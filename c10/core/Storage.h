@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/StorageImpl.h>
+#include <c10/core/impl/cow/shadow_storage.h>
 
 namespace c10 {
 
@@ -176,6 +177,20 @@ struct C10_API Storage {
     storage_impl_->UniqueStorageShareExternalPointer(
         std::move(data_ptr), capacity);
   }
+
+  // Simulates the copy on write on the storage.
+  //
+  // The shadow_storage argument is optional. If present, this copy
+  // was taken on an instance that was produced by a previous copy on
+  // write, hence we would inherit its storage generation.
+  intrusive_ptr<impl::cow::ShadowStorage> simulate_copy_on_write(
+      impl::cow::ShadowStorage* shadow_storage) const;
+
+  // Bumps the copy on write generation of the storage and the shadow
+  // storage, if a copy on write is being simulated. Otherwise, does
+  // nothing.
+  void maybe_bump_copy_on_write_generation(
+      impl::cow::ShadowStorage* shadow_storage);
 
  protected:
   c10::intrusive_ptr<StorageImpl> storage_impl_;

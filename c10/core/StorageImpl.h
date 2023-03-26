@@ -4,10 +4,18 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/impl/PyObjectSlot.h>
+#include <c10/core/impl/cow/shadow_storage.h>
+#include <c10/core/impl/cow/state_machine.h>
 
 #include <c10/util/intrusive_ptr.h>
 
+#include <cstdint>
+
 namespace c10 {
+
+namespace impl::cow {
+class Spy; // for friendship
+} // namespace impl::cow
 
 // A storage represents the underlying backing data buffer for a
 // tensor.  This concept was inherited from the original Torch7
@@ -214,6 +222,13 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return received_cuda_;
   }
 
+  // For the shadow storage manipulation functions, see the
+  // comments on the Storage type.
+  intrusive_ptr<impl::cow::ShadowStorage> simulate_copy_on_write(
+      impl::cow::ShadowStorage* shadow_storage);
+  void maybe_bump_copy_on_write_generation(
+      impl::cow::ShadowStorage* shadow_storage);
+
  private:
   DataPtr data_ptr_;
   SymInt size_bytes_;
@@ -222,7 +237,15 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
+
   Allocator* allocator_;
   impl::PyObjectSlot pyobj_slot_;
+
+  impl::cow::StateMachine copy_on_write_state_;
+
+  // We friend this due to the temporary nature of the copy-on-write
+  // simulation, and so that we don't have any long-term accessors to
+  // what is logically private copy-on-write implementation details.
+  friend class impl::cow::Spy;
 };
 } // namespace c10

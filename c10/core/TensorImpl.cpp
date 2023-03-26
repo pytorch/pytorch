@@ -104,24 +104,16 @@ TensorImpl::TensorImpl(
 // the Python and PythonTLSSnapshot dispatch keys will be set and all is well.
 // The point is to delay the dispatch key setting until that point.
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     ImplType type,
     Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
-    : storage_(std::move(storage)),
-
-      numel_(0),
-      data_type_(data_type),
-      device_opt_(storage_.device()),
-      key_set_(key_set - c10::python_ks) { // See [Note: Python key removal]
-  init_bitfields();
-  // Inference tensor doesn't have version counter.
-  if (!is_inference()) {
-    version_counter_ = VariableVersion(/*version=*/0);
-  }
-}
+    : TensorImpl(
+          std::move(storage),
+          key_set,
+          data_type,
+          /*shadow_storage=*/nullptr) {}
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
@@ -140,7 +132,8 @@ TensorImpl::TensorImpl(
 
       numel_(0),
       data_type_(data_type),
-      device_opt_(device_opt) {
+      device_opt_(device_opt),
+      shadow_storage_(nullptr) {
   init_bitfields();
 
   if (!key_set.empty()) {
@@ -182,6 +175,44 @@ TensorImpl::TensorImpl(
   }
   // we would also like to check that non-cpu devices have an index, but some
   // Caffe2 operators create Storages with default devices.
+}
+
+TensorImpl::TensorImpl(
+    const TensorImpl& that,
+    intrusive_ptr<impl::cow::ShadowStorage> shadow_storage)
+    : TensorImpl(
+          Storage(that.storage()),
+          that.key_set(),
+          that.dtype(),
+          std::move(shadow_storage)) {}
+
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+TensorImpl::TensorImpl(
+    Storage&& storage,
+    DispatchKeySet key_set,
+    const caffe2::TypeMeta data_type,
+    intrusive_ptr<impl::cow::ShadowStorage> shadow_storage)
+    : intrusive_ptr_target(),
+      storage_(std::move(storage)),
+      numel_(0),
+      data_type_(data_type),
+      device_opt_(storage_.device()),
+      key_set_(key_set - c10::python_ks), // See [Note: Python key removal]
+      shadow_storage_(std::move(shadow_storage)) {
+  init_bitfields();
+  // Inference tensor doesn't have version counter.
+  if (!is_inference()) {
+    version_counter_ = VariableVersion(/*version=*/0);
+  }
+}
+
+intrusive_ptr<TensorImpl> TensorImpl::take_view() const {
+  return make_intrusive<TensorImpl>(*this, shadow_storage_);
+}
+
+intrusive_ptr<TensorImpl> TensorImpl::simulate_copy_on_write() const {
+  return make_intrusive<TensorImpl>(
+      *this, storage_.simulate_copy_on_write(shadow_storage_.get()));
 }
 
 void TensorImpl::_change_backend_component_keys(c10::Device device) {
@@ -1236,6 +1267,10 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
     default:
       break;
   }
+}
+
+void TensorImpl::maybe_bump_copy_on_write_generation() {
+  storage_.maybe_bump_copy_on_write_generation(shadow_storage_.get());
 }
 
 namespace impl {
