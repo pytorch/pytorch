@@ -1283,7 +1283,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_core_macros_h",
-        ":caffe2_protos",
         "//c10:headers",
         "//caffe2/proto:caffe2_pb",
     ],
