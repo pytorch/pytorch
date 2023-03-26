@@ -838,6 +838,24 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     at::Half** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
+#if defined(USE_ROCM)
+  // loop over matrices in the batch
+  for (int i = 0; i < batch_size; ++i) {
+   Gemm<at::Half, CUDAContext>(
+        trans_A,
+        trans_B,
+        M,
+        N,
+        K,
+        alpha,
+        A[i],
+        B[i],
+        beta,
+        C[i],
+        context,
+        math_type);
+  }
+#else
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
   const int lda = (trans_A == CblasNoTrans) ? K : M;
@@ -912,6 +930,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
   } else {
     CAFFE_THROW("Unsupported math type");
   }
+#endif
 }
 
 template <>
