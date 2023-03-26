@@ -4,20 +4,20 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
 cc_library(
     name = "caffe2_pb",
     hdrs = ["caffe2_pb.h"],
+    visibility = [
+        "//:__pkg__",
+    ],
     deps = [
         ":cc_proto",
         "//c10/core:base",
         "//c10/util:base",
     ],
-    visibility = [
-        "//:__pkg__",
-    ],
 )
 
 cc_proto_library(
     name = "cc_proto",
-    deps = [":proto"],
     visibility = ["//:__pkg__"],
+    deps = [":proto"],
 )
 
 proto_library(
