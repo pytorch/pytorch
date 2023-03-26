@@ -13,10 +13,6 @@ include(CMakePushCheckState)
 set(CAFFE2_USE_EXCEPTION_PTR 1)
 
 # ---[ Check if we want to turn off deprecated warning due to glog.
-# Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
-# is being deprecated. As a result, we will test if this is the environment we
-# are building under. If yes, we will turn off deprecation warning for a
-# cleaner build output.
 if(USE_GLOG)
   cmake_push_check_state(RESET)
   set(CMAKE_REQUIRED_FLAGS "-std=c++14")
