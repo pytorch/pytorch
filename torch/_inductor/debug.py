@@ -2,6 +2,7 @@ import collections
 import contextlib
 import cProfile
 import functools
+import itertools
 import logging
 import os.path
 import pstats
