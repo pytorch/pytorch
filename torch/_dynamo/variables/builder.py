@@ -807,12 +807,17 @@ class VariableBuilder:
                 from torch.fx.experimental.symbolic_shapes import DimDynamic
 
                 shape_env = self.tx.output.shape_env
+
+                if value < 0 or torch._dynamo.config.specialize_int:
+                    dynamic_dim=DimDynamic.STATIC
+                else:
+                    dynamic_dim=DimDynamic.DUCK
+
                 wrapped_value = shape_env.create_symintnode(
                     shape_env.create_symbol(
                         value,
                         source=self.source,
-                        # This must be static, because `value` can be negative. Ex: a -1 dim.
-                        dynamic_dim=DimDynamic.STATIC,
+                        dynamic_dim=dynamic_dim,
                         constraint_dim=None,
                     ),
                     hint=value,
