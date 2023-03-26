@@ -3692,6 +3692,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.fetch_attr = submodules.__getitem__
         self.name = "InterpreterShim"
         self.current_node = None
+        self.extra_traceback = True
 
     def run_node(self, n: torch.fx.Node) -> Any:
         self.current_node = n
