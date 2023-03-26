@@ -8,7 +8,7 @@ cc_library(
         "//:__pkg__",
     ],
     deps = [
-        ":caffe2_proto",
+        ":caffe2_cc_proto",
         "//c10/core:base",
         "//c10/util:base",
     ],
