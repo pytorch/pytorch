@@ -130,14 +130,15 @@ And here's an example of how to compute jacobians of model parameters::
     # using torch.func (as of PyTorch 2.0)
     # ------------------------------------
     import torch
+    from functools import partial
     from torch.func import jacrev, functional_call
     inputs = torch.randn(64, 3)
     model = torch.nn.Linear(3, 3)
 
     params = dict(model.named_parameters())
     # jacrev computes jacobians of argnums=0 by default.
-    # We set it to 1 to compute jacobians of params
-    jacobians = jacrev(functional_call, argnums=1)(model, params, (inputs,))
+    # In this case, 0 represents computing jacobians of params
+    jacobians = jacrev(partial(functional_call, model), argnums=0)(params, (inputs,))
 
 Note that it is important for memory consumption that you should only carry
 around a single copy of your parameters. ``model.named_parameters()`` does not copy
