@@ -81,7 +81,7 @@ class TestSubclass(TestCase):
                 x = nn.Parameter(x)
             torch.save(x, f)
             f.seek(0)
-            x_loaded = torch.load(f)
+            x_loaded = torch.load(f, weights_only=False)
 
             self.assertEqual(x, x_loaded)
             self.assertIsNot(x, x_loaded)

@@ -2774,7 +2774,7 @@ class TestQuantizeFx(QuantizationTestCase):
         model_2 = orig
         model_2 = prepare_fx(model_2, qconfig_dict, example_inputs=(x,))
 
-        loaded_dict = torch.load(b)
+        loaded_dict = torch.load(b, weights_only=False)
         torch.ao.quantization.load_observer_state_dict(model_2, loaded_dict)
 
         quant_2 = convert_fx(model_2)
@@ -3933,7 +3933,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m.load_state_dict(state_dict)
         with TemporaryFileName() as fname:
             torch.save(m.state_dict(), fname)
-            m.load_state_dict(torch.load(fname))
+            m.load_state_dict(torch.load(fname, weights_only=False))
 
         checkModel(m, data, ref_weight, ref_bias, ref_res)
 

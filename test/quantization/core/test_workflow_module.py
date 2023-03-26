@@ -138,7 +138,7 @@ class TestObserver(QuantizationTestCase):
             b = io.BytesIO()
             torch.save(state_dict, b)
             b.seek(0)
-            loaded_dict = torch.load(b)
+            loaded_dict = torch.load(b, weights_only=False)
             for key in state_dict:
                 self.assertEqual(state_dict[key], loaded_dict[key])
             loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
@@ -247,7 +247,7 @@ class TestObserver(QuantizationTestCase):
             b = io.BytesIO()
             torch.save(state_dict, b)
             b.seek(0)
-            loaded_dict = torch.load(b)
+            loaded_dict = torch.load(b, weights_only=False)
             for key in state_dict:
                 self.assertEqual(state_dict[key], loaded_dict[key])
             loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
@@ -654,7 +654,7 @@ class TestHistogramObserver(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(state_dict, b)
         b.seek(0)
-        loaded_dict = torch.load(b)
+        loaded_dict = torch.load(b, weights_only=False)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
         loaded_obs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
@@ -782,7 +782,7 @@ class TestFakeQuantize(TestCase):
         b = io.BytesIO()
         torch.save(state_dict, b)
         b.seek(0)
-        loaded_dict = torch.load(b)
+        loaded_dict = torch.load(b, weights_only=False)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
 

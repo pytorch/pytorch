@@ -361,7 +361,7 @@ class TestTorchbind(JitTestCase):
         b = io.BytesIO()
         torch.save(nt, b)
         b.seek(0)
-        nt_loaded = torch.load(b)
+        nt_loaded = torch.load(b, weights_only=False)
         for exp in [7, 3, 3, 1]:
             self.assertEqual(nt_loaded.pop(), exp)
 

@@ -1348,7 +1348,7 @@ class TestMeta(TestCase):
 
         torch.save(t, b)
         b.seek(0)
-        r = torch.load(b, map_location=torch.device("meta"))
+        r = torch.load(b, map_location=torch.device("meta"), weights_only=False)
         self.assertEqual(r.device.type, 'meta')
         self.assertEqual(r.shape, t.shape)
         self.assertEqual(r.dtype, t.dtype)

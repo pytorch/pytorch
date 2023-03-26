@@ -4495,7 +4495,7 @@ else:
             with filecontext_lambda() as f:
                 torch.save(b, f)
                 f.seek(0)
-                c = torch.load(f)
+                c = torch.load(f, weights_only=False)
                 self.assertEqual(b, c, atol=0, rtol=0)
                 u0, un = c
                 self.assertEqual(str(u0.device), devices[0])
@@ -5435,7 +5435,7 @@ class TestDevicePrecision(TestCase):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f)
             f.seek(0)
-            x_copy = torch.load(f)
+            x_copy = torch.load(f, weights_only=False)
 
         self.assertEqual(x_copy, x)
         self.assertIs(type(x_copy), type(x))
@@ -5450,7 +5450,7 @@ class TestDevicePrecision(TestCase):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f)
             f.seek(0)
-            x_copy = torch.load(f)
+            x_copy = torch.load(f, weights_only=False)
 
         for original, cp in zip(x, x_copy):
             self.assertEqual(cp, original)

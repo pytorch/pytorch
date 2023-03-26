@@ -1878,7 +1878,7 @@ class DistributedDataParallelTest(
 
         dist.barrier()
         map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
-        ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
+        ddp_state_dict = torch.load(checkpoint_path, map_location=map_location, weights_only=False)
 
         for model in [ddp_withload, model_withload]:
             for p in ddp_withload.parameters():

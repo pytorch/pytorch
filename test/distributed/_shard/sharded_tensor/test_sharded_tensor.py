@@ -1117,7 +1117,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         module_load._register_load_state_dict_pre_hook(pre_load_state_dict_hook, True)
 
         buffer.seek(0)
-        state_dict_deser = torch.load(buffer)
+        state_dict_deser = torch.load(buffer, weights_only=False)
         module_load.load_state_dict(state_dict_deser, strict=False)
 
         module_load._register_state_dict_hook(state_dict_hook)
@@ -1157,7 +1157,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         buffer.seek(0)
         with load_with_process_group(pg):
-            state_dict_deser = torch.load(buffer)
+            state_dict_deser = torch.load(buffer, weights_only=False)
             module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
@@ -1183,7 +1183,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         module_load._register_load_state_dict_pre_hook(pre_load_state_dict_hook, True)
 
         buffer.seek(0)
-        state_dict_deser = torch.load(buffer)
+        state_dict_deser = torch.load(buffer, weights_only=False)
         module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
@@ -1225,16 +1225,16 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank != 0:
             with self.assertRaisesRegex(RuntimeError, 'Local rank at save time was'):
                 with load_with_process_group(pg):
-                    state_dict_deser = torch.load(buffer)
+                    state_dict_deser = torch.load(buffer, weights_only=False)
         else:
             with self.assertRaisesRegex(RuntimeError, 'Local world size at save time was'):
                 with load_with_process_group(pg):
-                    state_dict_deser = torch.load(buffer)
+                    state_dict_deser = torch.load(buffer, weights_only=False)
 
         dist.destroy_process_group()
         buffer.seek(0)
         with self.assertRaisesRegex(RuntimeError, 'Need to initialize default process group'):
-            state_dict_deser = torch.load(buffer)
+            state_dict_deser = torch.load(buffer, weights_only=False)
         rpc.shutdown()
 
     @with_comms

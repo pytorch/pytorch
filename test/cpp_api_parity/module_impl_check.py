@@ -154,8 +154,8 @@ def test_forward_backward(unit_test_class, test_params):
         backward_grad_dict_file_path = compute_temp_file_path(cpp_tmp_folder, module_variant_name, 'backward_grad_dict')
 
         cpp_test_fn(arg_dict_file_path, module_file_path, forward_output_file_path, backward_grad_dict_file_path)
-        cpp_output = torch.load(forward_output_file_path)
-        cpp_grad_dict = torch.load(backward_grad_dict_file_path)
+        cpp_output = torch.load(forward_output_file_path, weights_only=False)
+        cpp_grad_dict = torch.load(backward_grad_dict_file_path, weights_only=False)
 
         # Check that forward outputs are equal
         unit_test_class.assertEqual(python_output, cpp_output,

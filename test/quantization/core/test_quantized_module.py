@@ -152,7 +152,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
-        loaded_dict = torch.load(b)
+        loaded_dict = torch.load(b, weights_only=False)
         for key in model_dict:
             if isinstance(model_dict[key], torch._C.ScriptObject):
                 assert isinstance(loaded_dict[key], torch._C.ScriptObject)
@@ -184,7 +184,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
-        loaded = torch.load(b)
+        loaded = torch.load(b, weights_only=False)
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
@@ -338,7 +338,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         bytes_io = io.BytesIO()
         torch.save(model_dict, bytes_io)
         bytes_io.seek(0)
-        loaded_dict = torch.load(bytes_io)
+        loaded_dict = torch.load(bytes_io, weights_only=False)
         for key in loaded_dict:
             self.assertEqual(model_dict[key], loaded_dict[key])
         loaded_qconv_module = type(qconv_module)(
@@ -365,7 +365,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(qconv_module, b)
         b.seek(0)
-        loaded_conv = torch.load(b)
+        loaded_conv = torch.load(b, weights_only=False)
 
         self.assertEqual(loaded_conv.bias(), qconv_module.bias())
         self.assertEqual(loaded_conv.scale, qconv_module.scale)
@@ -1446,7 +1446,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         bytes_io = io.BytesIO()
         torch.save(model_dict, bytes_io)
         bytes_io.seek(0)
-        loaded_dict = torch.load(bytes_io)
+        loaded_dict = torch.load(bytes_io, weights_only=False)
         for key in loaded_dict:
             self.assertEqual(model_dict[key], loaded_dict[key])
         loaded_qconv_module = type(dynamic_module)(
@@ -1473,7 +1473,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(dynamic_module, b)
         b.seek(0)
-        loaded_conv = torch.load(b)
+        loaded_conv = torch.load(b, weights_only=False)
 
         self.assertEqual(loaded_conv.bias(), dynamic_module.bias())
         self.assertEqual(loaded_conv.scale, dynamic_module.scale)
@@ -1619,7 +1619,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
-        loaded_dict = torch.load(b)
+        loaded_dict = torch.load(b, weights_only=False)
         for key in model_dict:
             if isinstance(model_dict[key], torch._C.ScriptObject):
                 assert isinstance(loaded_dict[key], torch._C.ScriptObject)
@@ -1651,7 +1651,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
-        loaded = torch.load(b)
+        loaded = torch.load(b, weights_only=False)
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 

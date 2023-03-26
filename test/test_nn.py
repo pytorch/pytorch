@@ -161,7 +161,7 @@ class TestNN(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path)
+            m = torch.load(path, weights_only=False)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
@@ -2416,7 +2416,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # Note that torch.save / torch.load is not recommended
             # to save / load modules.
             torch.save(m, f.name)
-            m = torch.load(f.name)
+            m = torch.load(f.name, weights_only=False)
 
         # Ensure we can run state_dict without issues
         _ = m.state_dict()
@@ -4459,7 +4459,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     buf = io.BytesIO()
                     rnn_pickle = torch.save(rnn, buf)
                     buf.seek(0)
-                    rnn2 = torch.load(buf)
+                    rnn2 = torch.load(buf, weights_only=False)
                     rnn2.flatten_parameters()
                     output3, hy3 = rnn2(input, hx)
 

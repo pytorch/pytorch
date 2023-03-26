@@ -611,7 +611,7 @@ class TestStateDictHooks(TestCase):
                 # Note that torch.save / torch.load is not recommended to save/load
                 # modules.
                 torch.save(m, f.name)
-                m = torch.load(f.name)
+                m = torch.load(f.name, weights_only=False)
                 m.load_state_dict(sd)
                 self.assertFalse(called)
 

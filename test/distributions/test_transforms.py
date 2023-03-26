@@ -491,7 +491,7 @@ def test_save_load_transform():
     stream = io.BytesIO()
     torch.save(dist, stream)
     stream.seek(0)
-    other = torch.load(stream)
+    other = torch.load(stream, weights_only=False)
     assert torch.allclose(log_prob, other.log_prob(x))
 
 

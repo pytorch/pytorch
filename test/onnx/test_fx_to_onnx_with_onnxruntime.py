@@ -273,7 +273,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             with ftm, ctx:
                 # Toy model with parameters and buffers as FakeTensor's.
                 fake_model = create_model()
-                fake_model.load_state_dict(torch.load(tmp_file.name))
+                fake_model.load_state_dict(torch.load(tmp_file.name, weights_only=False))
                 # Toy inputs as FakeTensor's.
                 fake_args = create_args()
                 # Export ONNX model without initializers while ctx.paths records

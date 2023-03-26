@@ -1094,7 +1094,7 @@ class TestFSDPStateDict(FSDPTest):
             checkpoint = io.BytesIO()
             torch.save(state_dict, checkpoint)
             checkpoint.seek(0)
-            state_dict_saved = torch.load(checkpoint)
+            state_dict_saved = torch.load(checkpoint, weights_only=False)
             for k, v in state_dict_saved.items():
                 if isinstance(v, ShardedTensor):
                     self.assertEqual(

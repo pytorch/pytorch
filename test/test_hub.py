@@ -94,7 +94,7 @@ class TestHub(TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             f = os.path.join(tmpdir, 'temp')
             hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, f, progress=False)
-            loaded_state = torch.load(f)
+            loaded_state = torch.load(f, weights_only=False)
             self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)

@@ -1145,7 +1145,7 @@ class TestFX(JitTestCase):
 
         bio.seek(0)
 
-        loaded = torch.load(bio)
+        loaded = torch.load(bio, weights_only=False)
 
         torch.testing.assert_close(loaded(x), x[0])
 

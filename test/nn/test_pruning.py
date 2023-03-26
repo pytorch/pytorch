@@ -798,7 +798,7 @@ class TestPruningNN(NNTestCase):
 
         with TemporaryFileName() as fname:
             torch.save(model, fname)
-            new_model = torch.load(fname)
+            new_model = torch.load(fname, weights_only=False)
 
         # check that the original weight and the new mask are present
         self.assertIn('0.weight_orig', new_model.state_dict())
@@ -848,7 +848,7 @@ class TestPruningNN(NNTestCase):
         )
         with TemporaryFileName() as fname:
             torch.save(model.state_dict(), fname)
-            new_model.load_state_dict(torch.load(fname))
+            new_model.load_state_dict(torch.load(fname, weights_only=False))
 
         # check that the original weight and the new mask are not present in
         # new_model either.

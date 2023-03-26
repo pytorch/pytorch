@@ -145,7 +145,7 @@ class TestQlinearPackedParams(TestCase):
             with tempfile.TemporaryFile() as file_buff:
                 torch.save(lin, file_buff)
                 file_buff.seek(0)
-                lin2 = torch.load(file_buff)
+                lin2 = torch.load(file_buff, weights_only=False)
                 self.assertEqual(lin._weight_bias(), lin2._weight_bias())
                 # Serialize -> Deserialize -> Serialize should match Serialize
                 self.assertEqual(serialized, lin2._packed_params._packed_params.__getstate__())
@@ -220,7 +220,7 @@ class TestQlinearPackedParams(TestCase):
             return ((state, weight_bias), file_buff)
 
         def load_get_state_weight_bias(f_b):
-            lin2 = torch.load(f_b)
+            lin2 = torch.load(f_b, weights_only=False)
             state = lin2._packed_params._packed_params.__getstate__()
             weight_bias = lin2._weight_bias()
             f_b.close()

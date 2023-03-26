@@ -82,11 +82,11 @@ class TestSerialization(TestCase):
             torch.jit.save(torch.jit.trace(qmodule, input_tensor), traced_module_file)
             torch.save(qmodule(input_tensor), expected_file)
 
-        input_tensor = torch.load(input_file)
-        qmodule.load_state_dict(torch.load(state_dict_file))
+        input_tensor = torch.load(input_file, weights_only=False)
+        qmodule.load_state_dict(torch.load(state_dict_file, weights_only=False))
         qmodule_scripted = torch.jit.load(scripted_module_file)
         qmodule_traced = torch.jit.load(traced_module_file)
-        expected = torch.load(expected_file)
+        expected = torch.load(expected_file, weights_only=False)
         self.assertEqual(qmodule(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
@@ -130,10 +130,10 @@ class TestSerialization(TestCase):
             torch.jit.save(traced_q, traced_module_file)
             torch.save(scripted_q(input_tensor), expected_file)
 
-        input_tensor = torch.load(input_file)
+        input_tensor = torch.load(input_file, weights_only=False)
         qmodule_scripted = torch.jit.load(scripted_module_file)
         qmodule_traced = torch.jit.load(traced_module_file)
-        expected = torch.load(expected_file)
+        expected = torch.load(expected_file, weights_only=False)
         self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
 
@@ -149,9 +149,9 @@ class TestSerialization(TestCase):
             torch.save(obs(input_tensor), expected_file)
             torch.save(obs.state_dict(), state_dict_file)
 
-        input_tensor = torch.load(input_file)
-        obs.load_state_dict(torch.load(state_dict_file))
-        expected = torch.load(expected_file)
+        input_tensor = torch.load(input_file, weights_only=False)
+        obs.load_state_dict(torch.load(state_dict_file, weights_only=False))
+        expected = torch.load(expected_file, weights_only=False)
         if check_numerics:
             self.assertEqual(obs(input_tensor), expected)
 
@@ -203,9 +203,9 @@ class TestSerialization(TestCase):
             torch.save(q_result, expected_file)
 
         # load input tensor
-        input_tensor = torch.load(input_file)
-        expected_output_tensor = torch.load(expected_file)
-        expected_get_attrs = torch.load(get_attr_targets_file)
+        input_tensor = torch.load(input_file, weights_only=False)
+        expected_output_tensor = torch.load(expected_file, weights_only=False)
+        expected_get_attrs = torch.load(get_attr_targets_file, weights_only=False)
 
         # load model from package and verify output and get_attr targets match
         imp = torch.package.PackageImporter(package_file)

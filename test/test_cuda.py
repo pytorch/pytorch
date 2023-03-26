@@ -603,7 +603,7 @@ class TestCuda(TestCase):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(q, f)
             f.seek(0)
-            q_copy = torch.load(f)
+            q_copy = torch.load(f, weights_only=False)
         self.assertEqual(q_copy, q, atol=0, rtol=0)
         q_copy[0].fill_(5)
         self.assertEqual(q_copy[0], q_copy[2], atol=0, rtol=0)
@@ -784,7 +784,7 @@ class TestCuda(TestCase):
 
         msg = r'Attempting to deserialize object on CUDA device 9'
         with self.assertRaisesRegex(RuntimeError, msg):
-            _ = torch.load(buf)
+            _ = torch.load(buf, weights_only=False)
 
     def test_specify_improper_device_name(self):
         import os
@@ -793,7 +793,7 @@ class TestCuda(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
                 torch.save([torch.nn.Parameter(torch.randn(10, 10))], fname,
                            _use_new_zipfile_serialization=True)
-                torch.load(fname, 'cuda0')
+                torch.load(fname, 'cuda0', weights_only=False)
         finally:
             if os.path.exists(fname):
                 os.remove(fname)
@@ -812,7 +812,7 @@ class TestCuda(TestCase):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f)
             f.seek(0)
-            x_copy = torch.load(f)
+            x_copy = torch.load(f, weights_only=False)
         for original, copy in zip(x, x_copy):
             self.assertEqual(copy, original)
             self.assertIs(type(copy), type(original))
@@ -829,7 +829,7 @@ class TestCuda(TestCase):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f)
             f.seek(0)
-            x_copy = torch.load(f, map_location=gpu_remap)
+            x_copy = torch.load(f, map_location=gpu_remap, weights_only=False)
 
         for original, copy in zip(x, x_copy):
             self.assertEqual(copy, original)
@@ -842,7 +842,7 @@ class TestCuda(TestCase):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f)
             f.seek(0)
-            x_copy = torch.load(f, map_location={'cuda:1': 'cuda:0'})
+            x_copy = torch.load(f, map_location={'cuda:1': 'cuda:0'}, weights_only=False)
         for original, copy in zip(x, x_copy):
             self.assertEqual(copy, original)
             self.assertIs(type(copy), type(original))

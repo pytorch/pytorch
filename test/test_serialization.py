@@ -199,7 +199,7 @@ class SerializationMixin:
         with BytesIOContext() as f:
             torch.save(b, f)
             f.seek(0)
-            c = torch.load(f)
+            c = torch.load(f, weights_only=False)
         self._test_serialization_assert(b, c)
 
     def test_serialization_fake_zip(self):
@@ -222,7 +222,7 @@ class SerializationMixin:
             self.assertTrue(zipfile.is_zipfile(f))
             self.assertFalse(torch.serialization._is_zipfile(f))
             f.seek(0)
-            self.assertEqual(torch.load(f), t)
+            self.assertEqual(torch.load(f, weights_only=False), t)
 
     def test_serialization_gzip(self):
         # Test serialization with gzip file
@@ -234,7 +234,7 @@ class SerializationMixin:
             shutil.copyfileobj(f_in, f_out)
 
         with gzip.open(f2.name, 'rb') as f:
-            c = torch.load(f)
+            c = torch.load(f, weights_only=False)
         self._test_serialization_assert(b, c)
 
     @unittest.skipIf(
@@ -249,7 +249,7 @@ class SerializationMixin:
                 torch.save(x, f, pickle_module=dill)
             f.seek(0)
             with self.assertRaisesRegex(ValueError, 'supports dill >='):
-                x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
+                x2 = torch.load(f, pickle_module=dill, encoding='utf-8', weights_only=False)
 
     @unittest.skipIf(
         not TEST_DILL or not HAS_DILL_AT_LEAST_0_3_1,
@@ -261,11 +261,11 @@ class SerializationMixin:
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f, pickle_module=dill)
             f.seek(0)
-            x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
+            x2 = torch.load(f, pickle_module=dill, encoding='utf-8', weights_only=False)
             self.assertIsInstance(x2, type(x))
             self.assertEqual(x, x2)
             f.seek(0)
-            x3 = torch.load(f, pickle_module=dill)
+            x3 = torch.load(f, pickle_module=dill, weights_only=False)
             self.assertIsInstance(x3, type(x))
             self.assertEqual(x, x3)
 
@@ -282,7 +282,7 @@ class SerializationMixin:
 
         with gzip.open(f2.name, 'rb') as f:
             j = pickle.load(f)
-            b = torch.load(f)
+            b = torch.load(f, weights_only=False)
         self.assertTrue(torch.equal(a, b))
         self.assertEqual(i, j)
 
@@ -335,7 +335,7 @@ class SerializationMixin:
             with self.assertRaisesRegex(
                     RuntimeError,
                     "size is inconsistent with indices"):
-                y = torch.load(f)
+                y = torch.load(f, weights_only=False)
 
     def _test_serialization_sparse_compressed_invalid(self,
                                                       conversion,
@@ -373,7 +373,7 @@ class SerializationMixin:
             with self.assertRaisesRegex(
                     RuntimeError,
                     f"`{compressed_indices_name}[[]..., 0[]] == 0` is not satisfied."):
-                y = torch.load(f)
+                y = torch.load(f, weights_only=False)
 
     def test_serialization_sparse_csr_invalid(self):
         self._test_serialization_sparse_compressed_invalid(
@@ -492,7 +492,7 @@ class SerializationMixin:
         def check_map_locations(map_locations, tensor_class, intended_device):
             for fileobject_lambda in fileobject_lambdas:
                 for map_location in map_locations:
-                    tensor = torch.load(fileobject_lambda(), map_location=map_location)
+                    tensor = torch.load(fileobject_lambda(, weights_only=False), map_location=map_location)
 
                     self.assertEqual(tensor.device, intended_device)
                     self.assertIsInstance(tensor, tensor_class)
@@ -528,7 +528,7 @@ class SerializationMixin:
 
         error_msg = r'Attempting to deserialize object on a CUDA device'
         with self.assertRaisesRegex(RuntimeError, error_msg):
-            _ = torch.load(buf)
+            _ = torch.load(buf, weights_only=False)
 
     @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_api_requirements(self):
@@ -542,7 +542,7 @@ class SerializationMixin:
         filemock.seek(0)
         filemock.calls.clear()
 
-        _ = torch.load(filemock)
+        _ = torch.load(filemock, weights_only=False)
         expected_superset = {'read', 'readline', 'seek', 'tell'}
         self.assertTrue(expected_superset.issuperset(filemock.calls))
 
@@ -554,7 +554,7 @@ class SerializationMixin:
 
         msg = 'filelike serialization with {}'
 
-        b = torch.load(data)
+        b = torch.load(data, weights_only=False)
         self.assertTrue(torch.equal(tensor, b), msg.format(desc))
 
     @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
@@ -592,7 +592,7 @@ class SerializationMixin:
         f.seek(0)
         data = FilelikeMock(f.read(), has_readinto=True)
 
-        b = torch.load(data)
+        b = torch.load(data, weights_only=False)
         self.assertTrue(data.was_called('readinto'))
 
     def test_serialization_filelike_exceptions(self):
@@ -648,7 +648,7 @@ class SerializationMixin:
                       b'\x00\x00\x00\x00')
 
         buf = io.BytesIO(serialized)
-        (s1, s2) = torch.load(buf)
+        (s1, s2) = torch.load(buf, weights_only=False)
         self.assertEqual(s1[0], 0)
         self.assertEqual(s2[0], 0)
         self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
@@ -657,13 +657,13 @@ class SerializationMixin:
         # This Pickle contains a Python 2 module with Unicode data and the
         # loading should fail if the user explicitly specifies ascii encoding!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
-        self.assertRaises(UnicodeDecodeError, lambda: torch.load(path, encoding='ascii'))
+        self.assertRaises(UnicodeDecodeError, lambda: torch.load(path, encoding='ascii', weights_only=False))
 
     def test_load_python2_unicode_module(self):
         # This Pickle contains some Unicode data!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         with warnings.catch_warnings(record=True) as w:
-            self.assertIsNotNone(torch.load(path))
+            self.assertIsNotNone(torch.load(path, weights_only=False))
 
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
@@ -674,7 +674,7 @@ class SerializationMixin:
         delattr(resource, "tell")
         delattr(resource, "seek")
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
-            torch.load(resource)
+            torch.load(resource, weights_only=False)
 
     def test_save_different_dtype_unallocated(self):
         devices = ['cpu']
@@ -685,7 +685,7 @@ class SerializationMixin:
             with io.BytesIO() as f:
                 torch.save([a, b], f)
                 f.seek(0)
-                a_loaded, b_loaded = torch.load(f)
+                a_loaded, b_loaded = torch.load(f, weights_only=False)
             self.assertEqual(a, a_loaded)
             self.assertEqual(b, b_loaded)
 
@@ -812,7 +812,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
             # First check that the checkpoint can be loaded without warning about unsafe loads
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:
-                loaded = torch.load(checkpoint)
+                loaded = torch.load(checkpoint, weights_only=False)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
                     self.assertEqual(len(w), 0)
@@ -823,7 +823,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
             module = import_module(tmpmodule_name, fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:
-                loaded = torch.load(checkpoint)
+                loaded = torch.load(checkpoint, weights_only=False)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
                     self.assertEqual(len(w), 1)
@@ -849,10 +849,10 @@ class TestOldSerialization(TestCase, SerializationMixin):
             self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
             f.seek(0)
             i_loaded = pickle.load(f)
-            a_loaded = torch.load(f)
+            a_loaded = torch.load(f, weights_only=False)
             j_loaded = pickle.load(f)
-            b_loaded = torch.load(f)
-            m_loaded = torch.load(f)
+            b_loaded = torch.load(f, weights_only=False)
+            m_loaded = torch.load(f, weights_only=False)
         self.assertTrue(torch.equal(a, a_loaded))
         self.assertTrue(torch.equal(b, b_loaded))
         self.assertTrue(m.kernel_size == m_loaded.kernel_size)
@@ -911,7 +911,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
             f.seek(0)
-            torch.load(f)
+            torch.load(f, weights_only=False)
 
     # Ensure large zip64 serialization works properly
     def test_serialization_2gb_file(self):
@@ -922,7 +922,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with BytesIOContext() as f:
             torch.save(big_model.state_dict(), f)
             f.seek(0)
-            state = torch.load(f)
+            state = torch.load(f, weights_only=False)
 
     @parametrize('weights_only', (True, False))
     def test_pathlike_serialization(self, weights_only):
@@ -952,7 +952,7 @@ class TestSerialization(TestCase, SerializationMixin):
             with BytesIOContext() as f:
                 torch.save(t, f)
                 f.seek(0)
-                loaded_t = torch.load(f)
+                loaded_t = torch.load(f, weights_only=False)
 
             self.assertEqual(t, loaded_t)
             self.assertEqual(t.foo, loaded_t.foo)
@@ -1082,7 +1082,7 @@ class TestSubclassSerialization(TestCase):
         with BytesIOContext() as f:
             torch.save(my_tensor, f)
             f.seek(0)
-            new_tensor = torch.load(f)
+            new_tensor = torch.load(f, weights_only=False)
 
         self.assertIsInstance(new_tensor, TestWrapperSubclass)
         self.assertEqual(new_tensor.elem, my_tensor.elem)
@@ -1099,7 +1099,7 @@ class TestSubclassSerialization(TestCase):
         with BytesIOContext() as f:
             torch.save(my_tensor, f)
             f.seek(0)
-            new_tensor = torch.load(f)
+            new_tensor = torch.load(f, weights_only=False)
 
         self.assertIsInstance(new_tensor, TestGetStateSubclass)
         self.assertEqual(new_tensor.elem, my_tensor.elem)
@@ -1136,7 +1136,7 @@ class TestSubclassSerialization(TestCase):
         with BytesIOContext() as f:
             torch.save(tensor, f)
             f.seek(0)
-            tensor2 = torch.load(f)
+            tensor2 = torch.load(f, weights_only=False)
 
         tensor = TestEmptySubclass()
         # Ensures it runs fine
@@ -1146,7 +1146,7 @@ class TestSubclassSerialization(TestCase):
         with BytesIOContext() as f:
             torch.save(tensor, f)
             f.seek(0)
-            tensor2 = torch.load(f)
+            tensor2 = torch.load(f, weights_only=False)
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())

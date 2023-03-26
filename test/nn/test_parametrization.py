@@ -359,7 +359,7 @@ class TestNNParametrization(NNTestCase):
         new_model = get_model()
         with TemporaryFileName() as fname:
             torch.save(model.state_dict(), fname)
-            new_model.load_state_dict(torch.load(fname))
+            new_model.load_state_dict(torch.load(fname, weights_only=False))
 
         # Integrity tests
         self.assertTrue(parametrize.is_parametrized(new_model[0], "weight"))

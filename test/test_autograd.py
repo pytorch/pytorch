@@ -7817,7 +7817,7 @@ for shape in [(1,), ()]:
                 return name
 
             def unpack(name):
-                return torch.load(name)
+                return torch.load(name, weights_only=False)
 
             with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
                 a = torch.ones(5, requires_grad=True)

@@ -7407,7 +7407,7 @@ class TestNNMPS(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path)
+            m = torch.load(path, weights_only=False)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
@@ -7424,7 +7424,7 @@ class TestNNMPS(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path, encoding='utf-8')
+            m = torch.load(path, encoding='utf-8', weights_only=False)
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
@@ -10114,7 +10114,7 @@ class TestNoRegression(TestCase):
             torch.save(x, f)
 
             f.seek(0)
-            x2 = torch.load(f, map_location="mps")
+            x2 = torch.load(f, map_location="mps", weights_only=False)
 
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "mps")
@@ -10125,7 +10125,7 @@ class TestNoRegression(TestCase):
             torch.save(x, f)
 
             f.seek(0)
-            x2 = torch.load(f)
+            x2 = torch.load(f, weights_only=False)
 
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "mps")
@@ -10136,7 +10136,7 @@ class TestNoRegression(TestCase):
             torch.save(x, f)
 
             f.seek(0)
-            x2 = torch.load(f, map_location="cpu")
+            x2 = torch.load(f, map_location="cpu", weights_only=False)
 
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "cpu")

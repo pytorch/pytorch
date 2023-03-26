@@ -395,7 +395,7 @@ class TestFSDPOptimState(FSDPTest):
 
     def _broadcast_full_osd(self, full_osd: Dict[str, Any], group=None):
         """Broadcasts the full optimizer state dict in place of using
-        ``torch.save()`` and ``torch.load()`` so that all ranks can have it."""
+        ``torch.save()`` and ``torch.load(, weights_only=False)`` so that all ranks can have it."""
         obj_list = [full_osd]
         dist.broadcast_object_list(
             obj_list,
@@ -1291,7 +1291,7 @@ class TestFSDPOptimState(FSDPTest):
                 if use_optim_input
                 else FSDP.full_optim_state_dict(model1, optim1)
             )
-            # Broadcast instead of `torch.save()`/`torch.load()` so that all ranks
+            # Broadcast instead of `torch.save()`/`torch.load(, weights_only=False)` so that all ranks
             # have the full state dict
             fsdp_osd = self._broadcast_full_osd(fsdp_osd)
         else:

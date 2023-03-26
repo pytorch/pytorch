@@ -2883,7 +2883,7 @@ graph(%Ra, %Rb):
         with TemporaryFileName() as fname:
             j.save(fname)
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
-                torch.load(fname)
+                torch.load(fname, weights_only=False)
 
     def test_torch_load_zipfile_check(self):
         @torch.jit.script
@@ -15602,7 +15602,7 @@ dedent """
             m = M(param)
             m(input)
             with open(fname, "rb") as handle:
-                loaded_tensor = torch.load(fname)
+                loaded_tensor = torch.load(fname, weights_only=False)
                 self.assertEqual(loaded_tensor, input + param)
 
     def _test_pickle_checkpoint_views(self, device):
@@ -15627,7 +15627,7 @@ dedent """
             m = M(param)
             m(input)
             with open(fname, "rb") as handle:
-                loaded_y, loaded_y_view, loaded_y_2 = torch.load(fname)
+                loaded_y, loaded_y_view, loaded_y_2 = torch.load(fname, weights_only=False)
                 self.assertEqual(loaded_y, input + param)
                 with torch.no_grad():
                     loaded_y_view[1] += 20
@@ -15651,7 +15651,7 @@ dedent """
             torch.save((3, 4), fname)
         with TemporaryFileName() as name:
             foo(name)
-            self.assertEqual(torch.load(name), (3, 4))
+            self.assertEqual(torch.load(name, weights_only=False), (3, 4))
 
     def test_string_list(self):
         def fn(string):

@@ -86,7 +86,7 @@ def evaluate(model, criterion, data_loader):
 
 def load_model(model_file):
     model = resnet18(pretrained=False)
-    state_dict = torch.load(model_file)
+    state_dict = torch.load(model_file, weights_only=False)
     model.load_state_dict(state_dict)
     model.to("cpu")
     return model

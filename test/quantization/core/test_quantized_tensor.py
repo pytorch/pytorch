@@ -302,7 +302,7 @@ class TestQuantizedTensor(TestCase):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(qr, f)
             f.seek(0)
-            loaded_q = torch.load(f)
+            loaded_q = torch.load(f, weights_only=False)
             loaded_int_repr = loaded_q.int_repr()
             self.assertEqual(int_repr, loaded_int_repr)
 
@@ -825,7 +825,7 @@ class TestQuantizedTensor(TestCase):
                 # Serializing and Deserializing Tensor
                 torch.save((qr, qrv), f)
                 f.seek(0)
-                qr2, qrv2 = torch.load(f)
+                qr2, qrv2 = torch.load(f, weights_only=False)
                 self.assertEqual(qr, qr2)
                 self.assertEqual(qrv, qrv2)
                 self.assertEqual(qr2.storage().data_ptr(), qrv2.storage().data_ptr())
@@ -843,7 +843,7 @@ class TestQuantizedTensor(TestCase):
                 # Serializing and Deserializing Tensor
                 torch.save(qr, f)
                 f.seek(0)
-                qr2 = torch.load(f)
+                qr2 = torch.load(f, weights_only=False)
                 self.assertEqual(qr, qr2)
 
     def test_qtensor_copy(self):
@@ -1338,7 +1338,7 @@ class TestQuantizedTensor(TestCase):
         torch.save(f, buf)
 
         buf.seek(0)
-        f2 = torch.load(buf)
+        f2 = torch.load(buf, weights_only=False)
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
 
@@ -1422,7 +1422,7 @@ class TestQuantizedTensor(TestCase):
             m = M()
             m(q, qc)
             with open(fname, "rb") as handle:
-                loaded_q, loaded_qc = torch.load(fname)
+                loaded_q, loaded_qc = torch.load(fname, weights_only=False)
                 self.assertEqual(loaded_q, q)
                 self.assertEqual(loaded_qc, qc)
 

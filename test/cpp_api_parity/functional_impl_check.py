@@ -97,7 +97,7 @@ def test_forward(unit_test_class, test_params):
         forward_output_file_path = compute_temp_file_path(cpp_tmp_folder, functional_variant_name, 'forward_output')
 
         cpp_test_fn(arg_dict_file_path, forward_output_file_path)
-        cpp_output = torch.load(forward_output_file_path)
+        cpp_output = torch.load(forward_output_file_path, weights_only=False)
 
         # Check that forward outputs are equal
         unit_test_class.assertEqual(

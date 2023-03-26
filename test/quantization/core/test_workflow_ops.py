@@ -571,7 +571,7 @@ class TestFakeQuantizeOps(TestCase):
             b = io.BytesIO()
             torch.save(state_dict, b)
             b.seek(0)
-            loaded_dict = torch.load(b)
+            loaded_dict = torch.load(b, weights_only=False)
             loaded_fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
             loaded_fq_module.load_state_dict(loaded_dict)
             for key in state_dict:
