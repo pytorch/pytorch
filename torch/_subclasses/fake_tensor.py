@@ -1233,6 +1233,12 @@ class FakeTensorMode(TorchDispatchMode):
                 if op_impl_out != NotImplemented:
                     return op_impl_out
 
+        def can_fallback(func: OpOverload):
+            if not self.allow_fallback_kernels:
+                return False
+            # should't fallback on custom ops
+            return func.namespace in ["prim", "aten"]
+
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         try:
@@ -1240,7 +1246,7 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
-            if has_symbolic_sizes or not self.allow_fallback_kernels:
+            if has_symbolic_sizes or not can_fallback(func):
                 raise
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 

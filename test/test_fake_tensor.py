@@ -47,6 +47,23 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_custom_op_fallback(self):
+        from torch.library import Library, impl
+
+        test_lib = Library("my_test_op", "DEF")
+        test_lib.define('foo(Tensor self) -> Tensor')
+
+        @impl(test_lib, 'foo', 'CPU')
+        def foo_impl(self):
+            return self.cos()
+
+        x = torch.empty(2, 2, device="cpu")
+        with self.assertRaisesRegex(NotImplementedError, "Could not run 'my_test_op::foo'"):
+            with FakeTensorMode(allow_fallback_kernels=True) as mode:
+                x = mode.from_tensor(x)
+                torch.ops.my_test_op.foo(x)
+
+
     def test_parameter_instantiation(self):
         with FakeTensorMode():
             x = torch.rand([4])
