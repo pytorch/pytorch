@@ -615,7 +615,7 @@ def retry_shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=N
             print(f"Command took >{timeout // 60}min, returning 124", file=stdout)
             return 124
         print(f"Command took >{timeout // 60}min, retrying (retries left={retries})", file=stdout)
-    return retry_shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None, retries=retries - 1)
+    return retry_shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout, retries=retries - 1)
 
 
 def discover_test_cases_recursively(suite_or_case):
