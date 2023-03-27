@@ -59,9 +59,13 @@ class GuardSource(enum.Enum):
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
     def is_nn_module(self) -> bool:
-        return self.is_fsdp_module() or self in (
-            GuardSource.GLOBAL_NN_MODULE,
-            GuardSource.LOCAL_NN_MODULE,
+        return (
+            self
+            in (
+                GuardSource.GLOBAL_NN_MODULE,
+                GuardSource.LOCAL_NN_MODULE,
+            )
+            or self.is_fsdp_module()
         )
 
     def is_local(self):

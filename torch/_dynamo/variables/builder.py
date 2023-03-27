@@ -661,7 +661,7 @@ class VariableBuilder:
             # Note on FSDP guarding
             # 1. We expect FSDP wrapping mutates an nn module irreversably (no way to de-wrap).
             # 2. Eager FSDP already assumes (requires, but without enforcement) that users don't mutate their
-            #    model parameters/structure after FSDP wrapping, becuase FSDP wouldn't notice or update its FlatParams.
+            #    model parameters/structure after FSDP wrapping, because FSDP wouldn't notice or update its FlatParams.
             #
             # Due to (1), once we enter this path we expect not to go back nor have to guard on type
             # or _is_fsdp_managed_module.

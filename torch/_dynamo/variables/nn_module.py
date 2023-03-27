@@ -683,7 +683,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     register parameters to the top-level, treat them as function inputs.
 
     Guards behavior: if 'skip_fsdp_guards', many guards that would be installed
-    by a vanilla UnspecializedNNMouduleVariable are simply dropped, on the basis
+    by a vanilla UnspecializedNNModuleVariable are simply dropped, on the basis
     that a user wrapping their model in FSDP(model) is already opting into a
     requirement to not modify internal model state, which would already break FSDP without
     compilation.
@@ -691,7 +691,9 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def __init__(self, value, **kwargs):
         source = kwargs.get("source", None)
-        assert source is not None
+        assert (
+            source is not None
+        ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
 
         super().__init__(value=value, **kwargs)
         if torch._dynamo.config.skip_fsdp_guards:
