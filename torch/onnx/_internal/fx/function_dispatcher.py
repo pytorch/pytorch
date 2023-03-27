@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import operator
+
 from typing import Callable, Dict, Union
 
 import onnxscript  # type: ignore[import]
@@ -132,6 +134,7 @@ _ATENLIB_FUNCTIONS = {
     "aten::sqrt": ops.core.aten_sqrt,
     "aten::sub": ops.core.aten_sub,
     "aten::sum": ops.core.aten_sum_dim_IntList,
+    "aten::sym_size": ops.core.aten_sym_size,
     "aten::t": ops.core.aten_t,
     "aten::tan": ops.core.aten_tan,
     "aten::tanh": ops.core.aten_tanh,
@@ -158,7 +161,6 @@ def _create_op_overload_to_exporter_key_table() -> (
     for op_namespace in (torch.ops.aten, torch.ops.prims):
         for attr_name in dir(op_namespace):
             op_overload_packet = getattr(op_namespace, attr_name)
-
             if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
                 continue
 
@@ -178,14 +180,20 @@ def _create_op_overload_to_exporter_key_table() -> (
                 # different exporter keys.
 
                 table[op_overload] = op_overload_packet._qualified_op_name
-    # TODO(justinchuby): is baddbmm different?
-    table[torch.ops.aten.baddbmm.default] = "aten::baddbmm"
+    # NOTE: Below are not in torch.ops.aten/torch.ops.prim
+    table[torch.ops.aten.sym_size.int] = "aten::sym_size"
     return table
 
 
 # Dictionary that maps torch.ops.aten.* to exporter look up key; e.g.,
 # _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
 _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
+_SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE = {
+    operator.mul: "aten::mul",
+    operator.add: "aten::add",
+    operator.pow: "aten::pow",
+    operator.sub: "aten::sub",
+}
 
 
 @_beartype.beartype
