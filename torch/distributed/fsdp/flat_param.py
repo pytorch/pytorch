@@ -101,8 +101,7 @@ class SharedParamInfo(NamedTuple):
 
 class FlatParamShardMetadata(NamedTuple):
     """
-    This holds metadata specific to this rank's shard of the flattened
-    parameter.
+    This holds metadata specific to this rank's shard of the flat parameter.
 
     Attributes:
         param_names (Tuple[str, ...]): Prefixed parameter names of this rank's
@@ -113,7 +112,7 @@ class FlatParamShardMetadata(NamedTuple):
             of the parameters; see :class:`FlatParameter`.
         param_offsets (Tuple[Tuple[int, int], ...]): [start, end] offsets (in
             units of numels) giving this rank's part of each flattened
-            original module parameter.
+            original parameter.
     """
 
     param_names: Tuple[str, ...]
@@ -135,12 +134,12 @@ class HandleShardingStrategy(Enum):
 
 class FlatParameter(nn.Parameter):
     """
-    This is the flattened parameter used by :class:`FullyShardedDataParallel`.
-    It is comprised of one or more original parameters, which are flattened
-    and concatenated to construct the flattened parameter.
+    This is the flat parameter used by :class:`FullyShardedDataParallel`. It is
+    comprised of one or more original parameters, which are flattened and
+    concatenated to construct the flat parameter.
 
     Under the current design, this parameter logically represents both the
-    unsharded and sharded flattened parameter, and its data changes storages
+    unsharded and sharded flat parameter, and its data changes storages
     dynamically.
         - In the :class:`FullyShardedDataParallel` constructor, the parameter
         is initialized as unsharded and then sharded in-place.
@@ -150,18 +149,18 @@ class FlatParameter(nn.Parameter):
         destination and owns the unsharded parameter storage thereafter. (See
         :meth:`FlatParamHandle.init_flat_param_attributes`.)
         - Throughout runtime, the parameter data changes storages as needed,
-        e.g. to the sharded flattened parameter, reduced-precision sharded
-        flattened parameter, or the unsharded flattened parameter.
+        e.g. to the sharded flat parameter, low precision sharded flat
+        parameter, or the unsharded flat parameter.
 
     Attributes:
-        _unpadded_unsharded_size (torch.Size): Unsharded flattened parameter's
-            size without padding.
-        _padded_unsharded_size (torch.Size): Unsharded flattened parameter's
-            size with padding. This is only set for sharded strategies since
-            they require padding for the all-gather.
-        _sharded_size (torch.Size): Sharded flattened parameter's size with
-            padding. This is also set for ``NO_SHARD``, in which case it is the
-            same as the unsharded sizes. (We omit "padded" because there is no
+        _unpadded_unsharded_size (torch.Size): Unsharded flat parameter's size
+            without padding.
+        _padded_unsharded_size (torch.Size): Unsharded flat parameter's size
+            with padding. This is only set for sharded strategies since they
+            require padding for the all-gather.
+        _sharded_size (torch.Size): Sharded flat parameter's size with padding.
+            This is also set for ``NO_SHARD``, in which case it is the same as
+            the unsharded sizes. (We omit "padded" because there is no
             analogous unpadded one.)
 
         _param_infos (Tuple[ParamInfo, ...]): Each parameter's parameter info
@@ -172,7 +171,7 @@ class FlatParameter(nn.Parameter):
             the owning handle's ``_fully_sharded_module``. The names are
             guaranteed to be unique within the subtree rooted at that module.
         _num_params (int): Number of original parameters flattened into this
-            flattened parameter; this is the length of ``_param_infos``,
+            flat parameter; this is the length of ``_param_infos``,
             ``_numels``, ``_shapes``, and ``_fqns``.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo`.
@@ -181,7 +180,7 @@ class FlatParameter(nn.Parameter):
             post-unflatten behavior. This is experimental, and users should not
             depend on its existence in the future.
         _modules (Set[nn.Module]): Modules that contain some original parameter
-            that is flattened into the ``FlatParameter``.
+            that is flattened into the flat parameter.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
@@ -193,27 +192,26 @@ class FlatParameter(nn.Parameter):
             flattened; this indexes appropriately into any data structure that
             follows the flattening order (e.g. ``_param_infos``, ``_numels``,
             etc.).
-        _shard_numel_padded (int): Numel padded for this rank's sharded
-            flattened parameter.
-
-        _local_shard (Tensor): Sharded flattened parameter with padding if
-            using a sharded strategy. If using ``NO_SHARD``, then this is the
-            unpadded unsharded flattened parameter, and there is no notion of a
-            sharded flattened parameter or padded unsharded flattened
+        _shard_numel_padded (int): Numel padded for this rank's sharded flat
             parameter.
-        _full_param_padded (Tensor): Unsharded flattened parameter with
-            padding. This is not defined for ``NO_SHARD``. When using mixed
-            precision for parameters, this has the low precision.
-        _full_prec_full_param_padded (Tensor): Full precision unsharded
-            flattened parameter with padding. This is used for unsharding
-            outside of computation when using mixed precision for parameters.
-            This is never defined for ``NO_SHARD``.
+
+        _local_shard (Tensor): Sharded flat parameter with padding if using a
+            sharded strategy. If using ``NO_SHARD``, then this is the unpadded
+            unsharded flat parameter, and there is no notion of a sharded flat
+            parameter or padded unsharded flat parameter.
+        _full_param_padded (Tensor): Unsharded flat parameter with padding.
+            This is not defined for ``NO_SHARD``. When using mixed precision
+            for parameters, this has the low precision.
+        _full_prec_full_param_padded (Tensor): Full precision unsharded flat
+            parameter with padding. This is used for unsharding outside of
+            computation when using mixed precision for parameters. This is
+            never defined for ``NO_SHARD``.
         _post_backward_hook_state (Tuple[AccumulateGrad, RemovableHandle]):
-            Flattened parameter's :class:`AccumulateGrad` object and
-            post-backward hook handle.
-        _mp_shard (Tensor): Low precision sharded flattened parameter with
-            padding. This is only defined when parameter mixed precision is
-            enabled. For ``NO_SHARD``, this is used for computation.
+            Flat parameter's :class:`AccumulateGrad` object and post-backward
+            hook handle.
+        _mp_shard (Tensor): Low precision sharded flat parameter with padding.
+            This is only defined when parameter mixed precision is enabled. For
+            ``NO_SHARD``, this is used for computation.
         _cpu_grad (Tensor): Sharded gradient with padding stored on CPU.
             This is only defined when offloading parameters is enabled.
         _saved_grad_shard (Tensor): Sharded gradient with padding from previous
@@ -254,12 +252,12 @@ class FlatParameter(nn.Parameter):
     ) -> None:
         """
         Initializes attributes holding metadata about the original parameters
-        comprising the flattened parameter.
+        comprising the flat parameter.
 
         We expose this method separate from the constructor to keep the
-        constructor only responsible for the flattened parameter's tensor data.
-        This method should only be called once per model, while the constructor
-        may be called multiple times, e.g. when reloading from a checkpoint, in
+        constructor only responsible for the flat parameter's tensor data. This
+        method should only be called once per model, while the constructor may
+        be called multiple times, e.g. when reloading from a checkpoint, in
         which case only the tensor data needs to be passed to the constructor.
         Since :meth:`load_state_dict` is implemented via :meth:`copy_`, the
         metadata is correctly assumed to be unchanged.
@@ -312,12 +310,12 @@ class FlatParameter(nn.Parameter):
 
 class FlatParamHandle:
     """
-    This handle manages a flattened parameter (:class:`FlatParameter`). This
+    This handle manages a flat parameter (:class:`FlatParameter`). This
     includes sharding and view management.
 
     Args:
-        params (Sequence[nn.Parameter]): The parameters to use for the
-            flattened parameter.
+        params (Sequence[nn.Parameter]): The parameters to flatten into the
+            flat parameter.
         fully_sharded_module (nn.Module): See [Note: Fully Sharded Module].
         device (torch.device): The compute and communication device, which
             should be a non-CPU device. We refer to it as the compute device.
@@ -388,10 +386,10 @@ class FlatParamHandle:
         use_orig_params: bool,
     ) -> None:
         """
-        Initializes the flattened parameter ``self.flat_param`` by flattening
-        the parameters in ``params`` into a single :class:`FlatParameter` and
-        saves relevant metadata. Shared parameters are only included in the
-        flattened parameter once.
+        Initializes the flat parameter ``self.flat_param`` by flattening the
+        parameters in ``params`` into a single :class:`FlatParameter` and saves
+        relevant metadata. Shared parameters are only included in the flat
+        parameter once.
 
         This checks that all comprising parameters have the same dtype and
         ``requires_grad`` and does not support nested construction of
@@ -507,8 +505,8 @@ class FlatParamHandle:
         :class:`FlatParameter` s.
 
         We expose this factory method for checkpointing (e.g. sharded state
-        dict). The flattened parameter's metadata should only be initialized
-        once (see :meth:`_init_metadata`), but its tensor data may be reloaded.
+        dict). The flat parameter's metadata should only be initialized once
+        (see :meth:`_init_metadata`), but its tensor data may be reloaded.
         """
         with torch.no_grad():
             flat_params = [
@@ -559,11 +557,11 @@ class FlatParamHandle:
     def shard(self):
         """
         Shards the handle's ``FlatParameter``. In terms of memory, this
-        allocates new memory for the sharded flattened parameter and frees the
-        unsharded flattened parameter's storage.
+        allocates new memory for the sharded flat parameter and frees the
+        unsharded flat parameter's storage.
 
-        Postcondition: ``self.flat_param`` is the sharded flattened parameter.
-        Shard metadata attributes are set for all sharding strategies.
+        Postcondition: ``self.flat_param`` is the sharded flat parameter. Shard
+        metadata attributes are set for all sharding strategies.
         ``process_group``, ``rank``, and ``world_size`` attributes are set if
         using a sharded strategy.
         """
@@ -595,20 +593,20 @@ class FlatParamHandle:
         end: int,
     ) -> None:
         """
-        Initializes shard-related metadata for this rank's shard of the
-        flattened parameter: ``_sharded_size``, ``_shard_param_offsets``,
+        Initializes shard-related metadata for this rank's shard of the flat
+        parameter: ``_sharded_size``, ``_shard_param_offsets``,
         ``_shard_indices``, and ``_shard_numel_padded``.
 
         Args:
-            numel_padded (int): Numel padded for this rank's sharded flattened
+            numel_padded (int): Numel padded for this rank's sharded flat
                 parameter.
-            start (int): Start index in the sharded flattened parameter
-                assigned to this rank.
-            end (int): End index (inclusive) in the sharded flattened parameter
-                assigned to this rank. If this exceeds the sharded flattened
+            start (int): Start index in the sharded flat parameter assigned to
+                this rank.
+            end (int): End index (inclusive) in the sharded flat parameter
+                assigned to this rank. If this exceeds the sharded flat
                 parameter's numel, then it is truncated.
 
-        Precondition: ``self.flat_param`` 's data is the sharded flattened
+        Precondition: ``self.flat_param`` 's data is the sharded flat
         parameter.
         """
         self.flat_param._sharded_size = self.flat_param.size()  # type: ignore[attr-defined]
@@ -632,14 +630,14 @@ class FlatParamHandle:
     ) -> Tuple[Tuple[Tuple[int, int], ...], Tuple[int, int]]:
         """
         Computes the shard metadata based on ``start`` and ``end``, which give
-        the closed interval of the unsharded flattened parameter specifying the
+        the closed interval of the unsharded flat parameter specifying the
         shard.
 
         Args:
             start (int): Start index (in units of numel) of this rank's shard
-                of the flattened parameter.
+                of the flat parameter.
             end (int): End index (in units of numel and inclusive) of this
-                rank's shard of the flattened parameter.
+                rank's shard of the flat parameter.
 
         Return:
             Tuple[Tuple[Tuple[int, int], ...], Tuple[int, int]]: See
@@ -647,11 +645,11 @@ class FlatParamHandle:
             :class:`FlatParameter` 's docstring.
         """
         flat_param_offsets = self._get_flat_param_offsets()
-        # Indices of the original parameters in this rank's sharded flattened
+        # Indices of the original parameters in this rank's sharded flat
         # parameter
         shard_param_indices_range = []  # elements will be consecutive
         # [start, end] offsets giving this rank's part of the flattened
-        # original module parameter (which will be [0, `p.numel()`-1] for any
+        # original parameter (which will be [0, `p.numel()`-1] for any
         # parameter that is not sharded across ranks)
         shard_param_offsets = []
         for i, (param_start, param_end) in enumerate(flat_param_offsets):
@@ -744,8 +742,10 @@ class FlatParamHandle:
         return torch.Size([unpadded_sharded_size[0] + numel_to_pad])
 
     def _get_flat_param_offsets(self) -> List[Tuple[int, int]]:
-        """Returns [start, end] offsets of each original parameter's flattened
-        data in the unsharded flattened parameter (without padding)."""
+        """
+        Returns [start, end] offsets of each original parameter's flattened
+        data in the unsharded flat parameter (without padding).
+        """
         cumulative_sum = list(accumulate(self.flat_param._numels))
         starts = [0] + cumulative_sum[:-1]
         ends = [end - 1 for end in cumulative_sum]  # inclusive
@@ -755,8 +755,10 @@ class FlatParamHandle:
     def shard_metadata(
         self,
     ) -> FlatParamShardMetadata:
-        """Returns shard-related metadata specific to this rank's shard of the
-        flattened parameter."""
+        """
+        Returns shard-related metadata specific to this rank's shard of the
+        flat parameter.
+        """
         assert hasattr(self.flat_param, "_shard_indices") and hasattr(
             self.flat_param, "_shard_param_offsets"
         ), "Shard metadata has not been initialized"
@@ -892,7 +894,7 @@ class FlatParamHandle:
     def _use_low_precision_shard(self):
         """
         Allocates the low precision shard directly on the compute device and
-        switches to using the low precision sharded flattened parameter.
+        switches to using the low precision sharded flat parameter.
         """
         self._check_low_precision_shard()
         flat_param = self.flat_param
@@ -910,17 +912,17 @@ class FlatParamHandle:
 
     def unshard(self):
         """
-        Runs the unshard logic. This includes all-gathering the flattened
-        parameter and switching to using the unsharded flattened parameter. If
-        the handle does not need unsharding, then this only switches to using
-        the unsharded flattened parameter. For ``NO_SHARD``, this is a no-op.
+        Runs the unshard logic. This includes all-gathering the flat parameter
+        and switching to using the unsharded flat parameter. If the handle does
+        not need unsharding, then this only switches to using the unsharded
+        flat parameter. For ``NO_SHARD``, this is a no-op.
 
         If FSDP is in :meth:`summon_full_params` and the handle uses parameter
         mixed precision, then the parameter is forced to full precision.
         """
         if not self.needs_unshard():
             # Even when not needing an unshard, we should switch to using
-            # the unsharded flattened parameter
+            # the unsharded flat parameter
             unsharded_flat_param = (
                 self._get_padded_unsharded_flat_param()
                 if self.uses_sharded_strategy
@@ -933,7 +935,7 @@ class FlatParamHandle:
         self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
     def needs_unshard(self) -> bool:
-        """Returns if the handle's flattened parameter needs to be unsharded."""
+        """Returns if the handle's flat parameter needs to be unsharded."""
         if not self.uses_sharded_strategy:
             return False
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
@@ -945,10 +947,10 @@ class FlatParamHandle:
 
     def _alloc_padded_unsharded_flat_param(self):
         """
-        Allocates the *padded* unsharded flattened parameter. The unpadded
-        unsharded flattened parameter is always a view into the padded one.
-        This padded parameter is saved to a different attribute on the
-        ``FlatParameter`` depending on if we force full precision.
+        Allocates the *padded* unsharded flat parameter. The unpadded unsharded
+        flat parameter is always a view into the padded one. This padded
+        parameter is saved to a different attribute on the ``FlatParameter``
+        depending on if we force full precision.
         """
         self._check_sharded_strategy()
         flat_param = self.flat_param
@@ -959,9 +961,9 @@ class FlatParamHandle:
 
     def _get_padded_unsharded_flat_param(self) -> torch.Tensor:
         """
-        Returns a reference to the padded unsharded flattened parameter
-        depending on the calling context. This should only be called if using a
-        sharded strategy.
+        Returns a reference to the padded unsharded flat parameter depending on
+        the calling context. This should only be called if using a sharded
+        strategy.
         """
         self._check_sharded_strategy()
         flat_param = self.flat_param
@@ -983,7 +985,7 @@ class FlatParamHandle:
         padded_unsharded_flat_param: Tensor,
     ) -> Tensor:
         """
-        All-gathers the handle's flattened parameter to the destination
+        All-gathers the handle's flat parameter to the destination
         ``padded_unsharded_flat_param``, and switches to using the all-gathered
         tensor.
         """
@@ -1009,8 +1011,8 @@ class FlatParamHandle:
         padded_unsharded_flat_param: torch.Tensor,
     ) -> None:
         """
-        Switches to using the *unpadded* unsharded flattened parameter, which
-        is a view into the *padded* unsharded flattened parameter.
+        Switches to using the *unpadded* unsharded flat parameter, which is a
+        view into the *padded* unsharded flat parameter.
         """
         unsharded_size = self.flat_param._unpadded_unsharded_size
         self.flat_param.data = padded_unsharded_flat_param[
@@ -1041,7 +1043,7 @@ class FlatParamHandle:
         self._check_on_compute_device(self.flat_param)
 
     def _free_low_precision_sharded_param(self):
-        """Frees the low precision sharded flattened parameter."""
+        """Frees the low precision sharded flat parameter."""
         self._check_low_precision_shard()
         # `_mp_shard` is allocated in the pre-unshard stream, consumed in the
         # unshard stream for sharded strategies, and consumed in both the
@@ -1230,15 +1232,15 @@ class FlatParamHandle:
     @contextlib.contextmanager
     def to_cpu(self):
         """
-        Moves the unpadded unsharded flattened parameter to CPU while in the
-        context and moves it back to the previous device upon exit. For now,
-        this assumes the ``FlatParameter`` is the unpadded unsharded flattened
-        parameter since (1) there is no reason to include the padding in the
-        copy and (2) there is no use case for the sharded flattened parameter.
+        Moves the unpadded unsharded flat parameter to CPU while in the context
+        and moves it back to the previous device upon exit. For now, this
+        assumes the ``FlatParameter`` is the unpadded unsharded flat parameter
+        since (1) there is no reason to include the padding in the copy and (2)
+        there is no use case for the sharded flat parameter.
 
         Precondition: ``self.flat_param`` 's data is the unpadded unsharded
-        flattened parameter on the compute device, and the handle uses a
-        sharded strategy.
+        flat parameter on the compute device, and the handle uses a sharded
+        strategy.
         Postcondition: Same as the precondition.
         """
         self._check_sharded_strategy()
@@ -1247,8 +1249,8 @@ class FlatParamHandle:
             f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
         )
         self._check_on_compute_device(self.flat_param)
-        # Check that the unpadded unsharded flattened parameter is a view into
-        # the padded unsharded flattened parameter as expected
+        # Check that the unpadded unsharded flat parameter is a view into the
+        # padded unsharded flat parameter as expected
         # NOTE: This check is not strictly needed for correctness but is a
         # useful sanity check since the tensor should only be used internally.
         unpadded_storage_ptr = self.flat_param._typed_storage()._data_ptr()
@@ -1277,9 +1279,9 @@ class FlatParamHandle:
 
     def reshard(self, free_unsharded_flat_param: bool):
         """
-        Runs the reshard logic. This includes freeing the unsharded flattened
+        Runs the reshard logic. This includes freeing the unsharded flat
         parameter if ``free_unsharded_flat_param`` and switching to using the
-        sharded flattened parameter.
+        sharded flat parameter.
         """
         # Switch to the sharded `FlatParameter` before freeing to prevent
         # "use-after-free"-type bugs with external profiling tools, where for
@@ -1293,13 +1295,13 @@ class FlatParamHandle:
         """
         Runs the post-reshard logic. This includes freeing any memory that
         can now be freed given that the ``FlatParameter`` points to the full
-        precision sharded flattened parameter.
+        precision sharded flat parameter.
 
         Precondition: ``self.flat_param`` 's data points to the full precision
-        sharded flattened parameter.
+        sharded flat parameter.
         """
         # For `NO_SHARD`, `_mp_shard` is not freed in the post-unshard since
-        # it is also the low precision *unsharded* flattened parameter. Hence,
+        # it is also the low precision *unsharded* flat parameter. Hence,
         # we delay the free until the reshard.
         if (
             self._uses_param_mixed_precision
@@ -1310,8 +1312,8 @@ class FlatParamHandle:
 
     def _free_unsharded_flat_param(self):
         """
-        Frees the padded unsharded flattened parameter. The tensor to free
-        depends on the calling context since the unshard may have forced full
+        Frees the padded unsharded flat parameter. The tensor to free depends
+        on the calling context since the unshard may have forced full
         precision, in which case a different tensor is used.
         """
         self._check_sharded_strategy()
@@ -1323,7 +1325,7 @@ class FlatParamHandle:
         _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
-        """Switches to using the sharded flattened parameter."""
+        """Switches to using the sharded flat parameter."""
         flat_param = self.flat_param
         if self._offload_params:
             device = flat_param._local_shard.device  # type: ignore[attr-defined]
@@ -1364,9 +1366,9 @@ class FlatParamHandle:
         ``None`` or ``flat_param`` otherwise, where the unflattening is based
         on ``flat_param`` 's metadata.
 
-        In other words, to get views into the unsharded flattened parameter,
-        pass ``tensor`` as ``None``, but to get views into tensor optimizer
-        state, pass ``tensor`` as the optimizer state tensor.
+        In other words, to get views into the unsharded flat parameter, pass
+        ``tensor`` as ``None``, but to get views into tensor optimizer state,
+        pass ``tensor`` as the optimizer state tensor.
         """
         if tensor is None:
             tensor = flat_param
@@ -1388,8 +1390,8 @@ class FlatParamHandle:
     @no_type_check
     def _use_unsharded_views(self, as_params: bool) -> None:
         """
-        Unflattens the unsharded flattened parameter by setting the original
-        module parameter variables to be views into it.
+        Unflattens the unsharded flat parameter by setting the original module
+        parameter variables to be views into it.
 
         Args:
             as_params (bool): If ``True``, then registers the original
@@ -1465,7 +1467,7 @@ class FlatParamHandle:
 
     def _use_unsharded_grad_views(self) -> None:
         """
-        Unflattens the unsharded flattened parameter's gradient by setting the
+        Unflattens the unsharded flat parameter's gradient by setting the
         original module parameter variables' gradients to be views into it.
         """
         # Expects the gradient to be in `flat_param.grad`
@@ -1530,10 +1532,10 @@ class FlatParamHandle:
     @contextlib.contextmanager
     def unflatten_as_params(self) -> Generator:
         """
-        Assumes the flattened parameter is unsharded. When in the context,
+        Assumes the flat parameter is unsharded. When in the context,
         unflattens the original parameters as ``nn.Parameter`` views into the
-        flattened parameter, and after the context, restores the original
-        parameters as ``Tensor`` views into the flattened parameter.
+        flat parameter, and after the context, restores the original parameters
+        as ``Tensor`` views into the flat parameter.
         """
         self._use_unsharded_views(as_params=True)
         try:
@@ -1546,14 +1548,14 @@ class FlatParamHandle:
     def _use_sharded_views(self) -> None:
         """
         Sets the original module parameter variables' data to be flattened
-        views into the sharded flattened parameter.
+        views into the sharded flat parameter.
 
         The views are kept as flattened to simplify the case where a parameter
         is sharded across ranks. Parameters whose data is not present in the
-        sharded flattened parameter have their data set to a size-0 empty
-        tensor. We do not delete them to ensure to preserve expected behaviors
-        like model printability. Parameters whose data is present must preserve
-        their variables to be passable to an optimizer.
+        sharded flat parameter have their data set to a size-0 empty tensor. We
+        do not delete them to ensure to preserve expected behaviors like model
+        printability. Parameters whose data is present must preserve their
+        variables to be passable to an optimizer.
         """
         if not self.uses_sharded_strategy:
             # For `NO_SHARD`, use the *unflattened* unsharded views since we
@@ -1604,11 +1606,11 @@ class FlatParamHandle:
     def _use_sharded_grad_views(self) -> None:
         """
         Sets the original module parameter variables' gradients to be flattened
-        views into the sharded flattened parameter's gradient. This is a no-op
-        if there is no gradient.
+        views into the sharded flat parameter's gradient. This is a no-op if
+        there is no gradient.
 
-        Parameters whose data is not present in the sharded flattened parameter
-        and parameters with ``requires_grad=False`` have their gradients set to
+        Parameters whose data is not present in the sharded flat parameter and
+        parameters with ``requires_grad=False`` have their gradients set to
         ``None``. Since the gradient variables do not need to be preserved,
         this method does not manipulate existing ``Tensor`` data directly and
         creates new ``Tensor`` variables instead.
@@ -1870,8 +1872,10 @@ class FlatParamHandle:
                 self._use_unsharded_views(as_params=True)
 
     def _get_modules(self) -> Set[nn.Module]:
-        """Returns a :class:`set` of the modules whose parameters are included
-        in this handle's flattened parameter."""
+        """
+        Returns a :class:`set` of the modules whose parameters are included in
+        this handle's flat parameter.
+        """
         return {pi.module for pi in self.flat_param._param_infos}.union(
             {spi.module for spi in self.flat_param._shared_param_infos}
         )
