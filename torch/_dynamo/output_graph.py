@@ -422,8 +422,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
             if self.module_has_hooks(target, only_check_unsupported=True):
-                log.warning(
-                    "nn.Module hooks are not fully supported, they may be ignored"
+                torch._logging.warning_once(
+                    log, "nn.Module hooks are not fully supported, they may be ignored"
                 )
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 

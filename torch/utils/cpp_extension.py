@@ -382,8 +382,10 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     cuda_ver = packaging.version.parse(cuda_str_version)
     torch_cuda_version = packaging.version.parse(torch.version.cuda)
     if cuda_ver != torch_cuda_version:
-        # major/minor attributes are only available in setuptools>=49.6.0
-        if getattr(cuda_ver, "major", float("nan")) != getattr(torch_cuda_version, "major", float("nan")):
+        # major/minor attributes are only available in setuptools>=49.4.0
+        if getattr(cuda_ver, "major", None) is None:
+            raise ValueError("setuptools>=49.4.0 is required")
+        if cuda_ver.major != torch_cuda_version.major:
             raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(cuda_str_version, torch.version.cuda))
         warnings.warn(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda))
 
@@ -718,7 +720,7 @@ class BuildExtension(build_ext):
                         else:
                             cflags = []
 
-                        cflags = win_cuda_flags(cflags) + ['--use-local-env']
+                        cflags = win_cuda_flags(cflags) + ['-std=c++17', '--use-local-env']
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
                         for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
@@ -790,7 +792,7 @@ class BuildExtension(build_ext):
             cuda_post_cflags = None
             cuda_cflags = None
             if with_cuda:
-                cuda_cflags = ['--use-local-env']
+                cuda_cflags = ['-std=c++17', '--use-local-env']
                 for common_cflag in common_cflags:
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
