@@ -800,9 +800,15 @@ class VariableBuilder:
                 config.dynamic_shapes
                 and not torch._dynamo.config.specialize_int
                 and isinstance(value, int)
-                and value >= 0
                 and not is_constant_source(self.get_source())
             ):
+                if value < 0:
+                    # Edge case
+                    return ConstantVariable(
+                        value=value,
+                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
+
                 shape_env = self.tx.output.shape_env
 
                 # TODO: This should be dynamic, as we in general do not
