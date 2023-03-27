@@ -2176,7 +2176,7 @@ class CppKernelProxy(CppKernel):
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:
                 main_loop, tail_loop = self.loop_nest.split_with_tiling(
-                    inner_most_idx, factor=tiling_factors[0]
+                    tiling_indices[0], factor=tiling_factors[0]
                 )
                 main_loop.set_kernel(
                     codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
