@@ -770,7 +770,8 @@ void ProcessGroupNCCL::runHealthCheck() {
       rank_);
 }
 
-void ProcessGroupNCCL::setSequenceNumberForGroup() {} // NCCL just starts sequence numbers at 0.
+void ProcessGroupNCCL::setSequenceNumberForGroup() {
+} // NCCL just starts sequence numbers at 0.
 
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seq_;
