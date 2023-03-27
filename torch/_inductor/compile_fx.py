@@ -139,7 +139,6 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
     aot_mode=False,
-    is_inference=False,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -163,7 +162,6 @@ def compile_fx_inner(
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
-
     fake_mode = fake_mode_from_tensors(
         example_inputs
     ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
@@ -185,8 +183,6 @@ def compile_fx_inner(
             if aot_mode:
                 return compiled_fn
 
-    output = list(gm.graph.nodes)[-1]
-    assert len(output.args) == 1
     if cudagraphs:
         complex_memory_overlap_inputs = any(
             complex_memory_overlap(t) for t in example_inputs
@@ -204,8 +200,6 @@ def compile_fx_inner(
                 example_inputs,
                 static_input_idxs=range(num_fixed),
                 device_index=next(iter(graph.device_idxs)),
-                is_backward=is_backward,
-                is_inference=is_inference,
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -273,25 +267,14 @@ def align_inputs(model, inputs, static_input_idxs=()):
 
 
 @dynamo_utils.dynamo_timed
-def cudagraphify(
-    model,
-    inputs,
-    static_input_idxs=(),
-    *,
-    device_index: int,
-    is_backward: bool,
-    is_inference: bool,
-):
+def cudagraphify(model, inputs, static_input_idxs=(), *, device_index: int):
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
     )
 
     if config.triton.cudagraph_trees:
         cudagraphify_fn = functools.partial(
-            new_cudagraphify_impl,
-            device_index=device_index,
-            is_backward=is_backward,
-            is_inference=is_inference,
+            new_cudagraphify_impl, device_index=device_index
         )
     else:
         cudagraphify_fn = cudagraphify_impl
@@ -346,9 +329,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
 
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        static_input(x).copy_(x.detach())
-        if idx not in static_input_idxs
-        else x.detach()
+        static_input(x).zero_() if idx not in static_input_idxs else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
@@ -513,7 +494,7 @@ def compile_fx(
     graph_id = next(_graph_counter)
 
     @dynamo_utils.dynamo_timed
-    def fw_compiler_base(model: torch.fx.GraphModule, example_inputs, is_inference):
+    def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
         # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
         # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
@@ -525,11 +506,7 @@ def compile_fx(
             num_fixed=fixed,
             cudagraphs=cudagraphs,
             graph_id=graph_id,
-            is_inference=is_inference,
         )
-
-    fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
-    inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
 
     # Save and restore dynamic shapes setting for backwards, as it is
     # sometimes done as a context manager which won't be set when we
@@ -558,7 +535,6 @@ def compile_fx(
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            inference_compiler=inference_compiler,
             decompositions=decompositions,
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"

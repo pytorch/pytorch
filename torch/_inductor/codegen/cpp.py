@@ -1719,8 +1719,6 @@ class CppVecKernelChecker(CppVecKernel):
         V.graph.wrapper_code = WrapperCodeGen()
 
         class VecCheckerProxy:
-            bin_cmp_ops = ["eq", "ne", "le", "ge", "lt", "gt"]
-
             @staticmethod
             def _bin_cmp_op(x, y):
                 current_node: torch.fx.Node = V.interpreter.current_node
@@ -1730,8 +1728,10 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def __getattr__(name):
+                bin_cmp_ops = ["eq", "ne", "le", "ge", "lt", "gt"]
+
                 def inner(*args, **kwargs):
-                    if name in VecCheckerProxy.bin_cmp_ops:
+                    if name in bin_cmp_ops:
                         return VecCheckerProxy._bin_cmp_op(args, kwargs)
 
                     if not (name in self.fast_vec_list):
@@ -1778,14 +1778,7 @@ class CppVecKernelChecker(CppVecKernel):
                             opt_ctx.dtype = torch.float32
 
                     supported_dtypes = [torch.float32, torch.int32, torch.bfloat16]
-
-                    if opt_ctx.dtype not in supported_dtypes or (
-                        opt_ctx.dtype == torch.int32
-                        and not all(
-                            user.target in VecCheckerProxy.bin_cmp_ops
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
+                    if opt_ctx.dtype not in supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
 
                     if opt_ctx.dtype in [torch.bfloat16]:
@@ -1849,10 +1842,6 @@ class CppVecKernelChecker(CppVecKernel):
                         and min_expr.is_number
                         and max_expr <= i32_iinfo.max
                         and min_expr >= i32_iinfo.min
-                        and all(
-                            user.target in VecCheckerProxy.bin_cmp_ops
-                            for user in node_ctx.current_node.users
-                        )
                     ):
                         opt_ctx.dtype = torch.int32
                     else:
@@ -2078,14 +2067,12 @@ class CppKernelProxy(CppKernel):
                     if src_dtype == torch.bfloat16:
                         # Since we always convert the load/store value to float if the tensor is bfloat16.
                         # Therefore, the reduction should never work with bfloat16 value. Hence, we update
-                        # the bfloat16 reduction by
-                        #     1) updating the src_dtype to float
-                        # and 2) updating the dtype to float if it is bfloat16.
-                        assert dtype in [torch.float, torch.bfloat16, torch.int64]
+                        # the bfloat16 reduction by updating the dtype and src_dtype to float.
+                        assert dtype in [torch.float, torch.bfloat16]
                         _node.args = (
                             ops,
                             name,
-                            torch.float if dtype == torch.bfloat16 else dtype,
+                            torch.float,
                             torch.float,
                             reduction_type,
                             index,
