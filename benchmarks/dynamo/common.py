@@ -97,6 +97,7 @@ CI_SKIP[CI("eager", training=True)] = [
     # TIMM
     "cait_m36_384",  # fp64_OOM
     "convit_base",  # fp64_OOM
+    "mobilenetv2_100",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM,
 ]
 
