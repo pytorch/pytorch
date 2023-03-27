@@ -306,6 +306,9 @@ test_perf_for_dashboard() {
     python "benchmarks/dynamo/$suite.py" \
         --accuracy --"$dtype" --backend "$backend" "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_accuracy.csv"
+    python "benchmarks/dynamo/$suite.py" \
+        --accuracy --"$dtype" --backend "$backend" --dyanmic-shapes --disable-cudagraphs "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_training_cuda_accuracy.csv"
 
     # Run performance test
     # Skip dynamo-eager and aot-eager for performance test
