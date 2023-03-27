@@ -31,7 +31,7 @@ from .resharding import (
     _check_shard_metadata_pair_overlap
 )
 
-__all__: List[str] = [ "create_read_items_for_chunk_list" ]
+__all__: List[str] = ["create_read_items_for_chunk_list"]
 
 
 def _create_chunk_from_tensor(tensor: torch.Tensor) -> ChunkStorageMetadata:
