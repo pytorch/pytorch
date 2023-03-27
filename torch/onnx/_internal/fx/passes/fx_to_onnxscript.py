@@ -322,6 +322,7 @@ def _export_fx_node_to_onnxscript(
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
     export_options: options.ExportOptions,
+    node_with_fixed_shape: torch.fx.Node,
 ):
     # Record stack trace of node in diagnostic.
     node_stack_trace = node.stack_trace
@@ -448,12 +449,12 @@ def _export_fx_node_to_onnxscript(
             output
         )
         if export_options.op_level_debug:
-            # Use the node with fixed shape obtained from FakeTensorProp
-            node_with_fixed_shape = export_options.node_name_to_node[node.name]
             (
                 node_with_fixed_shape_args,
                 node_with_fixed_shape_kwargs,
             ) = _separate_input_attributes_from_arguments(node_with_fixed_shape)
+            # TODO(titaiwang): Why some ops failed on op-level validation, but
+            # successfully exported?
             (torch_args, torch_kwargs) = op_validation.wrap_fx_args_as_torch_args(
                 node_with_fixed_shape_args, node_with_fixed_shape_kwargs
             )
@@ -525,7 +526,10 @@ def export_fx_to_onnxscript(
     fx_name_to_onnxscipt_value: Dict[
         str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
     ] = {}
-    for node in fx_module_with_metadata.graph.nodes:
+    # node_fixed_shape is only used on op_level_debug purpose.
+    for node, node_fixed_shape in zip(
+        fx_module_with_metadata.graph.nodes, export_options.static_reference_graph.nodes
+    ):
         _export_fx_node_to_onnxscript(
             node,
             onnxscript_graph,
@@ -533,15 +537,7 @@ def export_fx_to_onnxscript(
             tracer,
             fx_module_with_metadata,
             export_options,
+            node_fixed_shape,
         )
-
-    # Apply TorchScript's type promotion code.
-    # Ideally, we should implement our type promotion but
-    # to save time, we just reuse.
-    onnxscript_graph.apply(
-        torch._C._jit_pass_onnx_scalar_type_analysis,
-        lowprecision_cast=True,
-        opset_version=export_options.opset_version,
-    )
 
     return onnxscript_graph

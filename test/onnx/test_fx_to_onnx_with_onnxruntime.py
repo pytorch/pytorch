@@ -13,8 +13,8 @@ import numpy as np
 
 import onnx.reference
 import onnx_test_common
-
 import onnxruntime  # type: ignore[import]
+import parameterized
 import torch
 import transformers  # type: ignore[import]
 from torch import nn
@@ -52,6 +52,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     rtol: float = 1e-3,
     atol: float = 1e-7,
     opset_version: int = 18,
+    op_level_debug=False,
     **input_kwargs,
 ):
     # Feed args and kwargs into exporter.
@@ -63,6 +64,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         opset_version=opset_version,
         use_binary_format=True,
         enable_dynamic_axes=True,
+        op_level_debug=op_level_debug,
         **input_kwargs,
     )
 
@@ -89,6 +91,17 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         )
 
 
+def _parameterized_class_attrs_and_values():
+    return {
+        "attrs": ["op_level_debug"],
+        "input_values": [(True,), (False,)],
+    }
+
+
+@parameterized.parameterized_class(
+    **_parameterized_class_attrs_and_values(),
+    class_name_func=onnx_test_common.parameterize_class_name,
+)
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     def setUp(self):
         super().setUp()
@@ -168,7 +181,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(MNISTModel(), (tensor_x,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            MNISTModel(), (tensor_x,), op_level_debug=True
+        )
 
     # test single op with no kwargs
     def test_sigmoid(self):
@@ -198,7 +213,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 x = torch.ops.aten.add(x, 1.0, alpha=2.0)
                 return self.sigmoid(x)
 
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(SigmoidAddModel(), (x,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            SigmoidAddModel(), (x,), op_level_debug=True
+        )
 
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -218,6 +235,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             use_binary_format=True,
             opset_version=self.opset_version,
             enable_dynamic_axes=False,
+            op_level_debug=True,
             **inputs,
         )
 

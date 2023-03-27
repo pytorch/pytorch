@@ -12,7 +12,7 @@ from onnxscript import evaluator  # type: ignore[import]
 import torch
 import torch.fx
 
-from torch.onnx import _type_utils
+from torch.onnx import _constants, _type_utils
 from torch.onnx._internal import _beartype, onnx_proto_utils
 from torch.onnx._internal.fx import diagnostics
 from torch.onnx._internal.fx.passes import fx_to_onnxscript
@@ -98,9 +98,26 @@ def validate_op_between_ort_torch(
 
 @_beartype.beartype
 def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
-    if dtype == {torch.int64, torch.int32, torch.uint8}:
-        # NOTE: high=256 can be changed if needed
-        return torch.randint(low=0, high=256, size=shape, dtype=dtype)
+    if dtype == torch.uint8:
+        return torch.randint(
+            low=_constants.UINT8_MIN, high=_constants.UINT8_MAX, size=shape, dtype=dtype
+        )
+    if dtype == torch.int8:
+        return torch.randint(
+            low=_constants.INT8_MIN, high=_constants.INT8_MAX, size=shape, dtype=dtype
+        )
+    if dtype == torch.int16:
+        return torch.randint(
+            low=_constants.INT16_MIN, high=_constants.INT16_MAX, size=shape, dtype=dtype
+        )
+    if dtype == torch.int32:
+        return torch.randint(
+            low=_constants.INT32_MIN, high=_constants.INT32_MAX, size=shape, dtype=dtype
+        )
+    if dtype == torch.int64:
+        return torch.randint(
+            low=_constants.INT64_MIN, high=_constants.INT64_MAX, size=shape, dtype=dtype
+        )
     if dtype == torch.bool:
         random_numbers = torch.rand(shape)
         return torch.where(

@@ -11,11 +11,11 @@ import warnings
 from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
 import numpy as np
-
 import onnx.reference
 import onnx_test_common
 
 import onnxruntime  # type: ignore[import]
+import parameterized
 
 import torch
 import torchvision
@@ -128,6 +128,17 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             compare_pytorch_onnx_with_ort(onnx_model, additional_input_args)
 
 
+def _parameterized_class_attrs_and_values():
+    return {
+        "attrs": ["op_level_debug"],
+        "input_values": [(True,), (False,)],
+    }
+
+
+@parameterized.parameterized_class(
+    **_parameterized_class_attrs_and_values(),
+    class_name_func=onnx_test_common.parameterize_class_name,
+)
 class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     def setUp(self):
         super().setUp()

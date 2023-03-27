@@ -1,6 +1,9 @@
 # Owner(s): ["module: onnx"]
 import unittest
 
+import onnx_test_common
+import parameterized
+
 import pytorch_test_common
 import torch
 from torch import nn
@@ -9,6 +12,17 @@ from torch.onnx._internal import fx as fx_onnx
 from torch.testing._internal import common_utils
 
 
+def _parameterized_class_attrs_and_values():
+    return {
+        "attrs": ["op_level_debug"],
+        "input_values": [(True,), (False,)],
+    }
+
+
+@parameterized.parameterized_class(
+    **_parameterized_class_attrs_and_values(),
+    class_name_func=onnx_test_common.parameterize_class_name,
+)
 class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
@@ -22,9 +36,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         _ = fx_onnx.export(func, torch.randn(1, 1, 2), opset_version=self.opset_version)
 
-    @unittest.skip(
-        "Conv Op is not supported at the time. https://github.com/microsoft/onnx-script/issues/397"
-    )
+    @unittest.skip("MaxPool2D Op is not supported at the time.")
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):

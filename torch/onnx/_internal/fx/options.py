@@ -24,8 +24,8 @@ class ExportOptions:
         enable_dynamic_axes: Whether to export the model with dynamic axes. This would set
             the shape of input and nodes all to dynamic by following symbolic fx graph.
             op_level_debug is not supported when dynamic axes is on.
-        node_name_to_node: A dictionary mapping node name to its args with
-            real shape.
+        static_reference_graph: torch.fx.graph object with real shape information to be
+            used as a reference in op_level_debug mode.
     """
 
     opset_version: int = _constants.ONNX_DEFAULT_OPSET
@@ -33,8 +33,8 @@ class ExportOptions:
     op_level_debug: bool = False
     # NOTE(titaiwang): What would be the best arg name for this?
     enable_dynamic_axes: bool = True
-    node_name_to_node: Dict[str, torch.fx.Node] = dataclasses.field(
-        default_factory=dict
+    static_reference_graph: torch.fx.Graph = dataclasses.field(
+        default_factory=torch.fx.Graph
     )
     decomposition_table: Dict[torch._ops.OpOverload, Callable] = dataclasses.field(
         default_factory=lambda: function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE

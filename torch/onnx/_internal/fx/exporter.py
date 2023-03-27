@@ -35,14 +35,14 @@ def _export(
     decomposed_module = passes.Decompose(
         module, export_options.decomposition_table, export_options.enable_dynamic_axes
     ).run(*args)
-    if export_options.op_level_debug:
-        # Run FakeTensorProp to get fixed shape of nodes.
-        fixed_shape_module = passes.ShapeInferenceWithFakeTensor(module).run(*args)
-        export_options.update(
-            node_name_to_node={
-                node.name: node for node in fixed_shape_module.graph.nodes
-            }
-        )
+    # Run FakeTensorProp to get fixed shape of nodes for op_level_debug purposes.
+    # NOTE: torch.fx.Transformer makes a copy of the graph only but shares weights
+    # with the original module.
+    static_reference_graph_module = torch.fx.Transformer(decomposed_module).transform()
+    static_reference_graph_module = passes.ShapeInferenceWithFakeTensor(
+        static_reference_graph_module
+    ).run(*args)
+    export_options.update(static_reference_graph=static_reference_graph_module.graph)
     # We want to pass list of ints and floats to TorchScript graph correctly
     # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
     # receive FakeTensor and results runtime error. In addition, TorchScript-based
