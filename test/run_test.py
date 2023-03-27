@@ -809,7 +809,7 @@ def get_pytest_args(options):
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
-        rerun_options = ["-x", "--reruns=2"]
+        rerun_options = ["-x", "--reruns=2", "--sw"]
 
     pytest_args = [
         "--use-pytest",
