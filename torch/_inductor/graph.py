@@ -622,8 +622,6 @@ class GraphLowering(torch.fx.Interpreter):
         from .codecache import PyCodeCache
 
         code, linemap = self.codegen()
-        if config.debug:
-            print(code)
 
         mod = PyCodeCache.load(code, linemap=linemap)
         for name, value in self.constants.items():
