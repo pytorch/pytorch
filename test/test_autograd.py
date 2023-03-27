@@ -347,42 +347,6 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(Exception, "Simulate error on backward pass"):
             t3.sum().backward()
 
-    def test_custom_function_raises_if_input_returned_as_is_and_saved(self):
-        for save_inputs, mark_dirty, requires_grad, save_for_fw in product(*([(True, False)] * 4)):
-            class Func(torch.autograd.Function):
-                @staticmethod
-                def forward(x):
-                    return x ** 3, x
-
-                @staticmethod
-                def setup_context(ctx, inputs, outputs):
-                    if save_for_fw:
-                        save_fn = ctx.save_for_forward
-                    else:
-                        save_fn = ctx.save_for_backward
-
-                    if mark_dirty:
-                        ctx.mark_dirty(inputs[0])
-
-                    if save_inputs:
-                        save_fn(inputs[0])
-                    else:
-                        save_fn(outputs[1])
-
-                @staticmethod
-                def backward(ctx, grad_output, grad_x):
-                    pass
-
-            a = torch.tensor(1., requires_grad=requires_grad).clone()
-
-            if mark_dirty:
-                _unused, b = Func.apply(a)
-                if mark_dirty:
-                    self.assertTrue(a is b)
-            else:
-                with self.assertRaisesRegex(RuntimeError, "A input that has been returned as-is"):
-                    Func.apply(a)
-
     def test_custom_function_non_tensor_inputs_outputs(self):
         class MyFunction(Function):
 

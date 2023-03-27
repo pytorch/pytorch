@@ -1066,15 +1066,48 @@ class TestAutogradFunction(TestCase):
             def backward(ctx, grad_output):
                 return grad_output
 
+            @staticmethod
+            def jvp(ctx, x_t):
+                # NB: the logic to check ctx.save_for_forward happens
+                #     before we reach this!
+                if mark_dirty:
+                    x_t.add_(0)
+                return x_t
+
         def fn(x):
             return A.apply(x.clone())
 
-        x = torch.tensor(2., device=device, requires_grad=inner_requires_grad)
+        err_msg = "A input that has been returned as-is"
+
+        a = torch.tensor(2., device=device, requires_grad=inner_requires_grad)
+        a_t = torch.tensor(2., device=device, requires_grad=inner_requires_grad)
         if save_tensors in ("input", "output") and not mark_dirty:
-            with self.assertRaisesRegex(RuntimeError, "A input that has been returned as-is"):
-                grad(fn)(x)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                grad(fn)(a)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                jvp(fn, (a,), (a_t,))
         else:
-            grad(fn)(x)
+            grad(fn)(a)
+            jvp(fn, (a,), (a_t,))
+
+        a = torch.tensor(2., device=device, requires_grad=inner_requires_grad).clone()
+        a_t = torch.tensor(2., device=device, requires_grad=inner_requires_grad).clone()
+
+        if save_tensors in ("input", "output") and not mark_dirty:
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                A.apply(a)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                with fwAD.dual_level():
+                    A.apply(fwAD.make_dual(a, a_t))
+        elif mark_dirty:
+            b = A.apply(a)
+            if mark_dirty:
+                self.assertTrue(a is b)
+            with fwAD.dual_level():
+                a_dual = fwAD.make_dual(a, a_t)
+                b_dual = A.apply(a_dual)
+            if mark_dirty:
+                self.assertTrue(a_dual is b_dual)
 
     def test_needs_input_grads(self, device):
         class A(torch.autograd.Function):

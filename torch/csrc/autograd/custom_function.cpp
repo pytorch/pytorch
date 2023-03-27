@@ -277,7 +277,7 @@ optional_variable_list _process_backward_mode_ad(
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
   int num_outputs = raw_outputs.size();
 
-  std::string error_msg_input_returned_as_is =
+  const char* error_msg_input_returned_as_is =
       "A input that has been returned as-is as output is being saved for backward. "
       "This is not supported if you override setup_context. You should return and "
       "save a view of the input instead, e.g. with x.view_as(x) or setup ctx inside "
