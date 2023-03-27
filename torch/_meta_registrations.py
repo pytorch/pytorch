@@ -22,7 +22,8 @@ from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_
 from torch._refs import _broadcast_shapes
 
 from torch.utils._pytree import tree_map
-
+# register quantized_decomposed ops
+from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 
 aten = torch.ops.aten
 
@@ -2776,6 +2777,7 @@ def activate_meta():
             if opo not in activate_meta_table:
                 activate_meta_table[opo] = registry[opo]
 
+    print("activate_meta_table.items:", activate_meta_table.keys())
     for op_overload, fn in activate_meta_table.items():
         assert isinstance(op_overload, OpOverload)
 

@@ -86,7 +86,15 @@ def quantize_per_tensor(
 
     return _quantize_per_tensor_impl(input, scale, zero_point, quant_min, quant_max, dtype)
 
-@register_decomposition(torch.ops.quantized_decomposed.quantize_per_tensor)
+# @impl(quantized_decomposed_lib, "quantize_per_tensor.tensor", "Meta")
+# def quantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype):
+#     assert zero_point.numel() == 1, f"Exepecting zero_point tensor to be one element, but received : {zero_point.numel()}"
+#     assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
+#     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+#     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+#     return torch.empty_like(input, dtype=dtype)
+
+@register_decomposition(torch.ops.quantized_decomposed.quantize_per_tensor.default)
 def quantize_per_tensor_decomp_impl(
     input: torch.Tensor,
     scale: float,
@@ -181,8 +189,17 @@ def dequantize_per_tensor(
     else:
         raise ValueError(f"Unsupported dtype in dequantize_per_tensor: {dtype}")
 
+# @impl(quantized_decomposed_lib, "dequantize_per_tensor.tensor", "Meta")
+# def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype):
+#     assert zero_point.numel() == 1, f"Exepecting zero_point tensor to be one element, but received : {zero_point.numel()}"
+#     assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
+#     assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}"
+#     if dtype in [torch.uint8, torch.int8, torch.int32]:
+#         return torch.empty_like(input, dtype=torch.float32)
+#     else:
+#         raise ValueError(f"Unsupported dtype in dequantize_per_tensor: {dtype}")
 
-@register_decomposition(torch.ops.quantized_decomposed.dequantize_per_tensor)
+@register_decomposition(torch.ops.quantized_decomposed.dequantize_per_tensor.default)
 def dequantize_per_tensor_decomp_impl(
     input: torch.Tensor,
     scale: float,

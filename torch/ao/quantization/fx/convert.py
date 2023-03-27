@@ -158,8 +158,8 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 "_dtype_": dtype_
             }
         else:
-            quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
-            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor
+            quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
             scale = float(scale)
             zero_point = int(zero_point)
             quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
