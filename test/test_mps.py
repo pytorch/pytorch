@@ -9518,11 +9518,13 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(output, input_list)
 
     def test_index_put_deterministic(self, device="mps"):
-        def helper(dtype, accumulate, deterministic, acc_expected, non_acc_expected, num_tests=128):
+        def helper(dtype, accumulate, deterministic, num_tests=128):
+            acc_expected = torch.tensor([233, 187, 360], device=device, dtype=dtype)
+            non_acc_expected = torch.tensor([38, 37, 39], device=device, dtype=dtype)
+            t_idx = torch.tensor([0, 0, 0, 0, 2, 2, 1, 0, 2, 1, 0, 1, 2, 1, 0, 2, 2, 2, 2, 2, 0, 0, 2, 1, 2, 1, 0, 0, 2, 0, 2, 1, 1, 2, 2, 0, 2, 1, 0, 2])
             for _ in range(num_tests):
                 try:
                     torch.use_deterministic_algorithms(deterministic)
-                    t_idx = torch.tensor([0, 0, 0, 0, 2, 2, 1, 0, 2, 1, 0, 1, 2, 1, 0, 2, 2, 2, 2, 2, 0, 0, 2, 1, 2, 1, 0, 0, 2, 0, 2, 1, 1, 2, 2, 0, 2, 1, 0, 2])
                     t = torch.zeros(3, dtype=dtype, device=device)
                     t.index_put_((t_idx,), torch.arange(len(t_idx), device=device, dtype=dtype), accumulate=accumulate)
                     if accumulate:
@@ -9534,13 +9536,11 @@ class TestAdvancedIndexing(TestCaseMPS):
 
         for accumulate, deterministic in product((False, True), (False, True)):
             dtype = torch.float if accumulate else torch.long
-            acc_expected = torch.tensor([233, 187, 360], device=device, dtype=dtype)
-            non_acc_expected = torch.tensor([38, 37, 39], device=device, dtype=dtype)
             if not accumulate and not deterministic:
                 with self.assertRaisesRegex(AssertionError, "Tensor-likes are not equal!"):
-                    helper(dtype, accumulate, deterministic, acc_expected, non_acc_expected)
+                    helper(dtype, accumulate, deterministic)
             else:
-                helper(dtype, accumulate, deterministic, acc_expected, non_acc_expected)
+                helper(dtype, accumulate, deterministic)
 
     def test_multiple_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
