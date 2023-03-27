@@ -1948,7 +1948,7 @@ class TestOperators(TestCase):
     # Usually testing the composition of two transforms is sufficient to convince
     # ourselves that an operator is correctly implemented. For the following cases,
     # we want to be extra sure, so we send those through some three-transform tests:
-    # - autograd.Function. The mechanism is via PyDispatcher/PyOperator, not the
+    # - autograd.Function. The mechanism is via PyDispatcher/HigherOrderOperator, not the
     #   regular PyTorch dispatcher, so it's good to exercise more caution.
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_vmapvjpvmap', {
