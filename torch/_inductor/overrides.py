@@ -166,9 +166,9 @@ def fuse_reference_quantized_conv_unary(gm: torch.fx.GraphModule):
     """
     Replace pattern:
     # dequantize_per_channel -
-    # dequantize_per_tensor  - conv - post_op(or none) - quantize_per_tensor
+    # dequantize_per_tensor  - conv - post_op - quantize_per_tensor
     into new pattern:
-    # torch.ops.quantized.conv_unary
+    # torch.ops.quantized.conv_unary(post_op = post_op)
     """
     aten = torch.ops.aten
     quantized_decomposed = torch.ops.quantized_decomposed
@@ -205,22 +205,32 @@ def fuse_reference_quantized_conv_unary(gm: torch.fx.GraphModule):
                 ), "weight's node should be dequantize_per_channel"
                 (qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype) = x.args
                 (qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype) = w.args
-                if len(list(node.users)) != 1:
-                    # There are more than 1 users of this conv node, fail to fuse
+                if (
+                    len(list(node.users)) != 1
+                    or len(list(x.users)) != 1
+                    or len(list(w.users)) != 1
+                ):
+                    # Ensure met these criteria
+                    # 1. the conv node has only 1 user node
+                    # 2. the dequantize_per_tensor node as activation input of conv has only 1 user node
+                    # 3. the dequantize_per_channel node as weight input of conv has only 1 user node
                     continue
 
                 if list(node.users)[0].target is unary_post_op:
                     # conv relu fusion
                     unary_op_to_be_fused = list(node.users)[0]
                     if (
-                        list(unary_op_to_be_fused.users)[0].target
+                        len(list(unary_op_to_be_fused.users)) != 1
+                        or list(unary_op_to_be_fused.users)[0].target
                         != quantize_per_tensor
                     ):
-                        # Not meet fusion pattern: the op after unary_op is not quantize_per_tensor
+                        # Ensure met these criteria
+                        # 1. the unary op has only 1 user node.
+                        # 2. this user node should be quantize_per_tensor.
                         continue
                     quant_per_tensor_node = list(unary_op_to_be_fused.users)[0]
                 else:
-                    # Not meet fusion pattern: the op after conv is not unary_op to be fused or quantize_per_tensor
+                    # Not meet fusion pattern: the op after conv is not unary_op to be fused
                     continue
 
                 (
@@ -329,8 +339,15 @@ def fuse_reference_quantized_conv_binary(gm: torch.fx.GraphModule):
                 ), "weight's node should be dequantize_per_channel"
                 (qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype) = x.args
                 (qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype) = w.args
-                if len(list(node.users)) != 1:
-                    # There are more than 1 users of this conv node, fail to fuse
+                if (
+                    len(list(node.users)) != 1
+                    or len(list(x.users)) != 1
+                    or len(list(w.users)) != 1
+                ):
+                    # Ensure met these criteria
+                    # 1. the conv node has only 1 user node
+                    # 2. the dequantize_per_tensor node as activation input of conv has only 1 user node
+                    # 3. the dequantize_per_channel node as weight input of conv has only 1 user node
                     continue
 
                 if list(node.users)[0].target is binary_post_op[0]:
@@ -340,19 +357,20 @@ def fuse_reference_quantized_conv_binary(gm: torch.fx.GraphModule):
                     if len(binary_post_op) > 1:
                         # Has unary op after binary op in the check pattern
                         if (
-                            list(binary_op_to_be_fused.users)[0].target
+                            len(list(binary_op_to_be_fused.users)) == 1
+                            and list(binary_op_to_be_fused.users)[0].target
                             is binary_post_op[1]
                         ):
-                            if len(list(binary_op_to_be_fused.users)) != 1:
-                                # There are more than 1 users of this binary op, fail to fuse
-                                continue
                             # Conv add ReLU
                             unary_op_to_be_fused = list(binary_op_to_be_fused.users)[0]
                             if (
-                                list(unary_op_to_be_fused.users)[0].target
+                                len(list(unary_op_to_be_fused.users)) != 1
+                                or list(unary_op_to_be_fused.users)[0].target
                                 != quantize_per_tensor
                             ):
-                                # Not meet fusion pattern: the op after unary_op is not quantize_per_tensor
+                                # Ensure met these criteria
+                                # 1. unary_op_to_be_fused has 1 user node.
+                                # 2. this user node should be quant per tensor.
                                 continue
                             has_unary_op_fused_after_binary_op = True
                             quant_per_tensor_node = list(unary_op_to_be_fused.users)[0]
@@ -362,10 +380,13 @@ def fuse_reference_quantized_conv_binary(gm: torch.fx.GraphModule):
                     else:
                         # Only Binary op to check of pattern
                         if (
-                            list(binary_op_to_be_fused.users)[0].target
+                            len(list(binary_op_to_be_fused.users)) != 1
+                            or list(binary_op_to_be_fused.users)[0].target
                             != quantize_per_tensor
                         ):
-                            # Not meet fusion pattern: the op after unary_op is not quantize_per_tensor
+                            # Ensure met these criteria
+                            # 1. the binary post op should only has 1 user node.
+                            # 2. this user node should be quant per tensor.
                             continue
                         quant_per_tensor_node = list(binary_op_to_be_fused.users)[0]
                 else:
@@ -381,10 +402,13 @@ def fuse_reference_quantized_conv_binary(gm: torch.fx.GraphModule):
                 extra_input_node = binary_op_to_be_fused.all_input_nodes[
                     extra_input_node_idx
                 ]
-                if extra_input_node.target is not dequantize_per_tensor:
-                    print(
-                        "oneDNN 2.X version conv add fuison, requires extra input node has fake quant inserted"
-                    )
+                if (
+                    len(list(extra_input_node.users)) != 1
+                    or extra_input_node.target is not dequantize_per_tensor
+                ):
+                    # Ensure met these criteria
+                    # 1. Extra input node has only 1 user node.
+                    # 2. Extra input node is a dequant per tensor node.
                     continue
                 (
                     qaccum,
@@ -448,9 +472,9 @@ def fuse_reference_quantized_conv_binary(gm: torch.fx.GraphModule):
     return gm
 
 
-def packed_reference_quantized_conv(gm: torch.fx.GraphModule):
+def fuse_single_reference_quantized_conv(gm: torch.fx.GraphModule):
     """
-    Prepack of single conv without post op fusion
+    Single reference conv without post op fusion
     Replace pattern:
     # dequantize_per_channel -
     # dequantize_per_tensor  - conv - quantize_per_tensor
@@ -485,8 +509,15 @@ def packed_reference_quantized_conv(gm: torch.fx.GraphModule):
             ), "weight's node should be dequantize_per_channel"
             (qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype) = x.args
             (qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype) = w.args
-            if len(list(node.users)) != 1:
-                # There are more than 1 users of this conv node, fail to fuse
+            if (
+                len(list(node.users)) != 1
+                or len(list(x.users)) != 1
+                or len(list(w.users)) != 1
+            ):
+                # Ensure met these criteria
+                # 1. the conv node has only 1 user node
+                # 2. the dequantize_per_tensor node as activation input of conv has only 1 user node
+                # 3. the dequantize_per_channel node as weight input of conv has only 1 user node
                 continue
 
             if list(node.users)[0].target is quantize_per_tensor:
@@ -543,7 +574,7 @@ def packed_reference_quantized_conv(gm: torch.fx.GraphModule):
 def fuse_reference_quantized_conv(gm: torch.fx.GraphModule):
     gm = fuse_reference_quantized_conv_unary(gm)
     gm = fuse_reference_quantized_conv_binary(gm)
-    gm = packed_reference_quantized_conv(gm)
+    gm = fuse_single_reference_quantized_conv(gm)
     return gm
 
 
