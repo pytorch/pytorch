@@ -1635,7 +1635,10 @@ Tensor asarray(
       THPObjectPtr ptr;
       auto arr = obj;
 
-      if (is_numpy_scalar) {
+      // According to https://numpy.org/devdocs/reference/c-api/array.html#c.PyArray_CheckScalar
+      // is_numpy_scalar evaluates to true for new scalars and 0-dim arrays.
+      // For 0-dim arrays no casting is needed
+      if (is_numpy_scalar && !is_numpy_array) {
         TORCH_CHECK(
             !force_alias,
             "can't alias NumPy scalars. ",
