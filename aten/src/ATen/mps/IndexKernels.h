@@ -24,6 +24,7 @@ kernel void index_select(
     constant uint3    * offsets           [[buffer(3)]],
     constant void     * inputData         [[buffer(4)]],
     device   void     * outputData        [[buffer(5)]],
+    constant uint     * numIters          [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]) {
     constant int64_t * index_sizes   = (constant int64_t *)indexSizes;
     constant int64_t * index_strides = (constant int64_t *)indexStrides;
@@ -41,17 +42,15 @@ kernel void index_select(
 }
 
 template<typename T>
-kernel void index_put(
-    constant IndexAB  & indexAB           [[buffer(0)]],
-    constant void     * indexSizes        [[buffer(1)]],
-    constant void     * indexStrides      [[buffer(2)]],
-    constant uint3    * offsets           [[buffer(3)]],
-    constant void     * inputData         [[buffer(4)]],
-    device   void     * outputData        [[buffer(5)]],
-    uint thread_index [[thread_position_in_grid]]) {
-
-    constant int64_t * index_sizes   = (constant int64_t *)indexSizes;
-    constant int64_t * index_strides = (constant int64_t *)indexStrides;
+void index_put_impl(
+    constant IndexAB  & indexAB,
+    constant int64_t  * index_sizes,
+    constant int64_t  * index_strides,
+    constant uint3    * offsets,
+    constant void     * inputData,
+    device   void     * outputData,
+    uint thread_index
+){
     int64_t offset = 0;
     for (uint32_t i = 0; i < num_indices; i++) {
         int64_t index = ((constant int64_t*)(indexAB.indexArray[i]))[offsets[thread_index].z / sizeof(int64_t)];
@@ -59,10 +58,33 @@ kernel void index_put(
             index += index_sizes[i];
         }
         offset += index * index_strides[i];
-     }
+    }
     device T * out = (device T*)((device char*)outputData + offsets[thread_index].x + offset);
     constant T * in  = (constant T*)((constant char*)inputData  + offsets[thread_index].y);
     *out = *in;
+}
+
+template<typename T>
+kernel void index_put(
+    constant IndexAB  & indexAB           [[buffer(0)]],
+    constant void     * indexSizes        [[buffer(1)]],
+    constant void     * indexStrides      [[buffer(2)]],
+    constant uint3    * offsets           [[buffer(3)]],
+    constant void     * inputData         [[buffer(4)]],
+    device   void     * outputData        [[buffer(5)]],
+    constant uint     * numIters          [[buffer(6)]],
+    uint thread_index [[thread_position_in_grid]]) {
+
+    constant int64_t * index_sizes   = (constant int64_t *)indexSizes;
+    constant int64_t * index_strides = (constant int64_t *)indexStrides;
+
+    if (*numIters > 1 && thread_index == 0) { // deterministic
+        for (uint iter_i = 0; iter_i < *numIters; iter_i++) {
+            index_put_impl<T>(indexAB, index_sizes, index_strides, offsets, inputData, outputData, iter_i);
+        }
+    } else {
+        index_put_impl<T>(indexAB, index_sizes, index_strides, offsets, inputData, outputData, thread_index);
+    }
 }
 
 #define REGISTER_INDEX_OP(DTYPE_SIZE, DTYPE, INDEX_OP_TYPE)     \
@@ -75,6 +97,7 @@ kernel void index_ ## INDEX_OP_TYPE<DTYPE>(                     \
     constant uint3   * offsets           [[buffer(3)]],         \
     constant void    * inputData         [[buffer(4)]],         \
     device   void    * outputData        [[buffer(5)]],         \
+    constant uint    * numIters          [[buffer(6)]],         \
     uint thread_index [[thread_position_in_grid]]);
 
 #define REGISTER_INDEX_OP_ALL_DTYPES(INDEX_OP_TYPE)     \

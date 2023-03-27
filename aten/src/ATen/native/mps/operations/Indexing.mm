@@ -39,6 +39,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
   if (iter.numel() == 0) {
     return true;
   }
+  bool serial_index_put = at::globalContext().deterministicAlgorithms() && !accumulate && !index_select;
 
   const Tensor& inputTensor = iter.tensor(1);
   Tensor outputTensor = iter.tensor(0);
@@ -52,7 +53,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       NSError* error = nil;
       constexpr uint32_t nOffsets = 3;
       const int64_t num_indices = index_size.size();
-      const uint32_t numThreads = iter.numel();
+      const uint32_t numIters = serial_index_put ? iter.numel() : 1;
+      uint32_t numThreads = iter.numel();
       const uint32_t nDim = iter.ndim();
       const IntArrayRef& iterShape = iter.shape();
       std::vector<uint32_t> iterShapeData(iterShape.size());
@@ -133,6 +135,10 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       [computeEncoder setBuffer:outputBuffer
                          offset:outputTensor.storage_offset() * outputTensor.element_size()
                         atIndex:5];
+      [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:6];
+
+      gridSize = MTLSizeMake(serial_index_put ? 1 : numThreads, 1, 1);
+      numThreads = serial_index_put ? 1 : numThreads;
 
       NSUInteger tgSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads)
