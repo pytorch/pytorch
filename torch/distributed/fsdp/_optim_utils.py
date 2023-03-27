@@ -36,8 +36,8 @@ from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.flat_param import (
     _FLAT_PARAM_PADDING,
+    _FlatParameterPadding,
     FlatParameter,
-    FlatParameterPadding,
     FlatParamHandle,
 )
 
@@ -275,7 +275,7 @@ def _unflatten_communicated_optim_state(
             else:
                 views = flat_param_views[state_name]
             optim_state: Union[
-                torch.Tensor, ShardedTensor, FlatParameterPadding
+                torch.Tensor, ShardedTensor, _FlatParameterPadding
             ] = next(views)
             # Skip any alignment padding -- `views` should never be exhausted
             # before the outer for loop completes
