@@ -203,7 +203,7 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           // seeing a scalar input, we convert its expected type to tensor.
           if (auto scalar_type = get_scalar_type(input)) {
             auto tensor_type = input->type()->castRaw<TensorType>();
-            // get_scalar_type returns non-null value already guranatees
+            // get_scalar_type returns non-null value already guarantees
             // that the input has a valid tensor_type.
             TORCH_INTERNAL_ASSERT(nullptr != tensor_type);
             auto rank = tensor_type->dim();

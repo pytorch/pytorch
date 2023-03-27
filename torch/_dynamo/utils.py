@@ -17,13 +17,14 @@ import os
 import pstats
 import re
 import sys
+import textwrap
 import time
 import types
 import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Set, Tuple, Union
 
 import torch._logging
 from . import config
@@ -43,12 +44,18 @@ import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import DimDynamismState, MinMaxConstraint
+from torch.fx.experimental.symbolic_shapes import (
+    DimConstraint,
+    DimDynamic,
+    RelaxedUnspecConstraint,
+)
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
+DimList = List
+
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
+troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
@@ -761,32 +768,6 @@ tuple_iterator_len = tuple_iterator.__length_hint__
 object_new = object.__new__
 
 
-# See Note - [On Dynamic Dim Guards]
-def dynamic_dims_check(tensor, prior_dynamo_dynamic_ranges):
-    if not hasattr(tensor, "_dynamo_dynamic_ranges"):
-        return True
-    if not set(tensor._dynamo_dynamic_ranges.keys()).issubset(
-        set(prior_dynamo_dynamic_ranges.keys())
-    ):
-        return False
-    for key, vr in tensor._dynamo_dynamic_ranges.items():
-        prior_vr = prior_dynamo_dynamic_ranges[key]
-        # Below, None means not set, aka (pos/neg) infinity
-        # If a prior value is None, and a new value is not, we reject
-        if prior_vr[1] is None and vr.max is not None:
-            return False
-        if prior_vr[0] is None and vr.min is not None:
-            return False
-
-        # If the new range min is lower, we must reject
-        if vr.min < prior_vr[0]:
-            return False
-        # If the new range min is higher, we must reject
-        if vr.max > prior_vr[1]:
-            return False
-    return True
-
-
 def product(it):
     return functools.reduce(operator.mul, it, 1)
 
@@ -1104,43 +1085,57 @@ class CompileProfiler:
             [format_func_info(code), num_recompiles(code), recompile_reasons(code)]
             for code in gf
         ]
-        rpt = "Torchdynamo Profiler Report\n"
-        if "graph_break" in counters:
-            rpt += "\n"
-            rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
-            rpt += (
-                "You may gain additional insight by passing `nopython=True` to torch._dynamo.optimize, "
-                "to break on the first condition.\n"
-            )
-            graph_breaks = counters["graph_break"]
-            rpt += tabulate(
-                [[msg, graph_breaks[msg]] for msg in graph_breaks],
-                headers=["Graph Break Reason", "Count"],
-            )
 
-        if len(gf):
-            max_recompiles = max([num_recompiles(code) for code in gf])
-            rpt += "\n"
-            rpt += (
-                "These subgraphs were recompiled more than once due to guard failures."
-            )
-            rpt += (
-                "Guard failures indicate some condition assumed to be static by the tracer changed, "
-                "making it unsafe to reuse the compiled program."
-            )
-            rpt += tabulate(
-                summarized_gf,
-                headers=["Function", "Num Recompiles", "Recompile Reasons"],
-            )
-            rpt += "\n"
-            rpt += (
-                f"Set torch._dynamo.config.cache_size_limit to "
-                f"{max_recompiles} to avoid being cache limited.\n"
-            )
-        else:
-            rpt += "No cache-limited recompilations detected.\n"
+        def graph_break_report():
+            if "graph_break" in counters:
+                graph_breaks = counters["graph_break"]
+                return tabulate(
+                    [[msg, graph_breaks[msg]] for msg in graph_breaks],
+                    headers=["Graph Break Reason", "Count"],
+                )
 
-        return rpt
+        def recompilation_report():
+            if len(gf):
+                max_recompiles = max([num_recompiles(code) for code in gf])
+                recomp_table = tabulate(
+                    summarized_gf,
+                    headers=["Function", "Recompiles", "Recompile Reasons"],
+                )
+                return recomp_table + textwrap.dedent(
+                    f"""
+
+                    Set torch._dynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.
+                """
+                )
+
+        report = textwrap.dedent(
+            """
+            Torchdynamo Profiler Report
+            ===========================
+
+            Graph Breaks
+            ------------
+            Graph breaks happen when torchdynamo encounters code it can't safely trace.
+            If you want to find out why breaks are happening, check below for each break reason
+            You may gain additional insight by passing `fullgraph=True` to torch.compile,
+            to stop at the first break.
+
+        """
+        )
+        report += graph_break_report() or "No graph breaks detected."
+        report += textwrap.dedent(
+            """
+
+            Recompilation
+            -------------
+            These subgraphs were recompiled more than once due to guard failures
+            Guard failures indicate some condition assumed to be static by the tracer changed,
+            making it unsafe to reuse the compiled program.
+
+        """
+        )
+        report += recompilation_report() or "No recompilation detected.\n"
+        return report
 
 
 # return same dir unless user changes config between calls
@@ -1381,15 +1376,12 @@ def get_custom_getattr(value: Any):
 
 
 class TensorStaticReason(enum.Enum):
-    NO_SOURCE = 1
     PARAMETER = 2
     CONFIG_NOT_DYN = 3
     NOT_TENSOR = 4
 
 
 def tensor_static_reason_to_message(reason: TensorStaticReason):
-    if reason == TensorStaticReason.NO_SOURCE:
-        return "mark_dynamic usage without a source is illegal."
     if reason == TensorStaticReason.PARAMETER:
         return "mark_dynamic on parameter, parameters are always static today."
     if reason == TensorStaticReason.CONFIG_NOT_DYN:
@@ -1400,23 +1392,19 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 
 
 def tensor_always_has_static_shape(
-    tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
+    tensor: Union[torch.Tensor, Any], is_tensor: bool
 ) -> Tuple[bool, TensorStaticReason]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
 
     Args:
     tensor - the real tensor to evaluate, parameters force a static shape.
-    source - an optional source, None forces a static shape
     is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
     tensors not in a TensorVariable for whatever reason are forced static.
 
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    if source is None:
-        # TODO(voz): Look into why we need this case?
-        return True, TensorStaticReason.NO_SOURCE
     if type(tensor) is torch.nn.Parameter:
         return True, TensorStaticReason.PARAMETER
     if config.dynamic_shapes is False:
@@ -1454,42 +1442,3 @@ def format_graph_tabular(fn_name, gm):
 
 def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
-
-
-# Note - this could live in shape_env, but then we would need to plumb the
-# config as an input, and that seems a little annoying for little
-# gain.
-def dynamic_dims_from_tensor(
-    e: torch.Tensor, dynamic_ranges: Optional[Dict[int, MinMaxConstraint]]
-) -> Dict[int, DimDynamismState]:
-    """
-    Given a tensor, returns a list of dimension dynamism states.
-
-    :param e: The input tensor.
-    :type e: torch.Tensor
-    :param dynamic_ranges: A dictionary containing the indices of dynamic dimensions and their corresponding
-    constraints. Defaults to None.
-    :type dynamic_ranges: Optional[Dict[int, MinMaxConstraint]], optional
-    :return: A list of DimDynamismState values representing the dynamism state of each dimension in the input tensor.
-    :rtype: Dict[int, DimDynamismState]
-
-    An invariant is that the length of this list is the number of dimensions of the tensor.
-    If a dimension is marked in dynamic_ranges, it is set as DYNAMIC.
-    Otherwise, it is set to the default dimension state, either DUCK or STATIC depending on the configuration.
-    """
-    # Note - while dynamo callers must be in config.dynamic_shapes
-    # This is invoked outside of dynamo tests, so we do not assert on it here.
-    # We suppose we could patch the tests, but that feels like a strange thing to add to
-    # what should just be a dynamic shapes test.
-    # in dynamo, it is protected by being downstream of tensor_always_has_static_shape
-    dynamic_dims: Dict[int, DimDynamismState] = {}
-    for i, _ in enumerate(e.size()):
-        if dynamic_ranges and i in dynamic_ranges:
-            dynamic_dims[i] = DimDynamismState.DYNAMIC
-        else:
-            if config.assume_static_by_default:
-                dynamic_dims[i] = DimDynamismState.STATIC
-            else:
-                dynamic_dims[i] = DimDynamismState.DUCK
-
-    return dynamic_dims

@@ -9,6 +9,7 @@ from typing import Dict, Optional, Set
 import torch
 import torch._logging
 from torch._guards import tracing
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
@@ -199,6 +200,7 @@ def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
     export: bool = False,
+    export_constraints=None,
 ):
     """Fully convert a frame into an FX graph"""
     reset_graph_break_dup_checker()
@@ -274,6 +276,7 @@ def convert_frame_assert(
             compiler_fn,
             one_graph,
             export,
+            export_constraints,
             hooks,
             frame,
         )
@@ -291,6 +294,7 @@ def _compile(
     compiler_fn: CompilerFn,
     one_graph: bool,
     export: bool,
+    export_constraints,
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
@@ -312,6 +316,7 @@ def _compile(
             compiler_fn,
             one_graph,
             export,
+            export_constraints,
             mutated_closure_cell_contents,
         )
         with tracing(tracer.output.tracing_context):
@@ -394,11 +399,13 @@ def _compile(
         TorchRuntimeError,
         BackendCompilerFailed,
         AssertionError,
+        ConstraintViolationError,
     ) as e:
         exception_handler(e, code, frame)
         raise
     except Exception as e:
         exception_handler(e, code, frame)
+        # TODO: Why???  Why not raise the original exception as is
         raise InternalTorchDynamoError() from e
 
 
@@ -432,9 +439,7 @@ def replay(filename):
     config.replay_record_enabled = False
     with open(filename, "rb") as in_file:
         record = ExecutionRecord.load(in_file)
-    record.globals = {
-        k: v for k, v in itertools.chain(record.globals.items(), globals().items())
-    }
+    record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
     try:
         _compile(

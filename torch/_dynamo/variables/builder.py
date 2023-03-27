@@ -12,8 +12,9 @@ import torch
 
 from torch import SymInt
 from torch._guards import GuardSource
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.symbolic_shapes import DimDynamic, RelaxedUnspecConstraint
 from torch.fx.immutable_collections import immutable_list
 
 from .. import config, mutation_guard, replay_record, skipfiles
@@ -27,7 +28,6 @@ from ..source import (
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
-    LocalInputSource,
     LocalSource,
     RandomValueSource,
     Source,
@@ -35,7 +35,6 @@ from ..source import (
 )
 from ..utils import (
     clone_input,
-    dynamic_dims_from_tensor,
     get_fake_value,
     getfile,
     global_key_name,
@@ -97,7 +96,7 @@ from .tensor import (
 from .torch import (
     tensor_dunder_fns,
     torch_special_class_types,
-    TorchPyOperator,
+    TorchHigherOrderOperator,
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
@@ -125,11 +124,6 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
-            # Mapping for downstream systems to remap back into dynamo arg positions
-            if isinstance(self.source, LocalInputSource):
-                if "graph_arg_pos" not in self.fake_tensor.__dict__:
-                    self.fake_tensor.__dict__["graph_arg_pos"] = []
-                self.fake_tensor.__dict__["graph_arg_pos"].append(self.source.pos)
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
@@ -469,8 +463,8 @@ class VariableBuilder:
             return HFPretrainedConfigVariable(
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
-        elif isinstance(value, PyOperator):
-            return TorchPyOperator(
+        elif isinstance(value, HigherOrderOperator):
+            return TorchHigherOrderOperator(
                 value,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
@@ -589,8 +583,12 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        if istype(value, (tuple, list)) and all(
-            [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+        if (
+            istype(value, (tuple, list))
+            and all(
+                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+            )
+            and not config.dynamic_shapes
         ):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
         else:
@@ -801,9 +799,38 @@ class VariableBuilder:
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
             ):
+                if value < 0 or torch._dynamo.config.specialize_int:
+                    # Negative values don't create_symbol correctly,
+                    # so make sure we do a constant in this case.
+                    #
+                    # Also, if specialize_int is False, also return
+                    # a constant (but this should have been handled
+                    # in the caller, TBH)
+                    return ConstantVariable(
+                        value=value,
+                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
+
                 shape_env = self.tx.output.shape_env
+
+                # TODO: This should be dynamic, as we in general do not
+                # know if bare integers are actually going to be sizevars
+                # and it is inappropriate to eagerly duck size them with
+                # real sizevars
+                dynamic_dim = DimDynamic.DUCK
+
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, source=self.source), hint=value
+                    # TODO: This is wrong wrong wrong, create_symbol will
+                    # generate something that is non-negative, but this is
+                    # not a sound assumption to make.
+                    # Not fixing as this was a preexisting condition.
+                    shape_env.create_symbol(
+                        value,
+                        source=self.source,
+                        dynamic_dim=dynamic_dim,
+                        constraint_dim=None,
+                    ),
+                    hint=value,
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
@@ -1062,7 +1089,8 @@ def wrap_fx_proxy_cls(
 class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
-    dynamic_ranges: Set[int]
+    # Is None when fake is SymInt
+    dynamic_indices: Optional[Set[int]]
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name()))
@@ -1076,37 +1104,61 @@ class TrackedFake:
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    from torch.fx.experimental.symbolic_shapes import DimDynamismState
+    from torch.fx.experimental.symbolic_shapes import DimConstraint
 
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
+        assert source is not None
+        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
 
-        dynamic_ranges = None
-        if hasattr(e, "_dynamo_dynamic_ranges"):
-            dynamic_ranges = e._dynamo_dynamic_ranges
-            assert not static_shapes, tensor_static_reason_to_message(reason)
+        # TODO: index export_constraints ahead of time so we don't have to
+        # do a linear scan every time here
+        t_id = id(e)
+        dim2constraint = {}
+        if tx.output.export_constraints:
+            for constraint in tx.output.export_constraints:
+                if constraint.t_id == t_id:
+                    dim2constraint[constraint.dim] = constraint.constraint_range
 
-        if not static_shapes:
-            dynamic_dims: Dict[int, DimDynamismState] = dynamic_dims_from_tensor(
-                e, dynamic_ranges
-            )
-        else:
-            dynamic_dims = None
+        dynamic_dims = None
+        constraint_dims = None
+        if tx.fake_mode.shape_env is not None:
+            dynamic_dims = []
+            constraint_dims = []
+            for i in range(e.dim()):
+                # We will process constraints first, as they will imply that we
+                # have a dynamic dimension
+                # Precedence: export constraints > eager constraints
+                constraint = dim2constraint.get(i)
+                if constraint is None:
+                    if i in getattr(e, "_dynamo_dynamic_indices", set()):
+                        constraint = RelaxedUnspecConstraint()
+                constraint_dims.append(constraint)
+
+                # Now, figure out if the dim is dynamic/duck/static
+                if constraint is not None:
+                    # NB: We could assert static_shapes is False here, but it
+                    # seems better to allow the user to override policy in this
+                    # case
+                    dynamic = DimDynamic.DYNAMIC
+                elif static_shapes or config.assume_static_by_default:
+                    dynamic = DimDynamic.STATIC
+                else:
+                    dynamic = DimDynamic.DUCK
+                dynamic_dims.append(dynamic)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
-                static_shapes=static_shapes,
                 ignore_subclass=ignore_subclass,
                 source=source,
                 dynamic_dims=dynamic_dims,
-                constraint_dims=dynamic_ranges,
+                constraint_dims=constraint_dims,
             )
         )
         if is_tensor:
-            tx.output.tracked_fakes.append(TrackedFake(fake_e, source, dynamic_ranges))
+            tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
         return fake_e
     else:
         return e

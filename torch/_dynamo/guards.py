@@ -30,7 +30,6 @@ from .utils import (
     dict_const_keys,
     dict_const_keys_repr,
     dict_param_key_ids,
-    dynamic_dims_check,
     guard_failures,
     HAS_NUMPY,
     istype,
@@ -59,7 +58,6 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___dict_const_keys", dict_const_keys),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
-        ("___dynamic_dims_check", dynamic_dims_check),
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
     ]
@@ -424,12 +422,12 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
+        dyn_ranges_or_indices = [a.dynamic_indices for a in fs]
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
-            [a.dynamic_ranges for a in fs],
+            constraint_inputs=dyn_ranges_or_indices,
             source_ref=self.source_ref,
-            strict_mark_dyn=output_graph.export,
         )
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
@@ -484,7 +482,6 @@ class GuardBuilder(GuardBuilderBase):
                 self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
 
-            # Note - [On Dynamic Dim Guards]
             # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
             # strict subset of the old.
             #
@@ -512,31 +509,22 @@ class GuardBuilder(GuardBuilderBase):
             # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
             # compiled with that same
             # tensor + more onerous user directives.
-            #
-            # There is finer grain control available within _dynamo_dynamic_ranges - and that is for ranges.
-            # To fully understand that, please see the mark_dynamic_constrain api docs first.
-            # The way we guard on user directive ranges specified via mark_dynamic_constrain is by the same logic as
-            # above. Specifically, when X is a strict subset of Y notion around which dimensions can be valid, the same
-            # goes for the value ranges WITHIN a dimension. We specialize to the user directive range. Ranges within
-            # that range can safely reuse the same compiled frame, but wider ranges must recompile.
-            static, reason = tensor_always_has_static_shape(
-                value, guard.source, is_tensor=True
-            )
+            assert guard.source is not None
+            static, reason = tensor_always_has_static_shape(value, is_tensor=True)
             if not static:
-                if hasattr(value, "_dynamo_dynamic_ranges"):
-                    dims_check = str(dict(value._dynamo_dynamic_ranges))
-                    dims_check = dims_check.replace("-oo", "None")
-                    dims_check = dims_check.replace("oo", "None")
-                    code.append(f"___dynamic_dims_check({tensor_name}, {dims_check})")
+                if hasattr(value, "_dynamo_dynamic_indices"):
+                    code.append(
+                        f"({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"  # noqa: B950
+                    )
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
                 else:
                     code.append(
-                        f"hasattr({tensor_name}, '_dynamo_dynamic_ranges') == False"
+                        f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
             else:
                 assert not hasattr(
-                    value, "_dynamo_dynamic_ranges"
+                    value, "_dynamo_dynamic_indices"
                 ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
 
             if len(code) > 0:
@@ -712,19 +700,9 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                pos_a = self.output_graph.pos_to_arg[guard.input_pos_a]
-                pos_b = self.output_graph.pos_to_arg[guard.input_pos_b]
-                assert (
-                    pos_b >= 0 and pos_a >= 0
-                ), "Deduped args out of bounds, cannot be negative"
-
-                assert self.output_graph.graphargs[
-                    pos_a
-                ].is_tensor, "Deduped arg must be a tensor"
-                assert self.output_graph.graphargs[
-                    pos_b
-                ].is_tensor, "Deduped arg must be a tensor"
-                code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
+                source_a = guard.input_source_a
+                source_b = guard.input_source_b
+                code_part = f"{source_a.name()} is {source_b.name()}"
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
             else:
@@ -780,13 +758,23 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         return id(obj)
 
 
+stashed_first_fail_reason = None
+
+
 def guard_fail_hook(
-    guard_fn: GuardFn, code: types.CodeType, f_locals: Dict[str, object], last: bool
+    guard_fn: GuardFn,
+    code: types.CodeType,
+    f_locals: Dict[str, object],
+    index: int,
+    last: bool,
 ) -> None:
     """
     called whenever a guard fails.
     """
-    if not guard_fn.guard_fail_fn and not last:
+    first = index == 0
+    global stashed_first_fail_reason
+    # Don't waste time computing the fail reason for guards we aren't going to report out.
+    if not guard_fn.guard_fail_fn and not (first or last):
         return
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
@@ -801,6 +789,22 @@ def guard_fail_hook(
         elif isinstance(fail_reason, bool) and not fail_reason:
             reason = part
             break
+
+    if first:
+        stashed_first_fail_reason = reason
+
+    if not last:
+        return
+
+    # Technically, we're failing our last guard, which is our oldest guard due to the
+    # eval_frame.c logic that moves newest frames to head, but for logging purposes
+    # it's more useful to see the 'first' failure (if we never got a hit) since it's
+    # likely not yet been logged as a failure reason in a case of repeating failures.
+    assert stashed_first_fail_reason
+    guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
+    stashed_first_fail_reason = None
+
+    # TODO should we GuardFail our stashed_first_fail_reason too?
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
@@ -812,12 +816,13 @@ def guard_fail_hook(
             exc_info=True,
         )
 
-    if last:
-        guard_failures[orig_code_map[code]].append(reason)
-
 
 def guard_error_hook(
-    guard_fn: GuardFn, code: types.CodeType, f_locals: Dict[str, object], last: bool
+    guard_fn: GuardFn,
+    code: types.CodeType,
+    f_locals: Dict[str, object],
+    index: int,
+    last: bool,
 ):
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"

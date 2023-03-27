@@ -1,13 +1,15 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, Dict, Optional
+from typing import ContextManager, List, Optional
 
 import torch
 from torch._guards import Source
-from torch.fx.experimental.symbolic_shapes import DimDynamismState, MinMaxConstraint
+from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils.weak import WeakIdRef
+
+DimList = List
 
 
 def safe_is_leaf(t):
@@ -166,8 +168,8 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: Optional[Dict[int, DimDynamismState]] = None,
-        constraint_dims: Optional[Dict[int, MinMaxConstraint]] = None,
+        dynamic_dims: Optional[DimList[DimDynamic]] = None,
+        constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -213,16 +215,17 @@ class MetaConverter:
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
-        make_symbolic = shape_env is not None
-
         def sym_sizes_strides_storage_offset(t):
-            if make_symbolic:
+            if shape_env is not None:
                 return shape_env.create_symbolic_sizes_strides_storage_offset(
                     t,
                     source,
                     dynamic_dims=dynamic_dims,
                     constraint_dims=constraint_dims,
                 )
+            else:
+                assert dynamic_dims is None
+                assert constraint_dims is None
             return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
@@ -234,6 +237,9 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
+                    # TODO: Delete this assert, and just attempt making the
+                    # sparse tensor anyway; even if there is a shape_env, this
+                    # tensor might be all static
                     assert shape_env is None, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(

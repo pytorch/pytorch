@@ -11,6 +11,9 @@ from torch._decomp import core_aten_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.utils import stateless
 from torch.utils import _pytree as pytree
+from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+from torch.utils._sympy.value_ranges import ValueRanges
+import sympy
 
 from torch._functorch.aot_autograd import (
     AOTConfig,
@@ -237,8 +240,10 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
 #         # operator overloading because it makes it clear whether
 #         # or not you’re inclusive-exclusive range or not
 #         0 <= dynamic_dim(blah, 1) <= 100,
+#         # NB: But we actually truncate ranges to be >= 2, because of
+#         # 0/1 specialization
 #     ]
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
     from torch._dynamo.eval_frame import Constraint
-    return Constraint(weakref.ref(t), index, None)
+    return Constraint(weakref.ref(t), id(t), index, StrictMinMaxConstraint(ValueRanges(lower=2, upper=sympy.oo)))
