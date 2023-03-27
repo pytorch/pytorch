@@ -2321,7 +2321,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         y = torch.randn(128, 30, requires_grad=True)
 
         inputs = [x, y]
-        fake_inputs = [fake_mode.from_tensor(x, dynamic_dims=[DimDynamic.DUCK] * x.dim()) for x in inputs]
+        fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
         compiled_f = aot_module_simplified(mod, fake_inputs, nop)
 
         ref = mod(*inputs)

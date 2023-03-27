@@ -1436,8 +1436,8 @@ class ShapeEnv:
         ex: torch.Tensor,
         source: Source,
         *,
-        dynamic_dims: Optional[DimList[DimDynamic]],
-        constraint_dims: Optional[DimList[DimConstraint]],
+        dynamic_dims: Optional[DimList[DimDynamic]]=None,
+        constraint_dims: Optional[DimList[DimConstraint]]=None,
     ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
@@ -1652,7 +1652,7 @@ class ShapeEnv:
                     else:
                         assert len(constraint) == t.dim()
                 else:
-                    assert isinstance(t, SymInt)
+                    assert isinstance(t, (SymInt, int))
                     assert not isinstance(constraint, list)
 
         # It took a lot of sweat to figure out the algorithm here.  Let's
@@ -1789,7 +1789,7 @@ class ShapeEnv:
             assert isinstance(source, Source)
             if t is None:
                 continue
-            if isinstance(t, SymInt):
+            if isinstance(t, (SymInt, int)):
                 track_symint(source, t)
                 continue
             assert isinstance(t, torch.Tensor)

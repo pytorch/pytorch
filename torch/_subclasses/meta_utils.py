@@ -223,6 +223,9 @@ class MetaConverter:
                     dynamic_dims=dynamic_dims,
                     constraint_dims=constraint_dims,
                 )
+            else:
+                assert dynamic_dims is None
+                assert constraint_dims is None
             return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages

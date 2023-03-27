@@ -2643,15 +2643,7 @@ def create_aot_dispatcher_function(
                         from torch._dynamo.source import ConstantSource
                         if isinstance(x, int):
                             return shape_env.create_symintnode(
-                                shape_env.create_symbol(
-                                    x,
-                                    ConstantSource(f"sym_{idx}"),
-                                    # TODO: bare int input may be better as
-                                    # DYNAMIC as we don't know if it will
-                                    # actually be a sizevar
-                                    dynamic_dim=DimDynamic.DUCK,
-                                    constraint_dim=None
-                                ),
+                                shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
                                 hint=x)
                     if not isinstance(x, torch.Tensor):
                         return x

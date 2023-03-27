@@ -14,8 +14,8 @@ from torch import SymInt
 from torch._guards import GuardSource
 from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.immutable_collections import immutable_list
 from torch.fx.experimental.symbolic_shapes import DimDynamic, RelaxedUnspecConstraint
+from torch.fx.immutable_collections import immutable_list
 
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
@@ -1117,29 +1117,32 @@ def wrap_to_fake_tensor_and_record(
                 if constraint.t_id == t_id:
                     dim2constraint[constraint.dim] = constraint.constraint_range
 
-        dynamic_dims = []
-        constraint_dims = []
-        for i in range(e.dim()):
-            # We will process constraints first, as they will imply that we
-            # have a dynamic dimension
-            # Precedence: export constraints > eager constraints
-            constraint = dim2constraint.get(i)
-            if constraint is None:
-                if i in getattr(e, "_dynamo_dynamic_indices", set()):
-                    constraint = RelaxedUnspecConstraint()
-            constraint_dims.append(constraint)
+        dynamic_dims = None
+        constraint_dims = None
+        if tx.fake_mode.shape_env is not None:
+            dynamic_dims = []
+            constraint_dims = []
+            for i in range(e.dim()):
+                # We will process constraints first, as they will imply that we
+                # have a dynamic dimension
+                # Precedence: export constraints > eager constraints
+                constraint = dim2constraint.get(i)
+                if constraint is None:
+                    if i in getattr(e, "_dynamo_dynamic_indices", set()):
+                        constraint = RelaxedUnspecConstraint()
+                constraint_dims.append(constraint)
 
-            # Now, figure out if the dim is dynamic/duck/static
-            if constraint is not None:
-                # NB: We could assert static_shapes is False here, but it
-                # seems better to allow the user to override policy in this
-                # case
-                dynamic = DimDynamic.DYNAMIC
-            elif static_shapes or config.assume_static_by_default:
-                dynamic = DimDynamic.STATIC
-            else:
-                dynamic = DimDynamic.DUCK
-            dynamic_dims.append(dynamic)
+                # Now, figure out if the dim is dynamic/duck/static
+                if constraint is not None:
+                    # NB: We could assert static_shapes is False here, but it
+                    # seems better to allow the user to override policy in this
+                    # case
+                    dynamic = DimDynamic.DYNAMIC
+                elif static_shapes or config.assume_static_by_default:
+                    dynamic = DimDynamic.STATIC
+                else:
+                    dynamic = DimDynamic.DUCK
+                dynamic_dims.append(dynamic)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
@@ -1151,9 +1154,7 @@ def wrap_to_fake_tensor_and_record(
             )
         )
         if is_tensor:
-            tx.output.tracked_fakes.append(
-                TrackedFake(fake_e, source, constraint_dims)
-            )
+            tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
         return fake_e
     else:
         return e

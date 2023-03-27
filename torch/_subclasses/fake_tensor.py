@@ -1405,13 +1405,16 @@ class FakeTensorMode(TorchDispatchMode):
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
+        shape_env = self.shape_env
         if static_shapes:
-            assert dynamic_dims is None, "cannot set both static_shapes and dynamic_dims"
-            dynamic_dims = [DimDynamic.STATIC] * tensor.dim()
+            assert (
+                dynamic_dims is None
+            ), "cannot set both static_shapes and dynamic_dims"
+            shape_env = None
         return self.fake_tensor_converter(
             self,
             tensor,
-            shape_env=self.shape_env,
+            shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
             dynamic_dims=dynamic_dims,
@@ -1490,7 +1493,9 @@ class FakeCopyMode(TorchFunctionMode):
 
         # clone will get called in Parameter deepcopy
         if func == torch._C._TensorBase.clone:
-            return func(self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs)
+            return func(
+                self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs
+            )
         elif func == torch.Tensor.__deepcopy__:
             assert len(args) == 2 and len(kwargs) == 0
             tensor, memo = args

@@ -9,8 +9,8 @@ from typing import Dict, Optional, Set
 import torch
 import torch._logging
 from torch._guards import tracing
-from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
 from .allowed_functions import is_allowed

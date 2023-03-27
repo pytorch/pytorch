@@ -497,8 +497,9 @@ class f(torch.nn.Module):
 class TestSymNumberMagicMethods(TestCase):
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
         # Helper function
-        seed_node = (create_symint(shape_env, 1) / 1.).node
-        bool_seed_node = (create_symint(shape_env, 1) == 1).node
+        # NB: don't use one as that will get specialized
+        seed_node = (create_symint(shape_env, 2) / 2.).node
+        bool_seed_node = (create_symint(shape_env, 2) == 2).node
 
         def get_sym_inp(inp):
             # NB: this must come before int

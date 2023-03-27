@@ -42,6 +42,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
     SM80OrLater,
 )
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -4773,9 +4774,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         torch._dynamo.mark_dynamic(y, 0)
-        with self.assertRaises(
-            torch._dynamo.exc.InternalTorchDynamoError,
-        ):
+        with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
@@ -4846,9 +4845,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         torch._dynamo.mark_dynamic(y, 0)
-        with self.assertRaises(
-            torch._dynamo.exc.InternalTorchDynamoError,
-        ):
+        with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
 
     def test_cannot_trace_mark_dynamic(self):

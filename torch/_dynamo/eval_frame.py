@@ -571,6 +571,7 @@ class Constraint:
     them to be fully polymorphic or within some range.  Don't create this
     class directly; instead, use :func:`torch._export.dynamic_dim`.
     """
+
     w_tensor: weakref.ReferenceType[torch.Tensor]
     # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
@@ -588,7 +589,9 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "real",
-    constraints: List[Constraint,] = None,
+    constraints: List[
+        Constraint,
+    ] = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
