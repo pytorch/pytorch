@@ -1,0 +1,2 @@
+,m,k,n,eval_batch_size,init_batch_size,alg_id,sparse_model_size,dense_model_size
+0,4096,4096,4096,1,1,0,18.0MiB,32.0MiB

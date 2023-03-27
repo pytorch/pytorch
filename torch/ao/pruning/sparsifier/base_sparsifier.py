@@ -109,11 +109,11 @@ class BaseSparsifier(abc.ABC):
             "groups": groups,
         }
 
-    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True):
+    def load_state_dict(self, model, state_dict: Dict[str, Any], strict: bool = True):
         groups = copy.deepcopy(state_dict["groups"])
         states = state_dict["state"]
         for tensor_fqn, s in states.items():
-            arg_info = get_arg_info_from_tensor_fqn(self.model, tensor_fqn)
+            arg_info = get_arg_info_from_tensor_fqn(model, tensor_fqn)
             module = arg_info["module"]
             tensor_name = arg_info["tensor_name"]
             if strict and module is None:
@@ -125,7 +125,7 @@ class BaseSparsifier(abc.ABC):
                     found = True
                     break
             if not found:
-                p = FakeSparsity(torch.ones(getattr(module, tensor_name).shape))
+                p = FakeSparsity(torch.ones(getattr(module, tensor_name).shape, dtype=torch.bool))
                 parametrize.register_parametrization(module, tensor_name, p)
             if s.get("mask", None) is not None:
                 mask = s.pop("mask")
@@ -161,7 +161,7 @@ class BaseSparsifier(abc.ABC):
             The model is modified inplace. If you need to preserve the original
             model, use copy.deepcopy.
         """
-        self.model = model  # TODO: Need to figure out how to load without this.
+        # self.model = model  # TODO: Need to figure out how to load without this.
         self.config = config
 
         # If no config -- try getting all the supported layers
@@ -213,7 +213,7 @@ class BaseSparsifier(abc.ABC):
             module = config["module"]
             tensor_name = config["tensor_name"]
             parametrization = config.get("parametrization", FakeSparsity)
-            mask = config.get("mask", torch.ones_like(getattr(module, tensor_name)))
+            mask = config.get("mask", torch.ones_like(getattr(module, tensor_name), dtype=torch.bool))
             self.state[config["tensor_fqn"]]["mask"] = mask
             parametrize.register_parametrization(
                 module, tensor_name, parametrization(mask)
@@ -279,7 +279,7 @@ class BaseSparsifier(abc.ABC):
             {'foo': 42, 'bar': 24, 'baz': 0.1}
         """
         for config in self.groups:
-            module = config["module"]
+            module = config.pop("module")
             tensor_name = config["tensor_name"]
             parametrize.remove_parametrizations(
                 module, tensor_name, leave_parametrized=True
