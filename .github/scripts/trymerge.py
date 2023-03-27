@@ -1784,13 +1784,8 @@ def merge(
 
     if ignore_current:
         checks = pr.get_checkrun_conclusions()
-        pending, failing = categorize_checks(checks, list(checks.keys()))
+        _, failing = categorize_checks(checks, list(checks.keys()))
         ignore_current_checks_info = failing
-        if len(pending) == 0:
-            raise RuntimeError(
-                "The --ignore-current flag was used but there are no pending checks on this PR.  Please use "
-                + "-f/--force instead."
-            )
 
     gh_post_pr_comment(
         org,
