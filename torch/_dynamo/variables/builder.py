@@ -15,7 +15,7 @@ from torch._guards import GuardSource
 from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
-from torch.fx.experimental.symbolic_shapes import DimDynamic
+from torch.fx.experimental.symbolic_shapes import DimDynamic, RelaxedUnspecConstraint
 
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
@@ -1135,7 +1135,7 @@ def wrap_to_fake_tensor_and_record(
                 # seems better to allow the user to override policy in this
                 # case
                 dynamic = DimDynamic.DYNAMIC
-            elif static_shapes:
+            elif static_shapes or config.assume_static_by_default:
                 dynamic = DimDynamic.STATIC
             else:
                 dynamic = DimDynamic.DUCK

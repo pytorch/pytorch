@@ -428,7 +428,6 @@ class GuardBuilder(GuardBuilderBase):
             [a.source for a in fs],
             constraint_inputs=dyn_ranges_or_indices,
             source_ref=self.source_ref,
-            strict_mark_dyn=output_graph.export,
         )
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)

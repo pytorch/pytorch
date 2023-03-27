@@ -13,6 +13,7 @@ from torch.nn.utils import stateless
 from torch.utils import _pytree as pytree
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 from torch.utils._sympy.value_ranges import ValueRanges
+import sympy
 
 from torch._functorch.aot_autograd import (
     AOTConfig,
@@ -245,4 +246,4 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
     from torch._dynamo.eval_frame import Constraint
-    return Constraint(weakref.ref(t), id(t), index, StrictMinMaxConstraint(ValueRanges(min=2)))
+    return Constraint(weakref.ref(t), id(t), index, StrictMinMaxConstraint(ValueRanges(lower=2, upper=sympy.oo)))

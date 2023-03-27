@@ -1389,13 +1389,6 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {}
-        # [NOTE - on user_constrained]
-        # User constrained symbols have an entry in var_to_range, but some of their range
-        # comes from manual user directives like dynamo's constrain api. This distinction is maintained
-        # for the purposes of protecting and enforcing user directives. In strict_mark_dyn mode, we do not
-        # allow ANY constraining of values for a given symbol. However, if this symbol is user constrained, we
-        # relax this requirement in favor of honoring the user directive and allowing the user specified range.
-        self.user_constrained: Set["sympy.Symbol"] = set()
         if specialize_zero_one:
             self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
@@ -1622,11 +1615,6 @@ class ShapeEnv:
     # For convenience in testing, a source is allowed to be a str,
     # in which case we will assume it is a LocalSource
     #
-    # strict_mark_dyn lets you enforce stricter dynamic dim verification. When this flag is set,
-    # we assert that there are *no* constraints on the dim. If the flag is not set, we allow
-    # any constraining that allows for more than 2 values, aka, as long as it is not constrained to a single
-    # value.
-    #
     # simplified lets you omit duck sizing, equality and 0/1 guards.
     # This is useful for testing when you don't care about the boilerplate
     # guards, and it may be helpful for user output too (be careful though;
@@ -1644,8 +1632,6 @@ class ShapeEnv:
         # DimList[DimConstraint]).  Whenever Optional is accepted, that
         # just means there are no constraints
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
-        # TODO: I don't think this should be here
-        strict_mark_dyn=False,
         _simplified=False
     ) -> List[str]:
         assert len(placeholders) == len(sources)
@@ -1842,7 +1828,7 @@ class ShapeEnv:
                     source = symbol_to_source[symbol][0]
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
-                        if isinstance(c, StrictMinMaxConstraint) or (c is not None and strict_mark_dyn):
+                        if isinstance(c, StrictMinMaxConstraint):
                             record_constraint_violation(lambda: (
                                 f"Could not validate (strict) constraint {c.render(source)} as "
                                 f"we generated a guard on this size variable: {guard_expr}.  Guard "
@@ -1867,6 +1853,8 @@ class ShapeEnv:
         # these should probably get reported in tests too
         if not _simplified:
             for symbol, sources in symbol_to_source.items():
+                r = self.var_to_range[symbol]
+
                 for c in symbol_to_constraints[symbol]:
                     if isinstance(c, StrictMinMaxConstraint):
                         # Refine the user VR based on default value range, as
@@ -1877,7 +1865,7 @@ class ShapeEnv:
                         # applied the constraint when we allocated the symbol
                         # originally.  Otherwise, should only assert that
                         # vr is superset of c_vr
-                        if not (c_vr.lower == vr.lower and c_vr.upper == vr.upper):
+                        if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
                             record_constraint_violation(lambda: (
                                 f"Could not validate constraint {c.render(sources[0])} as "
                                 f"we actually inferred the valid range to be [{vr.lower}, {vr.upper}]."
@@ -1889,7 +1877,6 @@ class ShapeEnv:
 
                 assert sources
                 assert symbol.is_integer
-                r = self.var_to_range[symbol]
                 bounds = []
                 if r.lower != -sympy.oo:
                     bounds.append(str(r.lower))
