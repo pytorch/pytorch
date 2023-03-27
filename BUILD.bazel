@@ -463,9 +463,6 @@ header_template_rule(
     src = "caffe2/core/macros.h.in",
     out = "caffe2/core/macros.h",
     substitutions = {
-        "@CAFFE2_VERSION_MAJOR@": "1",
-        "@CAFFE2_VERSION_MINOR@": "3",
-        "@CAFFE2_VERSION_PATCH@": "0",
         "cmakedefine": "define",
         "#define CAFFE2_FORCE_FALLBACK_CUDA_MPI": "/* #undef CAFFE2_FORCE_FALLBACK_CUDA_MPI */",
         "#define CAFFE2_HAS_MKL_DNN": "/* #undef CAFFE2_HAS_MKL_DNN */",
