@@ -1679,7 +1679,6 @@ def define_buck_targets(
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
-            "-DKINETO_NEW_CLIENT_CONF",
         ],
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
@@ -1704,7 +1703,6 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
             "-DEDGE_PROFILER_USE_KINETO",
-            "-DKINETO_NEW_CLIENT_CONF",
         ],
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
@@ -1793,7 +1791,6 @@ def define_buck_targets(
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
-            "-DKINETO_NEW_CLIENT_CONF",
         ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],

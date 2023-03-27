@@ -490,6 +490,8 @@ aten::_test_autograd_multiple_dispatch.fullcoverage_out
 aten::_test_autograd_multiple_dispatch_view
 aten::_test_autograd_multiple_dispatch_view_copy
 aten::_test_autograd_multiple_dispatch_view_copy.out
+aten::_test_functorch_fallback
+aten::_test_functorch_fallback.out
 aten::_test_optional_filled_intlist
 aten::_test_optional_filled_intlist.out
 aten::_test_optional_floatlist
