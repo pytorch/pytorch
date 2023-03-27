@@ -1039,13 +1039,17 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         rerun_options = ["-x", "--reruns=2"]
 
     pytest_args = [
-        "-vv",
-        "-rfEX",
+        "-vvvv",
+        "-rfEsxXP"
     ]
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         # We have a custom pytest shard that conflicts with the normal plugin
         pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
+        if not options.continue_through_error and IS_CI:
+            pytest_args.append(f"--sc={stepcurrent_key}")
+        if options.save_xml:
+            pytest_args.extend(["--save-xml"])
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
