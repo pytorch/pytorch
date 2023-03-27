@@ -1635,9 +1635,9 @@ Tensor asarray(
       THPObjectPtr ptr;
       auto arr = obj;
 
-      // According to https://numpy.org/devdocs/reference/c-api/array.html#c.PyArray_CheckScalar
-      // is_numpy_scalar evaluates to true for new scalars and 0-dim arrays.
-      // For 0-dim arrays no casting is needed
+      // PyArray_CheckScalar is true for both scalars and 0-dim arrays, per
+      // https://numpy.org/devdocs/reference/c-api/array.html#c.PyArray_CheckScalar
+      // But for 0-dim arrays no `PyArray_FromScalar` call is needed
       if (is_numpy_scalar && !is_numpy_array) {
         TORCH_CHECK(
             !force_alias,
