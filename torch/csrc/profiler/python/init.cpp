@@ -6,7 +6,6 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_graph_observer.h>
 #include <torch/csrc/utils/pybind.h>
@@ -294,7 +293,6 @@ void initPythonBindings(PyObject* module) {
   m.def(
       "_disable_execution_graph_observer",
       &torch::profiler::impl::disableExecutionGraphObserver);
-  m.def("_initialize_kineto", &torch::profiler::impl::kineto::initializeKineto);
 
   py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
       m, "CapturedTraceback");

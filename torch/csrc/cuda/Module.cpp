@@ -29,6 +29,7 @@
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/python_comm.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
@@ -1182,6 +1183,9 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   }
   set_module_attr("default_generators", default_cuda_generators);
   bindGetDeviceProperties(m);
+
+  // initialize kineto to fix #75504
+	torch::profiler::impl::kineto::initializeKineto();
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
