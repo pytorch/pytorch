@@ -798,12 +798,16 @@ class VariableBuilder:
             # take unspecialized floats and use them in sizevar computation
             if (
                 config.dynamic_shapes
-                and not torch._dynamo.config.specialize_int
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
             ):
-                if value < 0:
-                    # Edge case
+                if value < 0 or torch._dynamo.config.specialize_int:
+                    # Negative values don't create_symbol correctly,
+                    # so make sure we do a constant in this case.
+                    #
+                    # Also, if specialize_int is False, also return
+                    # a constant (but this should have been handled
+                    # in the caller, TBH)
                     return ConstantVariable(
                         value=value,
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
