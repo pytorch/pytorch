@@ -412,7 +412,7 @@ class StrictMinMaxConstraint:
 
     def render(self, source: Source):
         # TODO: better printing for -oo and oo
-        return f"{vr.lower} <= {source.name()} <= {vr.upper}"
+        return f"{self.vr.lower} <= {source.name()} <= {self.vr.upper}"
 
 @dataclass(frozen=True)
 class RelaxedUnspecConstraint:
