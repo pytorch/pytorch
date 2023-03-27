@@ -84,11 +84,26 @@ CI_SKIP[CI("eager", training=False)] = [
     "DebertaV2ForQuestionAnswering",  # OOM
 ]
 
-CI_SKIP[CI("aot_eager", training=False)] = [
+CI_SKIP[CI("eager", training=True)] = [
     *CI_SKIP[CI("eager", training=False)],
     # TorchBench
-    "demucs",  # OOM
+    "BERT_pytorch",  # accuracy
+    "Background_Matting",  # fp64_OOM
+    "hf_BigBird",  # fp64_OOM
+    "hf_T5_base",  # fp64_OOM
+    "vision_maskrcnn",  # eager_variation
+    # Huggingface
+    "XGLMForCausalLM",  # OOM
+    # TIMM
+    "cait_m36_384",  # fp64_OOM
+    "convit_base",  # fp64_OOM
+    "xcit_large_24_p8_224",  # fp64_OOM,
+]
+
+CI_SKIP[CI("aot_eager", training=False)] = [
+    *CI_SKIP[CI("eager", training=False)],
     # all dynamic shapes errors for detectron variants
+    "demucs",  # OOM
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
     "detectron2_fasterrcnn_r_101_fpn",
