@@ -7129,6 +7129,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             snapshot = str(torch.cuda.memory._snapshot())
             self.assertTrue("called_inside_compile" in snapshot)
 
+        def test_memory_leak_inductor(self):
+            import gc
+            import tracemalloc
+
+            def fn(x):
+                return 2 * x
+
+            def collect_memory(opt, x):
+                gc.collect()
+                begin, _ = tracemalloc.get_traced_memory()
+                for _ in range(1000):
+                    opt(x)
+                gc.collect()
+                end, _ = tracemalloc.get_traced_memory()
+                return end - begin
+
+            opt = torch.compile(fn)
+            x = torch.randn(4, device=self.device)
+            opt(x)
+            mem = collect_memory(opt, x)
+            self.assertTrue(mem < 2048, "leaked more than 2048 bytes of memory")
+
     copy_tests(CommonTemplate, CudaTests, "cuda")
 
     class CudaReproTests(TestCase):
