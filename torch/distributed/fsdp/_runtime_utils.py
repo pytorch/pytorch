@@ -759,9 +759,6 @@ def _post_backward_hook(
             if (
                 not _low_precision_hook_enabled(state)
                 and flat_param.grad.dtype != handle._reduce_dtype
-                # TODO (rohan-varma) add test when in eval mode, but only
-                # reduction is in reduced dtype, comm should still be in fp32
-                # due to this check.
                 and not handle._force_full_precision
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
