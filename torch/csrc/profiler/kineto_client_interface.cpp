@@ -22,27 +22,18 @@ class LibKinetoClient : public libkineto::ClientInterface {
  public:
   void init() override {}
 
-  void prepare(
-      bool report_input_shapes = true,
-      bool profile_memory = false,
-      bool with_stack = false,
-      bool with_flops = false,
-      bool with_modules = false) override {
-    reportInputShapes_ = report_input_shapes;
-    profileMemory_ = profile_memory;
-    withStack_ = with_stack;
-    withFlops_ = with_flops;
-    withModules_ = with_modules;
+  void warmup(bool setupOpInputsCollection) override {
+    reportInputShapes_ = setupOpInputsCollection;
   }
 
   void start() override {
     ProfilerConfig cfg{
         ProfilerState::KINETO_ONDEMAND,
         /*report_input_shapes=*/reportInputShapes_,
-        /*profile_memory=*/profileMemory_,
+        /*profile_memory=*/false,
         /*with_stack=*/withStack_,
-        /*with_flops=*/withFlops_,
-        /*with_modules=*/withModules_};
+        /*with_flops=*/false,
+        /*with_modules=*/false};
     std::set<ActivityType> activities{ActivityType::CPU};
     std::unordered_set<at::RecordScope> scopes;
     scopes.insert(at::RecordScope::FUNCTION);
@@ -55,12 +46,14 @@ class LibKinetoClient : public libkineto::ClientInterface {
     (void)disableProfiler();
   }
 
+  // NOLINTNEXTLINE(modernize-use-override)
+  void set_withstack(bool withStack) override {
+    withStack_ = withStack;
+  }
+
  private:
   bool reportInputShapes_{true};
-  bool profileMemory_{false};
   bool withStack_{false};
-  bool withFlops_{false};
-  bool withModules_{false};
 };
 
 } // namespace

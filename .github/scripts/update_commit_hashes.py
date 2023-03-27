@@ -1,10 +1,9 @@
 import json
 import os
 import subprocess
-from argparse import ArgumentParser
-from typing import Any, Dict
-
 import requests
+from typing import Any, Dict
+from argparse import ArgumentParser
 
 MERGEBOT_TOKEN = os.environ["MERGEBOT_TOKEN"]
 PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]

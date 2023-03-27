@@ -906,6 +906,7 @@ class TestGradCheckOverride(TestCase):
                 'numel',
                 'requires_grad',
                 'requires_grad_',
+                'retain_grad',
                 'size',
                 'stride',
             }
@@ -919,6 +920,7 @@ class TestGradCheckOverride(TestCase):
                 torch.Tensor.size,
                 torch.Tensor.is_floating_point,
                 torch.Tensor.numel,
+                torch.Tensor.retain_grad,
                 torch.Tensor.stride,
                 torch.Tensor.requires_grad_,
                 torch.autograd.grad,

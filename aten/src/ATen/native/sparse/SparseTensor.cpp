@@ -65,7 +65,8 @@
 #include <ATen/ops/ones.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 using namespace at::sparse;
 
@@ -850,4 +851,5 @@ Tensor empty_like_sparse_coo(
   }
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at
