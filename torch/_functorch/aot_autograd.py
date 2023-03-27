@@ -2644,20 +2644,28 @@ def create_aot_dispatcher_function(
                         if isinstance(x, int):
                             return shape_env.create_symintnode(
                                 shape_env.create_symbol(
-                                    x, ConstantSource(f"sym_{idx}"),
-                                    dynamic_dim=DimDynamic.STATIC, constraint_dim=None),
+                                    x,
+                                    ConstantSource(f"sym_{idx}"),
+                                    # TODO: bare int input may be better as
+                                    # DYNAMIC as we don't know if it will
+                                    # actually be a sizevar
+                                    dynamic_dim=DimDynamic.DUCK,
+                                    constraint_dim=None
+                                ),
                                 hint=x)
                     if not isinstance(x, torch.Tensor):
                         return x
                     if isinstance(x, FakeTensor):
                         assert x.fake_mode is fake_mode
                         return x
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
                     if (
                         idx < aot_config.num_params_buffers
                         and config.static_weight_shapes
                     ):
-                        return fake_mode.from_tensor(x, dynamic_dims=[DimDynamic.STATIC] * x.dim())
-                    return fake_mode.from_tensor(x)
+                        return fake_mode.from_tensor(x, static_shapes=True)
+                    return fake_mode.from_tensor(x, static_shapes=False)
 
                 return [convert(idx, x) for idx, x in enumerate(flat_args)]
             else:

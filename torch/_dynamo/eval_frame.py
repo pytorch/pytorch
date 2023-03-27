@@ -566,7 +566,13 @@ def explain(f, *args, **kwargs):
 
 @dataclasses.dataclass
 class Constraint:
+    """
+    This represents constraints on input tensor dimensions, e.g., requiring
+    them to be fully polymorphic or within some range.  Don't create this
+    class directly; instead, use :func:`torch._export.dynamic_dim`.
+    """
     w_tensor: weakref.ReferenceType[torch.Tensor]
+    # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
     constraint_range: Optional[

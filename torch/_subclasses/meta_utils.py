@@ -171,25 +171,11 @@ class MetaConverter:
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
-        # Ideally, we could use something like tensor_always_has_static_shape, but that is a little too dynamo bound
-        # specific atm. Maybe we can refactor that later, so we can keep having a centralized policy.
-        static_shape = type(t) is torch.nn.Parameter or source is None
-
         if source is None:
             from torch._dynamo.source import ConstantSource
 
             # TODO: make a dedicated UnknownSource for this?
             source = ConstantSource(f"__unknown_tensor{len(self.tensor_memo)}")
-
-        # Setup some default policy for convenience.  NB: from dynamo, you
-        # shouldn't do this as Dynamo has a more complicated policy it wants
-        # to apply
-        if shape_env is not None:
-            if dynamic_dims is None:
-                val = DimDynamic.STATIC if static_shape else DimDynamic.DUCK
-                dynamic_dims = [val] * t.dim()
-            if constraint_dims is None:
-                constraint_dims = [None] * t.dim()
 
         # This indicates you set no_dispatch() before calling into this
         # function.  This is an error: we may be creating fake tensors and
@@ -248,10 +234,10 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
-                    if dynamic_dims:
-                        assert all(
-                            [d is DimDynamic.STATIC for d in dynamic_dims]
-                        ), "symbolic on sparse NYI"
+                    # TODO: Delete this assert, and just attempt making the
+                    # sparse tensor anyway; even if there is a shape_env, this
+                    # tensor might be all static
+                    assert shape_env is None, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(
                         lambda: torch.ops.aten._sparse_coo_tensor_with_dims(

@@ -1347,6 +1347,11 @@ class ShapeEnv:
         self, *,
         allow_scalar_outputs=True,
         allow_dynamic_output_shape_ops=True,
+        # NB: These are legacy configuration that help us make good choices
+        # when the constraint/dynamic dims are not explicitly passed to us.
+        # Ideally we will fix all call sites to be explicit and not have
+        # implicit choices, but this apparently was pretty involved.
+        assume_static_by_default=False,
         # Note - On 0/1 specialization
         #
         # The following options affect decisions we make about eager
@@ -1395,6 +1400,7 @@ class ShapeEnv:
             self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
+        self.assume_static_by_default = assume_static_by_default
         self.specialize_zero_one = specialize_zero_one
         self.duck_shape = duck_shape
 
@@ -1435,18 +1441,35 @@ class ShapeEnv:
         ex: torch.Tensor,
         source: Source,
         *,
-        # TODO: once we fix the call sites, can consider allowing Optional for
-        # convenience
-        dynamic_dims: DimList[DimDynamic],
-        constraint_dims: DimList[DimConstraint],
+        dynamic_dims: Optional[DimList[DimDynamic]],
+        constraint_dims: Optional[DimList[DimConstraint]],
     ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-        assert len(dynamic_dims) == ex.dim()
-        assert len(constraint_dims) == ex.dim()
+        dim = ex.dim()
+
+        # Reimplement the legacy behavior
+        if constraint_dims is None:
+            constraint_dims = [None] * dim
+        if dynamic_dims is None:
+            dynamic_dims = []
+            for i in range(dim):
+                # NB: This is encapsulation breaking!  Legacy behavior was
+                # bad.
+                if _is_dim_dynamic(ex, i):
+                    r = DimDynamic.DYNAMIC
+                elif self.assume_static_by_default:
+                    r = DimDynamic.STATIC
+                else:
+                    r = DimDynamic.DUCK
+                dynamic_dims.append(r)
+            dynamic_dims = [DimDynamic.DUCK] * dim
+
+        assert len(dynamic_dims) == dim
+        assert len(constraint_dims) == dim
 
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size: List[sympy.Expr] = self._produce_dyn_sizes(ex, source, dynamic_dims, constraint_dims)
@@ -1480,6 +1503,7 @@ class ShapeEnv:
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
+                    # TODO: This should be DYNAMIC, using DUCK for BC
                     dynamic_dim=DimDynamic.DUCK,
                     constraint_dim=None,
                 )
@@ -1495,7 +1519,8 @@ class ShapeEnv:
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex.storage_offset(),
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            dynamic_dim=DimDynamic.DYNAMIC,
+            # TODO: This should be DYNAMIC, using DUCK for BC
+            dynamic_dim=DimDynamic.DUCK,
             constraint_dim=None,
         ), hint=ex.storage_offset())
         return sym_sizes, sym_stride, sym_storage_offset
@@ -1504,6 +1529,10 @@ class ShapeEnv:
     # is, pass it into hint.  Otherwise, pass None and we will make our best
     # guess
     def create_symintnode(self, sym: "sympy.Expr", *, hint: Optional[int]):
+        if isinstance(sym, sympy.Integer):
+            if hint is not None:
+                assert int(sym) == hint
+            return int(sym)
         return SymInt(SymNode(sym, self, int, hint))
 
     def create_unbacked_symfloat(self):
@@ -1523,7 +1552,7 @@ class ShapeEnv:
         val: int,
         source: Source,
         dynamic_dim: DimDynamic,
-        constraint_dim: DimConstraint,
+        constraint_dim: DimConstraint,  # NB: includes None
     ) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
@@ -1615,6 +1644,7 @@ class ShapeEnv:
         # DimList[DimConstraint]).  Whenever Optional is accepted, that
         # just means there are no constraints
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
+        # TODO: I don't think this should be here
         strict_mark_dyn=False,
         _simplified=False
     ) -> List[str]:
@@ -2269,3 +2299,7 @@ def _is_int(expr):
     if len(expr.node.expr.free_symbols) > 0:
         return False
     return True
+
+# WARNING: This is legacy, DO NOT USE
+def _is_dim_dynamic(t, d):
+    return hasattr(t, "_dynamo_dynamic_indices") and d in t._dynamo_dynamic_indices
