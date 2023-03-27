@@ -60,6 +60,8 @@ SYM_FUNCTION_MODE = None
 # Didn't bother with ancestors for now, unlikely to have multiple modes for
 # symints right now
 
+class ConstraintViolationError(RuntimeError):
+    pass
 
 # SymDispatchMode gets invoked whenever an operation is processed on
 # a PySymInt.  When this occurs, you get called at __sym_dispatch__
@@ -1750,14 +1752,22 @@ class ShapeEnv:
                     if constraint is not None:
                         # TODO: Maybe non-strict constraint shouldn't error
                         # here?  Check what happens in practice
+                        def hint():
+                            if s.free_symbols:
+                                return (
+                                    "Perhaps you meant to specify a constraint on {s.free_symbols}?" +
+                                    "; ".join(
+                                        f"{s0} bound by " + ", ".join(str(source0) for source0 in symbol_to_source[s0])
+                                        for s0 in s.free_symbols
+                                    )
+                                )
+                            else:
+                                return "Did you really mean to mark this dimension as dynamic?"
+
                         record_constraint_violation(lambda: (
                             f"Could not validate constraint {constraint.render(source)} as "
                             f"{source.name()} is actually a non-atomic symbolic expression "
-                            f"{s}.  Perhaps you meant to specify a constraint on {s.free_symbols}?" +
-                            "; ".join(
-                                f"{s0} bound by " + ", ".join(str(source0) for source0 in symbol_to_source[s0])
-                                for s0 in s.free_symbols
-                            )
+                            f"{s}.  {hint()}"
                         ))
 
                 input_guards.append((source, s))
@@ -1894,9 +1904,9 @@ class ShapeEnv:
                     exprs.append(" <= ".join(bounds))
 
         if constraint_violations:
-            msgs = [f"{i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
-            msgs = "   \n".join(msgs)
-            raise RuntimeError(f"Constraints violated!\n{msgs}")
+            msgs = [f"  {i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
+            msgs = "\n".join(msgs)
+            raise ConstraintViolationError(f"Constraints violated!\n{msgs}")
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
