@@ -495,6 +495,7 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
+                            torch.ops.aten._int_mm.default,
                         ]
                         if torch._C.has_mkldnn:
                             need_fixed_layout += [
