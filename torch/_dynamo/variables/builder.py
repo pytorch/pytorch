@@ -798,23 +798,18 @@ class VariableBuilder:
             # take unspecialized floats and use them in sizevar computation
             if (
                 config.dynamic_shapes
+                and not torch._dynamo.config.specialize_int
                 and isinstance(value, int)
+                and value >= 0
                 and not is_constant_source(self.get_source())
             ):
                 shape_env = self.tx.output.shape_env
 
-                # TODO: We can probably avoid specializing on negative
-                # integers, but we need a way to generate symbols that can be
-                # negative (and which we make no assumptions about their
-                # range)
-                if torch._dynamo.config.specialize_int:
-                    dynamic_dim = DimDynamic.STATIC
-                else:
-                    # TODO: This should be dynamic, as we in general do not
-                    # know if bare integers are actually going to be sizevars
-                    # and it is inappropriate to eagerly duck size them with
-                    # real sizevars
-                    dynamic_dim = DimDynamic.DUCK
+                # TODO: This should be dynamic, as we in general do not
+                # know if bare integers are actually going to be sizevars
+                # and it is inappropriate to eagerly duck size them with
+                # real sizevars
+                dynamic_dim = DimDynamic.DUCK
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will

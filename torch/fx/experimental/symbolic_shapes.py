@@ -1546,8 +1546,8 @@ class ShapeEnv:
         self,
         val: int,
         source: Source,
-        dynamic_dim: DimDynamic,
-        constraint_dim: DimConstraint,  # NB: includes None
+        dynamic_dim: DimDynamic = DimDynamic.DUCK,
+        constraint_dim: DimConstraint = None,  # NB: includes None
     ) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
@@ -1569,6 +1569,7 @@ class ShapeEnv:
 
         if val < 0:
             from torch._dynamo.source import NegateSource
+            assert constraint_dim is None, "constraints on negative unspec ints NYI"
             return -self.create_symbol(-val, NegateSource(source), dynamic_dim, constraint_dim)
 
         if val in (0, 1) and self.specialize_zero_one:
