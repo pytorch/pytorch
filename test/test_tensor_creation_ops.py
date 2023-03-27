@@ -3952,7 +3952,7 @@ class TestAsArray(TestCase):
         zerodim_arr = np.array(1.)
         tensor = torch.asarray(zerodim_arr, dtype=torch.int32)
         self.assertEqual(tensor.dim(), 0)
-        self.assertEqual(tensor.item(), scalar.item())
+        self.assertEqual(tensor.item(), zerodim_arr.item())
         self.assertEqual(tensor.dtype, torch.int32)
 
 
