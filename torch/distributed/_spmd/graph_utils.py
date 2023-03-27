@@ -76,7 +76,9 @@ def get_comm_block_nodes(
     return comm_idx, node_list
 
 
-def get_node_tensor_metadata(node: fx.Node, is_required: bool = True) -> TensorMetadata:
+def get_node_tensor_metadata(
+    node: fx.Node, is_required: bool = True
+) -> TensorMetadata:
     metadata = node.meta.get("tensor_meta", None)
     if is_required and metadata is None:
         raise RuntimeError(
