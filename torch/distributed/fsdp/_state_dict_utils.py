@@ -1,7 +1,7 @@
 import functools
 import math
 import warnings
-from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
+from typing import Any, Callable, cast, Dict, Iterator, List, no_type_check, Tuple
 
 import torch
 import torch.distributed as dist
@@ -57,23 +57,25 @@ def _convert_to_wrapped_module_name(module_name: str) -> str:
     return module_name
 
 
-def _param_fqns(
+def _param_name_infos(
     module: nn.Module, fsdp_state: _FSDPState
 ) -> Iterator[Tuple[str, str, str]]:
     if not _has_fsdp_params(fsdp_state, module):
         return
     for param_name, module_name in _module_handles(fsdp_state, module)[
         0
-    ].parameter_module_names():
+    ].param_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
         yield fqn, param_name, module_name
 
 
-def _shared_param_fqns(module: nn.Module, fsdp_state) -> Iterator[Tuple[str, str, str]]:
+def _shared_param_name_infos(
+    module: nn.Module, fsdp_state
+) -> Iterator[Tuple[str, str, str]]:
     for param_name, module_name in _module_handles(fsdp_state, module)[
         0
-    ].shared_parameter_module_names():
+    ].shared_param_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
         yield fqn, param_name, module_name
@@ -195,7 +197,7 @@ def _common_unshard_post_state_dict_hook(
 
     # Loop only the parameters saved in this instance's wrapped module to
     # avoid processing buffers.
-    for fqn, param_name, module_name in _param_fqns(module, fsdp_state):
+    for fqn, param_name, module_name in _param_name_infos(module, fsdp_state):
         fqn = f"{prefix}{fqn}"
         if no_fsdp_return:
             state_dict.pop(fqn)
@@ -550,16 +552,18 @@ def _sharded_pre_load_state_dict_hook(
     if not _module_handles(fsdp_state, module)[0].uses_sharded_strategy:
         raise RuntimeError(
             "load_sharded_state_dict can only be called when parameters "
-            "are flatten and sharded."
+            "are flattened and sharded."
         )
 
-    nonsharded_tensors = []
-    shared_fqns = [fqn for fqn, _, _ in _shared_param_fqns(module, fsdp_state)]
-    loaded_shapes = []
-    for fqn, _, _ in _param_fqns(module, fsdp_state):
-        full_fqn = f"{prefix}{FSDP_PREFIX}{fqn}"
-        param = state_dict.pop(full_fqn)
-        if fqn in shared_fqns:
+    nonsharded_tensors: List[torch.Tensor] = []
+    shared_param_fqns = [
+        fqn for fqn, _, _ in _shared_param_name_infos(module, fsdp_state)
+    ]
+    loaded_shapes: List[torch.Size] = []
+    for fqn, _, _ in _param_name_infos(module, fsdp_state):
+        fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
+        param = state_dict.pop(fqn_from_global_root)
+        if fqn in shared_param_fqns:
             continue
         # All-gather the param (ShardedTensor)
         param, shards = _ext_pre_load_state_dict_transform(param)
