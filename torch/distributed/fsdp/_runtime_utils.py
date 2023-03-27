@@ -414,9 +414,15 @@ def _pre_forward(
     # the `grad_fn` is mutated.
     _register_post_backward_hooks(state, handles)
 
-    # Recursively convert args and kwargs to specified precision.
-    input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
-    if state.mixed_precision.cast_forward_inputs:
+    should_cast_forward = True
+    for handle in state._handles:
+        if handle._force_full_precision:
+            should_cast_forward = False
+            break
+
+    if should_cast_forward and state.mixed_precision.cast_forward_inputs:
+        # Recursively convert args and kwargs to specified precision.
+        input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
         args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
     return args, kwargs
 
@@ -519,6 +525,42 @@ def _root_pre_forward(
     _p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
         return args, kwargs
+
+    # We cast buffers back to fp32 if we're forcing full precision. In addition, we check if buffers
+    # are in full precision and if we should cast them back to lower precision, which happens when
+    # exiting eval() mode.
+
+    cast_buffers_to_full_prec = False
+    for handle in state._handles:
+        if handle._force_full_precision:
+            cast_buffers_to_full_prec = True
+            break
+
+    if cast_buffers_to_full_prec:
+        _cast_buffers_to_dtype_and_device(
+            buffers=dict(module.named_buffers()).values(),
+            buffer_dtypes=list(state._buffer_name_to_orig_dtype.values()),
+            device=state.compute_device
+        )
+        # This flag is only set when we cast buffers to full precision, to avoid the
+        # CPU overhead that can stem from retrieving all buffers and their types in the
+        # following else branch.
+        state._needs_restore_check = True
+    elif hasattr(state, '_needs_restore_check') and state._needs_restore_check:
+        # Check if buffers are in full precision and we need to cast them
+        # back down.
+        buffers, buffer_dtypes_for_computation = _get_buffers_and_dtypes_for_computation(state, module)
+        # buffers, buffer_dtypes_for_computation = list(buffers), list(buffer_dtypes_for_computation)
+        if len(buffers) > 0 and len(buffer_dtypes_for_computation) > 0:
+            buffer, buffer_dtype_for_computation = buffers[0], buffer_dtypes_for_computation[0]
+            if buffer.dtype != buffer_dtype_for_computation:
+                # Assume we have to cast everything if there is one mismatch
+                _cast_buffers_to_dtype_and_device(
+                    buffers, buffer_dtypes_for_computation, state.compute_device
+                )
+        # We don't have to check this again until we cast buffers to full precision again.
+        state._needs_restore_check = False
+
     if state.forward_prefetch:
         handles_keys = []
         for fsdp_state in state._all_fsdp_states:
@@ -544,9 +586,16 @@ def _root_pre_forward(
     args = args_tuple[0]
     kwargs = kwargs_tuple[0]
 
-    input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
+    # TODO: can replace this with next(state._handles).should_cast_forward to reduce
+    # iterating through all handles if we assume model.eval() is always uniformly set.
+    should_cast_forward = True
+    for handle in state._handles:
+        if handle._force_full_precision:
+            should_cast_forward = False
+            break
 
-    if state.mixed_precision.cast_root_forward_inputs:
+    if should_cast_forward and state.mixed_precision.cast_root_forward_inputs:
+        input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
         args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
     return args, kwargs
 
@@ -710,6 +759,10 @@ def _post_backward_hook(
             if (
                 not _low_precision_hook_enabled(state)
                 and flat_param.grad.dtype != handle._reduce_dtype
+                # TODO (rohan-varma) add test when in eval mode, but only
+                # reduction is in reduced dtype, comm should still be in fp32
+                # due to this check.
+                and not handle._force_full_precision
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
 
@@ -1344,6 +1397,7 @@ def _get_orig_buffer_dtypes(
     """
     Returns the original buffer types of the given buffer names.
     """
+
     buffer_dtypes: List[torch.dtype] = []
     for buffer_name in buffer_names:
         _p_assert(
