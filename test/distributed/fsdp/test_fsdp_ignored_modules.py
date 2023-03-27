@@ -152,7 +152,7 @@ class TestFSDPIgnoredModules(FSDPTest):
                 padding_numel = sum(
                     numel
                     for (numel, pi) in zip(
-                        flat_param._wp_numels, flat_param._optional_param_infos
+                        flat_param._wp_numels, flat_param._wp_param_infos
                     )
                     if pi is _FLAT_PARAM_PADDING
                 )
@@ -201,7 +201,7 @@ class TestFSDPIgnoredModules(FSDPTest):
                 padding_numel = sum(
                     numel
                     for (numel, pi) in zip(
-                        flat_param._wp_numels, flat_param._optional_param_infos
+                        flat_param._wp_numels, flat_param._wp_param_infos
                     )
                     if pi is _FLAT_PARAM_PADDING
                 )
