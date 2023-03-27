@@ -921,13 +921,9 @@ struct PythonPrintImpl {
     bool hasNonASCII = false;
     auto checkSubvalue = [&hasNonASCII](const IValue& val) {
       if (val.isString()) {
-        // char's type is implementation designed signedness, likely
-        // signed on x86 and unsigned on ARM. But as of C++11, it is
-        // guaranteed to be twos complement. Therefore, converting to
-        // signed char gives us a range of [-128, 127]. Thus, any
-        // negative number is non-ascii.
-        for (signed char c : val.toStringRef()) {
-          if (c < 0) {
+        const auto maxASCII = 0x7fu;
+        for (auto c : val.toStringRef()) {
+          if (static_cast<decltype(maxASCII)>(c) > maxASCII) {
             hasNonASCII = true;
             return true;
           }

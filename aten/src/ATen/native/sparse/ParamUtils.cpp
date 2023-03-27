@@ -11,7 +11,8 @@
 #include <ATen/ops/empty_like_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 std::pair<Tensor, Tensor> softmax_sparse_input_preprocessing(
     const Tensor& input_,
@@ -56,4 +57,5 @@ std::tuple<Tensor, Tensor, Tensor> softmax_backward_sparse_input_preprocessing(
   return std::make_tuple(grad_input, grad, output);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at
