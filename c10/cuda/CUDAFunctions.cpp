@@ -220,8 +220,13 @@ cudaError_t GetDevice(int* device) {
 
 cudaError_t SetDevice(int device) {
   TORCH_CHECK(device >= 0, "device id must be positive!");
-  cudaError_t err = cudaSetDevice(device);
   targetDeviceIndex = -1;
+  int curdev = -1;
+  C10_CUDA_CHECK(cudaGetDevice(&curdev));
+  if (device == curdev) {
+    return cudaSuccess;
+  }
+  cudaError_t err = cudaSetDevice(device);
   C10_CUDA_CHECK(cudaFree(0));
   return err;
 }
@@ -232,6 +237,37 @@ cudaError_t MaybeSetDevice(int device) {
   }
   targetDeviceIndex = device;
   return cudaSuccess;
+}
+
+int ExchangeDevice(int to_device) {
+  LastSavedDevice = -1;
+  int cur_device;
+  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  if (to_device == cur_device) {
+    return cur_device;
+  }
+  C10_CUDA_CHECK(cudaSetDevice(to_device));
+  return cur_device;
+}
+
+int MaybeExchangeDevice(int to_device) {
+  if (hasPrimaryContext(to_device)) {
+    return c10::cuda::MaybeSetDevice(to_device);
+  }
+
+  int cur_device;
+  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  if (to_device == cur_device) {
+    return cur_device;
+  }
+  LastSavedDevice = to_device;
+  return cur_device;
+}
+
+void SetTargetDevice() {
+  if (targetDeviceIndex >= 0) {
+    C10_CUDA_CHECK(c10::cuda::SetDevice(targetDeviceIndex));
+  }
 }
 
 } // namespace c10::cuda

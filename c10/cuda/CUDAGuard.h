@@ -80,11 +80,7 @@ struct OptionalCUDAGuard {
   explicit OptionalCUDAGuard() : guard_() {
     // This constructor initializes CUDA context on current device.
     // For more info see comment in CUDAFunctions.cpp
-    int cur_device = -1;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
-    if (hasPrimaryContext(cur_device) == false) {
-      C10_CUDA_CHECK(c10::cuda::SetDevice(cur_device));
-    }
+    c10::cuda::SetTargetDevice();
   }
 
   /// Set the current CUDA device to the passed Device, if it is not nullopt.
@@ -220,11 +216,7 @@ struct OptionalCUDAStreamGuard {
   explicit OptionalCUDAStreamGuard() : guard_() {
     // This constructor initializes CUDA context on current device.
     // For more info see comment in CUDAFunctions.cpp
-    int cur_device = -1;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
-    if (hasPrimaryContext(cur_device) == false) {
-      C10_CUDA_CHECK(c10::cuda::SetDevice(cur_device));
-    }
+    c10::cuda::SetTargetDevice();
   }
 
   /// Set the current CUDA device to the device associated with the passed

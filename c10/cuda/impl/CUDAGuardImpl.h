@@ -29,11 +29,8 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Device exchangeDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
-    Device old_device = getDevice();
-    if (old_device.index() != d.index()) {
-      C10_CUDA_CHECK(c10::cuda::SetDevice(d.index()));
-    }
-    return old_device;
+    int old_device_index = c10::cuda::ExchangeDevice(d.index());
+    return Device(DeviceType::CUDA, old_device_index);
   }
   Device getDevice() const override {
     int device;
@@ -51,16 +48,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   void setDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
-    Device current_device = getDevice();
-    if (current_device != d) {
-      C10_CUDA_CHECK(c10::cuda::SetDevice(d.index()));
-    }
+    C10_CUDA_CHECK(c10::cuda::SetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    auto current_device = uncheckedGetDevice();
-    if (!current_device.has_value() || current_device.value() != d) {
-      C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
-    }
+    C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
   }
   Stream getStream(Device d) const noexcept override {
     return getCurrentCUDAStream(d.index()).unwrap();

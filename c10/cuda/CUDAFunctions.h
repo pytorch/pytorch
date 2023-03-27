@@ -43,6 +43,12 @@ C10_CUDA_API cudaError_t SetDevice(int device);
 
 C10_CUDA_API cudaError_t MaybeSetDevice(int device);
 
+C10_CUDA_API int ExchangeDevice(int device);
+
+C10_CUDA_API int MaybeExchangeDevice(int device);
+
+C10_CUDA_API void SetTargetDevice();
+
 enum class SyncDebugMode { L_DISABLED = 0, L_WARN, L_ERROR };
 
 // this is a holder for c10 global state (similar to at GlobalContext)
