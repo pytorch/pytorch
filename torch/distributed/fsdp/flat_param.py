@@ -2088,7 +2088,7 @@ class FlatParamHandle:
         for param_info in chain(self.flat_param._param_infos, shared_param_infos):
             is_padding = param_info is None
             if not is_padding:
-                param_name, _, module_name = param_info
+                param_name, _, module_name = param_info  # type: ignore[misc]
                 yield (param_name, module_name)
 
     def shared_param_module_names(self) -> Iterator[Tuple[str, str]]:
