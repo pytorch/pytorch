@@ -2758,6 +2758,7 @@ class ExternKernelOut(ExternKernel):
         kernel=None,
         cpp_kernel=None,
         ordered_kwargs_for_cpp_kernel=(),
+        cpp_constant_args=(),
     ):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
