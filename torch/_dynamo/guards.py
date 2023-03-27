@@ -35,7 +35,6 @@ from .utils import (
     istype,
     np,
     orig_code_map,
-    rename_implicit,
     tensor_always_has_static_shape,
     tensor_static_reason_to_message,
     tuple_iterator_getitem,
@@ -87,17 +86,15 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
-        scope: Optional[Dict[str, object]],
+        user_scope: Optional[Dict[str, object]],
         check_fn_manager: "CheckFunctionManager",
-        renames=True,
     ):
         self.id_ref = id_ref
         self.source_ref = source_ref
-        if scope:
-            if renames:
-                scope = {rename_implicit(k): v for k, v in scope.items()}
+        if user_scope:
+            scope = {'E': user_scope}
         else:
-            scope = dict()
+            scope = {'E': dict()}
         self.scope: Dict[str, object] = scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
@@ -623,10 +620,9 @@ class CheckFunctionManager:
             source_ref,
             combine_scopes(f_globals, f_locals),
             self,
-            renames=True,
         )
         global_builder = GuardBuilder(
-            self.id_ref, source_ref, f_globals, self, renames=False
+            self.id_ref, source_ref, f_globals, self
         )
         # source_ref can cause a cycle, make sure we break it with weakref
         w_local = weakref.ref(local_builder)
@@ -723,7 +719,7 @@ class CheckFunctionManager:
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda {args}: {code}
+    return lambda E: {code}
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
@@ -774,7 +770,7 @@ def guard_fail_hook(
     # Don't waste time computing the fail reason for guards we aren't going to report out.
     if not guard_fn.guard_fail_fn and not (first or last):
         return
-    scope = {rename_implicit(k): v for k, v in f_locals.items()}
+    scope = {'E': f_locals}
     scope.update(guard_fn.closure_vars)
     reason = None
     for part in guard_fn.verbose_code_parts:

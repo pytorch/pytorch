@@ -803,19 +803,6 @@ def global_key_name(key):
     return f"__dict_key_{id(key)}"
 
 
-def rename_implicit(v):
-    """
-    Usage of inline comprehensions generates a implicit ".0" variable that
-    trips up guard generation.  This renames these variables in guards.
-    """
-    m = re.match(r"^[.](\d+)$", v)
-    if m:
-        assert v == ".0", f"currently only .0 supported: {v}"
-        # to support .1 etc see guards.py and _eval_frame.c
-        return f"___implicit{m.group(1)}"
-    return v
-
-
 from torch._subclasses import (  # noqa: F401
     FakeTensorMode,
     UnsupportedFakeTensorException,
