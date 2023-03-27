@@ -61,11 +61,6 @@ struct C10_API Storage {
   }
 
   template <typename T>
-  T* data() const {
-    return storage_impl_->mutable_unsafe_data<T>();
-  }
-
-  template <typename T>
   const T* unsafe_data() const {
     return storage_impl_->mutable_unsafe_data<T>();
   }
