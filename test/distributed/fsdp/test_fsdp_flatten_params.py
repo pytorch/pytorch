@@ -340,7 +340,7 @@ class TestFlattenParams(FSDPTest):
             flat_param = flat_param_handle.flat_param
             (
                 flat_param._shard_param_offsets,
-                flat_param._shard_indices,
+                flat_param._shard_param_indices,
             ) = flat_param_handle._get_shard_metadata(kwargs["start"], kwargs["end"])
             self.assertEqual(
                 flat_param_handle.shard_metadata(),
