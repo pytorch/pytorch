@@ -1322,14 +1322,15 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         model = ToyModel()
         forward_handles = {}
-        for name, module in model.named_modules():
-            forward_handles[name] = module.register_forward_hook(
-                partial(save_activations, name)
-            )
         activations = dict()
 
         def save_activations(name, mod, inp, out):
             activations[name] = inp
+
+        for name, module in model.named_modules():
+            forward_handles[name] = module.register_forward_hook(
+                partial(save_activations, name)
+            )
 
         model = torch.compile(model, backend="aot_eager")
 
