@@ -158,10 +158,13 @@ class FlatParameter(nn.Parameter):
 
     Attributes:
         _unpadded_unsharded_size (torch.Size): Unsharded flat parameter's size
-            without padding.
+            without right-hand-side padding for divisibility by the world size.
+            For ``use_orig_params=True``, this includes alignment padding.
         _padded_unsharded_size (torch.Size): Unsharded flat parameter's size
-            with padding. This is only set for sharded strategies since they
-            require padding for the all-gather.
+            with right-hand-side padding for divisibility by the world size.
+            For ``use_orig_params=True``, this includes alignment padding. This
+            is only set for sharded strategies since they require padding for
+            the all-gather.
         _sharded_size (torch.Size): Sharded flat parameter's size with padding.
             This is also set for ``NO_SHARD``, in which case it is the same as
             the unsharded sizes. (We omit "padded" because there is no
@@ -865,34 +868,41 @@ class FlatParamHandle:
         """
         Returns shard-related metadata specific to this rank's shard of the
         flat parameter.
+        NOTE: The returned tuple does not include elements for alignment
+        padding but does account for the padding.
         """
         assert hasattr(self.flat_param, "_shard_param_indices") and hasattr(
             self.flat_param, "_shard_param_offsets"
         ), "Shard metadata has not been initialized"
-        shard_param_start_index = self.flat_param._shard_param_indices[0]  # type: ignore[attr-defined]
-        shard_param_end_index = self.flat_param._shard_param_indices[1]  # type: ignore[attr-defined]
+        shard_param_start_index = self.flat_param._shard_param_indices[0]
+        shard_param_end_index = self.flat_param._shard_param_indices[1]
         if shard_param_start_index > shard_param_end_index:
             fqns: Tuple[str, ...] = tuple()
             shapes: Tuple[torch.Size, ...] = tuple()
             numels: Tuple[int, ...] = tuple()
+            shard_param_offsets = self.flat_param._shard_param_offsets[:]
         else:
             fqns_list = []
             shapes_list = []
             numels_list = []
-            # Do not include padding
+            shard_param_offsets = []
+            # Do not include alignment padding
             for i in range(shard_param_start_index, shard_param_end_index + 1):
-                if self.flat_param._fqns[i] is None:
+                is_padding = self.flat_param._param_infos[i] is None
+                if is_padding:
+                    assert self.flat_param._fqns[i] is None
                     assert self.flat_param._shapes[i] is None
                     continue
                 fqns_list.append(self.flat_param._fqns[i])
                 shapes_list.append(self.flat_param._shapes[i])
                 numels_list.append(self.flat_param._numels[i])
+                shard_param_offsets.append(
+                    self.flat_param._shard_param_offsets[i - shard_param_start_index]
+                )
             fqns = tuple(fqns_list)
             shapes = tuple(shapes_list)
             numels = tuple(numels_list)
-        return FlatParamShardMetadata(
-            fqns, shapes, numels, self.flat_param._shard_param_offsets[:]  # type: ignore[attr-defined]
-        )
+        return FlatParamShardMetadata(fqns, shapes, numels, shard_param_offsets)
 
     @no_type_check
     @torch.no_grad()
