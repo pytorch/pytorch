@@ -7,6 +7,9 @@ void doRead(io fildes, void* buf, size_t nbytes);
 template <class io>
 void doWrite(io fildes, void* buf, size_t nbytes);
 
+// Note that this takes a mutable storage because it may ultimately be
+// calling into a Python API which requires a char* parameter, even
+// though it is only reading from it.
 template <class io>
 void THPStorage_writeFileRaw(
     c10::StorageImpl* self,
