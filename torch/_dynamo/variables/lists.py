@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 import torch
 import torch.fx
 
-from .. import variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
@@ -391,8 +391,20 @@ class SizeVariable(TupleVariable):
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            return self.getitem_const(args[0])
+            if config.dynamic_shapes:
+                out = self.get_item_dyn(tx, args[0])
+            else:
+                out = self.getitem_const(args[0])
+            return out
         return super().call_method(tx, name, args, kwargs)
+
+    def get_item_dyn(self, tx, arg: VariableTracker):
+        index = arg.as_python_constant()
+        if isinstance(index, slice):
+            return SizeVariable(self.items[index]).add_options(arg, self)
+        else:
+            assert isinstance(index, int)
+            return self.items[index].add_options(arg, self)
 
 
 class ShapeVariable(TupleVariable):
