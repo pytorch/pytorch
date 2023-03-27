@@ -240,7 +240,7 @@ cudaError_t MaybeSetDevice(int device) {
 }
 
 int ExchangeDevice(int to_device) {
-  LastSavedDevice = -1;
+  targetDeviceIndex = -1;
   int cur_device;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
   if (to_device == cur_device) {
@@ -260,7 +260,7 @@ int MaybeExchangeDevice(int to_device) {
   if (to_device == cur_device) {
     return cur_device;
   }
-  LastSavedDevice = to_device;
+  targetDeviceIndex = to_device;
   return cur_device;
 }
 
