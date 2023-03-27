@@ -1243,7 +1243,7 @@ Tensor zeros_like(
   // See [Note: hacky wrapper removal for TensorOptions]
   auto other_options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
   // Prefer values passed in explicitly, but default to value from self.
-  auto options = self.options().merge_in(other_options).merge_memory_format(optional_memory_format);
+  auto options = self.options().merge_in(other_options);
 
   if (options.layout() == kSparse) {
     TORCH_CHECK(
