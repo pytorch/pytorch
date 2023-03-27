@@ -180,17 +180,17 @@ class Shard(Placement):
         is replicated on the previously sharded mesh dimension
         """
         my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(mesh_dim)
+        num_chunks = mesh.size(dim=mesh_dim)
         # TODO: what should happen if rank is not in the mesh?
         # see issue https://github.com/pytorch/tau/pull/492
         assert (
             my_coordinate is not None
         ), "Rank if not part of mesh"  # TODO: figure out behavior here
-
-        gather_dim_len = size[self.dim]
-        pad_idx = gather_dim_len % num_chunks
+        # check if it needs to pad input tensor before all_gather
+        pad_idx = size[self.dim] % num_chunks
         if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
             local_tensor = self._pad_tensor(local_tensor)
+        local_tensor = local_tensor.contiguous()
 
         result = mesh.all_gather(
             tensor=local_tensor,
