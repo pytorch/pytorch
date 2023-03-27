@@ -577,9 +577,9 @@ class FlatParamHandle:
         aligned_numel: int,
     ) -> Tensor:
         """
-        Flattens ``tensors`` into a single flattened tensor optionally
-        including padding if ``aligned_numel`` is greater than 0, where
-        ``aligned_numel`` gives the numel required to have address alignment.
+        Flattens ``tensors`` into a single flat tensor optionally including
+        padding if ``aligned_numel`` is greater than 0, where ``aligned_numel``
+        gives the numel required to have address alignment.
 
         NOTE: The padding alignment algorithm must be kept in sync with
         :meth:`_init_flat_param_metadata`. We separate the two methods because
@@ -754,9 +754,9 @@ class FlatParamHandle:
         # Indices of the original parameters in this rank's sharded flat
         # parameter
         shard_param_indices_range: List[int] = []  # elements will be consecutive
-        # [start, end] offsets giving this rank's part of the flat original
-        # parameter (which will be [0, `p.numel()`-1] for any parameter that is
-        # not sharded across ranks)
+        # [start, end] offsets giving this rank's part of the flattened
+        # original parameter (which will be [0, `p.numel()`-1] for any
+        # parameter that is not sharded across ranks)
         shard_param_offsets: List[Tuple[int, int]] = []
         for i, (param_start, param_end) in enumerate(flat_param_offsets):
             if start > param_end or end < param_start:
@@ -2086,7 +2086,8 @@ class FlatParamHandle:
             ) in self.flat_param._shared_param_infos
         ]
         for param_info in chain(self.flat_param._param_infos, shared_param_infos):
-            if param_info is not None:
+            is_padding = param_info is None
+            if not is_padding:
                 param_name, _, module_name = param_info
                 yield (param_name, module_name)
 
@@ -2110,8 +2111,9 @@ class FlatParamHandle:
         fqns_in_shard: List[str] = []
         start, end = self.flat_param._shard_param_indices  # type: ignore[attr-defined]
         for i in range(len(self.flat_param._fqns)):
+            is_padding = self.flat_param._fqns[i] is None
             if (
-                self.flat_param._fqns[i] is not None
+                not is_padding
                 and i >= start
                 and i <= end
                 and self.flat_param._shard_param_offsets  # type: ignore[attr-defined]
