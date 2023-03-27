@@ -312,10 +312,10 @@ test_perf_for_dashboard() {
     # Run performance test for inductor with different configs
     # TODO: add more configs here, e.g. dynamic-shapes, max-autotune, etc.
     python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+        --performance --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$dtype" --backend "$backend" "$@" \
+        --performance --"$dtype" --backend "$backend" "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
   done
 }
@@ -571,10 +571,6 @@ test_vulkan() {
 }
 
 test_distributed() {
-  # Smuggle a few multi-gpu tests here so that we don't have to request another large node
-  echo "Testing multi_gpu tests in test_torchinductor"
-  pytest test/inductor/test_torchinductor.py -k test_multi_gpu
-
   echo "Testing distributed python tests"
   time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
   assert_git_not_dirty

@@ -2491,7 +2491,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                                 aot_config.keep_inference_input_mutations,
                                 aot_config.dynamic_shapes,
                                 inference_compiler=None,
-                                aot_autograd_arg_pos_to_source=None,
                             )
                         )
                     else:
@@ -2769,8 +2768,7 @@ def aot_function(
             larger Aten ops into simpler or core Aten ops.
         inference_compiler (Optional[Callable]): A Python function that accepts an
             Fx graph with Aten ops and input args, and returns a Callable that
-            semantically is equivalent to the input Fx graph. inference_compiler is invoked
-            if no autograd is needed. Default: None
+            semantically is equivalent to the input Fx graph.  Default: None
             (when None, it defaults to the :attr:`fw_compiler`)
     Returns:
         Returns a ``Callable`` that retains the eager behavior of the original
@@ -2807,7 +2805,6 @@ def aot_function(
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic,
-        aot_autograd_arg_pos_to_source=None,
     )
     cached_res = None
 

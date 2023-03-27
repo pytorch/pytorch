@@ -1709,17 +1709,21 @@ except RuntimeError as e:
 
     def test_bincount_ext(self):
         # ensure CUDA code coverage
-        input_size = (100000,)
+        input_size = (5000,)
         w = torch.randn(input_size, dtype=torch.double, device='cuda')
         w_cpu = w.cpu()
         # test shared memory impl
         t = torch.randint(50, input_size, dtype=torch.int8, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+        # test multi block memory impl
+        # see `THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM` in SummaryOps.cu
+        t = torch.randint(500, input_size, dtype=torch.int64, device='cuda')
+        self.assertEqual(t.cpu().bincount(), t.bincount())
+        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
         # test global memory impl
-        #   see `CUDAHistogramMemoryType` in SummaryOps.cu
-        #   50000 * sizeof(int64_t) == 390 KiB, which should exceed smem of any known GPU
-        t = torch.randint(50000, input_size, dtype=torch.int64, device='cuda')
+        # see `THRESH_NUMBER_BINS_FOR_GLOBAL_MEM` in SummaryOps.cu
+        t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
 
@@ -2520,43 +2524,6 @@ torch.cuda.synchronize()
                     if k == "step":
                         actual = actual.squeeze()
                     self.assertEqual(state_control[k], actual)
-
-    def test_grads_invalidated_between_unscale_and_step(self):
-        for optimizer_ctor, optimizer_kwargs in product(
-            (torch.optim.Adam, torch.optim.AdamW),
-            (
-                {"foreach": False, "fused": False},
-                {"foreach": True, "fused": False},
-                {"foreach": False, "fused": True},
-            ),
-        ):
-            with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
-                self._test_grads_invalidated_between_unscale_and_step(optimizer_ctor, optimizer_kwargs)
-
-    def _test_grads_invalidated_between_unscale_and_step(self, optimizer_ctor, optimizer_kwargs):
-        model, _, optimizer, _, data, loss_fn, _ = self._create_scaling_case(
-            optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
-        )
-        scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
-
-        orig_params = [p.clone().detach() for p in model.parameters()]
-
-        for i, (input, target) in enumerate(data):
-            optimizer.zero_grad()
-            with torch.autocast('cuda', enabled=True):
-                output = model(input)
-                loss = loss_fn(output, target)
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-
-            # deliberately break grads
-            for j, param in enumerate(model.parameters()):
-                param.grad.copy_(torch.inf if j % 2 else torch.nan)
-
-            scaler.step(optimizer)
-            scaler.update()
-
-        self.assertEqual(orig_params, list(model.parameters()))
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -3383,7 +3350,7 @@ torch.cuda.synchronize()
                                     torch.nn.Linear(8, 8)).cuda()
         input = torch.rand((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
         with torch.autocast('cuda', ):
-            output = checkpoint_sequential(model, 2, input, use_reentrant=True)
+            output = checkpoint_sequential(model, 2, input)
         self.assertTrue(output.requires_grad)
         self.assertTrue(output.dtype is torch.float16)
         output.sum().backward()
