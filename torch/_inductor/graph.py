@@ -495,6 +495,7 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
+                            torch.ops.aten._int_mm.default,
                         ]
                         if torch._C.has_mkldnn:
                             need_fixed_layout += [
@@ -622,8 +623,6 @@ class GraphLowering(torch.fx.Interpreter):
         from .codecache import PyCodeCache
 
         code, linemap = self.codegen()
-        if config.debug:
-            print(code)
 
         mod = PyCodeCache.load(code, linemap=linemap)
         for name, value in self.constants.items():

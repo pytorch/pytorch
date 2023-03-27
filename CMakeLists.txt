@@ -713,9 +713,6 @@ cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
   "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
-if(USE_FLASH_ATTENTION)
-    ADD_DEFINITIONS(-DUSE_FLASH_ATTENTION)
-ENDIF()
 
 
 if(USE_FBGEMM)
