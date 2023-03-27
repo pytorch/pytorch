@@ -283,6 +283,78 @@ class TestQuantizePT2EX86Inductor(QuantizationTestCase):
                     inductor_res = run(*example_inputs)
                     self.assertEqual(ref_result, inductor_res, atol=5e-2, rtol=5e-2)
 
+    @skipIfNoX86
+    @skipIfNoONEDNN
+    @xfailIfPython311
+    def test_inductor_backend_config_conv_add_relu(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, inplace_add=False, inplace_relu=False) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False
+                )
+                self.conv2 = torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False)
+                self.conv3 = torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False)
+                self.relu = torch.nn.ReLU(inplace=inplace_relu)
+                self.inplace_add = inplace_add
+                self.conv4 = torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False)
+                self.conv5 = torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False)
+
+            def forward(self, x):
+                if not self.inplace_add:
+                    x1 = self.conv(x)
+                    relu_res = self.relu(self.conv2(x1) + self.conv3(x1))
+                    res = self.conv5(self.conv4(relu_res)) + relu_res
+                    return res
+                else:
+                    x1 = self.conv(x)
+                    accum = self.conv2(x1)
+                    accum += self.conv3(x1)
+                    relu_res = self.relu(accum)
+                    relu_res += self.conv5(self.conv4(relu_res))
+                    return relu_res
+
+        inplace_add_list = [True, False]
+        inplace_relu_list = [True, False]
+        with override_quantized_engine("x86"):
+            with torch.no_grad():
+                for inplace_add, inplace_relu in itertools.product(inplace_add_list, inplace_relu_list):
+                    m = Mod(inplace_add=inplace_add, inplace_relu=inplace_relu).eval()
+                    example_inputs = (torch.randn(2, 3, 16, 16),)
+                    # program capture
+                    # **TODO** Add testcase for tracing_mode="symbolic" after fix issue:
+                    # https://github.com/pytorch/pytorch/issues/96274
+                    export_module, guards = torchdynamo.export(
+                        m,
+                        *copy.deepcopy(example_inputs),
+                        aten_graph=True,
+                        tracing_mode="real",
+                    )
+
+                    qconfig = get_default_qconfig("x86")
+                    qconfig_mapping = QConfigMapping().set_global(qconfig)
+                    backend_config = get_x86_inductor_pt2e_backend_config()
+                    prepare_module = prepare_pt2e(export_module, qconfig_mapping, example_inputs, backend_config)
+                    prepare_module(*example_inputs)
+                    convert_module = convert_pt2e(prepare_module)
+                    convert_module(*example_inputs)
+                    # Step2: Start to lowering into Inductor
+                    run = compile_fx(convert_module, example_inputs)
+                    # Inductor first run
+                    inductor_res = run(*example_inputs)
+                    # Inductor second run
+                    inductor_res = run(*example_inputs)
+
+                    # Fake quant should only be inserted at start and end
+                    node_occurrence = {
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 6,
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 5,
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 5,
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 6,
+                    }
+                    self.checkGraphModuleNodes(convert_module,
+                                               expected_node_occurrence=node_occurrence)
+
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
