@@ -1812,6 +1812,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(opt_fn(x, 1) == 9)
         self.assertTrue(opt_fn(x, -2) == 9)
 
+    def test_stride_dim(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, dim):
+            return x.stride(dim=dim)
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.empty([4, 9, 8])
+        self.assertTrue(opt_fn(x, 0) == 72)
+        self.assertTrue(opt_fn(x, -2) == 8)
+
     def test_torch_seed(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
