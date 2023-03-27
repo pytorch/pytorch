@@ -2807,6 +2807,8 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.ReplicationPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReflectionPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReflectionPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.GRUCell,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.RNNCell,  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 

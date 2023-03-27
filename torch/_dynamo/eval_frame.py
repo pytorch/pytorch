@@ -12,6 +12,7 @@ import threading
 import traceback
 import types
 import warnings
+import weakref
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
@@ -568,7 +569,9 @@ class Constraint:
     w_tensor: weakref.ReferenceType[torch.Tensor]
     t_id: int
     dim: int
-    constraint_range: Optional[StrictMinMaxConstraint]
+    constraint_range: Optional[
+        torch.fx.experimental.symbolic_shapes.StrictMinMaxConstraint
+    ]
 
 
 def export(
