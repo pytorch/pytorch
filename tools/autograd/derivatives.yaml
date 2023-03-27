@@ -621,7 +621,7 @@
   result: auto_element_wise
 
 - name: expm1(Tensor self) -> Tensor
-  self: grad * (result + 1)
+  self: grad * (result.conj() + 1)
   result: auto_element_wise
 
 # TODO: this derivative is not SymInt safe, need sum_to support
@@ -1493,8 +1493,12 @@
   result: auto_linear
 
 - name: split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
+      result: auto_linear
+    AutogradNestedTensor:
+      self: _nested_split_with_sizes_backward(grads, split_sizes, dim, self)
 
 - name: unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
