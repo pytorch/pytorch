@@ -4,7 +4,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include <c10/util/ssize.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
@@ -505,8 +504,7 @@ size_t determineUsageIdx(Value* value, Node* user) {
   const auto idx =
       std::find(user->inputs().begin(), user->inputs().end(), value) -
       user->inputs().begin();
-  using c10::ssize;
-  TORCH_CHECK(idx != ssize(user->inputs()));
+  TORCH_CHECK(idx != static_cast<decltype(idx)>(user->inputs().size()));
   return idx;
 }
 

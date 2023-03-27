@@ -535,9 +535,6 @@ class Vectorized<ComplexFlt> {
   Vectorized<ComplexFlt> exp2() const {
     return map(exp2_impl);
   }
-  Vectorized<ComplexFlt> expm1() const {
-    return map(std::expm1);
-  }
 
   Vectorized<ComplexFlt> eq(const Vectorized<ComplexFlt>& other) const {
     auto ret = (*this == other);
@@ -575,6 +572,10 @@ class Vectorized<ComplexFlt> {
     TORCH_CHECK(false,"not supported for complex numbers");
   }
   Vectorized<ComplexFlt> erfc() const {
+    TORCH_CHECK(false,"not supported for complex numbers");
+  }
+
+  Vectorized<ComplexFlt> expm1() const {
     TORCH_CHECK(false,"not supported for complex numbers");
   }
 

@@ -13,7 +13,8 @@
 #include <ATen/ops/where.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 DEFINE_DISPATCH(spdiags_kernel_stub);
 
@@ -91,4 +92,5 @@ Tensor spdiags(
   return result_coo;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

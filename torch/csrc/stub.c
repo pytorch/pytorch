@@ -1,5 +1,8 @@
 #include <Python.h>
 
+#ifdef _WIN32
+__declspec(dllimport)
+#endif
 extern PyObject* initModule(void);
 
 #ifndef _WIN32
