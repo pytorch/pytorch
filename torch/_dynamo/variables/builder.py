@@ -807,7 +807,7 @@ class VariableBuilder:
                 # integers, but we need a way to generate symbols that can be
                 # negative (and which we make no assumptions about their
                 # range)
-                if value < 0 or torch._dynamo.config.specialize_int:
+                if torch._dynamo.config.specialize_int:
                     dynamic_dim = DimDynamic.STATIC
                 else:
                     # TODO: This should be dynamic, as we in general do not

@@ -1567,7 +1567,9 @@ class ShapeEnv:
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
-        assert val >= 0
+        if val < 0:
+            from torch._dynamo.source import NegateSource
+            return -self.create_symbol(-val, NegateSource(source), dynamic_dim, constraint_dim)
 
         if val in (0, 1) and self.specialize_zero_one:
             r = self.val_to_var[val]
@@ -1748,6 +1750,8 @@ class ShapeEnv:
                     symbol_to_source[s].append(source)
                     if constraint is not None:
                         symbol_to_constraints[s].append(constraint)
+                elif isinstance(-s, sympy.Symbol):
+                    symbol_to_source[-s].append(NegateSource(source))
                 else:
                     if constraint is not None:
                         # TODO: Maybe non-strict constraint shouldn't error
