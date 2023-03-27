@@ -61,10 +61,6 @@ void unsupportedAllclose(const c10::OperatorHandle& op, torch::jit::Stack* stack
         "support over at github.com/pytorch/functorch/issues/275");
 }
 
-void unsupportedData(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-    TORCH_CHECK(false, "mutating directly with `.data` under vmap transform is not allowed.");
-}
-
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
     UNSUPPORTED_DYNAMIC(nonzero);
     UNSUPPORTED_DYNAMIC(where);
@@ -76,7 +72,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
     m.impl("item", torch::CppFunction::makeFromBoxedFunction<&unsupportedItem>());
     m.impl("is_nonzero", torch::CppFunction::makeFromBoxedFunction<&unsupportedIsNonzero>());
     m.impl("allclose", torch::CppFunction::makeFromBoxedFunction<&unsupportedAllclose>());
-    m.impl("_has_compatible_shallow_copy_type", torch::CppFunction::makeFromBoxedFunction<&unsupportedData>());
 }
 
 }}
