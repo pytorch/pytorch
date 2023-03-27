@@ -41,6 +41,8 @@ class C10_API TaskThreadPoolBase {
     auto num_threads = std::thread::hardware_concurrency();
 #if defined(_M_X64) || defined(__x86_64__)
     num_threads /= 2;
+#elif defined(FBCODE_CAFFE2) && defined(__aarch64__) && !defined(C10_MOBILE)
+    num_threads = 1;
 #endif
     return num_threads;
   }
