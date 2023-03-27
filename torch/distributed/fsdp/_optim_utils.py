@@ -1732,7 +1732,7 @@ def _shard_orig_param_state(
     param_idx = fsdp_param_info.param_indices[fqn]
 
     optim_state = _gather_state_dict(optim_state, fsdp_state.process_group)
-    start, end = flat_param._shard_indices  # type: ignore[attr-defined]
+    start, end = flat_param._shard_param_indices  # type: ignore[attr-defined]
     if not (start <= param_idx <= end and flat_param._shard_param_offsets):  # type: ignore[attr-defined]
         return {}
     param_start, param_end = flat_param._shard_param_offsets[param_idx - start]  # type: ignore[attr-defined]
