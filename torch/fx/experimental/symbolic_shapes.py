@@ -1894,7 +1894,7 @@ class ShapeEnv:
                     exprs.append(" <= ".join(bounds))
 
         if constraint_violations:
-            msgs = [f"{i}. {msg()}" for i, msg in enumerate(constraint_violations)]
+            msgs = [f"{i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
             msgs = "   \n".join(msgs)
             raise RuntimeError(f"Constraints violated!\n{msgs}")
         return exprs

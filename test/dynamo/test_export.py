@@ -2278,8 +2278,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.mark_dynamic(y, 0)
         with self.assertRaisesRegex(
-            AssertionError,
-            "Illegal to mix mark_dynamic on tensors with export constraints",
+            RuntimeError,
+            "Constraints violated!",
         ):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
