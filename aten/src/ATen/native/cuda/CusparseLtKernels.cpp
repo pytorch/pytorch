@@ -39,13 +39,14 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   constexpr static auto type         = CUDA_R_16F;
   constexpr static auto compute_type = CUSPARSE_COMPUTE_16F;
 
+  // this tensor is magic, will segfault when removed ? 
   at::Tensor weight_compressed;
   cusparseLtHandle_t handle;
   cusparseLtMatDescriptor_t weight_descriptor, activation_descriptor, matC;
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
-  c10::Half* dBias; 
+  void* dBias; 
   float alpha{1.0};
   float beta{0.0};
   unsigned alignment{16};
@@ -69,7 +70,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   CusparseLtLinear(const at::Tensor& weight_compressed,
                    const at::Tensor& bias)
   : weight_compressed{weight_compressed},
-    dBias{bias.data_ptr<c10::Half>()},
+    dBias{bias.data_ptr()},
     pruning_algo{CUSPARSELT_PRUNE_SPMMA_STRIP}
   {
     // CUDA VERSION CHECK
@@ -138,8 +139,8 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
       &weight_descriptor, 
       true, 
       opA,
-      weight.data_ptr<c10::Half>(),
-      weight.data_ptr<c10::Half>(),
+      weight.data_ptr(),
+      weight.data_ptr(),
       pruning_algo,
       stream) )
   CHECK_CUSPARSE(
@@ -148,7 +149,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
       &weight_descriptor,
       true,
       opA,
-      weight.data_ptr<c10::Half>(),
+      weight.data_ptr(),
       d_valid,
       stream) )
 
@@ -190,8 +191,8 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
       &weight_descriptor,
       true,
       opA,
-      weight.data_ptr<c10::Half>(),
-      weight_compressed.data_ptr<c10::Half>(),
+      weight.data_ptr(),
+      weight_compressed.data_ptr(),
       dA_compressedBuffer,
       stream) )
 
@@ -352,11 +353,11 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
         &handle,
         &plan,
         &alpha,
-        weight_compressed.data_ptr<c10::Half>(),
-        input.data_ptr<c10::Half>(),
+        weight_compressed.data_ptr(),
+        input.data_ptr(),
         &beta,
-        res.data_ptr<c10::Half>(),
-        res.data_ptr<c10::Half>(),
+        res.data_ptr(),
+        res.data_ptr(),
         nullptr,
         streams,
         num_streams) )
@@ -374,11 +375,11 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       &handle,
       &plan,
       &alpha,
-      weight_compressed.data_ptr<c10::Half>(),
-      input.data_ptr<c10::Half>(),
+      weight_compressed.data_ptr(),
+      input.data_ptr(),
       &beta,
-      res.data_ptr<c10::Half>(),
-      res.data_ptr<c10::Half>(),
+      res.data_ptr(),
+      res.data_ptr(),
       d_workspace,
       streams,
       num_streams) )

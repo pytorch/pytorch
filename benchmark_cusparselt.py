@@ -259,11 +259,9 @@ if __name__ == "__main__":
             "nvidia-fixed-mn",
             "distilbert-shapes",
             "alg-id-sweep",
-            "compare-wrong-alg-id",
             "int8-fp16-linear",
             "memory"
         ],
-        metavar="",
     )
     args = parser.parse_args()
 
@@ -325,7 +323,7 @@ if __name__ == "__main__":
         shapes = [
             # distilbert shapes
             (768, 3072, 3072),
-            # (3072, 768, 3072),
+            (3072, 768, 3072),
             # jiecao shapes
             # (1024, 1536, 2048),
             # (1024, 9408, 2048),
@@ -367,17 +365,17 @@ if __name__ == "__main__":
     elif args.mode == "alg-id-sweep":
         dim_range = list(range(96, 3072 + 1, 96))
         batch_sizes = list(range(4, 128 + 1, 4))
-        results = (
+        results = [
             compare_linear(768, 3072, n, batch_size)
             for n, batch_size in tqdm(
                 product(dim_range, batch_sizes), total=len(dim_range) * len(batch_sizes)
             )
-        )
+        ]
 
-        results += (
+        results += [
             compare_linear(768, 3072, 96, batch_size, init_batch_size=init_batch_size)
             for batch_size, init_batch_size in tqdm(product(batch_sizes, batch_sizes), total=len(batch_sizes)**2)
-        )
+        ]
 
     elif args.mode == "memory":
         results = [compare_memory(4096, 4096, 4096, 1)]
