@@ -1693,6 +1693,9 @@ class Layout(IRNode):
             and self.offset == other.offset
         )
 
+    def storage_size(self) -> sympy.Expr:
+        return sympy_dot(self.size, self.stride) + self.offset
+
 
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
@@ -3560,6 +3563,10 @@ class MutableBox(IRNode):
         if callable(fn):
             return fn
         raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
+
+    @property
+    def layout(self):
+        return self.data.layout
 
     def __str__(self):
         if isinstance(self.data, MutableBox):

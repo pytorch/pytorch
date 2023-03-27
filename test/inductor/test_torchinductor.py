@@ -32,7 +32,7 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import make_tensor
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -1476,8 +1476,10 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    @largeTensorTest("6GB")
     def test_large_tensor_reduction(self):
+        if not _has_sufficient_memory(self.device, 6 * 1024**3): # 6 GiB
+            raise unittest.SkipTest("insufficient memory")
+
         # Test 64-bit indexing works correctly
         def fn(a):
             return torch.max(a)
