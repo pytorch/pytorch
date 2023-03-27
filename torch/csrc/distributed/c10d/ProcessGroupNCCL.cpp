@@ -770,7 +770,8 @@ void ProcessGroupNCCL::runHealthCheck() {
       rank_);
 }
 
-void ProcessGroupNCCL::setSequenceNumberForGroup() {} // NCCL just starts sequence numbers at 0.
+void ProcessGroupNCCL::setSequenceNumberForGroup() {
+} // NCCL just starts sequence numbers at 0.
 
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seq_;
@@ -833,8 +834,10 @@ void ProcessGroupNCCL::abortTimedOutCollectives(
       if (desyncDebug_) {
         try {
             exceptionMsg += retrieveDesyncReport(store_, "NCCL", rank_, size_);
+        }
         catch (const std::exception &e) {
-            LOG(ERROR) << "Failed to retrieve NCCL desync report. Please report an issue to PyTorch Distributed.";
+            LOG(ERROR) << "Failed to retrieve NCCL desync report with error: "
+                       << e.what() << " Please report an issue to PyTorch.";
         }
       }
       LOG(ERROR) << exceptionMsg;
