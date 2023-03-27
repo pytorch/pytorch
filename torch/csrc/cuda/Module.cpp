@@ -1185,7 +1185,7 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   bindGetDeviceProperties(m);
 
   // initialize kineto to fix #75504
-	torch::profiler::impl::kineto::initializeKineto();
+  torch::profiler::impl::kineto::initializeKineto();
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
