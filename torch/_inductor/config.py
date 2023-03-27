@@ -102,7 +102,8 @@ def is_fbcode():
 
 
 # warnings intended for PyTorch developers, disable for point releases
-developer_warnings = is_fbcode() or "+" in torch.__version__
+is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
+developer_warnings = is_fbcode() or is_nightly_or_source
 
 
 def decide_compile_threads():
@@ -194,7 +195,11 @@ class triton:
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = False
 
-    debug_cudagraph_trees = True
+    # assertions not on the fast path, steady state
+    fast_cudagraph_asserts = True
+
+    # assertions on the fast path
+    slow_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
