@@ -63,8 +63,8 @@ class _ConsolidatedOptimState:
 
     Attributes:
         tensor_state (Dict[str, torch.Tensor]): Mapping from positive-dimension
-            tensor state name to the unsharded flattened tensor representing
-            the state.
+            tensor state name to the unsharded flat tensor representing the
+            state.
         zero_dim_tensor_state (Dict[str, torch.Tensor]): Mapping from zero-
             dimension tensor state name to its value.
         non_tensor_state (Dict[str, Any]): Mapping from non-tensor state
@@ -119,16 +119,16 @@ def _unflatten_optim_state(
     Args:
         fsdp_param_info (FSDPParamInfo): The fsdp state and the target flatten
             parameter.
-        flat_param_state (Dict[str, Any]): Entry for the flattened parameter
-            in the "state" part of the optimizer state dict.
+        flat_param_state (Dict[str, Any]): Entry for the flat parameter in the
+            "state" part of the optimizer state dict.
         to_save (bool): Whether to save the state on this rank.
 
     Returns:
         List[Dict[str, Any]]: A :class:`list` holding the entries in the
         "state" part of the optimizer state dict corresponding to the
-        unflattened parameters comprising the flattened parameter if on the
-        target rank or an empty :class:`list` otherwise. The final optimizer
-        state dict will need to map these entries using the proper unflattened
+        unflattened parameters comprising the flat parameter if on the target
+        rank or an empty :class:`list` otherwise. The final optimizer state
+        dict will need to map these entries using the proper unflattened
         parameter IDs.
     """
     assert (
@@ -163,8 +163,8 @@ def _communicate_optim_state(
     flat_param_state: Dict[str, Any],
 ) -> _ConsolidatedOptimState:
     """
-    Communicates the optimizer state for a flattened parameter across ranks.
-    All ranks will hold the entire non-sharded optimizer state on GPU.
+    Communicates the optimizer state for a flat parameter across ranks. All
+    ranks will hold the entire non-sharded optimizer state on GPU.
 
     If ``N`` is the number of tensor optimizer states in the optimizer state
     dict, then the communication complexity is 0 if ``N = 0`` and ``N + 1``
@@ -174,11 +174,11 @@ def _communicate_optim_state(
         fsdp_param_info (FSDPParamInfo): The fsdp state and the target flatten
             parameter.
         flat_param_state (Dict[str, Any]): The entry in the "state" part of the
-            optimizer state dict corresponding to the flattened parameter.
+            optimizer state dict corresponding to the flat parameter.
 
     Returns:
         ConsolidatedOptimState: Consolidated optimizer state for the target
-            flattened parameter.
+        flat parameter.
     """
     fsdp_state = fsdp_param_info.state
     flat_param = fsdp_param_info.flat_param
@@ -204,7 +204,7 @@ def _communicate_optim_state(
             if not value.is_cuda:
                 value = value.to(fsdp_state.compute_device)
             # Assume that positive-dimension tensor optimizer state
-            # has the same shape as the sharded flattened parameter
+            # has the same shape as the sharded flat parameter
             buffer_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
             tensor_buffer = value.new_zeros(*buffer_size)
             dist.all_gather_into_tensor(
@@ -232,7 +232,7 @@ def _unflatten_communicated_optim_state(
 ) -> List[Dict[str, Any]]:
     """
     Unflattens the communicated optimizer state (given by ``tensor_state``,
-    ``non_tensor_state``, and ``zero_dim_tensor_state``) for a single flattened
+    ``non_tensor_state``, and ``zero_dim_tensor_state``) for a single flat
     parameter. This should only be called on the target rank.
 
     Args:
@@ -243,7 +243,7 @@ def _unflatten_communicated_optim_state(
     Returns:
         List[Dict[str, Any]]: A :class:`list` holding the entries in the
         "state" part of the optimizer state dict corresponding to the
-        unflattened parameters comprising the flattened parameter. The final
+        unflattened parameters comprising the flat parameter. The final
         optimizer state dict will need to map these entries using the proper
         unflattened parameter IDs.
     """
@@ -406,32 +406,31 @@ def _flatten_optim_state(
 ) -> Dict[str, Any]:
     """
     Flattens the optimizer state in ``full_optim_state_dict`` for a single
-    flattened parameter in ``fsdp_param_info`` corresponding to the unflattened
+    flat parameter in ``fsdp_param_info`` corresponding to the unflattened
     parameter names in ``unflat_param_names``.
 
     Args:
         unflat_osd_state (Dict[str, Dict[str, Any]]): The "state" part of the
             optimizer state dict corresponding to the unflattened parameters.
         unflat_param_names (List[str]): A :class:`list` of unflattened
-            parameter names corresponding to the flattened parameter
-            ``flat_param``.
+            parameter names corresponding to the flat parameter ``flat_param``.
         fsdp_param_info (FSDPParamInfo): The fsdp state and the target flatten
             parameter.
         shard_state (bool): Whether to shard flattened positive-dimension
-            tensor state; if ``False``, then the full flattened tensor is
-            kept in the returned :class:`dict.
+            tensor state; if ``False``, then the full flat tensor is kept in
+            the returned :class:`dict.
 
     Returns:
         Dict[str, Any]: A :class:`dict` mapping state names to their values for
-        a particular flattened parameter. The sharded optimizer state dict's
-        "state" part will map a key to this returned value.
+        a particular flat parameter. The sharded optimizer state dict's "state"
+        part will map a key to this returned value.
     """
     fsdp_state = fsdp_param_info.state
     flat_param = fsdp_param_info.flat_param
     num_unflat_params = len(unflat_param_names)
     assert num_unflat_params > 0, (
         "Expects at least one unflattened parameter corresponding to the "
-        "flattened parameter"
+        "flat parameter"
     )
     unflat_param_shapes = flat_param._shapes
     num_unflat_param_shapes = len(unflat_param_shapes)
@@ -444,8 +443,8 @@ def _flatten_optim_state(
         bool(unflat_param_name in unflat_osd_state)
         for unflat_param_name in unflat_param_names
     ]
-    # If none of the unflattened parameters comprising this flattened parameter
-    # have any state, then we do not want an entry in the optimizer state dict
+    # If none of the unflattened parameters comprising this flat parameter have
+    # any state, then we do not want an entry in the optimizer state dict
     if not any(has_state):
         return {}  # no need to flatten any state
     # There may still be some unflattened parameters with state and some
@@ -540,7 +539,7 @@ def _flatten_tensor_optim_state(
 ) -> torch.Tensor:
     """
     Flattens the positive-dimension tensor optimizer state given by the values
-    ``tensors`` for the state ``state_name`` for a single flattened parameter
+    ``tensors`` for the state ``state_name`` for a single flat parameter
     ``flat_param`` corresponding to the unflattened parameter names
     ``unflat_param_names`` and unflatted parameter shapes
     ``unflat_param_shapes``. This flattens each unflattened parameter's tensor
@@ -556,15 +555,15 @@ def _flatten_tensor_optim_state(
         state_name (str): Optimizer state name.
         pos_dim_tensors (List[torch.Tensor]): Positive-dimension tensor
             optimizer state values for the unflattened parameters corresponding
-            to the single flattened parameter.
+            to the single flat parameter.
         unflat_param_names (List[str]): A :class:`list` of unflattened
-            parameter names corresponding to the single flattened parameter.
+            parameter names corresponding to the single flat parameter.
         unflat_param_shapes (List[torch.Size]): Unflattened parameter shapes
-            corresponding to the single flattened parameter.
-        flat_param (FlatParameter): The flattened parameter.
+            corresponding to the single flat parameter.
+        flat_param (FlatParameter): The flat parameter.
 
     Returns:
-        torch.Tensor: A flattened tensor containing the optimizer state
+        torch.Tensor: A flat tensor containing the optimizer state
         corresponding to ``state_name`` constructed by concatenating the
         unflattened parameter tensor states in ``pos_dim_tensors`` (using zero
         tensors for any unflattened parameters without the state).
@@ -574,7 +573,7 @@ def _flatten_tensor_optim_state(
     dtypes = {t.dtype for t in non_none_tensors}
     if len(dtypes) != 1:
         raise ValueError(
-            "All unflattened parameters comprising a single flattened "
+            "All unflattened parameters comprising a single flat "
             "parameter must have positive-dimension tensor state with the "
             f"same dtype but got dtypes {dtypes} for state {state_name} and "
             f"unflattened parameter names {unflat_param_names}"
@@ -590,8 +589,8 @@ def _flatten_tensor_optim_state(
                 f"parameter: {tensor.shape} {shape}"
             )
     # Flatten the tensor states: we do not need to add any padding since the
-    # flattened optimizer state tensor sharded via `_get_shard()`, which pads
-    # the shard as needed (just like for the flattened parameter)
+    # flat optimizer state tensor sharded via `_get_shard()`, which pads the
+    # shard as needed (just like for the flat parameter)
     cpu_device = torch.device("cpu")
     tensors = [
         torch.flatten(state_value.to(cpu_device))
@@ -609,7 +608,7 @@ def _flatten_tensor_optim_state(
     flat_param_shape = flat_param._unpadded_unsharded_size  # type: ignore[attr-defined]
     assert flat_tensor.shape == flat_param_shape, (
         f"tensor optim state: {flat_tensor.shape} "
-        f"flattened parameter: {flat_param_shape}"
+        f"flat parameter: {flat_param_shape}"
     )
     return flat_tensor
 
@@ -621,13 +620,13 @@ def _flatten_zero_dim_tensor_optim_state(
 ) -> torch.Tensor:
     """
     Flattens the zero-dimension tensor optimizer state given by the values
-    ``zero_dim_tensors`` for the state ``state_name`` for a single flattened
+    ``zero_dim_tensors`` for the state ``state_name`` for a single flat
     parameter corresponding to the unflattened parameter names
     ``unflat_param_names`` by enforcing that all tensors are the same and using
     that common value.
 
     NOTE: The requirement that the tensors are the same across all unflattened
-    parameters comprising the flattened parameter is needed to maintain the
+    parameters comprising the flat parameter is needed to maintain the
     invariant that FSDP performs the same computation as its non-sharded
     equivalent. This means that none of the unflattened parameters can be
     missing this state since imposing a value may differ from having no value.
@@ -638,9 +637,9 @@ def _flatten_zero_dim_tensor_optim_state(
         state_name (str): Optimizer state name.
         zero_dim_tensors (List[torch.Tensor]): Zero-dimension optimizer state
             for the unflattened parameters corresponding to the single
-            flattened parameter.
+            flat parameter.
         unflat_param_names (List[str]): A :class:`list` of unflattened
-            parameter names corresponding to the single flattened parameter.
+            parameter names corresponding to the single flat parameter.
 
     Returns:
         torch.Tensor: A zero-dimensional tensor giving the value of the state
@@ -657,7 +656,7 @@ def _flatten_zero_dim_tensor_optim_state(
         or len(dtypes) != 1
     ):
         raise ValueError(
-            "All unflattened parameters comprising a single flattened "
+            "All unflattened parameters comprising a single flat "
             "parameter must have scalar state with the same value and dtype "
             f"but got values {values_set} and dtypes {dtypes} for state "
             f"{state_name} and unflattened parameter names "
@@ -675,7 +674,7 @@ def _flatten_non_tensor_optim_state(
 ) -> Any:
     """
     Flattens the non-tensor optimizer state given by the values ``non_tensors``
-    for the state ``state_name`` for a single flattened parameter corresponding
+    for the state ``state_name`` for a single flat parameter corresponding
     to the unflattened parameter names ``unflat_param_names`` by enforcing that
     all values are the same and using that common value.
 
@@ -684,9 +683,9 @@ def _flatten_non_tensor_optim_state(
     Args:
         state_name (str): Optimizer state name.
         non_tensors (List[Any]): Non-tensor optimizer state for the unflattened
-            parameters corresponding to the single flattened parameter.
+            parameters corresponding to the single flat parameter.
         unflat_param_names (List[str]): A :class:`list` of unflattened
-            parameter names corresponding to the single flattened parameter.
+            parameter names corresponding to the single flat parameter.
 
     Returns:
         Any: A non-tensor giving the value of the state ``state_name`` for all
@@ -698,7 +697,7 @@ def _flatten_non_tensor_optim_state(
     non_tensor_set = set(non_tensors)
     if len(non_none_non_tensors) != len(non_tensors) or len(non_tensor_set) != 1:
         raise ValueError(
-            "All unflattened parameters comprising a single flattened "
+            "All unflattened parameters comprising a single flat "
             "parameter must have scalar state with the same value and dtype "
             f"but got values {non_tensor_set} for state {state_name} and  "
             f"unflattened parameter names {unflat_param_names}"
@@ -953,10 +952,10 @@ def _rekey_sharded_optim_state_dict(
     is_named_optimizer: bool = False,
 ) -> Dict[str, Any]:
     """
-    Rekeys the optimizer state dict from unflattened parameter names to
-    flattened parameter IDs according to the calling rank's ``optim``, which
-    may be different across ranks. In particular, the unflattened parameter
-    names are represented as :class:`_OptimStateKey` s.
+    Rekeys the optimizer state dict from unflattened parameter names to flat
+    parameter IDs according to the calling rank's ``optim``, which may be
+    different across ranks. In particular, the unflattened parameter names are
+    represented as :class:`_OptimStateKey` s.
     """
     param_to_fqns = _get_param_to_fqns(model)
     flat_param_to_fqn = _get_flat_param_to_fqn(model)
@@ -1359,8 +1358,8 @@ def _optim_state_dict(
     Consolidates the optimizer state and returns it as a :class:`dict`
     following the convention of :meth:`torch.optim.Optimizer.state_dict`,
     i.e. with keys ``"state"`` and ``"param_groups"``.
-    The flattened parameters in ``FSDP`` modules contained in ``model``
-    are mapped back to their unflattened parameters.
+    The flat parameters in ``FSDP`` modules contained in ``model`` are mapped
+    back to their unflattened parameters.
 
     Parameter keys are not well-defined. For a regular optimizer, the optimizer
     state_dict contains a mapping from parameter IDs to parameter states.
@@ -1432,8 +1431,8 @@ def _optim_state_dict(
         merge_keys=use_orig_params,
     )
 
-    # Iterate in rank 0's flattened parameter ID order to ensure aligned
-    # all-gathers across ranks
+    # Iterate in rank 0's flat parameter ID order to ensure aligned all-gathers
+    # across ranks
     for optim_state_key in all_optim_state_keys:
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
             optim_state_key, None
