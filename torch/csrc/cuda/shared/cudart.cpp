@@ -97,10 +97,13 @@ void initCudartBindings(PyObject* module) {
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12000
   // cudaProfilerInitialize is no longer needed after CUDA 12:
   // https://forums.developer.nvidia.com/t/cudaprofilerinitialize-is-deprecated-alternative/200776/3
+C10_CLANG_DIAGNOSTIC_PUSH()
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-declarations")
   cudart.def(
       "cuda"
       "ProfilerInitialize",
       cudaProfilerInitialize);
+C10_CLANG_DIAGNOSTIC_POP()
 #endif
   cudart.def(
       "cuda"
