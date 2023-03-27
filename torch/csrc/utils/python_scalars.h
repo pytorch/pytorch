@@ -110,6 +110,9 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
     case at::kBFloat16:
       return PyFloat_FromDouble(
           at::convert<double, at::BFloat16>(*(at::BFloat16*)data));
+    case at::kFloat8_E4M3FN:
+      return PyFloat_FromDouble(
+          at::convert<double, at::float8_e4m3fn>(*(at::float8_e4m3fn*)data));
     default:
       throw std::runtime_error("invalid type");
   }

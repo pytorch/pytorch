@@ -87,6 +87,9 @@ class C10_API Scalar {
 
   // TODO: Support ComplexHalf accessor
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ACCESSOR)
+  // TODO(before land) delete this, keeping around until PR is ready for review
+  // to mark the code spot in case we split float8 out from SCALAR_TYPES
+  // AT_FORALL_FLOAT8_TYPES(DEFINE_ACCESSOR)
 
 #undef DEFINE_ACCESSOR
 

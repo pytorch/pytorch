@@ -19,6 +19,9 @@ namespace at {
 
  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CAST)
  AT_FORALL_QINT_TYPES(DEFINE_CAST)
+ // TODO(before land) delete this, keeping around until PR is ready for review
+ // to mark the code spot in case we split float8 out from SCALAR_TYPES
+ // AT_FORALL_FLOAT8_TYPES(DEFINE_CAST)
  #undef DEFINE_CAST
 
  #define DEFINE_ITEM(T, name)      \
@@ -28,6 +31,9 @@ namespace at {
    }
 
  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ITEM)
+ // TODO(before land) delete this, keeping around until PR is ready for review
+ // to mark the code spot in case we split float8 out from SCALAR_TYPES
+ // AT_FORALL_FLOAT8_TYPES(DEFINE_ITEM)
  #undef DEFINE_ITEM
 
  } //namespace at

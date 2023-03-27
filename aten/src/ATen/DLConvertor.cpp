@@ -67,6 +67,9 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::Bits16:
       TORCH_CHECK(false, "Bit types are not supported by dlpack");
       break;
+    case ScalarType::Float8_E4M3FN:
+      TORCH_CHECK(false, "Float8 types are not supported by dlpack");
+      break;
     case ScalarType::Undefined:
       TORCH_CHECK(false, "Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:

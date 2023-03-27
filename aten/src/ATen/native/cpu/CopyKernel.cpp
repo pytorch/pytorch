@@ -237,9 +237,10 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
     sizeof(BFloat16) == strides_out[0] && (sizeof(float) == strides_in[0] || strides_in[0] == 0)))) {
     float_bfloat16_copy_kernel(iter, requires_neg);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
+    // TODO(before land): also add float8_e5m2
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, ScalarType::Float8_E4M3FN, dtype, "copy_", [&] {
       using dest_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, ScalarType::Float8_E4M3FN, iter.dtype(1), "copy_", [&] {
         if (iter.has_contiguous_first_dim()) {
           TORCH_INTERNAL_ASSERT(iter.ninputs() == 1);
           TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);

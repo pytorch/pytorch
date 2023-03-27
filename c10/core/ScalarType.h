@@ -5,6 +5,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/bits.h>
 #include <c10/util/complex.h>
+#include <c10/util/float8.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint2x4.h>
@@ -49,11 +50,17 @@ namespace c10 {
   _(c10::bits2x4, Bits2x4) /* 19 */                      \
   _(c10::bits4x2, Bits4x2) /* 20 */                      \
   _(c10::bits8, Bits8) /* 21 */                          \
-  _(c10::bits16, Bits16) /* 22 */
+  _(c10::bits16, Bits16) /* 22 */                        \
+  _(c10::float8_e4m3fn, Float8_E4M3FN) /* 23 */
+
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
 // doesn't work for all the conversions you need...
+// TODO(before land): figure out strategy on either adding
+// float8 here and in other SCALAR_TYPES macros without breaking
+// things, or renaming SCALAR_TYPES to be more consistent with
+// today's state of the codebase
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
   _(uint8_t, Byte)                                                 \
   _(int8_t, Char)                                                  \
@@ -81,7 +88,8 @@ namespace c10 {
   _(c10::complex<float>, ComplexFloat)         \
   _(c10::complex<double>, ComplexDouble)       \
   _(bool, Bool)                                \
-  _(at::BFloat16, BFloat16)
+  _(at::BFloat16, BFloat16) \
+  _(c10::float8_e4m3fn, Float8_E4M3FN)
 
 enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1, n) n,
@@ -211,6 +219,9 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
   _(c10::complex<float>, ComplexFloat) \
   _(c10::complex<double>, ComplexDouble)
 
+#define AT_FORALL_FLOAT8_TYPES(_)      \
+  _(c10::float8_e4m3fn, Float8_E4M3FN)
+
 #define DEFINE_CONSTANT(_, name) \
   constexpr ScalarType k##name = ScalarType::name;
 
@@ -257,6 +268,12 @@ static inline bool isIntegralType(ScalarType t) {
   return isIntegralType(t, /*includeBool=*/false);
 }
 
+static inline bool isFloat8Type(ScalarType t) {
+  return t == ScalarType::Float8_E4M3FN;
+}
+
+// Note: this does not include the Float8 types because op support is
+// non-existent.
 static inline bool isFloatingType(ScalarType t) {
   return (
       t == ScalarType::Double || t == ScalarType::Float ||
@@ -325,6 +342,8 @@ static inline bool isSignedType(ScalarType t) {
     case ScalarType::Bits8:
     case ScalarType::Bits16:
       TORCH_CHECK(false, "Bits types are undefined");
+    case ScalarType::Float8_E4M3FN:
+      TORCH_CHECK(false, "Signedness for Float8 types is not implemented");
     case ScalarType::ComplexHalf:
     case ScalarType::ComplexFloat:
     case ScalarType::ComplexDouble:
@@ -442,6 +461,10 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   if (isBitsType(a) && a == b) {
     return a;
   } else if (isBitsType(a) || isBitsType(b)) {
+    return ScalarType::Undefined;
+  }
+
+  if (isFloat8Type(a) || isFloat8Type(b)) {
     return ScalarType::Undefined;
   }
 
