@@ -815,9 +815,7 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.ScalarType)),
                 default="None",
                 default_init=(
-                    "self.scalar_type()"
-                    if is_like_or_new_function
-                    else topt_default_init("dtype")
+                    None if is_like_or_new_function else topt_default_init("dtype")
                 ),
             )
         )
@@ -827,9 +825,7 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.Layout)),
                 default="None",
                 default_init=(
-                    "self.layout()"
-                    if is_like_or_new_function
-                    else topt_default_init("layout")
+                    None if is_like_or_new_function else topt_default_init("layout")
                 ),
             )
         )
@@ -839,7 +835,7 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.Device)),
                 default="None",
                 default_init=(
-                    "self.device()"
+                    None
                     if is_like_or_new_function
                     else (
                         topt_default_init("device")
