@@ -120,6 +120,8 @@ def decode_dtype(dtype: int):
 def is_integer_type(x):
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    elif isinstance(x, sympy.Symbol):
+        return x.is_integer is True
     else:
         return isinstance(x, int)
 
@@ -1058,9 +1060,9 @@ def native_dropout(x, p, train):
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
 def bernoulli_(x, *args):
-    assert (
-        config.fallback_random
-    ), "this should be handled in decomps unless config.fallback_random"
+    assert config.fallback_random or x.get_device() == torch.device(
+        "cpu"
+    ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
     V.graph.realize_users_of(x.get_name())
     ir.InplaceBernoulliFallback(x, *args)
@@ -1069,9 +1071,9 @@ def bernoulli_(x, *args):
 
 @register_lowering(aten.bernoulli.p, type_promotion_kind=None)
 def bernoulli_p(x, *args):
-    assert (
-        config.fallback_random
-    ), "this should be handled in decomps unless config.fallback_random"
+    assert config.fallback_random or x.get_device() == torch.device(
+        "cpu"
+    ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     return bernoulli_(clone(x), *args)
 
 
@@ -1239,10 +1241,16 @@ make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten.cumsum, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
+make_fallback(aten._flash_attention_forward)
+make_fallback(aten._flash_attention_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
+make_fallback(aten._scaled_dot_product_efficient_attention.default)
+make_fallback(aten._scaled_dot_product_efficient_attention_backward.default)
+make_fallback(aten._scaled_dot_product_flash_attention)
+make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -1261,7 +1269,7 @@ make_fallback(aten._adaptive_avg_pool3d)
 make_fallback(aten.adaptive_max_pool2d)
 make_fallback(aten.adaptive_max_pool3d)
 make_fallback(aten.addbmm)
-make_fallback(aten.addmv)
+make_fallback(aten.addmv, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
@@ -1400,68 +1408,6 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
-
-
-add_layout_constraint(aten.convolution, constrain_to_fx_strides)
-
-
-@register_lowering(aten.convolution)
-def convolution(
-    x: TensorBox,
-    weight: TensorBox,
-    bias: TensorBox,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
-    transposed: bool,
-    output_padding: List[int],
-    groups: int,
-):
-    is_cpu = all(
-        input.get_device().type == "cpu"
-        for input in (x, weight, bias)
-        if input is not None
-    )
-    result = TensorBox.create(
-        ir.Convolution.create(
-            x,
-            weight,
-            bias if is_cpu else None,  # For cpu path, bias can always be fused
-            stride,
-            padding,
-            dilation,
-            transposed,
-            output_padding,
-            groups,
-        )
-    )
-    if not is_cpu and bias is not None:
-        kernel_dims = len(weight.get_size()) - 2
-        out_chan = result.get_size()[-1 - kernel_dims]
-        bias = view(bias, [out_chan] + kernel_dims * [1])
-        result = add(result, bias)
-    return result
-
-
-@register_lowering(aten._convolution)
-def _convolution(
-    x,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    transposed,
-    output_padding,
-    groups,
-    benchmark,
-    deterministic,
-    cudnn_enabled,
-    allow_tf32,
-):
-    return convolution(
-        x, weight, bias, stride, padding, dilation, transposed, output_padding, groups
-    )
 
 
 @register_lowering(aten.clone)
@@ -2050,7 +1996,10 @@ def index_put_(self, indices, values, accumulate=False):
         and len(indices) == 1
         and indices[0].get_dtype() in {torch.bool, torch.uint8}
     ):
-        return index_put_as_masked_fill(self, indices, values, accumulate)
+        mask = indices[0]
+        for _ in range(len(mask.get_size()), len(self.get_size())):
+            mask = unsqueeze(mask, -1)
+        return index_put_as_masked_fill(self, [mask], values, accumulate)
 
     # Fallback if there is a boolean index
     for index in indices:
@@ -2598,10 +2547,19 @@ def constant_pad_nd(x, padding, fill_value=0):
     bounds = list(reversed(list(zip(padding[::2], padding[1::2]))))
     n = len(sizes) - len(bounds)
 
+    # if padding is a complicated expression, hoist it
+    bounds_precomp = []
+    for l, h in bounds:
+        l_precomp = (
+            V.graph.sizevars.lookup_precomputed_size(l)
+            if isinstance(l, sympy.Expr) and l.free_symbols
+            else l
+        )
+        bounds_precomp.append((l_precomp, h))
+
     output_size = list(sizes[:n])
     mask_sizes = []
     for (low, high), size in zip(bounds, sizes[n:]):
-        size = V.graph.sizevars.guard_static_shape(size)
         mask_sizes.append(size)
         output_size.append(sympy.expand(size + low + high))
     assert len(output_size) == len(sizes)
@@ -2619,7 +2577,7 @@ def constant_pad_nd(x, padding, fill_value=0):
 
     def offset_fn(index):
         new_index = list(index[:n])
-        for idx, (low, high) in zip(index[n:], bounds):
+        for idx, (low, high) in zip(index[n:], bounds_precomp):
             new_index.append(idx - low)
         assert len(new_index) == len(index)
         return mask(new_index)
