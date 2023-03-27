@@ -73,7 +73,7 @@ class TestMatcher(JitTestCase):
         subgraph_matcher = SubgraphMatcher(pattern_graph)
         match_result = subgraph_matcher.match(original_graph)
         self.assertEqual(len(match_result), 0)
-	
+
 
     def check_replace_literals(self, f, inputs, expected_num_placeholders):
         gm = make_fx(f)(*inputs)
