@@ -4475,8 +4475,13 @@ class TestSparseAny(TestCase):
 
     def test_two_four_sparse(self):
         # TODO: This definitely cannot land.
-        def make_tensor(shape):
-            return torch.randn(shape) / 10
+        def make_tensor(shape, dtype):
+            if dtype.is_complex:
+                return torch.zeros(shape, dtype=dtype)
+            elif dtype.is_floating_point:
+                return torch.randn(shape, dtype=dtype) / 10
+            else:
+                return torch.randint(-5, 5, shape, dtype=dtype)
 
 
         def random_mask_choice(i=None):
@@ -4494,13 +4499,10 @@ class TestSparseAny(TestCase):
             return choices[i]
 
 
-        def run_test(m, n, k):
-            a = make_tensor((m, k))
-            b = make_tensor((k, n))
-            c = make_tensor((m, n))
-            a = a.half().cuda()
-            b = b.half().cuda()
-            c = c.half().cuda()
+        def run_test(m, n, k, dtype_inout):
+            a = make_tensor((m, k), dtype_inout[0]).cuda()
+            b = make_tensor((n, k), dtype_inout[0]).cuda().T
+            c = make_tensor((m, n), dtype_inout[1]).cuda()
 
             c0_results = []
             c1_results = []
@@ -4514,20 +4516,18 @@ class TestSparseAny(TestCase):
                 a_sparse = a.masked_select(mask).view(m, k // 2)
                 a_dense = a.masked_fill(~mask, 0)
 
-                c1 = torch.mm(a_dense, b) + c
+                dtype_dense = torch.float
+                c1 = torch.mm(a_dense.to(dtype_dense), b.to(dtype_dense)) + c.to(dtype_dense)
 
                 c0, meta_reordered = torch._cutlass_linear(a_sparse, b, c, mask)
-                torch.testing.assert_close(c0, c1, rtol=1e-3, atol=1e-3)
+                torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
 
-                # sparse_t, _ = benchmark_torch_function_in_microseconds(torch._cutlass_linear, a_sparse, b, meta_reordered)
-                # dense_t = benchmark_torch_function_in_microseconds(torch.mm, a, b)
-                # print(f"sparse_t: {sparse_t:.0f}us dense_t: {dense_t:.0f}us speedup: {dense_t/sparse_t:.2f}x")
-
-        for (m, n, k) in itertools.product(range(8), range(8), range(8)):
+        dtypes_inout = [[torch.int8, torch.int32], [torch.half, torch.half]]
+        for (dtype_inout, m, n, k) in itertools.product(dtypes_inout, range(4), range(4), range(4)):
             m = (m + 1) * 32
             n = (n + 1) * 32
-            k = (k + 1) * 64
-            run_test(m, n, k)
+            k = (k + 1) * 128
+            run_test(m, n, k, dtype_inout)
 
 
     @onlyNativeDeviceTypes
