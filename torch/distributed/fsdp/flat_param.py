@@ -1894,7 +1894,7 @@ class FlatParamHandle:
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
         return tensor.size() == sharded_size
 
-    def parameter_module_names(self) -> Iterator[Tuple[str, str]]:
+    def param_module_names(self) -> Iterator[Tuple[str, str]]:
         shared_param_infos = [
             ParamInfo(param_name, module, module_name)
             for (
@@ -1911,7 +1911,7 @@ class FlatParamHandle:
         ):
             yield (param_name, module_name)
 
-    def shared_parameter_module_names(self) -> Iterator[Tuple[str, str]]:
+    def shared_param_module_names(self) -> Iterator[Tuple[str, str]]:
         for param_name, _, module_name in [
             ParamInfo(param_name, module, module_name)
             for (
