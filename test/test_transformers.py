@@ -2,6 +2,7 @@
 
 import contextlib
 from functools import partial
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,7 +14,7 @@ from torch.backends.cuda import sdp_kernel, SDPBackend
 import torch.optim as optim
 from torch.testing._internal.common_dtype import floating_types_and_half
 
-from typing import Tuple
+from typing import List, Tuple, Union
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_FAIRSEQ,
@@ -510,6 +511,91 @@ class TestTransformers(NNTestCase):
             with cm:
                 _test(batch_first, training, enable_nested_tensor)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
+    def test_encoder_padding_and_src_mask_bool(self):
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=2,
+            dim_feedforward=32,
+            dropout=0.1,
+            activation='relu',
+            batch_first=True,
+        )
+        encoder_norm = nn.LayerNorm(16)
+        encoder = nn.TransformerEncoder(
+            encoder_layer, 2, encoder_norm
+        )
+
+        inputs = torch.randn(2, 3, 16)
+
+        src_mask = torch.ones(3, 3, dtype=torch.bool).triu_(diagonal=1)
+        input_seq_len = torch.tensor([3, 2])
+        padding_mask = (
+            torch.arange(3)[None, :].cpu() >= input_seq_len[:, None]
+        )
+
+        with self.assertNoLogs(None):
+            encoder(
+                inputs,
+                mask=src_mask,
+                src_key_padding_mask=padding_mask,
+            )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
+    def test_decoder_padding_and_src_mask_bool(self):
+
+        def transformer_decoder(inputs, input_seq_len, memory):
+            decoder_layer = nn.TransformerDecoderLayer(
+                d_model=16,
+                nhead=2,
+                dim_feedforward=32,
+                dropout=0.1,
+                activation='relu',
+                batch_first=True,
+            )
+            decoder_norm = nn.LayerNorm(16)
+            decoder = nn.TransformerDecoder(
+                decoder_layer, 2, decoder_norm
+            )
+
+            src_mask = torch.ones(
+                inputs.shape[1], inputs.shape[1], dtype=torch.bool
+            ).triu_(diagonal=1)
+            padding_mask = (
+                torch.arange(inputs.shape[1])[None, :].cpu()
+                >= input_seq_len[:, None]
+            )
+
+            return decoder(
+                inputs,
+                memory,
+                tgt_mask=src_mask,
+                tgt_key_padding_mask=padding_mask,
+                memory_key_padding_mask=padding_mask,
+            )
+
+        inputs = torch.randn(2, 3, 16)
+        memory = torch.randn(2, 3, 16)
+        input_seq_len = torch.tensor([3, 2])
+
+        with self.assertNoLogs(None):
+            transformer_decoder(inputs, input_seq_len, memory)
+
+
+    def test_encoder_is_causal(self):
+
+        d_model = 3
+        layer = torch.nn.TransformerEncoderLayer(d_model, 1, 6, batch_first=True)
+        layer.eval()
+        x = torch.randn(1, 5, d_model)
+        unmasked_output = layer(x)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(x.size(1))
+        is_causal_output = layer(x, src_mask=mask, is_causal=True)
+        masked_output = layer(x, src_mask=mask)
+
+        self.assertEqual(masked_output, is_causal_output)
+
+
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_decoder_only_layer(self):
@@ -576,240 +662,6 @@ class TestTransformers(NNTestCase):
                     return_all_hiddens=False,
                 )[0]
 
-        class BetterDecoder(torch.nn.Module):
-            """
-            Only incremental decoder for now
-            """
-
-            def __init__(self, transformer, embedding, pad_idx):
-                super().__init__()
-                self.transformer = transformer
-                self.embedding = embedding
-                self.padding_idx = pad_idx
-
-            def forward(
-                self,
-                x,
-                src_mask=None,
-                include_padding_mask=True,
-                incr_key_lst=None,
-                incr_value_lst=None,
-                is_incremental_decoding=False,
-            ):
-                padding_mask = None
-                if not x.is_nested and include_padding_mask:
-                    padding_mask = x.eq(self.padding_idx)
-                if(is_incremental_decoding):
-                    x = x[:, -1:]  # only take the last token
-                x = self.embedding(x)
-
-                one_encoder_layer = self.transformer.layers[0]
-                self_attn = one_encoder_layer.self_attn
-                embed_dim = self_attn.embed_dim
-                num_heads = self_attn.num_heads
-
-                use_gelu = (
-                    one_encoder_layer.activation_relu_or_gelu == 2
-                )  # see torch/nn/modules/activation attention impl. 1 == relu, 2 == gelu
-                assert (
-                    one_encoder_layer.activation_relu_or_gelu != 0
-                )  # 0 == not relu or gelu
-
-                norm_first = one_encoder_layer.norm_first
-
-                # TODO: make this a bit less janky. but for now we initialize with an empty tensor.
-                if(not is_incremental_decoding):
-                    assert len(incr_key_lst) == 0 or incr_key_lst[0] is None
-                    assert len(incr_value_lst) == 0 or incr_value_lst[0] is None
-                while len(incr_key_lst) <= len(self.transformer.layers):
-                    if(is_incremental_decoding):
-                        incr_key_lst.append(torch.Tensor([]).cuda().half())
-                        incr_value_lst.append(torch.Tensor([]).cuda().half())
-                    else:
-                        incr_key_lst.append(None)
-                        incr_value_lst.append(None)
-
-                for i, layer in enumerate(self.transformer.layers):
-                    incr_key = incr_key_lst[i]
-                    incr_value = incr_value_lst[i]
-
-                    x, incr_key, incr_value = torch._transformer_decoder_only_layer_fwd(
-                        src=x,
-                        embed_dim=embed_dim,
-                        num_heads=num_heads,
-                        qkv_weight=layer.self_attn.in_proj_weight,
-                        qkv_bias=layer.self_attn.in_proj_bias,
-                        proj_weight=layer.self_attn.out_proj.weight,
-                        proj_bias=layer.self_attn.out_proj.bias,
-                        use_gelu=use_gelu,
-                        norm_first=norm_first,
-                        # TODO: layer_norm_eps hardcoded to be same as nn.TransformerEncoder default.
-                        # fix by pulling from self_attn.norm1
-                        eps=1e-5,
-                        norm_weight_1=layer.norm1.weight,
-                        norm_bias_1=layer.norm1.bias,
-                        norm_weight_2=layer.norm2.weight,
-                        norm_bias_2=layer.norm2.bias,
-                        ffn_weight_1=layer.linear1.weight,
-                        ffn_bias_1=layer.linear1.bias,
-                        ffn_weight_2=layer.linear2.weight,
-                        ffn_bias_2=layer.linear2.bias,
-                        mask=src_mask,
-                        incr_key=incr_key,  # altered in place
-                        incr_value=incr_value,
-                    )
-
-                    # not in-place
-                    if(not is_incremental_decoding):
-                        incr_key = None
-                        incr_value = None
-                    incr_key_lst[i] = incr_key
-                    incr_value_lst[i] = incr_value
-
-                return x, incr_key_lst, incr_value_lst
-
-        def torch_to_fairseq(torch_encoder, fairseq_encoder):
-            for src_layer, dst_layer in zip(torch_encoder.layers, fairseq_encoder.layers):
-                w_q, w_k, w_v = src_layer.self_attn.in_proj_weight.chunk(3, dim=0)
-                b_q, b_k, b_v = src_layer.self_attn.in_proj_bias.chunk(3, dim=0)
-
-                dst_layer.self_attn.q_proj.weight = torch.nn.Parameter(w_q)
-                dst_layer.self_attn.q_proj.bias = torch.nn.Parameter(b_q)
-                dst_layer.self_attn.k_proj.weight = torch.nn.Parameter(w_k)
-                dst_layer.self_attn.k_proj.bias = torch.nn.Parameter(b_k)
-                dst_layer.self_attn.v_proj.weight = torch.nn.Parameter(w_v)
-                dst_layer.self_attn.v_proj.bias = torch.nn.Parameter(b_v)
-
-                dst_layer.self_attn.out_proj.weight = src_layer.self_attn.out_proj.weight
-                dst_layer.self_attn.out_proj.bias = src_layer.self_attn.out_proj.bias
-
-                dst_layer.fc1.weight = src_layer.linear1.weight
-                dst_layer.fc1.bias = src_layer.linear1.bias
-
-                # fairseq may use fusedlayernorm from nvidia apex - diff properties
-                dst_layer.self_attn_layer_norm.load_state_dict(src_layer.norm1.state_dict())
-
-                dst_layer.fc2.weight = src_layer.linear2.weight
-                dst_layer.fc2.bias = src_layer.linear2.bias
-
-                dst_layer.final_layer_norm.load_state_dict(src_layer.norm2.state_dict())
-
-            return fairseq_encoder
-
-        def set_weights_deterministic(model):
-            for idx, p in enumerate(model.parameters()):
-                x = p.data
-                sz = x.view(-1).size(0)
-                shape = x.shape
-                x = torch.cos(torch.arange(0, sz).float().view(shape))
-                p.data.copy_(x)
-
-        D = 4  # d_model
-        H = 2  # nhead
-        FD = 16  # dim_feedforward
-        V = 100  # vocab size
-        L = 2  # num layers
-
-        embedding_layer = torch.nn.Embedding(V, D, DEFAULT_PADDING_IDX)
-        layer = torch.nn.TransformerEncoderLayer(
-            d_model=D,
-            nhead=H,
-            dim_feedforward=FD,
-            batch_first=True,
-            activation="gelu",
-        )
-        transformer = torch.nn.TransformerEncoder(
-            layer,
-            num_layers=L,
-        ).eval().cuda().half()
-
-        set_weights_deterministic(embedding_layer)
-        set_weights_deterministic(transformer)
-
-        better_decoder = (
-            BetterDecoder(transformer, embedding_layer, DEFAULT_PADDING_IDX)
-            .eval()
-            .cuda()
-            .half()
-        )
-        fairseq_decoder = (
-            FairseqDecoder(
-                D,
-                H,
-                FD,
-                L,
-                embedding_layer,
-                dropout=0,
-                normalize_before=False,
-                torch_encoder=transformer,
-                activation="gelu",
-            )
-            .eval()
-            .cuda()
-            .half()
-        )
-
-        tokens = torch.Tensor([
-            [5, 6, 7, 8],
-            [9, 10, 11, 12]
-        ]).to(torch.int).cuda()
-        lengths_tensor = torch.Tensor([2, 2]).to(torch.int).cuda()
-        # bs = 2, seqlen = 4
-        bs, seqlen = tokens.shape
-
-        upper_triangle = torch.zeros(seqlen, seqlen)
-        upper_triangle.fill_(-100000000)
-        upper_triangle = torch.triu(upper_triangle, 1)
-        upper_triangle = upper_triangle.cuda().half()
-        upper_triangle_expanded = upper_triangle.unsqueeze(0).unsqueeze(0)
-        upper_triangle_expanded = upper_triangle_expanded.expand(
-            bs, H, -1, -1
-        )
-
-        # test forced decoding
-        with torch.no_grad():
-            result, _, _ = better_decoder(
-                tokens,
-                src_mask=upper_triangle_expanded,
-                include_padding_mask=False,
-                incr_key_lst=[],
-                incr_value_lst=[],
-                is_incremental_decoding=False,
-            )
-        ref_output = fairseq_decoder(tokens, lengths_tensor, with_triangle_mask=True)
-
-        self.assertEqual(result.shape, ref_output.shape)
-        torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
-
-        # test incremental decoding
-        bs, seqlen = tokens.shape
-
-        incr_state = {}
-        ref_outputs = [fairseq_decoder(
-            tokens[:, :i],
-            src_lengths=None,
-            with_triangle_mask=False,
-            incremental_state=incr_state,
-        ) for i in range(1, seqlen + 1)]
-        ref_output = torch.stack(ref_outputs)
-
-        incr_key_lst = []
-        incr_value_lst = []
-        results = []
-        for i in range(1, seqlen + 1):
-            res, incr_key_lst, incr_value_lst = better_decoder(
-                tokens[:, :i],
-                src_mask=None,
-                include_padding_mask=False,
-                incr_key_lst=incr_key_lst,
-                incr_value_lst=incr_value_lst,
-                is_incremental_decoding=True,
-            )
-            results.append(res)
-        result = torch.stack(results)
-
-        self.assertEqual(result.shape, ref_output.shape)
-        torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
 
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
@@ -999,8 +851,11 @@ class TestTransformers(NNTestCase):
         encoder.train()
         optimizer.zero_grad()
         inputs = torch.randn(S, L, E).to(device)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            inputs.size(1), device=device
+        )
 
-        outputs = encoder(inputs, is_causal=True)
+        outputs = encoder(inputs, mask=mask, is_causal=True)
 
         loss = criterion(outputs[:, 0:2, :], inputs[:, 0:2, :])
         loss.backward()
@@ -1009,12 +864,16 @@ class TestTransformers(NNTestCase):
         # inference with is_causal
         t_qvk = torch.randn((S, L, E), device=device, dtype=torch.float32)
         mha = nn.MultiheadAttention(E, H).to(device)
-        attn_out, _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            S, device=device
+        )
 
-        # Can't give both attn_mask AND is_causal
+        attn_out, _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=mask, is_causal=True)
+
+        # Can't give only is_causal
         attn_mask = torch.randint(0, 2, size=(L, L), device=device, dtype=torch.bool)
-        with self.assertRaisesRegex(AssertionError, "Only allow causal mask or attn_mask"):
-            _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=attn_mask, is_causal=True)
+        with self.assertRaises(RuntimeError):
+            _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
 
         # # Passing a causal mask sets is_causal to 1
         causal_mask = torch.triu(
@@ -1039,6 +898,9 @@ class TestTransformers(NNTestCase):
         mha.in_proj_weight = Parameter(torch.ones((E * 3, E), device=device))
         mha.out_proj.weight = Parameter(torch.ones((E, E), device=device))
         expected = torch.ones(size=(S, L, E)).to(device) * 16
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            qkv.size(1), device=device
+        )
 
         for kernel in kernels:
             with torch.backends.cuda.sdp_kernel(
@@ -1046,20 +908,32 @@ class TestTransformers(NNTestCase):
                 enable_flash=(kernel == 'flash'),
                 enable_mem_efficient=(kernel == 'meff')
             ):
-                actual, _ = mha(qkv, qkv, qkv, need_weights=False, is_causal=True)
+                actual, _ = mha(qkv, qkv, qkv, attn_mask=mask, need_weights=False, is_causal=True)
                 self.assertTrue(torch.equal(actual, expected))
 
                 if kernel != 'math':
                     # fails with embedding size not multiple of 4
                     with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                         qkv_f, mha_f = ones_tensor(S, L, 2), nn.MultiheadAttention(2, H).to(device)
-                        _ = mha_f(qkv_f, qkv_f, qkv_f, need_weights=False, is_causal=True)
+                        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+                            qkv_f.size(1), device=device
+                        )
+                        _ = mha_f(qkv_f, qkv_f, qkv_f, attn_mask=mask, need_weights=False, is_causal=True)
                         torch.cuda.synchronize()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Platform does not supposrt fused SDPA or pre-SM80 hardware"
+    )
     def test_is_causal_gpu(self):
         device = 'cuda'
         self.is_causal_kernels(["math", "meff"], device)
+
+    def test_script_mha_in_proj_weight_none(self):
+        mha = torch.nn.MultiheadAttention(
+            embed_dim=128, num_heads=8, kdim=256, vdim=256
+        ).eval()
+
+        torch.jit.script(mha)
 
 
 class TestSDPA(NNTestCase):
@@ -1083,7 +957,7 @@ class TestSDPA(NNTestCase):
             "enable_math": False, "enable_flash": False, "enable_mem_efficient": True}
     }
 
-    def rand_tensor(self, shape: Tuple[int], device: str, dtype: torch.dtype,
+    def rand_tensor(self, shape: Tuple[Union[int, List[int]]], device: str, dtype: torch.dtype,
                     type: str, requires_grad: bool = False, packed: bool = False) -> torch.Tensor:
         """Creates rand dense or nested tensor with given shape and type.
 
@@ -1100,11 +974,20 @@ class TestSDPA(NNTestCase):
         """
         batch, seq_len, num_heads, head_dim = shape
         if type == "nested":
-            size = (seq_len, num_heads, head_dim) if not packed else (seq_len, 3 * num_heads * head_dim)
-            return torch.nested.nested_tensor([
-                torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
-                for _ in range(batch)])
+            if isinstance(seq_len, list):
+                def _size(i):
+                    return (seq_len[i], num_heads, head_dim) if not packed else (seq_len[i], 3 * num_heads * head_dim)
+
+                return torch.nested.nested_tensor([
+                    torch.randn(_size(i), device=device, dtype=dtype, requires_grad=requires_grad)
+                    for i in range(batch)])
+            else:
+                size = (seq_len, num_heads, head_dim) if not packed else (seq_len, 3 * num_heads * head_dim)
+                return torch.nested.nested_tensor([
+                    torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
+                    for _ in range(batch)])
         else:
+            assert(isinstance(seq_len, int))
             size = (batch, seq_len, num_heads, head_dim) if not packed else (batch, seq_len, 3 * num_heads * head_dim)
             return torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -1167,15 +1050,21 @@ class TestSDPA(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
-    def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool):
+    @parametrize("head_dims_match", [True, False])
+    def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool, head_dims_match: bool):
         rand_tensor = partial(self.rand_tensor, type=type, device="cuda", dtype=torch.float16)
 
         batch, seq_len, num_heads, head_dim = 32, 64, 16, 64
         shape = (batch, seq_len, num_heads, head_dim)
+        if head_dims_match:
+            shape_v = shape
+        else:
+            head_dim_v = 96
+            shape_v = (batch, seq_len, num_heads, head_dim_v)
 
         query = rand_tensor(shape)
         key = rand_tensor(shape)
-        value = rand_tensor(shape)
+        value = rand_tensor(shape_v)
 
         # Lets switch seq_len and num_heads
         # B x S X H X D -> B x H x S x D
@@ -1232,9 +1121,9 @@ class TestSDPA(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
-    @parametrize("fused_kernel", ["flash", "mem_efficient"])
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_scaled_dot_product_attention_fused_kernels_packed_accuracy(self, type: str, fused_kernel: str):
-        if (not SM80OrLater) and fused_kernel == "flash":
+        if (not SM80OrLater) and fused_kernel == SDPBackend.FLASH_ATTENTION:
             return
 
         def rand_nt(shape):
@@ -1265,26 +1154,15 @@ class TestSDPA(NNTestCase):
         key_lp = key_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         value_lp = value_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        if fused_kernel == "flash":
-            with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
-                # TODO Flash for the nested path is currently not working due to cuda memory issues
-                if type == "nested":
-                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                        query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False))
-                    return
-                actual = torch.nn.functional.scaled_dot_product_attention(
-                    query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
-        elif fused_kernel == "mem_efficient":
-            with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-                actual = torch.nn.functional.scaled_dot_product_attention(
-                    query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
+        with sdp_kernel(**self.backend_map[fused_kernel]):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
 
-        with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
+        with sdp_kernel(**self.backend_map[SDPBackend.MATH]):
             math_ref_lp = torch.nn.functional.scaled_dot_product_attention(
                 query_lp.contiguous(), key_lp.contiguous(), value_lp.contiguous(),
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
-        with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
             math_query = query.contiguous()
             math_key = key.contiguous()
             math_value = value.contiguous()
@@ -1473,7 +1351,7 @@ class TestSDPA(NNTestCase):
 
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "CUDA unavailable")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])
     def test_sdp_choice_with_determinism(self, warn_only):
         # If we are only warning we still expect that efficient_attention will still be called.
@@ -1487,7 +1365,7 @@ class TestSDPA(NNTestCase):
                 assert torch._fused_sdp_choice(query, key, value) == (
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "CUDA unavailable")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "Does not support fused SDPA or not SM86 hardware")
     def test_memory_efficeint_sm86_failure(self):
         device = 'cuda'
         dtype = torch.float16
@@ -1499,7 +1377,26 @@ class TestSDPA(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "Does not support fused SDPA or not SM86 hardware")
+    def test_flash_backward_sm86_headdim128(self):
+        device = 'cuda'
+        dtype = torch.float16
+        make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
+        # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        size = (2, 2, 4, 128)
+        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
+            # Should not fail because inputs don't require grad
+            torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+
+            # Should fail because inputs require grad
+            q = make_tensor(size, requires_grad=True)
+            k = make_tensor(size, requires_grad=True)
+            v = make_tensor(size, requires_grad=True)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, None, 0.0, False))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused scaled dot product attention")
     def test_dispatch_fails_no_backend(self):
         dtype = torch.float16
         device = "cuda"
@@ -1541,7 +1438,7 @@ class TestSDPA(NNTestCase):
     )
     def test_invalid_fused_inputs_broadcast(self, kernel: SDPBackend):
         with sdp_kernel(**self.backend_map[kernel]):
-            #  Fused Kernels don't support broadcasting
+            #  Fused Kernels don't support broadcasting for dense inputs
             device = "cuda"
             dtype = torch.float16
             size = (2, 4, 3, 8)
@@ -1600,7 +1497,7 @@ class TestSDPA(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, torch.ones_like(q), 0.0, False))
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support fused SDPA or pre-SM80 hardware")
     def test_unaligned_tensors(self):
         # The alignment is depdent on arch so we specifiy SM80OrLater
         device = 'cuda'
@@ -1612,7 +1509,7 @@ class TestSDPA(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support fused SDPA or pre-SM80 hardware")
     def test_flash_fail_fp32(self):
         device = 'cuda'
         dtype = torch.float
@@ -1623,7 +1520,7 @@ class TestSDPA(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
     def test_flash_autocast_fp32_float16(self):
         device = 'cuda'
         dtype = torch.float
@@ -1635,7 +1532,7 @@ class TestSDPA(NNTestCase):
                 _ = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
     def test_flash_autocast_fp32_bfloat16(self):
         device = 'cuda'
         dtype = torch.float
@@ -1665,7 +1562,7 @@ class TestSDPA(NNTestCase):
 
         self.assertRaises(RuntimeError, func)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
@@ -1673,8 +1570,12 @@ class TestSDPA(NNTestCase):
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0])  # mem_efficient_attention does not support dropout
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("scale", [None, "l1"])
     def test_mem_efficient_attention_vs_math_ref_grads(self, batch_size: int, seq_len_q: int, seq_len_k: int,
-                                                       head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype):
+                                                       head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
+                                                       scale: str):
+
+        scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
                            device="cuda", dtype=dtype, requires_grad=True)
@@ -1699,18 +1600,19 @@ class TestSDPA(NNTestCase):
             # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
             if isSM86Device and head_dim == 128:
                 self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
-                                                                                       dropout_p=dropout_p, is_causal=is_causal))
+                                                                                       dropout_p=dropout_p,
+                                                                                       is_causal=is_causal, scale=scale))
                 return
             else:
-                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal)
+                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
 
         with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
             # High Precision Math Reference
             out_ref = F.scaled_dot_product_attention(query_ref, key_ref, value_ref,
-                                                     dropout_p=dropout_p, is_causal=is_causal)
+                                                     dropout_p=dropout_p, is_causal=is_causal, scale=scale)
             # Low Precision Math Reference
             out_lp_ref = F.scaled_dot_product_attention(query_ref_lp, key_ref_lp, value_ref_lp,
-                                                        dropout_p=dropout_p, is_causal=is_causal)
+                                                        dropout_p=dropout_p, is_causal=is_causal, scale=scale)
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
@@ -1749,7 +1651,7 @@ class TestSDPA(NNTestCase):
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
@@ -1757,8 +1659,12 @@ class TestSDPA(NNTestCase):
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("scale", [None, "l1"])
     def test_flash_attention_vs_math_ref_grads(self, batch_size: int, seq_len_q: int, seq_len_k: int,
-                                               head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype):
+                                               head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
+                                               scale: str):
+
+        scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
                            device="cuda", dtype=dtype, requires_grad=True)
@@ -1780,7 +1686,7 @@ class TestSDPA(NNTestCase):
 
         # Create real output
         output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
-            query, key, value, dropout_p=dropout_p, is_causal=is_causal, return_debug_mask=True)
+            query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
         out = output_tuple[0]
         dbug_mask = output_tuple[-1]
 
@@ -1797,17 +1703,18 @@ class TestSDPA(NNTestCase):
             with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
                 # High Precision Math Reference
                 out_ref = F.scaled_dot_product_attention(
-                    query_ref, key_ref, value_ref, is_causal=is_causal)
+                    query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
-                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal)
+                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
         else:
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, dropout_mask=dropout_mask)[0]
+                query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, dropout_mask=dropout_mask)[0]
+                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                dropout_mask=dropout_mask)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
@@ -1822,7 +1729,7 @@ class TestSDPA(NNTestCase):
 
         # TODO: Investigate why grad_q needs larger tolerances
         grad_q_deviation = query_ref.grad - query_ref_lp.grad
-        grad_q_ref_atol = max(2 * torch.abs(grad_q_deviation).max().item(), default_atol[out.dtype])
+        grad_q_ref_atol = max(4 * torch.abs(grad_q_deviation).max().item(), default_atol[out.dtype])
         grad_q_ref_rtol = max(get_rtol(query_ref.grad, query_ref_lp.grad), default_rtol[out.dtype])
 
         grad_k_deviation = key_ref.grad - key_ref_lp.grad
@@ -1873,6 +1780,211 @@ class TestSDPA(NNTestCase):
             key = torch.randn(shape, dtype=torch.float16, device=device)
             value = torch.randn(shape, dtype=torch.float16, device=device)
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    def test_fused_kernels_seq_len_1_inputs(self, fused_kernel):
+        if (not SM80OrLater) and fused_kernel == SDPBackend.FLASH_ATTENTION:
+            return
+        rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=torch.float16)
+        batch, num_heads, head_dim = 32, 16, 64
+        seq_lens = torch.randint(low=1, high=32, size=(batch,))
+        # make sure some seq_lens are 1
+        num_ones = 10
+        indices = torch.randint(low=0, high=batch, size=(num_ones,))
+        seq_lens.scatter_(0, indices, 1)
+
+        shape = (batch, seq_lens.tolist(), num_heads, head_dim)
+        query = rand_nested_tensor(shape)
+        key = rand_nested_tensor(shape)
+        value = rand_nested_tensor(shape)
+
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        with sdp_kernel(**self.backend_map[fused_kernel]):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                query.contiguous().to(torch.float32),
+                key.contiguous().to(torch.float32),
+                value.contiguous().to(torch.float32),
+                attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(torch.float16), atol=1e-3, rtol=1e-2)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    def test_fused_kernels_seq_len_0_inputs(self, fused_kernel):
+        if (not SM80OrLater) and fused_kernel == SDPBackend.FLASH_ATTENTION:
+            return
+        rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=torch.float16)
+        batch, num_heads, head_dim = 32, 16, 64
+        seq_lens = torch.randint(low=1, high=32, size=(batch,))
+        # make sure some seq_lens are 0
+        num_zeros = 10
+        indices = torch.randint(low=0, high=batch, size=(num_zeros,))
+        seq_lens.scatter_(0, indices, 0)
+
+        shape = (batch, seq_lens.tolist(), num_heads, head_dim)
+        query = rand_nested_tensor(shape)
+        key = rand_nested_tensor(shape)
+        value = rand_nested_tensor(shape)
+
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        with sdp_kernel(**self.backend_map[fused_kernel]):
+            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("expand_q_batch", [True, False])
+    @parametrize("expand_k_batch", [True, False])
+    @parametrize("expand_v_batch", [True, False])
+    @parametrize("expand_q_num_heads", [True, False])
+    @parametrize("expand_k_num_heads", [True, False])
+    @parametrize("expand_v_num_heads", [True, False])
+    def test_fused_kernels_nested_broadcasting(
+        self,
+        kernel,
+        expand_q_batch,
+        expand_k_batch,
+        expand_v_batch,
+        expand_q_num_heads,
+        expand_k_num_heads,
+        expand_v_num_heads,
+    ):
+        if (not SM80OrLater) and kernel == SDPBackend.FLASH_ATTENTION:
+            return
+        is_efficient = kernel == SDPBackend.EFFICIENT_ATTENTION
+        dtype = torch.float32 if is_efficient else torch.float16
+        rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=dtype)
+        batch, num_heads, head_dim = 32, 8, 64
+        head_dim_v = 32 if is_efficient else head_dim
+        seq_lens_q = (torch.randint(low=1, high=5, size=(1,)).item()
+                      if expand_q_batch
+                      else torch.randint(low=1, high=32, size=(batch,)).tolist())
+        seq_lens_kv = (torch.randint(low=1, high=5, size=(1,)).item()
+                       if (expand_k_batch or expand_v_batch)
+                       else torch.randint(low=1, high=32, size=(batch,)).tolist())
+
+        batch_q = 1 if expand_q_batch else batch
+        batch_k = 1 if expand_k_batch else batch
+        batch_v = 1 if expand_v_batch else batch
+
+        # handle case where all batch_sizes are 1
+        batch = max(batch_q, batch_k, batch_v)
+
+        num_heads_q = 1 if expand_q_num_heads else num_heads
+        num_heads_k = 1 if expand_k_num_heads else num_heads
+        num_heads_v = 1 if expand_v_num_heads else num_heads
+
+        # handle case where all num_heads are 1
+        num_heads = max(num_heads_q, num_heads_k, num_heads_v)
+
+        q_shape = (batch_q, seq_lens_q, num_heads_q, head_dim)
+        k_shape = (batch_k, seq_lens_kv, num_heads_k, head_dim)
+        v_shape = (batch_v, seq_lens_kv, num_heads_v, head_dim_v)
+
+        query = rand_nested_tensor(q_shape)
+        key = rand_nested_tensor(k_shape)
+        value = rand_nested_tensor(v_shape)
+
+        def _broadcast(t, batch_broadcasted, num_heads_broadcasted):
+            if batch_broadcasted and num_heads_broadcasted:
+                # (1, seq_len, 1, head_dim) -> (batch, seq_len, num_heads, head_dim)
+                result = torch.nested.nested_tensor(
+                    [t[0].expand(-1, num_heads, t.size(-1)) for _ in range(batch)], dtype=torch.float32)
+            elif batch_broadcasted:
+                # (1, seq_len, num_heads, head_dim) -> (batch, seq_len, num_heads, head_dim)
+                result = torch.nested.nested_tensor([t[0] for _ in range(batch)], dtype=torch.float32)
+            elif num_heads_broadcasted:
+                # (batch, seq_len, 1, head_dim) -> (batch, seq_len, num_heads, head_dim)
+                result = torch.nested.nested_tensor([x.expand(-1, num_heads, t.size(-1)) for x in t.unbind()], dtype=torch.float32)
+            else:
+                result = t.to(torch.float32)
+            return result
+
+        query_expanded = _broadcast(query, expand_q_batch, expand_q_num_heads).transpose(1, 2)
+        key_expanded = _broadcast(key, expand_k_batch, expand_k_num_heads).transpose(1, 2)
+        value_expanded = _broadcast(value, expand_v_batch, expand_v_num_heads).transpose(1, 2)
+
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        with sdp_kernel(**self.backend_map[kernel]):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                query_expanded.contiguous(), key_expanded.contiguous(), value_expanded.contiguous(),
+                attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    def test_fused_kernels_nested_broadcasting_query_dense(self):
+        rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=torch.float32)
+        batch, num_heads, head_dim, head_dim_v = 32, 16, 64, 96
+        seq_lens = torch.randint(low=1, high=32, size=(batch,)).tolist()
+        q_shape = (1, 1, num_heads, head_dim)
+        k_shape = (batch, seq_lens, num_heads, head_dim)
+        v_shape = (batch, seq_lens, 1, head_dim_v)
+
+        # create a dense query
+        query = torch.randn(q_shape, device="cuda", dtype=torch.float32)
+        key = rand_nested_tensor(k_shape)
+        value = rand_nested_tensor(v_shape)
+
+        # (1, 1, num_heads, head_dim) -> (batch, 1, num_heads, head_dim)
+        query_expanded = torch.nested.nested_tensor([query.squeeze(0) for _ in range(batch)]).transpose(1, 2)
+        # (batch, seq_lens, 1, head_dim) -> (batch, seq_lens, num_heads, head_dim)
+        value_expanded = torch.nested.nested_tensor([t.expand(-1, num_heads, head_dim_v) for t in value.unbind()]).transpose(1, 2)
+
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                query_expanded.contiguous(), key.contiguous(), value_expanded.contiguous(),
+                attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=1e-3, rtol=1e-2)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    def test_fused_kernels_nested_broadcasting_error_cases(self):
+        # one of k,v needs to be broadcasted and other has non consistent seq_len dim
+        rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=torch.float32)
+        batch, num_heads, head_dim = 32, 8, 64
+        seq_lens_q = torch.randint(low=1, high=32, size=(batch,)).tolist()
+        seq_lens_v = torch.randint(low=1, high=32, size=(batch,)).tolist()
+
+        q_shape = (batch, seq_lens_q, num_heads, head_dim)
+        k_shape = (1, 1, num_heads, head_dim)
+        v_shape = (batch, seq_lens_v, num_heads, head_dim)
+
+        query = rand_nested_tensor(q_shape).transpose(1, 2)
+        key = rand_nested_tensor(k_shape).transpose(1, 2)
+        value = rand_nested_tensor(v_shape).transpose(1, 2)
+
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
+            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+
+
+
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.

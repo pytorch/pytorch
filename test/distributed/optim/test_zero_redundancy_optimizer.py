@@ -100,7 +100,7 @@ class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
         )
 
 
-# TODO: sandcastle_skip_if does not work here.
+# TODO: skip_but_pass_in_sandcastle_if does not work here.
 @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN does not work.")
 class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
     def test_state_dict(self):
@@ -1236,19 +1236,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         layers are assigned to different devices."""
         if self.rank >= 2:
             return
-        # Disable DDP + ReplicatedTensor when `parameter_as_bucket_view=True`
-        # since then ZeroRedundancyOptimizer modifies the model parameters in
-        # place.
-        from torch.nn.parallel._replicated_tensor_ddp_utils import (
-            _ddp_replicated_tensor,
-        )
-
-        context = (
-            _ddp_replicated_tensor(False) if parameters_as_bucket_view else suppress()
-        )
-        with context:
-            self.dist_init(self.rank, world_size=2)
-            self._test_zero_model_parallel(parameters_as_bucket_view)
+        self.dist_init(self.rank, world_size=2)
+        self._test_zero_model_parallel(parameters_as_bucket_view)
 
     def _test_ddp_zero_overlap(
         self,
@@ -1435,20 +1424,13 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             else hook_with_zero_step_interleaved
         )
 
-        # Disable DDP + ReplicatedTensor since ZeroRedundancyOptimizer
-        # modifies the model parameters in place.
-        from torch.nn.parallel._replicated_tensor_ddp_utils import (
-            _ddp_replicated_tensor,
+        self._test_ddp_zero_overlap(
+            device,
+            hook_constructor,
+            gradient_as_bucket_view,
+            static_graph,
+            shard_buckets=shard_buckets,
         )
-
-        with _ddp_replicated_tensor(False):
-            self._test_ddp_zero_overlap(
-                device,
-                hook_constructor,
-                gradient_as_bucket_view,
-                static_graph,
-                shard_buckets=shard_buckets,
-            )
 
 
 instantiate_parametrized_tests(TestZeroRedundancyOptimizerSingleRank)

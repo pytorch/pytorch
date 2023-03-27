@@ -12,13 +12,10 @@ from .. import config, variables
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
-
 from ..utils import (
     fqn,
     get_fake_value,
     get_real_value,
-    HAS_NUMPY,
-    np,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
@@ -42,6 +39,12 @@ supported_const_comparison_ops = {
     "!=": operator.ne,
 }
 
+
+def has_same_metadata(t1, t2):
+    return (
+        t1.size == t2.size
+        and t1.stride == t2.stride
+    )
 
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
@@ -251,9 +254,21 @@ class TensorVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
+
+            if "dim" in kwargs:
+                dim = kwargs.pop("dim")
+                constant_result = constant_result.getitem_const(dim)
+
         elif name == "size" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
             constant_result = SizeVariable(sizes, **options)
+
+            if "dim" in kwargs:
+                dim = kwargs.pop("dim")
+                constant_result = constant_result.call_method(
+                    tx, "__getitem__", [dim], {}
+                )
+
         elif name == "size" and self.size is None and config.dynamic_shapes:
             return wrap_fx_proxy(
                 tx,
@@ -384,7 +399,7 @@ class TensorVariable(VariableTracker):
                         self.ndim = args[0].ndim
                         self.is_contiguous = (memory_format,)
 
-            return wrap_fx_proxy(
+            out = wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
                     "call_method",
@@ -393,6 +408,8 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+            tx.metadata_mutated_variables[self] = out
+            return out
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
@@ -421,7 +438,7 @@ class TensorVariable(VariableTracker):
                 and not config.dynamic_shapes
             ):
                 name = "new_empty"
-            return wrap_fx_proxy(
+            out = wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
                     "call_method",
@@ -430,6 +447,9 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+            if name[-1] == "_" and not has_same_metadata(out, self):
+                tx.metadata_mutated_variables[self] = out
+            return out
 
 
 class SymNodeVariable(VariableTracker):
@@ -611,8 +631,6 @@ class UnspecializedPythonVariable(TensorVariable):
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         raw_value = kwargs.pop("raw_value", None)
-        if HAS_NUMPY and isinstance(raw_value, np.number):
-            raw_values = raw_value.item()
         need_unwrap = kwargs.pop("need_unwrap", True)
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value

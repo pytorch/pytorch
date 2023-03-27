@@ -23,7 +23,6 @@ from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_method
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
-from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
 from torch.jit._fuser import _graph_for, _script_method_graph_for
@@ -484,7 +483,7 @@ if _enabled:
     # did nothing, __getattr__ would not be called. Instead we'd get nn.Module.forward
     # which always throws an exception.
 
-    class ScriptModule(with_metaclass(ScriptMeta, Module)):  # type: ignore[misc]
+    class ScriptModule(Module, metaclass=ScriptMeta):
         r"""
         A wrapper around C++ ``torch::jit::Module``. ``ScriptModule``\s
         contain methods, attributes, parameters, and
@@ -495,7 +494,7 @@ if _enabled:
         def __init__(self):
             super().__init__()
 
-        forward = _CachedForward()
+        forward: Callable[..., Any] = _CachedForward()  # type: ignore[assignment]
 
         def __getattr__(self, attr):
             if "_actual_script_module" not in self.__dict__:
@@ -650,11 +649,11 @@ if _enabled:
             modules = {}
             for name, cpp_module in torch._C.ModuleDict(self._c).items():
                 modules[name] = wrap_cpp_module(cpp_module)
-            self._modules = OrderedModuleDict(self._c, modules)
+            self._modules = OrderedModuleDict(self._c, modules)  # type: ignore[assignment]
 
             # Copy parameters and buffers.
-            self._parameters = OrderedDictWrapper(torch._C.ParameterDict(self._c))
-            self._buffers = OrderedDictWrapper(torch._C.BufferDict(self._c))
+            self._parameters = OrderedDictWrapper(torch._C.ParameterDict(self._c))  # type: ignore[assignment]
+            self._buffers = OrderedDictWrapper(torch._C.BufferDict(self._c))  # type: ignore[assignment]
 
             # Get rid of the functions from the old C++ module.
             self.__dict__ = {
@@ -679,7 +678,7 @@ if _enabled:
             ``forward`` method. This graph will be preprocessed to inline all function and method calls.
             See :ref:`interpreting-graphs` for details.
             """
-            return self.forward.inlined_graph
+            return self.forward.inlined_graph  # type: ignore[attr-defined]
 
         @property
         def code(self):
@@ -688,7 +687,7 @@ if _enabled:
             the internal graph for the ``forward`` method. See
             :ref:`inspecting-code` for details.
             """
-            return self.forward.code
+            return self.forward.code  # type: ignore[attr-defined]
 
         @property
         def code_with_constants(self):
@@ -702,7 +701,7 @@ if _enabled:
 
             See :ref:`inspecting-code` for details.
             """
-            r = self.forward.code_with_constants
+            r = self.forward.code_with_constants  # type: ignore[attr-defined]
             return (r[0], ConstMap(r[1]))
 
         def save(self, f, **kwargs):
@@ -740,7 +739,7 @@ if _enabled:
             return "original_name={}".format(self.original_name)
 
         def graph_for(self, *args, **kwargs):
-            return self.forward.graph_for(self, *args, **kwargs)
+            return self.forward.graph_for(self, *args, **kwargs)  # type: ignore[attr-defined]
 
         @property
         def original_name(self):
@@ -1344,6 +1343,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         )
         # Forward docstrings
         fn.__doc__ = obj.__doc__
+        # Allow torch.compile() to inline
+        fn._torchdynamo_inline = obj  # type: ignore[attr-defined]
         _set_jit_function_cache(obj, fn)
         return fn
     else:

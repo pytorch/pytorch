@@ -159,7 +159,12 @@ target_include_directories(${NVFUSER_CODEGEN}
                            PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>)
 set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 17)
 install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+# installing nvfuser python tests
+install(DIRECTORY "${NVFUSER_ROOT}/python_tests/"
+        DESTINATION "${TORCH_ROOT}/test/_nvfuser"
+        FILES_MATCHING PATTERN "*.py" )
 
+file(WRITE "${TORCH_ROOT}/test/_nvfuser/.gitignore" "*")
 # --- build nvfuser_python library
 
 if(BUILD_PYTHON)
@@ -214,6 +219,13 @@ if(BUILD_PYTHON)
     set_target_properties(${NVFUSER} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
   install(TARGETS ${NVFUSER} EXPORT NvfuserTargets DESTINATION ${TORCH_ROOT}/nvfuser/)
+
+  # install nvfuser python files
+  install(DIRECTORY "${NVFUSER_ROOT}/python/"
+          DESTINATION "${TORCH_ROOT}/nvfuser"
+          FILES_MATCHING PATTERN "*.py" )
+  
+  file(WRITE "${TORCH_ROOT}/nvfuser/.gitignore" "*")
 endif()
 
 # --- generate runtime files
@@ -321,4 +333,43 @@ if(BUILD_TEST AND USE_CUDA)
   endif()
 
   install(TARGETS ${NVFUSER_TESTS} DESTINATION bin)
+endif()
+
+if(BUILD_NVFUSER_BENCHMARK)
+  set(NVFUSER_BENCHMARK "${PROJECT_NAME}_bench")
+  set(BENCHMARK_SRCS)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/batch_norm_channels_first.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/batch_norm_channels_first_backward.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/batch_norm_channels_last.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/batch_norm_channels_last_backward.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/bert.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/broadcast.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/gelu_backward.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/heuristic_lookup.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/shape_inference.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/instance_norm.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/layer_norm.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/layer_norm_backward.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/rms_norm.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/rms_norm_backward.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/lstm_cell.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/reduction.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/softmax.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/softmax_backward.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/scale_bias_relu.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/transpose.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/matmul.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/timm.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/utils.cpp)
+  list(APPEND BENCHMARK_SRCS ${NVFUSER_ROOT}/benchmark/main.cpp)
+
+  add_executable(${NVFUSER_BENCHMARK} ${BENCHMARK_SRCS})
+  target_link_libraries(${NVFUSER_BENCHMARK} PRIVATE torch_library benchmark ${NVFUSER_CODEGEN})
+  target_include_directories(${NVFUSER_BENCHMARK} PRIVATE ${NVFUSER_ROOT})
+  if(NOT MSVC)
+    target_compile_options_if_supported(nvfuser_bench -Werror)
+    target_compile_options_if_supported(nvfuser_bench -Wno-unused-variable)
+    target_compile_options_if_supported(nvfuser_bench -Wno-deprecated-copy)
+  endif()
+
 endif()
