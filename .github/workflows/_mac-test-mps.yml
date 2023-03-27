@@ -126,7 +126,7 @@ jobs:
 
       - name: Print remaining test logs
         shell: bash
-        if: always()
+        if: steps.test.conclusion
         run: |
           cat test/**/*.log || true
 
