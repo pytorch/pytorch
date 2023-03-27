@@ -29,15 +29,10 @@ time python test/run_test.py --verbose -i distributed/_shard/sharding_spec/test_
 time python test/run_test.py --verbose -i distributed/_shard/sharding_plan/test_sharding_plan
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor_reshard
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_chunk
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_elementwise_ops
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_embedding
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_embedding_bag
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_binary_cmp
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_init
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_math_ops
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_matrix_ops
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_softmax
 time python test/run_test.py --verbose -i distributed/_shard/sharded_optim/test_sharded_optim
 
 # DTensor/TP tests
