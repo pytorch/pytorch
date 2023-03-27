@@ -454,7 +454,7 @@ class TestFSDPOptimState(FSDPTest):
             fsdp_osd_param_ids = set(fsdp_osd_state.keys())
             self.assertTrue(
                 ref_osd_param_ids == fsdp_osd_param_ids,
-                (ref_osd_param_ids, fsdp_osd_param_ids),
+                f"Rank {self.rank}: {(ref_osd_param_ids, fsdp_osd_param_ids)}",
             )
             # Check state values are the same
             for param_id, param_state in fsdp_osd_state.items():

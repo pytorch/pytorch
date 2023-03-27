@@ -1561,7 +1561,12 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         handle = handles[0]
         flat_param = handle.flat_param
         fsdp_param_info = FSDPParamInfo(fsdp_state, handle, {})
-        for idx, local_fqn in enumerate(flat_param._fqns):
+        # NOTE: `idx` indexes into the data structures *with padding elements*
+        # to preserve correctness since `_shard_orig_params_state()` relies on
+        # the indexing
+        for idx, local_fqn in enumerate(flat_param._wp_fqns):
+            if local_fqn is FLAT_PARAM_PADDING:
+                continue
             fqn = clean_tensor_name(prefix + local_fqn)
             if fqn in fqn_to_param_info:
                 assert fqn_to_param_info[fqn].handle.flat_param is flat_param, fqn
@@ -1725,8 +1730,8 @@ def _gather_orig_param_state(
         if not torch.is_tensor(value) or value.dim() == 0:
             continue
 
-        value = value[: flat_param._numels[param_idx]].reshape(
-            flat_param._shapes[param_idx]
+        value = value[: flat_param._wp_numels[param_idx]].reshape(
+            flat_param._wp_shapes[param_idx]
         )
         if shard_state:
             assert fsdp_state.process_group is not None

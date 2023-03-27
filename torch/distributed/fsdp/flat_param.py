@@ -170,12 +170,12 @@ class FlatParameter(nn.Parameter):
 
     NOTE: Since ``use_orig_params=True`` supports intra-``FlatParameter``
     padding, we save tuples/lists that include padding objects and tuples/lists
-    with them filtered. The former are prefixed with "_optional" and should
-    mainly be used within this file. They are needed when iterating over the
-    tensors in the ``FlatParameter`` or analogous tensors and the index
-    matters. Developers should take care to *avoid* zipping a data structure
-    that includes padding objects (i.e. with "_optional" prefix or ``_numels``)
-    with one that does not include padding objects.
+    with them filtered. The former are prefixed with "_wp", which stands for
+    "with padding", and should mainly be used within this file. They are needed
+    when iterating over the tensors in the ``FlatParameter`` or analogous
+    tensors and the index matters. Developers should take care to *avoid*
+    zipping a data structure that includes padding objects with one that does
+    not include padding objects.
 
     Attributes:
         _unpadded_unsharded_size (torch.Size): Unsharded flat parameter's size
@@ -191,36 +191,38 @@ class FlatParameter(nn.Parameter):
             the unsharded sizes. (We omit "padded" because there is no
             analogous unpadded one.)
 
-        _optional_param_infos (Tuple[Union[ParamInfo, FlatParameterPadding], ...]):
+        _wp_param_infos (Tuple[Union[ParamInfo, FlatParameterPadding], ...]):
             Each parameter's parameter info entry or the padding object if
             padding; see :class:`ParamInfo` for details.
-        _optional_shapes (Tuple[Union[torch.Size, FlatParameterPadding], ...]):
+        _wp_shapes (Tuple[Union[torch.Size, FlatParameterPadding], ...]):
             Each parameter's shape or the padding object if padding.
-        _optional_fqns (Tuple[Union[str, FlatParameterPadding], ...]): The
+        _wp_fqns (Tuple[Union[str, FlatParameterPadding], ...]): The
             original parameters' FQNs prefixed from the owning handle's
             ``_fully_sharded_module`` or the padding object if padding. The
             names are guaranteed to be unique within the subtree rooted at that
             module.
-        _optional_param_extensions (Tuple[Union[Optional[Any]], FlatParameterPadding]):
+        _wp_param_extensions (Tuple[Union[Optional[Any]], FlatParameterPadding]):
             Parameter extensions (i.e. some per-parameter state) used to
             customize pre-flatten and post-unflatten behavior. This is
             experimental, and users should not depend on its existence in the
             future.
-        _param_infos (Tuple[ParamInfo, ...]): Same as ``_optional_param_infos``
+        _wp_numels (Tuple[int, ...]): Each parameter's numel including entries
+            for padding objects.
+        _param_infos (Tuple[ParamInfo, ...]): Same as ``_wp_param_infos``
             except with any padding objects filtered.
-        _shapes (Tuple[torch.Size, ...]): Same as ``_optional_shapes`` except
+        _shapes (Tuple[torch.Size, ...]): Same as ``_wp_shapes`` except
             with any padding objects filtered.
-        _fqns (Tuple[str, ...]): Same as ``_optional_fqns`` except with any
+        _fqns (Tuple[str, ...]): Same as ``_wp_fqns`` except with any
             padding objects filtered.
         _param_extensions (Tuple[Optional[Any], ...]): Same as
-            ``_optional_param_extensions`` except with any padding objects
+            ``_wp_param_extensions`` except with any padding objects
             filtered.
+        _numels (Tuple[int, ...]): Same as ``_wp_numels`` except with any
+            padding objects filtered.
         _num_params (int): Number of original parameters flattened into this
             flat parameter; this is the length of ``_param_infos``,
             ``_shapes``, and ``_fqns``, which have their padding objects
             filtered.
-        _numels (Tuple[int, ...]): Each parameter's numel including entries for
-            padding objects.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo`.
         _modules (Set[nn.Module]): Modules that contain some original parameter
@@ -262,12 +264,12 @@ class FlatParameter(nn.Parameter):
         _saved_grad_shard (Tensor): Sharded gradient with padding from previous
             iterations for gradient accumulation without :meth:`no_sync`.
 
-        _optional_params (Optional[List[nn.Parameter, Tensor]]): If
+        _wp_params (Optional[List[nn.Parameter, Tensor]]): If
             ``use_orig_params=True``, then each original parameter variable or
             padding object if padding; if ``use_orig_params=False``, then
             ``None``. The "optional" part refers to an entry optionally being
             padding, not that the list itself is optional.
-        _params (Optional[List[nn.Parameter]]): Same as ``_optional_params``
+        _params (Optional[List[nn.Parameter]]): Same as ``_wp_params``
             with any padding objects filtered.
         _shared_params (Optional[List[nn.Parameter]]): The original shared
             parameter variables if ``use_orig_params=True`` and ``None``
@@ -283,7 +285,7 @@ class FlatParameter(nn.Parameter):
             parameters' gradients indicating if it is logically ``None`` or not
             if ``use_orig_params=True`` and ``None`` otherwise. This includes
             entries for padding objects and hence should be used with
-            ``_optional_params``. This is needed because only some of the
+            ``_wp_params``. This is needed because only some of the
             parameters may have ``None`` gradient, in which case the
             ``FlatParameter`` gradient must be non-``None`` and must use zeros
             to approximate those original ``None`` gradients. This mask informs
@@ -328,38 +330,43 @@ class FlatParameter(nn.Parameter):
             # Share references between the optional and filtered versions to
             # avoid duplication
             self._param_infos = cast(Tuple[ParamInfo, ...], tuple(param_infos))
-            self._optional_param_infos = self._param_infos
+            self._wp_param_infos = self._param_infos
             self._shapes = cast(Tuple[torch.Size, ...], tuple(shapes))
-            self._optional_shapes = self._shapes
+            self._wp_shapes = self._shapes
             self._fqns = cast(Tuple[str, ...], tuple(fqns))
-            self._optional_fqns = self._fqns
+            self._wp_fqns = self._fqns
             self._param_extensions = cast(
                 Tuple[Optional[Any], ...], tuple(param_extensions)
             )
-            self._optional_param_extensions = self._param_extensions
+            self._wp_param_extensions = self._param_extensions
         else:
             self._param_infos = cast(
                 Tuple[ParamInfo, ...],
                 tuple(pi for pi in param_infos if pi is not FLAT_PARAM_PADDING),
             )
-            self._optional_param_infos = tuple(param_infos)  # type: ignore[arg-type]
+            self._wp_param_infos = tuple(param_infos)  # type: ignore[arg-type]
             self._shapes = cast(
                 Tuple[torch.Size, ...],
                 tuple(shape for shape in shapes if shape is not FLAT_PARAM_PADDING),
             )
-            self._optional_shapes = tuple(shapes)  # type: ignore[arg-type]
+            self._wp_shapes = tuple(shapes)  # type: ignore[arg-type]
             self._fqns = cast(
                 Tuple[str, ...],
                 tuple(fqn for fqn in fqns if fqn is not FLAT_PARAM_PADDING),
             )
-            self._optional_fqns = tuple(fqns)  # type: ignore[arg-type]
+            self._wp_fqns = tuple(fqns)  # type: ignore[arg-type]
             self._param_extensions = cast(
                 Tuple[Optional[Any], ...],
                 tuple(pe for pe in param_extensions if pe is not FLAT_PARAM_PADDING),
             )
-            self._optional_param_extensions = tuple(param_extensions)
+            self._wp_param_extensions = tuple(param_extensions)
         self._num_params = len(self._param_infos)
-        self._numels = tuple(numels)
+        _numels: List[int] = []
+        for numel, param_info in zip(numels, param_infos):
+            if param_info is not FLAT_PARAM_PADDING:
+                _numels.append(numel)
+        self._wp_numels = tuple(numels)
+        self._numels = tuple(_numels)
         self._shared_param_infos = tuple(shared_param_infos)
         self._modules = {
             pi.module for pi in self._param_infos if pi is not FLAT_PARAM_PADDING
@@ -374,22 +381,22 @@ class FlatParameter(nn.Parameter):
                 is_padding = param_info is FLAT_PARAM_PADDING
                 if not is_padding:
                     self._params.append(param)
-            self._optional_params: Optional[List[Union[nn.Parameter, Tensor]]] = params  # type: ignore[assignment]
+            self._wp_params: Optional[List[Union[nn.Parameter, Tensor]]] = params  # type: ignore[assignment]
             self._shared_params: Optional[List[nn.Parameter]] = shared_params
             # Mark the original parameters to avoid flattening them into
             # another `FlatParameter` during recursive construction
             for param in chain(self._params, self._shared_params):
                 _set_fsdp_flattened(param)
-            assert self._optional_params is not None
+            assert self._wp_params is not None
             self._is_grad_none: Optional[List[bool]] = [
-                False for _ in range(len(self._optional_params))
+                False for _ in range(len(self._wp_params))
             ]
             self._tensors: Optional[List[Optional[Tensor]]] = [
-                None for _ in range(len(self._optional_params))
+                None for _ in range(len(self._wp_params))
             ]
         else:
             self._params = None
-            self._optional_params = None
+            self._wp_params = None
             self._shared_params = None
             self._is_grad_none = None
             self._tensors = None
@@ -826,8 +833,8 @@ class FlatParamHandle:
         """
         flat_param_offsets = self._get_flat_param_offsets()
         assert len(flat_param_offsets) == len(
-            self.flat_param._numels
-        ), f"Expected {len(self.flat_param._numels)} but got {len(flat_param_offsets)}"
+            self.flat_param._wp_numels
+        ), f"Expected {len(self.flat_param._wp_numels)} but got {len(flat_param_offsets)}"
         # Indices of the original parameters in this rank's sharded flat
         # parameter
         shard_param_indices_range: List[int] = []  # elements will be consecutive
@@ -932,7 +939,7 @@ class FlatParamHandle:
         data in the unsharded flat parameter (without padding).
         NOTE: The returned list includes elements for alignment padding.
         """
-        cumulative_sum = list(accumulate(self.flat_param._numels))
+        cumulative_sum = list(accumulate(self.flat_param._wp_numels))
         starts = [0] + cumulative_sum[:-1]
         ends = [end - 1 for end in cumulative_sum]  # inclusive
         param_offsets = list(zip(starts, ends))
@@ -965,16 +972,14 @@ class FlatParamHandle:
             shard_param_offsets = []
             # Do not include alignment padding
             for i in range(shard_param_start_index, shard_param_end_index + 1):
-                is_padding = (
-                    self.flat_param._optional_param_infos[i] is FLAT_PARAM_PADDING
-                )
+                is_padding = self.flat_param._wp_param_infos[i] is FLAT_PARAM_PADDING
                 if is_padding:
-                    assert self.flat_param._optional_fqns[i] is FLAT_PARAM_PADDING
-                    assert self.flat_param._optional_shapes[i] is FLAT_PARAM_PADDING
+                    assert self.flat_param._wp_fqns[i] is FLAT_PARAM_PADDING
+                    assert self.flat_param._wp_shapes[i] is FLAT_PARAM_PADDING
                     continue
-                fqns_list.append(self.flat_param._optional_fqns[i])
-                shapes_list.append(self.flat_param._optional_shapes[i])
-                numels_list.append(self.flat_param._numels[i])
+                fqns_list.append(self.flat_param._wp_fqns[i])
+                shapes_list.append(self.flat_param._wp_shapes[i])
+                numels_list.append(self.flat_param._wp_numels[i])
                 shard_param_offsets.append(
                     self.flat_param._shard_param_offsets[i - shard_param_start_index]
                 )
@@ -1602,10 +1607,10 @@ class FlatParamHandle:
         flat_param = self.flat_param
         if tensor is None:
             tensor = flat_param
-        splits: List[Tensor] = torch.split(tensor, flat_param._numels, dim=0)
+        splits: List[Tensor] = torch.split(tensor, flat_param._wp_numels, dim=0)
         optional_views: List[Optional[Tensor]] = []
         for split, shape, param_extension in zip(
-            splits, flat_param._optional_shapes, flat_param._optional_param_extensions
+            splits, flat_param._wp_shapes, flat_param._wp_param_extensions
         ):
             is_padding = shape is FLAT_PARAM_PADDING
             if is_padding:
@@ -1632,7 +1637,7 @@ class FlatParamHandle:
         self._check_unsharded(self.flat_param)
         views = self._get_unflat_views()
         for i, (view, param_info) in enumerate(
-            zip(views, self.flat_param._optional_param_infos)
+            zip(views, self.flat_param._wp_param_infos)
         ):
             is_padding = param_info is FLAT_PARAM_PADDING
             if is_padding:
@@ -1645,7 +1650,7 @@ class FlatParamHandle:
                     # variable.
                     self._setattr_param(module, param_name, nn.Parameter(view))
                     continue
-                param = self.flat_param._optional_params[i]
+                param = self.flat_param._wp_params[i]
                 self._setattr_param(module, param_name, param)
                 param.data = view
             elif as_params:
@@ -1712,7 +1717,7 @@ class FlatParamHandle:
         self._check_unsharded(self.flat_param.grad)
         views = self._get_unflat_views(self.flat_param.grad)
         for i, (view, param_info) in enumerate(
-            zip(views, self.flat_param._optional_param_infos)
+            zip(views, self.flat_param._wp_param_infos)
         ):
             is_padding = param_info is FLAT_PARAM_PADDING
             if is_padding:
@@ -1720,7 +1725,7 @@ class FlatParamHandle:
             param_name, module, _ = param_info
             _p_assert(
                 hasattr(module, param_name),
-                f"{self.flat_param._optional_fqns[i]} is missing",
+                f"{self.flat_param._wp_fqns[i]} is missing",
             )
             param = getattr(module, param_name)
             if param.shape != view.shape or param.dtype != view.dtype:
@@ -1806,7 +1811,7 @@ class FlatParamHandle:
             requires_grad=False,
         )
         for i, (param, param_info) in enumerate(
-            zip(self.flat_param._optional_params, self.flat_param._optional_param_infos)
+            zip(self.flat_param._wp_params, self.flat_param._wp_param_infos)
         ):
             is_padding = param_info is FLAT_PARAM_PADDING
             if not is_padding:
@@ -1863,9 +1868,9 @@ class FlatParamHandle:
         self._check_sharded(grad)
         start, end = flat_param._shard_param_indices
         offset = 0
-        assert flat_param._optional_params is not None
+        assert flat_param._wp_params is not None
         for i, (param, param_info) in enumerate(
-            zip(flat_param._optional_params, flat_param._optional_param_infos)
+            zip(flat_param._wp_params, flat_param._wp_param_infos)
         ):
             is_padding = param_info is FLAT_PARAM_PADDING
             in_sharded_flat_param = (
@@ -1943,7 +1948,7 @@ class FlatParamHandle:
             else flat_param_grad.untyped_storage().data_ptr()
         )
         for i, (param, param_info) in enumerate(
-            zip(flat_param._optional_params, flat_param._optional_param_infos)
+            zip(flat_param._wp_params, flat_param._wp_param_infos)
         ):
             in_sharded_flat_param = (
                 i >= start and i <= end and self.flat_param._shard_param_offsets
@@ -1975,7 +1980,7 @@ class FlatParamHandle:
             if param_changed:
                 # NOTE: The gradient is not preserved after a parameter change.
                 param = getattr(module, param_name)
-                flat_param._optional_params[i] = param
+                flat_param._wp_params[i] = param
             if needs_param_writeback:
                 expected_shape = torch.Size([numel_in_shard])
                 self._writeback_tensor(
@@ -2027,10 +2032,10 @@ class FlatParamHandle:
                     "Changing shared parameters is not supported yet"
                 )
         if wroteback:
-            # Re-sync `_params` in case `_optional_params` changed
+            # Re-sync `_params` in case `_wp_params` changed
             flat_param._params = [
                 param
-                for param in flat_param._optional_params
+                for param in flat_param._wp_params
                 if param is not FLAT_PARAM_PADDING
             ]
         return wroteback
@@ -2180,15 +2185,15 @@ class FlatParamHandle:
         """Returns the FQNs of the parameters present in this rank's shard."""
         fqns_in_shard: List[str] = []
         start, end = self.flat_param._shard_param_indices  # type: ignore[attr-defined]
-        for i in range(len(self.flat_param._optional_fqns)):
-            is_padding = self.flat_param._optional_fqns[i] is FLAT_PARAM_PADDING
+        for i in range(len(self.flat_param._wp_fqns)):
+            is_padding = self.flat_param._wp_fqns[i] is FLAT_PARAM_PADDING
             if (
                 not is_padding
                 and i >= start
                 and i <= end
                 and self.flat_param._shard_param_offsets  # type: ignore[attr-defined]
             ):
-                fqns_in_shard.append(self.flat_param._optional_fqns[i])  # type: ignore[arg-type]
+                fqns_in_shard.append(self.flat_param._wp_fqns[i])  # type: ignore[arg-type]
         return fqns_in_shard
 
     @property
@@ -2236,7 +2241,7 @@ class FlatParamHandle:
         )
         flat_param = self.flat_param
         assert flat_param._params is not None  # mypy
-        for i, param in enumerate(flat_param._optional_params):  # type: ignore[arg-type]
+        for i, param in enumerate(flat_param._wp_params):  # type: ignore[arg-type]
             # As long as the parameter requires gradient, it should receive a
             # meaningful gradient (even if the gradient happens to be zeros)
             if param.requires_grad:
