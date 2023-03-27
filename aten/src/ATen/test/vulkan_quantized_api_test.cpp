@@ -1749,9 +1749,7 @@ TEST_F(VulkanAPITest, quantized_upsample_nearest2d) {
   const auto in_vulkan = in_cpu.vulkan();
   const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
       in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
-  const auto upsample_vulkan =
-      at::native::vulkan::ops::quantized_upsample_nearest2d(
-          out_vulkan, {4, 6}, 1, 1);
+  const auto upsample_vulkan = at::upsample_nearest2d(out_vulkan, {4, 6}, 1, 1);
 
   const auto in_cpu2 =
       at::rand({2, 13, 4, 6}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
