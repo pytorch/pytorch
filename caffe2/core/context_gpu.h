@@ -148,7 +148,15 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
 #ifdef CAFFE2_USE_CUDNN
     for (auto element : cudnn_handles_) {
       if (element.second) {
+#ifdef _WIN32
+        // this is because of something dumb in the ordering of
+        // destruction. Sometimes at exit, the cuda context would already
+        // be destroyed by the time this gets destroyed. This happens on
+        // windows with cuda 11 and cuda 12.
+        cudnnDestroy(element.second);
+#else
         CUDNN_CHECK(cudnnDestroy(element.second));
+#endif // _WIN32
       }
     }
 #endif // CAFFE2_USE_CUDNN

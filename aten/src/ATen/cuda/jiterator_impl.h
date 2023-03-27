@@ -39,7 +39,7 @@ namespace native {
 
 c10::SmallVector<std::string> get_extra_args_typenames(const c10::SmallVector<at::Scalar>& extra_args) {
   c10::SmallVector<std::string> args_typenames(extra_args.size());
-  for (auto i = 0; i < extra_args.size(); ++i) {
+  for (const auto i : c10::irange(extra_args.size())) {
     args_typenames[i] = at::cuda::jit::typeName(extra_args[i].type());
   }
   return args_typenames;

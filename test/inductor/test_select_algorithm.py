@@ -14,16 +14,19 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
+aten = torch.ops.aten
+
 
 def patches(fn):
-    def skip_cache(self, key, generate):
-        return generate()
+    def skip_cache(self, choices, name, key, generate):
+        return {choice: generate(choice) for choice in choices}
 
     for patcher in [
         dynamo_config.patch(verbose=True),
         inductor_config.patch(debug=True, max_autotune=True, epilogue_fusion=True),
         patch.object(select_algorithm, "VERIFY", dict(atol=1e-4, rtol=1e-4)),
         patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
+        torch.backends.cudnn.flags(allow_tf32=False),
     ]:
         fn = patcher(fn)
 
@@ -62,11 +65,30 @@ class TestSelectAlgorithm(TestCase):
         def foo(input, weight, bias):
             return torch.addmm(bias, input, weight)
 
-        foo(
+        inps = (
             torch.randn(20, 33, device="cuda"),
             torch.randn(33, 16, device="cuda"),
             torch.randn(20, 16, device="cuda"),
         )
+
+        foo(*inps)
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
+    @patches
+    def test_addmm_fp16(self):
+        @torch.compile
+        def foo(input, weight, bias):
+            return torch.addmm(bias, input, weight)
+
+        inps = (
+            torch.randn(2, 320, device="cuda", dtype=torch.half),
+            torch.randn(320, 320, device="cuda", dtype=torch.half).t(),
+            torch.empty(320, device="cuda", dtype=torch.half),
+        )
+
+        foo(*inps)
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
@@ -145,6 +167,96 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(32, 32, device="cuda"),
             torch.randn(32, 32, device="cuda"),
             torch.randn(32, 32, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_convolution1(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x + 1,
+                w,
+                b,
+                stride=(2, 3),
+                padding=(4, 5),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+            )
+
+        foo(
+            torch.randn(2, 33, 34, 41, device="cuda"),
+            torch.randn(34, 33, 3, 3, device="cuda"),
+            torch.randn(34, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_mm_dropout(self):
+        @torch.compile
+        def fn(x1, x2, seed):
+            mm_4 = torch.ops.aten.mm.default(x2, x1)
+            rnd = torch.ops.prims.philox_rand_like.default(mm_4, seed, 0)
+            return mm_4 * rnd
+
+        # sizes picked so triton autotuning wins
+        fn(
+            torch.randn(512, 1024, dtype=torch.float16, device="cuda"),
+            torch.randn(384, 512, dtype=torch.float16, device="cuda"),
+            torch.tensor(12345, device="cuda"),
+        )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    @torch._inductor.config.patch(conv_1x1_as_mm=False)
+    def test_convolution2(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x,
+                w,
+                b,
+                stride=(1, 1),
+                padding=(0, 0),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+            )
+
+        foo(
+            torch.randn(1, 33, 16, 16, device="cuda"),
+            torch.randn(34, 33, 1, 1, device="cuda"),
+            torch.randn(34, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    @torch._inductor.config.patch(conv_1x1_as_mm=True)
+    def test_convolution_as_mm(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x + 1,
+                w,
+                b,
+                stride=(1, 1),
+                padding=(0, 0),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+            )
+
+        foo(
+            torch.randn(2, 33, 16, 16, device="cuda"),
+            torch.randn(34, 33, 1, 1, device="cuda"),
+            torch.randn(34, device="cuda"),
         )
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
