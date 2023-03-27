@@ -35,7 +35,7 @@ from torch.distributed.fsdp._runtime_utils import _clear_grads_if_needed, _lazy_
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.flat_param import (
-    FLAT_PARAM_PADDING,
+    _FLAT_PARAM_PADDING,
     FlatParameter,
     FlatParameterPadding,
     FlatParamHandle,
@@ -280,7 +280,7 @@ def _unflatten_communicated_optim_state(
             # Skip any alignment padding -- `views` should never be exhausted
             # before the outer for loop completes
             try:
-                while optim_state is FLAT_PARAM_PADDING:
+                while optim_state is _FLAT_PARAM_PADDING:
                     optim_state = next(views)
             except StopIteration as e:
                 print(
@@ -1565,7 +1565,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         # to preserve correctness since `_shard_orig_params_state()` relies on
         # the indexing
         for idx, local_fqn in enumerate(flat_param._wp_fqns):
-            if local_fqn is FLAT_PARAM_PADDING:
+            if local_fqn is _FLAT_PARAM_PADDING:
                 continue
             fqn = clean_tensor_name(prefix + local_fqn)
             if fqn in fqn_to_param_info:

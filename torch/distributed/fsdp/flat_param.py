@@ -78,15 +78,15 @@ or a submodule chosen by the provided wrapping policy.
 _FSDP_USE_UNSAFE_SETATTR = "FSDP_USE_UNSAFE_SETATTR"
 
 
-class FlatParameterPadding:
+class _FlatParameterPadding:
     pass
 
 
 # Unique padding object used to represent intra-`FlatParameter` padding in any
 # metadata structure (`_param_infos`, `_shapes`, `_fqns`).
-FLAT_PARAM_PADDING = FlatParameterPadding()
+_FLAT_PARAM_PADDING = _FlatParameterPadding()
 # Some value to set padding in tensors to for debuggability
-FLAT_PARAM_PADDING_VALUE = 42
+_FLAT_PARAM_PADDING_VALUE = 42
 
 
 class ParamInfo(NamedTuple):
@@ -173,9 +173,9 @@ class FlatParameter(nn.Parameter):
     with them filtered. The former are prefixed with "_wp", which stands for
     "with padding", and should mainly be used within this file. They are needed
     when iterating over the tensors in the ``FlatParameter`` or analogous
-    tensors and the index matters. Developers should take care to *avoid*
-    zipping a data structure that includes padding objects with one that does
-    not include padding objects.
+    tensors and the enumerated index matters. Developers should take care to
+    *avoid* zipping a data structure that includes padding objects with one
+    that does not include padding objects.
 
     Attributes:
         _unpadded_unsharded_size (torch.Size): Unsharded flat parameter's size
@@ -191,17 +191,17 @@ class FlatParameter(nn.Parameter):
             the unsharded sizes. (We omit "padded" because there is no
             analogous unpadded one.)
 
-        _wp_param_infos (Tuple[Union[ParamInfo, FlatParameterPadding], ...]):
+        _wp_param_infos (Tuple[Union[ParamInfo, _FlatParameterPadding], ...]):
             Each parameter's parameter info entry or the padding object if
             padding; see :class:`ParamInfo` for details.
-        _wp_shapes (Tuple[Union[torch.Size, FlatParameterPadding], ...]):
+        _wp_shapes (Tuple[Union[torch.Size, _FlatParameterPadding], ...]):
             Each parameter's shape or the padding object if padding.
-        _wp_fqns (Tuple[Union[str, FlatParameterPadding], ...]): The
+        _wp_fqns (Tuple[Union[str, _FlatParameterPadding], ...]): The
             original parameters' FQNs prefixed from the owning handle's
             ``_fully_sharded_module`` or the padding object if padding. The
             names are guaranteed to be unique within the subtree rooted at that
             module.
-        _wp_param_extensions (Tuple[Union[Optional[Any]], FlatParameterPadding]):
+        _wp_param_extensions (Tuple[Union[Optional[Any]], _FlatParameterPadding]):
             Parameter extensions (i.e. some per-parameter state) used to
             customize pre-flatten and post-unflatten behavior. This is
             experimental, and users should not depend on its existence in the
@@ -295,12 +295,12 @@ class FlatParameter(nn.Parameter):
 
     def _init_metadata(
         self,
-        param_infos: List[Union[ParamInfo, FlatParameterPadding]],
+        param_infos: List[Union[ParamInfo, _FlatParameterPadding]],
         numels: List[int],
-        shapes: List[Union[torch.Size, FlatParameterPadding]],
-        fqns: List[Union[str, FlatParameterPadding]],
+        shapes: List[Union[torch.Size, _FlatParameterPadding]],
+        fqns: List[Union[str, _FlatParameterPadding]],
         shared_param_infos: List[SharedParamInfo],
-        param_extensions: List[Union[Optional[Any], FlatParameterPadding]],
+        param_extensions: List[Union[Optional[Any], _FlatParameterPadding]],
         params: Optional[List[nn.Parameter]],
         shared_params: Optional[List[nn.Parameter]],
     ) -> None:
@@ -323,7 +323,7 @@ class FlatParameter(nn.Parameter):
         assert len(param_infos) == len(shapes)
         assert len(param_infos) == len(fqns)
         assert len(param_infos) == len(param_extensions)
-        has_padding = FLAT_PARAM_PADDING in param_infos
+        has_padding = _FLAT_PARAM_PADDING in param_infos
         # Define both optional and regular versions of the data structures that
         # may include padding objects to avoid filtering at runtime
         if not has_padding:
@@ -342,34 +342,34 @@ class FlatParameter(nn.Parameter):
         else:
             self._param_infos = cast(
                 Tuple[ParamInfo, ...],
-                tuple(pi for pi in param_infos if pi is not FLAT_PARAM_PADDING),
+                tuple(pi for pi in param_infos if pi is not _FLAT_PARAM_PADDING),
             )
             self._wp_param_infos = tuple(param_infos)  # type: ignore[arg-type]
             self._shapes = cast(
                 Tuple[torch.Size, ...],
-                tuple(shape for shape in shapes if shape is not FLAT_PARAM_PADDING),
+                tuple(shape for shape in shapes if shape is not _FLAT_PARAM_PADDING),
             )
             self._wp_shapes = tuple(shapes)  # type: ignore[arg-type]
             self._fqns = cast(
                 Tuple[str, ...],
-                tuple(fqn for fqn in fqns if fqn is not FLAT_PARAM_PADDING),
+                tuple(fqn for fqn in fqns if fqn is not _FLAT_PARAM_PADDING),
             )
             self._wp_fqns = tuple(fqns)  # type: ignore[arg-type]
             self._param_extensions = cast(
                 Tuple[Optional[Any], ...],
-                tuple(pe for pe in param_extensions if pe is not FLAT_PARAM_PADDING),
+                tuple(pe for pe in param_extensions if pe is not _FLAT_PARAM_PADDING),
             )
             self._wp_param_extensions = tuple(param_extensions)
         self._num_params = len(self._param_infos)
         _numels: List[int] = []
         for numel, param_info in zip(numels, param_infos):
-            if param_info is not FLAT_PARAM_PADDING:
+            if param_info is not _FLAT_PARAM_PADDING:
                 _numels.append(numel)
         self._wp_numels = tuple(numels)
         self._numels = tuple(_numels)
         self._shared_param_infos = tuple(shared_param_infos)
         self._modules = {
-            pi.module for pi in self._param_infos if pi is not FLAT_PARAM_PADDING
+            pi.module for pi in self._param_infos if pi is not _FLAT_PARAM_PADDING
         }.union({spi.module for spi in self._shared_param_infos})
         assert (params is None) == (shared_params is None)
         if params is not None:
@@ -378,7 +378,7 @@ class FlatParameter(nn.Parameter):
             )
             self._params: Optional[List[nn.Parameter]] = []
             for param, param_info in zip(params, param_infos):
-                is_padding = param_info is FLAT_PARAM_PADDING
+                is_padding = param_info is _FLAT_PARAM_PADDING
                 if not is_padding:
                     self._params.append(param)
             self._wp_params: Optional[List[Union[nn.Parameter, Tensor]]] = params  # type: ignore[assignment]
@@ -530,10 +530,10 @@ class FlatParamHandle:
         params_set = set(params)
         # For alignment padding, only `numels` gets strictly non-`None`
         # elements, and all other lists get `None` elements for padding.
-        param_infos: List[Union[ParamInfo, FlatParameterPadding]] = []
+        param_infos: List[Union[ParamInfo, _FlatParameterPadding]] = []
         numels: List[int] = []
-        shapes: List[Union[torch.Size, FlatParameterPadding]] = []
-        fqns: List[Union[str, FlatParameterPadding]] = []
+        shapes: List[Union[torch.Size, _FlatParameterPadding]] = []
+        fqns: List[Union[str, _FlatParameterPadding]] = []
         shared_param_infos: List[SharedParamInfo] = []
         shared_param_memo: Dict[
             Union[Tensor, nn.Parameter], Tuple[nn.Module, str, str]
@@ -569,11 +569,11 @@ class FlatParamHandle:
                                 numel_to_pad, dtype, requires_grad, device
                             )
                             params_to_flatten.append(padding_tensor)
-                            param_extensions.append(FLAT_PARAM_PADDING)
-                            param_infos.append(FLAT_PARAM_PADDING)
+                            param_extensions.append(_FLAT_PARAM_PADDING)
+                            param_infos.append(_FLAT_PARAM_PADDING)
                             numels.append(numel_to_pad)
-                            shapes.append(FLAT_PARAM_PADDING)
-                            fqns.append(FLAT_PARAM_PADDING)
+                            shapes.append(_FLAT_PARAM_PADDING)
+                            fqns.append(_FLAT_PARAM_PADDING)
                             total_numel += numel_to_pad
                     param, extension = _ext_pre_flatten_transform(param)
                     param_extensions.append(extension)
@@ -972,10 +972,10 @@ class FlatParamHandle:
             shard_param_offsets = []
             # Do not include alignment padding
             for i in range(shard_param_start_index, shard_param_end_index + 1):
-                is_padding = self.flat_param._wp_param_infos[i] is FLAT_PARAM_PADDING
+                is_padding = self.flat_param._wp_param_infos[i] is _FLAT_PARAM_PADDING
                 if is_padding:
-                    assert self.flat_param._wp_fqns[i] is FLAT_PARAM_PADDING
-                    assert self.flat_param._wp_shapes[i] is FLAT_PARAM_PADDING
+                    assert self.flat_param._wp_fqns[i] is _FLAT_PARAM_PADDING
+                    assert self.flat_param._wp_shapes[i] is _FLAT_PARAM_PADDING
                     continue
                 fqns_list.append(self.flat_param._wp_fqns[i])
                 shapes_list.append(self.flat_param._wp_shapes[i])
@@ -1612,7 +1612,7 @@ class FlatParamHandle:
         for split, shape, param_extension in zip(
             splits, flat_param._wp_shapes, flat_param._wp_param_extensions
         ):
-            is_padding = shape is FLAT_PARAM_PADDING
+            is_padding = shape is _FLAT_PARAM_PADDING
             if is_padding:
                 optional_views.append(None)
             else:
@@ -1639,7 +1639,7 @@ class FlatParamHandle:
         for i, (view, param_info) in enumerate(
             zip(views, self.flat_param._wp_param_infos)
         ):
-            is_padding = param_info is FLAT_PARAM_PADDING
+            is_padding = param_info is _FLAT_PARAM_PADDING
             if is_padding:
                 continue
             param_name, module, _ = param_info
@@ -1719,7 +1719,7 @@ class FlatParamHandle:
         for i, (view, param_info) in enumerate(
             zip(views, self.flat_param._wp_param_infos)
         ):
-            is_padding = param_info is FLAT_PARAM_PADDING
+            is_padding = param_info is _FLAT_PARAM_PADDING
             if is_padding:
                 continue
             param_name, module, _ = param_info
@@ -1813,7 +1813,7 @@ class FlatParamHandle:
         for i, (param, param_info) in enumerate(
             zip(self.flat_param._wp_params, self.flat_param._wp_param_infos)
         ):
-            is_padding = param_info is FLAT_PARAM_PADDING
+            is_padding = param_info is _FLAT_PARAM_PADDING
             if not is_padding:
                 param_name, module, _ = param_info
                 self._setattr_param(module, param_name, param)
@@ -1872,7 +1872,7 @@ class FlatParamHandle:
         for i, (param, param_info) in enumerate(
             zip(flat_param._wp_params, flat_param._wp_param_infos)
         ):
-            is_padding = param_info is FLAT_PARAM_PADDING
+            is_padding = param_info is _FLAT_PARAM_PADDING
             in_sharded_flat_param = (
                 i >= start and i <= end and flat_param._shard_param_offsets
             )
@@ -1953,7 +1953,7 @@ class FlatParamHandle:
             in_sharded_flat_param = (
                 i >= start and i <= end and self.flat_param._shard_param_offsets
             )
-            is_padding = param_info is FLAT_PARAM_PADDING
+            is_padding = param_info is _FLAT_PARAM_PADDING
             if not is_padding:
                 param_name, module, _ = param_info
                 if not hasattr(module, param_name):
@@ -2036,7 +2036,7 @@ class FlatParamHandle:
             flat_param._params = [
                 param
                 for param in flat_param._wp_params
-                if param is not FLAT_PARAM_PADDING
+                if param is not _FLAT_PARAM_PADDING
             ]
         return wroteback
 
@@ -2186,7 +2186,7 @@ class FlatParamHandle:
         fqns_in_shard: List[str] = []
         start, end = self.flat_param._shard_param_indices  # type: ignore[attr-defined]
         for i in range(len(self.flat_param._wp_fqns)):
-            is_padding = self.flat_param._wp_fqns[i] is FLAT_PARAM_PADDING
+            is_padding = self.flat_param._wp_fqns[i] is _FLAT_PARAM_PADDING
             if (
                 not is_padding
                 and i >= start
@@ -2397,7 +2397,7 @@ def _construct_padding_tensor(
         torch.ones(
             (padding_numel,), dtype=dtype, requires_grad=requires_grad, device=device
         )
-        * FLAT_PARAM_PADDING_VALUE
+        * _FLAT_PARAM_PADDING_VALUE
     )
 
 
