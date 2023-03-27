@@ -23,6 +23,7 @@ from .exc import (
     format_error_msg,
     InternalTorchDynamoError,
     TorchRuntimeError,
+    UserError,
     unimplemented,
     Unsupported,
 )
@@ -391,6 +392,7 @@ def _compile(
         return guarded_code
     except (
         Unsupported,
+        UserError,
         TorchRuntimeError,
         BackendCompilerFailed,
         AssertionError,

@@ -1,5 +1,6 @@
 import os
 import textwrap
+from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
@@ -71,6 +72,26 @@ class Unsupported(TorchDynamoException):
     def add_to_stats(self, category="unimplemented"):
         self.category = category
         counters[category][self.msg] += 1
+
+
+class UserErrorType(Enum):
+    DYNAMIC_CONTROL_FLOW = auto()
+
+
+# TODO Ideally it should inherit from UnsupportedError
+# because if user code doesn't compile, we know it is not
+# supported. But seperate exception for now as to
+# not pollute the stat collector.
+class UserError(TorchDynamoException):
+    def __init__(self, error_type: UserErrorType, msg):
+        """
+        Specifies illegal user code errors.
+
+        error_type: Type of user error
+        msg: Actionable error message
+        """
+        super().__init__(msg)
+        self.error_type = error_type
 
 
 def unimplemented(msg: str):
