@@ -1600,6 +1600,9 @@ class Layout(IRNode):
         stride: List[Expr],
         offset: Expr = Integer(0),
     ):
+        assert stride is None or len(size) == len(
+            stride
+        ), f"size={size}, stride={stride}"
         self.device = device
         self.dtype = dtype
         assert all(isinstance(s, (Expr, int)) for s in size)
@@ -1856,16 +1859,17 @@ class MutationLayout(Layout):
             target.get_size(),
             None,  # type: ignore[arg-type]
         )
-        self.target = target
+        self.target = target.target if isinstance(target, MutationLayout) else target
 
     @Layout.stride.getter
     def stride(self):
         return self.real_layout().stride
 
+    def storage_size(self) -> sympy.Expr:
+        return self.real_layout().storage_size()
+
     def real_layout(self):
-        if isinstance(self.target, MutationLayout):
-            return self.target.real_layout()
-        return self.target.data.layout
+        return self.target.layout
 
     @classmethod
     def realize_into(cls, src, dst):

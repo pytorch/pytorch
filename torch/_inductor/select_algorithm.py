@@ -22,7 +22,14 @@ from .autotune_process import BenchmarkRequest, TensorMeta
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
-from .codegen.triton import config_of, signature_of, texpr, TritonKernel, TritonPrinter, TritonScheduling
+from .codegen.triton import (
+    config_of,
+    signature_of,
+    texpr,
+    TritonKernel,
+    TritonPrinter,
+    TritonScheduling,
+)
 
 from .utils import do_bench, sympy_dot, sympy_product
 from .virtualized import V
@@ -62,8 +69,11 @@ class TritonTemplateKernel(TritonKernel):
         *,
         index_dtype,
     ):
-        super().__init__(sympy_product(output_node.get_size()), sympy.Integer(1),
-                         index_dtype=index_dtype)
+        super().__init__(
+            sympy_product(output_node.get_size()),
+            sympy.Integer(1),
+            index_dtype=index_dtype,
+        )
         self.input_nodes = input_nodes
         self.output_node = output_node
         self.named_input_nodes = {}
@@ -139,7 +149,7 @@ class TritonTemplateKernel(TritonKernel):
             [
                 "import triton.language as tl",
                 "import triton",
-                "from torch._inductor.triton_ops.autotune import template",
+                "from torch._inductor.triton_heuristics import template",
                 "from torch._inductor.utils import instance_descriptor",
                 "",
                 self.jit_line(),
@@ -272,10 +282,9 @@ class TritonTemplateKernel(TritonKernel):
         result, *mask = super().indexing(
             index,
             dense_indexing=False,
-            copy_shape=copy_shape,
+            copy_shape=self.template_mask,
             override_mask=self.template_mask,
         )
-        result += f" + tl.zeros({self.template_mask}.shape, {self.index_dtype})"
         return (result, *mask)
 
     def initialize_range_tree(self, pid_cache):
@@ -361,7 +370,11 @@ class TritonTemplate:
         kernel_name = f"triton_{self.name}"
 
         buffers = itertools.chain(input_nodes, (fake_out,))
-        index_dtype = "tl.int32" if TritonScheduling.can_use_32bit_indexing(buffers) else "tl.int64"
+        index_dtype = (
+            "tl.int32"
+            if TritonScheduling.can_use_32bit_indexing(buffers)
+            else "tl.int64"
+        )
 
         kernel_options = dict(
             input_nodes=input_nodes,

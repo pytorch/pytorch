@@ -347,6 +347,8 @@ aten::_index_put_impl_
 aten::_indices
 aten::_indices_copy
 aten::_indices_copy.out
+aten::_int_mm
+aten::_int_mm.out
 aten::_is_all_true
 aten::_is_any_true
 aten::_linalg_check_errors
@@ -490,6 +492,8 @@ aten::_test_autograd_multiple_dispatch.fullcoverage_out
 aten::_test_autograd_multiple_dispatch_view
 aten::_test_autograd_multiple_dispatch_view_copy
 aten::_test_autograd_multiple_dispatch_view_copy.out
+aten::_test_functorch_fallback
+aten::_test_functorch_fallback.out
 aten::_test_optional_filled_intlist
 aten::_test_optional_filled_intlist.out
 aten::_test_optional_floatlist
