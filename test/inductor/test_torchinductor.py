@@ -6988,6 +6988,16 @@ if HAS_CPU:
                 fn(torch.randn([8, 128]))
             self.assertGreater(len(strings), 3)
 
+        def test_vertical_sum_cpu_only(self):
+            def fn(a):
+                return a.sum(dim=0)
+
+            metrics.reset()
+            x = torch.randn(100, 100)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            self.assertTrue(same(fn(x), opt_fn(x)))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
