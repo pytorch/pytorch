@@ -1,10 +1,6 @@
 #include <sstream>
 
-#ifndef FBCODE_CAFFE2
-#include <nvtx3/nvToolsExt.h>
-#else
 #include <nvToolsExt.h>
-#endif
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
