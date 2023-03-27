@@ -299,7 +299,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     env['LC_ALL'] = 'C'  # Don't localize output
     version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
     if IS_LINUX:
-        # Check for 'gcc' or 'g++' for sccache warpper
+        # Check for 'gcc' or 'g++' for sccache wrapper
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
         results = re.findall(pattern, version_string)
         if len(results) != 1:
@@ -726,9 +726,11 @@ class BuildExtension(build_ext):
                         cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
                     elif isinstance(self.cflags, dict):
                         cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
+                        append_std17_if_no_std_present(cflags)
                         cmd += cflags
                     elif isinstance(self.cflags, list):
                         cflags = COMMON_MSVC_FLAGS + self.cflags
+                        append_std17_if_no_std_present(cflags)
                         cmd += cflags
 
                 return original_spawn(cmd)
@@ -1904,7 +1906,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.
         message = error_prefix
-        # `error` is a CalledProcessError (which has an `ouput`) attribute, but
+        # `error` is a CalledProcessError (which has an `output`) attribute, but
         # mypy thinks it's Optional[BaseException] and doesn't narrow
         if hasattr(error, 'output') and error.output:  # type: ignore[union-attr]
             message += f": {error.output.decode(*SUBPROCESS_DECODE_ARGS)}"  # type: ignore[union-attr]
@@ -1996,7 +1998,7 @@ def _write_ninja_file_to_build_library(path,
     common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
 
     if IS_WINDOWS:
-        cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
+        cflags = common_cflags + COMMON_MSVC_FLAGS + ['/std:c++17'] + extra_cflags
         cflags = _nt_quote_args(cflags)
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
