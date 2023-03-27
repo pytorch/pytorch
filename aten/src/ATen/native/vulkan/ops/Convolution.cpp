@@ -52,12 +52,12 @@ inline bool is_pointwise(const IntArrayRef weight_size) {
 
 Conv2dMethod determine_method(
     const IntArrayRef weight_size,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
+    const IntArrayRef /* stride */,
+    const IntArrayRef /* padding */,
+    const IntArrayRef /* dilation */,
     const int64_t groups,
     const bool transposed,
-    const bool quantized) {
+    const bool /* quantized */) {
   if (transposed) {
     return Conv2dSlidingWindow;
   }
@@ -281,9 +281,9 @@ at::Tensor rearrange_bias(
 
 static api::ShaderInfo get_shader(
     const IntArrayRef kernel_size,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
+    const IntArrayRef /* stride */,
+    const IntArrayRef /* padding */,
+    const IntArrayRef /* dilation */,
     const Conv2dMethod method,
     const bool transposed,
     const bool quantized) {
@@ -343,12 +343,12 @@ static api::ShaderInfo get_shader(
 //
 
 struct Params final {
-  api::utils::ivec3 out_extents;
+  api::utils::ivec3 outExtents;
   int32_t fill0;
-  api::utils::ivec3 in_extents;
+  api::utils::ivec3 inExtents;
   int32_t fill1;
-  api::utils::ivec4 overlay_region;
-  api::utils::ivec2 kernel_size;
+  api::utils::ivec4 overlayRegion;
+  api::utils::ivec2 kernelSize;
   api::utils::ivec2 stride;
   api::utils::ivec2 padding;
   api::utils::ivec2 dilate;
@@ -369,8 +369,8 @@ void record_op(
     const float output_min,
     const float output_max,
     const IntArrayRef kernel_size,
-    const Conv2dMethod method,
-    const bool transposed) {
+    const Conv2dMethod /* method */,
+    const bool /* transposed */) {
   api::PipelineBarrier pipeline_barrier{};
 
   api::utils::uvec3 global_size = v_output.extents();
@@ -415,13 +415,13 @@ void record_op(
 
 struct QParams final {
   api::utils::vec4 scales;
-  api::utils::ivec4 zero_points;
-  api::utils::ivec3 out_extents;
+  api::utils::ivec4 zeroPoints;
+  api::utils::ivec3 outExtents;
   int32_t fill0;
-  api::utils::ivec3 in_extents;
+  api::utils::ivec3 inExtents;
   int32_t fill1;
-  api::utils::ivec4 overlay_region;
-  api::utils::ivec2 kernel_size;
+  api::utils::ivec4 overlayRegion;
+  api::utils::ivec2 kernelSize;
   api::utils::ivec2 stride;
   api::utils::ivec2 padding;
   api::utils::ivec2 dilate;
@@ -442,8 +442,8 @@ void record_quantized_op(
     const float output_min,
     const float output_max,
     const IntArrayRef kernel_size,
-    const Conv2dMethod method,
-    const bool transposed) {
+    const Conv2dMethod /* method */,
+    const bool /* transposed */) {
   api::PipelineBarrier pipeline_barrier{};
 
   api::utils::uvec3 global_size = v_output.extents();
@@ -632,7 +632,7 @@ bool bias_valid(
     const c10::optional<Tensor>& bias,
     const Tensor& weight,
     const bool transposed,
-    const bool quantized) {
+    const bool /* quantized */) {
   if (!bias) {
     return true;
   }
@@ -658,7 +658,7 @@ bool available(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride,
-    const IntArrayRef padding,
+    const IntArrayRef /* padding */,
     const IntArrayRef dilation,
     const bool transposed,
     const bool quantized,
@@ -750,7 +750,7 @@ static inline std::vector<int64_t> get_conv_transpose_output_size(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef stride,
-    IntArrayRef dilation = IntArrayRef()) {
+    IntArrayRef /* dilation */) {
   auto dim = input_size.size();
   std::vector<int64_t> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
@@ -874,7 +874,7 @@ Conv2dPackedContext::Conv2dPackedContext(
   const auto method = conv2d::determine_method(
       weight.sizes(), stride, padding, dilation, groups, transposed, quantized);
 
-  packed_.reserve(Packed::NumArgs);
+  packed_.reserve(Packed::NUM_ARGS);
   packed_.emplace_back(
       convert(pack_weights(weight, transposed, quantized, method)));
   packed_.emplace_back(
@@ -896,11 +896,11 @@ Conv2dPackedContext::Conv2dPackedContext(
   packed_.emplace_back(method);
   packed_.emplace_back(weight.sizes().vec());
 
-  compute_shader_ = conv2d::get_shader(
+  computeShader_ = conv2d::get_shader(
       weight.sizes(), stride, padding, dilation, method, transposed, quantized);
 
   if (!at::globalContext().releaseWeightsWhenPrepacking()) {
-    unpacked_.reserve(Unpacked::NumArgs);
+    unpacked_.reserve(Unpacked::NUM_ARGS);
     unpacked_.emplace_back(weight);
     unpacked_.emplace_back(bias);
     unpacked_.emplace_back(stride_arg.vec());
@@ -917,17 +917,17 @@ Conv2dPackedContext::Conv2dPackedContext(
 
 Conv2dPackedContext Conv2dPackedContext::pack(c10::impl::GenericList unpacked) {
   return Conv2dPackedContext(
-      unpacked.get(Unpacked::Weight).toTensor(),
-      get_optional_tensor(unpacked, Unpacked::Bias),
-      unpacked.get(Unpacked::Stride).toIntVector(),
-      unpacked.get(Unpacked::Padding).toIntVector(),
-      unpacked.get(Unpacked::Dilation).toIntVector(),
-      unpacked.get(Unpacked::isTransposed).toBool(),
-      unpacked.get(Unpacked::isQuantized).toBool(),
-      unpacked.get(Unpacked::OutputPadding).toIntVector(),
-      unpacked.get(Unpacked::Groups).toInt(),
-      get_optional_scalar(unpacked, Unpacked::OutputMin),
-      get_optional_scalar(unpacked, Unpacked::OutputMax));
+      unpacked.get(Unpacked::WEIGHT).toTensor(),
+      get_optional_tensor(unpacked, Unpacked::BIAS),
+      unpacked.get(Unpacked::STRIDE).toIntVector(),
+      unpacked.get(Unpacked::PADDING).toIntVector(),
+      unpacked.get(Unpacked::DILATION).toIntVector(),
+      unpacked.get(Unpacked::IS_TRANSPOSED).toBool(),
+      unpacked.get(Unpacked::IS_QUANTIZED).toBool(),
+      unpacked.get(Unpacked::OUTPUT_PADDING).toIntVector(),
+      unpacked.get(Unpacked::GROUPS).toInt(),
+      get_optional_scalar(unpacked, Unpacked::OUTPUT_MIN),
+      get_optional_scalar(unpacked, Unpacked::OUTPUT_MAX));
 }
 
 c10::intrusive_ptr<Conv2dPackedContext> create_conv2d_context(
@@ -1013,41 +1013,44 @@ Tensor run_conv2d_context_impl(
 
   // Extract everything from the PackedContext
   const vTensor& v_weight = convert(
-      conv_context->get_val(Conv2dPackedContext::Packed::Weight).toTensor());
+      conv_context->get_val(Conv2dPackedContext::Packed::WEIGHT).toTensor());
 
   const vTensor& v_bias = convert(
-      conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor());
+      conv_context->get_val(Conv2dPackedContext::Packed::BIAS).toTensor());
 
   const auto overlay_region =
-      conv_context->get_val(Conv2dPackedContext::Packed::OverlayRegion)
+      conv_context->get_val(Conv2dPackedContext::Packed::OVERLAY_REGION)
           .toIntVector();
 
   const auto stride =
-      conv_context->get_val(Conv2dPackedContext::Packed::Stride).toIntVector();
+      conv_context->get_val(Conv2dPackedContext::Packed::STRIDE).toIntVector();
   const auto padding =
-      conv_context->get_val(Conv2dPackedContext::Packed::Padding).toIntVector();
+      conv_context->get_val(Conv2dPackedContext::Packed::PADDING).toIntVector();
   const auto output_padding =
-      conv_context->get_val(Conv2dPackedContext::Packed::OutputPadding)
+      conv_context->get_val(Conv2dPackedContext::Packed::OUTPUT_PADDING)
           .toIntVector();
   const auto dilation =
-      conv_context->get_val(Conv2dPackedContext::Packed::Dilation)
+      conv_context->get_val(Conv2dPackedContext::Packed::DILATION)
           .toIntVector();
 
   const auto transposed =
-      conv_context->get_val(Conv2dPackedContext::Packed::isTransposed).toBool();
+      conv_context->get_val(Conv2dPackedContext::Packed::IS_TRANSPOSED)
+          .toBool();
   const auto quantized =
-      conv_context->get_val(Conv2dPackedContext::Packed::isQuantized).toBool();
+      conv_context->get_val(Conv2dPackedContext::Packed::IS_QUANTIZED).toBool();
 
   const float output_min = safe_downcast<float>(
-      conv_context->get_val(Conv2dPackedContext::Packed::OutputMin).toDouble());
+      conv_context->get_val(Conv2dPackedContext::Packed::OUTPUT_MIN)
+          .toDouble());
   const float output_max = safe_downcast<float>(
-      conv_context->get_val(Conv2dPackedContext::Packed::OutputMax).toDouble());
+      conv_context->get_val(Conv2dPackedContext::Packed::OUTPUT_MAX)
+          .toDouble());
 
   const Conv2dMethod method_ = static_cast<Conv2dMethod>(
-      conv_context->get_val(Conv2dPackedContext::Packed::ConvMethod).toInt());
+      conv_context->get_val(Conv2dPackedContext::Packed::CONV_METHOD).toInt());
 
   const auto kernel_size =
-      conv_context->get_val(Conv2dPackedContext::Packed::WeightSizes)
+      conv_context->get_val(Conv2dPackedContext::Packed::WEIGHT_SIZES)
           .toIntVector();
 
   TORCH_CHECK(
@@ -1164,7 +1167,7 @@ Tensor quantized_conv2d(
 
 /* Backwards compatibility */
 Conv2dOpContext::Conv2dOpContext(Conv2dPackedContext conv_context)
-    : conv_context_{std::move(conv_context)} {}
+    : convContext_{std::move(conv_context)} {}
 
 Conv2dOpContext Conv2dOpContext::create(
     const Tensor& weight,
@@ -1193,23 +1196,24 @@ Conv2dOpContext Conv2dOpContext::create(
 
 Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
   return run_conv2d_context(
-      input_arg, c10::make_intrusive<Conv2dPackedContext>(conv_context_));
+      input_arg, c10::make_intrusive<Conv2dPackedContext>(convContext_));
 }
 
 Conv2dOpContext::State Conv2dOpContext::unpack() const {
-  const c10::impl::GenericList unpacked_ = conv_context_.unpack();
+  const c10::impl::GenericList unpacked_ = convContext_.unpack();
 
-  TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+  TORCH_CHECK(!unpacked_.empty(), "unpacked_ does not have any elements!");
 
   return Conv2dOpContext::State(
-      unpacked_.get(Conv2dPackedContext::Unpacked::Weight).toTensor(),
-      get_optional_tensor(unpacked_, Conv2dPackedContext::Unpacked::Bias),
-      unpacked_.get(Conv2dPackedContext::Unpacked::Stride).toIntVector(),
-      unpacked_.get(Conv2dPackedContext::Unpacked::Padding).toIntVector(),
-      unpacked_.get(Conv2dPackedContext::Unpacked::Dilation).toIntVector(),
-      unpacked_.get(Conv2dPackedContext::Unpacked::Groups).toInt(),
-      get_optional_scalar(unpacked_, Conv2dPackedContext::Unpacked::OutputMin),
-      get_optional_scalar(unpacked_, Conv2dPackedContext::Unpacked::OutputMax));
+      unpacked_.get(Conv2dPackedContext::Unpacked::WEIGHT).toTensor(),
+      get_optional_tensor(unpacked_, Conv2dPackedContext::Unpacked::BIAS),
+      unpacked_.get(Conv2dPackedContext::Unpacked::STRIDE).toIntVector(),
+      unpacked_.get(Conv2dPackedContext::Unpacked::PADDING).toIntVector(),
+      unpacked_.get(Conv2dPackedContext::Unpacked::DILATION).toIntVector(),
+      unpacked_.get(Conv2dPackedContext::Unpacked::GROUPS).toInt(),
+      get_optional_scalar(unpacked_, Conv2dPackedContext::Unpacked::OUTPUT_MIN),
+      get_optional_scalar(
+          unpacked_, Conv2dPackedContext::Unpacked::OUTPUT_MAX));
 }
 
 c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
@@ -1222,11 +1226,11 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dOpContext>(Conv2dOpContext::create(
-      std::move(weight),
-      std::move(bias),
-      std::move(stride),
-      std::move(padding),
-      std::move(dilation),
+      weight,
+      bias,
+      stride,
+      padding,
+      dilation,
       /* transposed = */ false,
       /* output_padding = */ {0},
       groups,

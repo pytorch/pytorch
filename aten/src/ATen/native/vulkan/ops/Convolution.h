@@ -30,23 +30,23 @@ Tensor rearrange_bias(
 namespace qconv2d_vk {
 
 struct QParams final {
-  api::utils::uvec3 out_extents;
+  api::utils::uvec3 outExtents;
   int32_t ic4;
-  api::utils::ivec4 sizes_2d;
-  float output_scale;
-  float input_scale;
-  int32_t output_zero_point;
-  int32_t input_zero_point;
-  float weight_scale;
-  float bias_scale;
-  int32_t weight_zero_point;
-  int32_t bias_zero_point;
-  api::utils::ivec2 kernel_size;
+  api::utils::ivec4 sizes2d;
+  float outputScale;
+  float inputScale;
+  int32_t outputZeroPoint;
+  int32_t inputZeroPoint;
+  float weightScale;
+  float biasScale;
+  int32_t weightZeroPoint;
+  int32_t biasZeroPoint;
+  api::utils::ivec2 kernelSize;
   api::utils::ivec2 stride;
   api::utils::ivec2 padding;
   api::utils::ivec2 dilate;
   api::utils::vec2 clamp;
-  api::utils::ivec4 src_filter;
+  api::utils::ivec4 srcFilter;
 };
 
 } // namespace qconv2d_vk
@@ -55,7 +55,7 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
                                   public torch::jit::CustomClassHolder {
  private:
   c10::impl::GenericList unpacked_;
-  api::ShaderInfo compute_shader_{};
+  api::ShaderInfo computeShader_{};
 
  public:
   Conv2dPackedContext(
@@ -75,53 +75,53 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
    * Assigns a name to each index in the unpacked list.
    */
   struct Unpacked final {
-    static constexpr uint32_t Weight = 0u;
-    static constexpr uint32_t Bias = 1u;
-    static constexpr uint32_t Stride = 2u;
-    static constexpr uint32_t Padding = 3u;
-    static constexpr uint32_t Dilation = 4u;
-    static constexpr uint32_t isTransposed = 5u;
-    static constexpr uint32_t isQuantized = 6u;
-    static constexpr uint32_t OutputPadding = 7u;
-    static constexpr uint32_t Groups = 8u;
-    static constexpr uint32_t OutputMin = 9u;
-    static constexpr uint32_t OutputMax = 10u;
+    static constexpr uint32_t WEIGHT = 0u;
+    static constexpr uint32_t BIAS = 1u;
+    static constexpr uint32_t STRIDE = 2u;
+    static constexpr uint32_t PADDING = 3u;
+    static constexpr uint32_t DILATION = 4u;
+    static constexpr uint32_t IS_TRANSPOSED = 5u;
+    static constexpr uint32_t IS_QUANTIZED = 6u;
+    static constexpr uint32_t OUTPUT_PADDING = 7u;
+    static constexpr uint32_t GROUPS = 8u;
+    static constexpr uint32_t OUTPUT_MIN = 9u;
+    static constexpr uint32_t OUTPUT_MAX = 10u;
 
-    static constexpr uint32_t NumArgs = 11u;
+    static constexpr uint32_t NUM_ARGS = 11u;
   };
 
   /*
    * Assigns a name to each index in the packed list.
    */
   struct Packed final {
-    static constexpr uint32_t Weight = 0u;
-    static constexpr uint32_t Bias = 1u;
-    static constexpr uint32_t OverlayRegion = 2u;
-    static constexpr uint32_t Stride = 3u;
-    static constexpr uint32_t Padding = 4u;
-    static constexpr uint32_t OutputPadding = 5u;
-    static constexpr uint32_t Dilation = 6u;
-    static constexpr uint32_t isTransposed = 7u;
-    static constexpr uint32_t isQuantized = 8u;
-    static constexpr uint32_t Groups = 9u;
-    static constexpr uint32_t OutputMin = 10u;
-    static constexpr uint32_t OutputMax = 11u;
-    static constexpr uint32_t ConvMethod = 12u;
-    static constexpr uint32_t WeightSizes = 13u;
+    static constexpr uint32_t WEIGHT = 0u;
+    static constexpr uint32_t BIAS = 1u;
+    static constexpr uint32_t OVERLAY_REGION = 2u;
+    static constexpr uint32_t STRIDE = 3u;
+    static constexpr uint32_t PADDING = 4u;
+    static constexpr uint32_t OUTPUT_PADDING = 5u;
+    static constexpr uint32_t DILATION = 6u;
+    static constexpr uint32_t IS_TRANSPOSED = 7u;
+    static constexpr uint32_t IS_QUANTIZED = 8u;
+    static constexpr uint32_t GROUPS = 9u;
+    static constexpr uint32_t OUTPUT_MIN = 10u;
+    static constexpr uint32_t OUTPUT_MAX = 11u;
+    static constexpr uint32_t CONV_METHOD = 12u;
+    static constexpr uint32_t WEIGHT_SIZES = 13u;
 
-    static constexpr uint32_t NumArgs = 14u;
+    static constexpr uint32_t NUM_ARGS = 14u;
   };
 
   static Conv2dPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override {
-    TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+    TORCH_CHECK(!unpacked_.empty(), "unpacked_ does not have any elements!");
 
     return unpacked_;
   }
 
   inline api::ShaderInfo& compute_shader() {
-    return compute_shader_;
+    return computeShader_;
   }
 };
 
@@ -200,7 +200,7 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
 
  private:
   explicit Conv2dOpContext(Conv2dPackedContext conv_context);
-  Conv2dPackedContext conv_context_;
+  Conv2dPackedContext convContext_;
 };
 
 Tensor conv2d_clamp_run(
