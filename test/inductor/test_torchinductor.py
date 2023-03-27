@@ -6989,13 +6989,22 @@ if HAS_CPU:
             self.assertGreater(len(strings), 3)
 
         def test_vertical_sum_cpu_only(self):
-            def fn(a):
+            def fn1(a):
                 return a.sum(dim=0)
+
+            def fn2(a):
+                return a.sum(dim=1)
 
             metrics.reset()
             x = torch.randn(100, 100)
-            opt_fn = torch._dynamo.optimize("inductor")(fn)
-            self.assertTrue(same(fn(x), opt_fn(x)))
+            opt_fn1 = torch._dynamo.optimize("inductor")(fn1)
+            self.assertTrue(same(fn1(x), opt_fn1(x)))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+            metrics.reset()
+            x = torch.randn(100, 100, 100)
+            opt_fn2 = torch._dynamo.optimize("inductor")(fn2)
+            self.assertTrue(same(fn2(x), opt_fn2(x)))
             assert metrics.generated_cpp_vec_kernel_count == 1
 
 
