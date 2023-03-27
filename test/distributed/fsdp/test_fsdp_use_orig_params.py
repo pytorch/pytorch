@@ -411,9 +411,9 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                 has_weight = False
                 has_bias = False
                 for param, fqn in zip(flat_param._params, flat_param._fqns):
-                    if fqn is not None and "weight" in fqn and param.numel() > 0:
+                    if "weight" in fqn and param.numel() > 0:
                         has_weight = True
-                    elif fqn is not None and "bias" in fqn and param.numel() > 0:
+                    elif "bias" in fqn and param.numel() > 0:
                         has_bias = True
                 has_both |= has_weight and has_bias
         assert has_both, (

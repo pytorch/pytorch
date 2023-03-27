@@ -34,7 +34,12 @@ from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
 from torch.distributed.fsdp._runtime_utils import _clear_grads_if_needed, _lazy_init
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
-from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
+from torch.distributed.fsdp.flat_param import (
+    FLAT_PARAM_PADDING,
+    FlatParameter,
+    FlatParameterPadding,
+    FlatParamHandle,
+)
 
 
 @dataclass
@@ -269,11 +274,13 @@ def _unflatten_communicated_optim_state(
                 flat_param_views[state_name] = views
             else:
                 views = flat_param_views[state_name]
-            optim_state: Optional[Union[torch.Tensor, ShardedTensor]] = next(views)
+            optim_state: Union[
+                torch.Tensor, ShardedTensor, FlatParameterPadding
+            ] = next(views)
             # Skip any alignment padding -- `views` should never be exhausted
             # before the outer for loop completes
             try:
-                while optim_state is None:
+                while optim_state is FLAT_PARAM_PADDING:
                     optim_state = next(views)
             except StopIteration as e:
                 print(
@@ -284,7 +291,7 @@ def _unflatten_communicated_optim_state(
             if shard_state:
                 assert fsdp_state.process_group is not None
                 optim_state = _ext_chunk_tensor(
-                    optim_state,
+                    cast(Union[torch.Tensor, ShardedTensor], optim_state),
                     fsdp_state.rank,
                     fsdp_state.world_size,
                     torch.cuda.device_count(),
@@ -445,7 +452,7 @@ def _flatten_optim_state(
         "Expects at least one unflattened parameter corresponding to the "
         "flat parameter"
     )
-    unflat_param_shapes = [shape for shape in flat_param._shapes if shape is not None]
+    unflat_param_shapes = flat_param._shapes
     num_unflat_param_shapes = len(unflat_param_shapes)
     assert (
         num_unflat_params == num_unflat_param_shapes
@@ -1548,16 +1555,13 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         handles = _module_handles(fsdp_state, module)
         assert (
             len(handles) < 2
-        ), f"Assumes at most 1 FlatParamHandle but {len(handles)} handles"
+        ), f"Assumes at most 1 FlatParamHandle but got {len(handles)} handles"
         if not handles:
             return
         handle = handles[0]
         flat_param = handle.flat_param
         fsdp_param_info = FSDPParamInfo(fsdp_state, handle, {})
         for idx, local_fqn in enumerate(flat_param._fqns):
-            is_padding = local_fqn is None
-            if is_padding:
-                continue
             fqn = clean_tensor_name(prefix + local_fqn)
             if fqn in fqn_to_param_info:
                 assert fqn_to_param_info[fqn].handle.flat_param is flat_param, fqn

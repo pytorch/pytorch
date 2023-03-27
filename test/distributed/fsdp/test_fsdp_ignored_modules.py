@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy
+from torch.distributed.fsdp.flat_param import FLAT_PARAM_PADDING
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -147,11 +148,13 @@ class TestFSDPIgnoredModules(FSDPTest):
             flat_param = wrapped_model.params[0]
             flat_param_numel = flat_param.numel()
             if use_orig_params:
-                # Subtract numel from alignment padding
+                # Subtract the numel contributed from alignment padding
                 padding_numel = sum(
                     numel
-                    for (numel, pi) in zip(flat_param._numels, flat_param._param_infos)
-                    if pi is None
+                    for (numel, pi) in zip(
+                        flat_param._numels, flat_param._optional_param_infos
+                    )
+                    if pi is FLAT_PARAM_PADDING
                 )
                 flat_param_numel -= padding_numel
                 self.assertEqual(flat_param_numel, nonignored_numel)
@@ -194,11 +197,13 @@ class TestFSDPIgnoredModules(FSDPTest):
             flat_param = wrapped_model.params[0]
             flat_param_numel = flat_param.numel()
             if use_orig_params:
-                # Subtract numel from alignment padding
+                # Subtract the numel contributed from alignment padding
                 padding_numel = sum(
                     numel
-                    for (numel, pi) in zip(flat_param._numels, flat_param._param_infos)
-                    if pi is None
+                    for (numel, pi) in zip(
+                        flat_param._numels, flat_param._optional_param_infos
+                    )
+                    if pi is FLAT_PARAM_PADDING
                 )
                 flat_param_numel -= padding_numel
                 self.assertEqual(flat_param_numel, nonignored_numel)
