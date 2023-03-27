@@ -21,9 +21,9 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, floating_and_complex_types,
-    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes
+    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
+    float_to_corresponding_complex_type_map
 )
-from torch.testing._creation import float_to_corresponding_complex_type_map
 
 from torch.utils.dlpack import to_dlpack
 
@@ -3664,10 +3664,10 @@ class TestBufferProtocol(TestCase):
             torch.frombuffer(byte_arr, dtype=dtype)
 
     def test_byte_to_int(self):
-        byte_array = np.array([-1, 0, 0, 0, -1, 0, 0, 0], dtype=np.byte)
+        byte_array = np.array([-1, 0, 0, 0, -1, 0, 0, 0], dtype=np.byte) if sys.byteorder == 'little' \
+            else np.array([0, 0, 0, -1, 0, 0, 0, -1], dtype=np.byte)
         tensor = torch.frombuffer(byte_array, dtype=torch.int32)
         self.assertEqual(tensor.numel(), 2)
-        # Assuming little endian machine
         self.assertSequenceEqual(tensor, [255, 255])
 
 # Tests for the `asarray` function:

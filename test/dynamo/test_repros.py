@@ -529,7 +529,7 @@ class ModelOutput(collections.OrderedDict):
 
     def __getitem__(self, k):
         if isinstance(k, str):
-            inner_dict = {k: v for (k, v) in self.items()}
+            inner_dict = dict(self.items())
             return inner_dict[k]
         else:
             return self.to_tuple()[k]
@@ -2350,18 +2350,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "input sum needs to be 3"):
             opt_fn(*args)
 
-    # TODO (tmanlaibaatar) handle data-dependent fstring in assert statement.
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
-    def test_rewrite_assert_with_fstring_msg(self):
-        def f(x):
-            b = x.sin()
-            assert x[0] == 3, f"First dim need to be {x[0]}"
-            return x.cos() + b
-
-        args = (torch.Tensor([3, 4, 5]),)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
-            exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
-
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
@@ -2375,6 +2363,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
+
+    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
+    def test_rewrite_assert_with_non_string_msg(self):
+        def f(x):
+            b = x.sin()
+            assert x[0] == 2, x.size()
+            return x.cos() + b
+
+        torch._dynamo.utils.counters.clear()
+        args = torch.Tensor([3, 4, 5])
+        opt_f = torch._dynamo.optimize("eager")(f)
+        with self.assertRaisesRegex(AssertionError, "torch.Size"):
+            opt_f(args)
+        self.assertEqual(
+            torch._dynamo.utils.counters["unimplemented"][
+                "assert with non-string message"
+            ],
+            1,
+        )
 
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_noop(self):
@@ -2492,6 +2499,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
+
+    @torch._dynamo.config.patch("specialize_int", False)
+    def test_maybe_multiply_symint(self):
+        # https://github.com/pytorch/pytorch/issues/97346
+        from torch._functorch.aot_autograd import aot_module_simplified
+
+        def my_aot_compiler(gm, example_inputs):
+            def my_compiler(gm, example_inputs):
+                return gm.forward
+
+            # Invoke AOTAutograd
+            return aot_module_simplified(gm, example_inputs, fw_compiler=my_compiler)
+
+        def my_example(t1, t2, d):
+            out = torch.add(t1, t2, alpha=d)
+            return out
+
+        compiled_fn = torch.compile(backend=my_aot_compiler, dynamic=True)(my_example)
+
+        t1 = torch.arange(3, dtype=torch.float32).requires_grad_(True)
+        t2 = torch.arange(3, dtype=torch.float32).requires_grad_(True)
+
+        ra = compiled_fn(t1, t2, 5)
+        self.assertEqual(ra, torch.tensor([0.0, 6.0, 12.0]))
+
+        ra = compiled_fn(t1, t2, 6)
+        self.assertEqual(ra, torch.tensor([0.0, 7.0, 14.0]))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_implicit_guard(self):
