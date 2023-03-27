@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 
-from typing import Callable, Dict
+from typing import Callable, Dict, List, Any
 
 import torch
 import torch._ops
@@ -37,7 +37,7 @@ def _rename_placeholder_targets(
     module.recompile()
 
 
-def wrapped_fn(fn, mode, allow_non_fake_inputs, args):
+def wrapped_fn(fn: Callable, mode: str, allow_non_fake_inputs: bool, args: List[Any]):
     context = enable_python_dispatcher if mode == "symbolic" else contextlib.nullcontext
     shape_env = ShapeEnv() if mode == "symbolic" else None
     fake_mode = torch._dynamo.utils.fake_mode_from_tensors(args)
@@ -47,7 +47,7 @@ def wrapped_fn(fn, mode, allow_non_fake_inputs, args):
         )
 
     args = [
-        (mode.from_tensor(t)
+        (fake_mode.from_tensor(t)
         if isinstance(t, torch.Tensor) and not isinstance(t, FakeTensor)
         else t)
         for t in args
