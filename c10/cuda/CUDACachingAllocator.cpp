@@ -2353,7 +2353,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::mutex mutex;
 
   // allocated blocks by device pointer
-  ska::flat_hash_map<void*, Block*> allocated_blocks;
+  ska::flat_hash_map<const void*, Block*> allocated_blocks;
 
   void add_allocated_block(Block* block) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -2363,7 +2363,7 @@ class NativeCachingAllocator : public CUDAAllocator {
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
 
-  Block* get_allocated_block(void* ptr, bool remove = false) {
+  Block* get_allocated_block(const void* ptr, bool remove = false) {
     std::lock_guard<std::mutex> lock(mutex);
     auto it = allocated_blocks.find(ptr);
     if (it == allocated_blocks.end()) {
@@ -2475,7 +2475,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[block->device]->getBaseAllocation(block, outSize);
   }
 
-  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
+  void recordStream(DataPtr& ptr, cuda::CUDAStream stream) override {
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
     if (!ptr.get()) {

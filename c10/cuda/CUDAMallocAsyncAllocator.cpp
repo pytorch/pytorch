@@ -584,9 +584,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return ptr;
   }
 
-  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
+  void recordStream(DataPtr& ptr, cuda::CUDAStream stream) override {
     std::lock_guard<std::mutex> lk(general_mutex);
-    auto ptr_val = ptr.get();
+    auto ptr_val = ptr.mutable_get();
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
     if (!ptr_val) {

@@ -85,7 +85,7 @@ struct CUDAPluggableAllocator
   virtual void cacheInfo(int dev_id, size_t* largestBlock) override;
   virtual void* getBaseAllocation(void* ptr, size_t* size) override;
 
-  virtual void recordStream(const c10::DataPtr&, streamType stream) override;
+  virtual void recordStream(c10::DataPtr&, streamType stream) override;
 
   virtual c10::cuda::CUDACachingAllocator::DeviceStats getDeviceStats(
       int device) override;

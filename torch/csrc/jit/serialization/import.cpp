@@ -270,7 +270,7 @@ Module ScriptModuleDeserializer::deserialize(
       size_t meta_size;
       std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
       extra_files[kv.first] =
-          std::string(static_cast<char*>(meta_ptr.get()), meta_size);
+          std::string(static_cast<char*>(meta_ptr.mutable_get()), meta_size);
     }
   }
   if (reader_->hasRecord("model.json") && code_prefix_ == "code/") {

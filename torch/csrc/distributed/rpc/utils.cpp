@@ -450,7 +450,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       const auto& idat = it->second;
       auto dptr = at::getCPUAllocator()->allocate(idat.second);
       if (idat.second != 0) {
-        memcpy(dptr.get(), idat.first, idat.second);
+        memcpy(dptr.mutable_get(), idat.first, idat.second);
       }
       return dptr;
     };

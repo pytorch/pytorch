@@ -667,35 +667,35 @@ void launch(
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
 
   auto kthValues_buffer = allocator.allocate(numInputSlices * sizeof(T));
-  T* kthValues = reinterpret_cast<T*>(kthValues_buffer.get());
+  T* kthValues = reinterpret_cast<T*>(kthValues_buffer.mutable_get());
 
   TORCH_CHECK(blocks_per_slice <= std::numeric_limits<uint32_t>::max(), "blocks_per_slice larger than uint32 maximum is not supported");
   auto semaphores_buffer = allocator.allocate(numInputSlices * sizeof(uint32_t));
-  uint32_t* semaphores = reinterpret_cast<uint32_t*>(semaphores_buffer.get());
+  uint32_t* semaphores = reinterpret_cast<uint32_t*>(semaphores_buffer.mutable_get());
   AT_CUDA_CHECK(cudaMemsetAsync(semaphores, 0, numInputSlices * sizeof(uint32_t), stream));
 
   auto ks_to_find_buffer = allocator.allocate(numInputSlices * sizeof(uint32_t));
-  uint32_t* ks_to_find = reinterpret_cast<uint32_t*>(ks_to_find_buffer.get());
+  uint32_t* ks_to_find = reinterpret_cast<uint32_t*>(ks_to_find_buffer.mutable_get());
   uint32_t k_to_find = largest ? inputSliceSize - outputSliceSize + 1: outputSliceSize;
   fill<uint32_t><<<std::min(((int64_t)numInputSlices + 511) / 512, (int64_t)1073741824), 512, 0, stream>>>(
     ks_to_find, k_to_find, numInputSlices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   auto desired_buffer = allocator.allocate(numInputSlices * sizeof(Bitwise));
-  Bitwise* desired = reinterpret_cast<Bitwise*>(desired_buffer.get());
+  Bitwise* desired = reinterpret_cast<Bitwise*>(desired_buffer.mutable_get());
 
   auto counts_buffer = allocator.allocate(num_blocks * RADIX_DIGITS * sizeof(short));
-  short* counts = reinterpret_cast<short*>(counts_buffer.get());
+  short* counts = reinterpret_cast<short*>(counts_buffer.mutable_get());
   static_assert(MAX_ITEMS_PER_THREAD * BLOCK_THREADS < std::numeric_limits<short>::max(),
     "blockwise counter too large");
 
 #if CUB_SUPPORTS_SCAN_BY_KEY()
   auto withinKCounts_buffer = allocator.allocate(num_blocks * sizeof(uint32_t));
-  uint32_t* withinKCounts = reinterpret_cast<uint32_t*>(withinKCounts_buffer.get());
+  uint32_t* withinKCounts = reinterpret_cast<uint32_t*>(withinKCounts_buffer.mutable_get());
   AT_CUDA_CHECK(cudaMemsetAsync(withinKCounts, 0, num_blocks * sizeof(uint32_t), stream));
 
   auto kthCounts_buffer = allocator.allocate(num_blocks * sizeof(uint32_t));
-  uint32_t* kthCounts = reinterpret_cast<uint32_t*>(kthCounts_buffer.get());
+  uint32_t* kthCounts = reinterpret_cast<uint32_t*>(kthCounts_buffer.mutable_get());
 #endif
 
   Bitwise desiredMask = 0;

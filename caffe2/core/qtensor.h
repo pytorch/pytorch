@@ -128,11 +128,11 @@ class C10_EXPORT QTensor {
       capacity_ = nbytes() * CHAR_BIT;
     }
     CAFFE_ENFORCE(capacity_ == nbytes() * CHAR_BIT);
-    return static_cast<unsigned char*>(data_ptr_.get());
+    return static_cast<unsigned char*>(data_ptr_.mutable_get());
   }
 
   inline const unsigned char* data() const {
-    return static_cast<unsigned char*>(data_ptr_.get());
+    return static_cast<const unsigned char*>(data_ptr_.get());
   }
 
   inline size_t size() const {

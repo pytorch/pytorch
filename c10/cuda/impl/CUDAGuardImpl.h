@@ -208,7 +208,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     cuda_stream.synchronize();
   }
 
-  void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
+  void recordDataPtrOnStream(c10::DataPtr& data_ptr, const Stream& stream)
       const override {
     CUDAStream cuda_stream{stream};
     CUDACachingAllocator::recordStream(data_ptr, cuda_stream);

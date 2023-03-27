@@ -1621,7 +1621,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       // See [Sync Streams].
       if (!avoidRecordStreams_) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            inputs[i].storage().data_ptr(), ncclStream);
+            inputs[i].storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+            ncclStream);
       }
       C10D_NCCL_CHECK(
           fn(inputs[i], outputs[i], ncclComm->getNcclComm(), ncclStream),
@@ -1757,7 +1758,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     //
     // See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
-        tensors[i].storage().data_ptr(), ncclStream);
+        tensors[i].storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+        ncclStream);
   }
 
   {
@@ -2174,7 +2176,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
             at::cuda::CUDAStream& stream) {
           if (!avoidRecordStreams_) {
             c10::cuda::CUDACachingAllocator::recordStream(
-                output.storage().data_ptr(), stream);
+                output.storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+                stream);
           }
           return ncclAllGather(
               input.data_ptr(),
@@ -2205,7 +2208,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
               // See [Sync Streams].
               if (!avoidRecordStreams_) {
                 c10::cuda::CUDACachingAllocator::recordStream(
-                    outputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
+                    outputTensors[i][j]
+                        .storage()
+                        .unsafeGetStorageImpl()
+                        ->mutable_data_ptr(),
+                    ncclStreams[i]);
               }
               outputTensors[i][j].copy_(outputFlattened[i][j], true);
             }
@@ -2290,7 +2297,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
             at::cuda::CUDAStream& stream) {
           if (!avoidRecordStreams_) {
             c10::cuda::CUDACachingAllocator::recordStream(
-                output.storage().data_ptr(), stream);
+                output.storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+                stream);
           }
           const auto ncclDataType = getNcclDataType(input.scalar_type());
           const auto ncclReduceOp = getNcclReduceOp(
@@ -2329,7 +2337,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
               // See [Sync Streams].
               if (!avoidRecordStreams_) {
                 c10::cuda::CUDACachingAllocator::recordStream(
-                    inputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
+                    inputTensors[i][j]
+                        .storage()
+                        .unsafeGetStorageImpl()
+                        ->mutable_data_ptr(),
+                    ncclStreams[i]);
               }
               inputFlattened[i][j].copy_(inputTensors[i][j], true);
             }
@@ -2414,7 +2426,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
           at::cuda::CUDAStream& stream) {
         if (!avoidRecordStreams_) {
           c10::cuda::CUDACachingAllocator::recordStream(
-              output.storage().data_ptr(), stream);
+              output.storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+              stream);
         }
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp = getNcclReduceOp(
@@ -2540,7 +2553,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
           // See [Sync Streams].
           if (!avoidRecordStreams_) {
             c10::cuda::CUDACachingAllocator::recordStream(
-                output.storage().data_ptr(), stream);
+                output.storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+                stream);
           }
           torch::cuda::nccl::all2all_single_equal_split(
               input, output, this->getSize(), comm, stream);
@@ -2589,7 +2603,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
           // See [Sync Streams].
           if (!avoidRecordStreams_) {
             c10::cuda::CUDACachingAllocator::recordStream(
-                output.storage().data_ptr(), stream);
+                output.storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+                stream);
           }
           torch::cuda::nccl::all2all_single_unequal_split(
               input.data_ptr(),
@@ -2815,7 +2830,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
           if (!avoidRecordStreams_) {
             for (auto output : outputs) {
               c10::cuda::CUDACachingAllocator::recordStream(
-                  output.storage().data_ptr(), stream);
+                  output.storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+                  stream);
             }
           }
         }
@@ -2901,7 +2917,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
           if (!avoidRecordStreams_) {
             for (auto input : inputs) {
               c10::cuda::CUDACachingAllocator::recordStream(
-                  input.storage().data_ptr(), stream);
+                  input.storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+                  stream);
             }
           }
         }
@@ -2950,7 +2967,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
           at::cuda::CUDAStream& stream) {
         if (!avoidRecordStreams_) {
           c10::cuda::CUDACachingAllocator::recordStream(
-              output.storage().data_ptr(), stream);
+              output.storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+              stream);
         }
         return ncclAllGather(
             input.data_ptr(),

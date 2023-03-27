@@ -33,7 +33,7 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
 
     C10_CUDA_CHECK(
         cudaMemcpyAsync(
-            data.get(),
+            data.mutable_get(),
             storage->data(),
             std::min(storage->nbytes(), size_bytes),
             cudaMemcpyDeviceToDevice,

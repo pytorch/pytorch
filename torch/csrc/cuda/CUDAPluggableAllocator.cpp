@@ -182,10 +182,10 @@ void* CUDAPluggableAllocator::getBaseAllocation(void* ptr, size_t* size) {
 }
 
 void CUDAPluggableAllocator::recordStream(
-    const c10::DataPtr& ptr,
+    c10::DataPtr& ptr,
     streamType stream) {
   if (record_stream_fn_) {
-    record_stream_fn_(ptr.get(), stream);
+    record_stream_fn_(ptr.mutable_get(), stream);
   }
 }
 

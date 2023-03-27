@@ -29,8 +29,8 @@ namespace c10d {
   do {                                                      \
     if ((_TENSORS)[0].device().is_cuda()) {                 \
       for (const auto i : c10::irange((_TENSORS).size())) { \
-        c10::cuda::CUDACachingAllocator::recordStream(      \
-            (_TENSORS)[i].storage().data_ptr(), (*stream)); \
+        c10::cuda::CUDACachingAllocator::recordStream(                  \
+            (_TENSORS)[i].storage().unsafeGetStorageImpl()->mutable_data_ptr(), (*stream)); \
       }                                                     \
     } else {                                                \
       (_DATA) = (_TENSORS);                                 \

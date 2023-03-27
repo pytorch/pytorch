@@ -430,7 +430,7 @@ void BytecodeDeserializer::deserialize_only_extra(
       size_t meta_size = 0;
       std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
       extra_files[kv.first] =
-          std::string(static_cast<char*>(meta_ptr.get()), meta_size);
+          std::string(static_cast<char*>(meta_ptr.mutable_get()), meta_size);
     }
   }
 }

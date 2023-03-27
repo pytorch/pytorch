@@ -99,8 +99,8 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
       ::google::protobuf::util::NewTypeResolverForDescriptorPool(
           url_prefix, model_def.GetDescriptor()->file()->pool()));
   std::string json_string = std::string(
-      static_cast<char*>(data_ptr.get()),
-      static_cast<char*>(data_ptr.get()) + data_size);
+      static_cast<char*>(data_ptr.mutable_get()),
+      static_cast<char*>(data_ptr.mutable_get()) + data_size);
   std::string binary_string;
   ::google::protobuf::util::JsonParseOptions opts;
   opts.ignore_unknown_fields = true;

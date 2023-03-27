@@ -31,7 +31,9 @@ void record_stream_any_impl(Variable& var, c10::Stream& stream) {
   if (C10_UNLIKELY(at::isBatchedTensor(var))) {
     auto* impl = at::maybeGetBatchedImpl(var);
     if (impl) {
-      guard.recordDataPtrOnStream(impl->value().storage().data_ptr(), stream);
+      guard.recordDataPtrOnStream(
+          impl->value().storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+          stream);
     } else {
       TORCH_INTERNAL_ASSERT(false, "Expected batched tensor");
     }
@@ -43,23 +45,38 @@ void record_stream_any_impl(Variable& var, c10::Stream& stream) {
       case c10::kSparseBsc: {
         auto* impl = at::sparse_csr::get_sparse_csr_impl(var);
         guard.recordDataPtrOnStream(
-            impl->values().storage().data_ptr(), stream);
+            impl->values().storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+            stream);
         guard.recordDataPtrOnStream(
-            impl->compressed_indices().storage().data_ptr(), stream);
+            impl->compressed_indices()
+                .storage()
+                .unsafeGetStorageImpl()
+                ->mutable_data_ptr(),
+            stream);
         guard.recordDataPtrOnStream(
-            impl->plain_indices().storage().data_ptr(), stream);
+            impl->plain_indices()
+                .storage()
+                .unsafeGetStorageImpl()
+                ->mutable_data_ptr(),
+            stream);
         break;
       }
       case c10::kSparse: {
         auto* impl = at::sparse::get_sparse_impl(var);
         guard.recordDataPtrOnStream(
-            impl->values().storage().data_ptr(), stream);
+            impl->values().storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+            stream);
         guard.recordDataPtrOnStream(
-            impl->indices().storage().data_ptr(), stream);
+            impl->indices()
+                .storage()
+                .unsafeGetStorageImpl()
+                ->mutable_data_ptr(),
+            stream);
         break;
       }
       case c10::kStrided:
-        guard.recordDataPtrOnStream(var.storage().data_ptr(), stream);
+        guard.recordDataPtrOnStream(
+            var.storage().unsafeGetStorageImpl()->mutable_data_ptr(), stream);
         break;
       default:
         TORCH_INTERNAL_ASSERT(

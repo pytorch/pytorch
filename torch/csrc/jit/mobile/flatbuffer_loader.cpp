@@ -688,7 +688,7 @@ c10::Storage FlatbufferLoader::getStorage(uint32_t index) {
     if (should_copy_tensor_memory_) {
       auto* allocator = at::GetCPUAllocator();
       data = allocator->allocate(size);
-      memcpy(data.get(), storage->data()->data(), size);
+      memcpy(data.mutable_get(), storage->data()->data(), size);
     } else {
       void* ptr = static_cast<void*>(storage->mutable_data()->data());
       data = at::DataPtr(ptr, ptr, deleteNothing2, DeviceType::CPU);

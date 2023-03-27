@@ -236,8 +236,8 @@ void Function::init_execution_state() const {
   }
 
   // Fill in preallocated buffer pointers.
-  for (const auto& preallocation : state.preallocations_) {
-    arguments.emplace_back(preallocation.get());
+  for (auto& preallocation : state.preallocations_) {
+    arguments.emplace_back(preallocation.mutable_get());
   }
 
   execution_state_ = std::make_unique<ExecutionState>(std::move(state));

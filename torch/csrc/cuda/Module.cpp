@@ -890,7 +890,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 // so that a deallocation is not triggered when they die.
 void removeStorageDeleterFns(
     const std::vector<c10::StorageImpl*>& stale_live_storages,
-    std::unordered_set<void*> definitely_stale_pointers) {
+    std::unordered_set<const void*> definitely_stale_pointers) {
   for (c10::StorageImpl* stale_storage : stale_live_storages) {
     auto ptr = stale_storage->data_ptr().get();
     auto allocated_pointer = definitely_stale_pointers.find(ptr);
@@ -908,7 +908,7 @@ void removeStorageDeleterFns(
 void addStorageDeleterFns(
     std::vector<c10::StorageImpl*>& storages_to_add_deleters_to,
     c10::cuda::CUDACachingAllocator::CheckpointDelta& delta) {
-  std::unordered_map<void*, c10::StorageImpl*> storages;
+  std::unordered_map<const void*, c10::StorageImpl*> storages;
   for (auto& storage : storages_to_add_deleters_to) {
     storages[storage->data_ptr().get()] = storage;
   }
@@ -1045,7 +1045,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def("_free_And_Remove_DeleterFn", [](size_t storage_impl_ptr) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
-    auto data_ptr = storage_impl->data_ptr().get();
+    auto data_ptr = storage_impl->mutable_data_ptr().mutable_get();
     bool succeeded = storage_impl->mutable_data_ptr().compare_exchange_deleter(
         alloc->raw_deleter(), c10::detail::deleteNothing);
     TORCH_CHECK("Expected standard deleter");
@@ -1099,11 +1099,11 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         auto& freed_pointers = delta.ptrs_freed;
         auto& allocd_pointers = delta.dataptrs_allocd;
 
-        std::unordered_set<void*> allocd_set;
+        std::unordered_set<const void*> allocd_set;
         for (auto& data_ptr : delta.dataptrs_allocd) {
           allocd_set.insert(data_ptr.get());
         }
-        std::unordered_set<void*> freed_pointer_set;
+        std::unordered_set<const void*> freed_pointer_set;
         size_t definite_freed_count = 0;
         for (void* ptr : freed_pointers) {
           if (!allocd_set.count(ptr)) {

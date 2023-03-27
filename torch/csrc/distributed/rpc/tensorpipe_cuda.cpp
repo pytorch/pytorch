@@ -80,7 +80,8 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
         at::cuda::CUDAStream(getStreamForDevice(streams, storage.device()));
     // record tensor data ptrs on TensorPipe streams, so that the tensors
     // won't be destructed before TensorPipe finishing sending them.
-    c10::cuda::CUDACachingAllocator::recordStream(storage.data_ptr(), stream);
+    c10::cuda::CUDACachingAllocator::recordStream(
+        storage.unsafeGetStorageImpl()->mutable_data_ptr(), stream);
 
     tensorpipe::CudaBuffer buffer;
     buffer.ptr = storage.unsafeGetStorageImpl()->mutable_unsafe_data<char>();
@@ -109,7 +110,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
         c10::cuda::CUDACachingAllocator::get()->allocate(length);
 
     tensorpipe::CudaBuffer buffer;
-    buffer.ptr = dataPtr.get();
+    buffer.ptr = dataPtr.mutable_get();
     buffer.stream = stream.stream();
 
     tensorpipe::Allocation::Tensor tensor;

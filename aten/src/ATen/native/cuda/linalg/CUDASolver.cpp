@@ -17,7 +17,7 @@ void getrf<double>(
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto dataPtr = allocator.allocate(sizeof(double)*lwork);
   TORCH_CUSOLVER_CHECK(cusolverDnDgetrf(
-      handle, m, n, dA, ldda, static_cast<double*>(dataPtr.get()), ipiv, info));
+      handle, m, n, dA, ldda, static_cast<double*>(dataPtr.mutable_get()), ipiv, info));
 }
 
 template <>
@@ -29,7 +29,7 @@ void getrf<float>(
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto dataPtr = allocator.allocate(sizeof(float)*lwork);
   TORCH_CUSOLVER_CHECK(cusolverDnSgetrf(
-      handle, m, n, dA, ldda, static_cast<float*>(dataPtr.get()), ipiv, info));
+      handle, m, n, dA, ldda, static_cast<float*>(dataPtr.mutable_get()), ipiv, info));
 }
 
 template <>
@@ -52,7 +52,7 @@ void getrf<c10::complex<double>>(
       n,
       reinterpret_cast<cuDoubleComplex*>(dA),
       ldda,
-      static_cast<cuDoubleComplex*>(dataPtr.get()),
+      static_cast<cuDoubleComplex*>(dataPtr.mutable_get()),
       ipiv,
       info));
 }
@@ -77,7 +77,7 @@ void getrf<c10::complex<float>>(
       n,
       reinterpret_cast<cuComplex*>(dA),
       ldda,
-      static_cast<cuComplex*>(dataPtr.get()),
+      static_cast<cuComplex*>(dataPtr.mutable_get()),
       ipiv,
       info));
 }
@@ -388,7 +388,7 @@ void gesvdjBatched<float>(
 
   TORCH_CUSOLVER_CHECK(cusolverDnSgesvdjBatched(
     handle, jobz, m, n, A, lda, S, U, ldu, V, ldv,
-    static_cast<float*>(dataPtr.get()),
+    static_cast<float*>(dataPtr.mutable_get()),
     lwork, info, params, batchSize));
 }
 
@@ -405,7 +405,7 @@ void gesvdjBatched<double>(
 
   TORCH_CUSOLVER_CHECK(cusolverDnDgesvdjBatched(
     handle, jobz, m, n, A, lda, S, U, ldu, V, ldv,
-    static_cast<double*>(dataPtr.get()),
+    static_cast<double*>(dataPtr.mutable_get()),
     lwork, info, params, batchSize));
 }
 
@@ -435,7 +435,7 @@ void gesvdjBatched<c10::complex<float>>(
     ldu,
     reinterpret_cast<cuComplex*>(V),
     ldv,
-    static_cast<cuComplex*>(dataPtr.get()),
+    static_cast<cuComplex*>(dataPtr.mutable_get()),
     lwork, info, params, batchSize));
 }
 
@@ -465,7 +465,7 @@ void gesvdjBatched<c10::complex<double>>(
     ldu,
     reinterpret_cast<cuDoubleComplex*>(V),
     ldv,
-    static_cast<cuDoubleComplex*>(dataPtr.get()),
+    static_cast<cuDoubleComplex*>(dataPtr.mutable_get()),
     lwork, info, params, batchSize));
 }
 

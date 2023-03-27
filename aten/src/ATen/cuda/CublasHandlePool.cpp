@@ -109,7 +109,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   if (workspace_it == cublas_handle_stream_to_workspace().end()) {
     workspace_it = cublas_handle_stream_to_workspace().insert(workspace_it, {key, getNewWorkspace()});
   }
-  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, workspace_it->second.get(), getChosenWorkspaceSize()));
+  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, workspace_it->second.mutable_get(), getChosenWorkspaceSize()));
 #endif
 #if !defined(USE_ROCM)
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup

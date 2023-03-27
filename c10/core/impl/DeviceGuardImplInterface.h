@@ -198,8 +198,7 @@ struct C10_API DeviceGuardImplInterface {
    * being used on the given stream, and that it should thus avoid recycling the
    * DataPtr until all work on that stream is done.
    */
-  virtual void recordDataPtrOnStream(const c10::DataPtr&, const Stream&) const {
-  }
+  virtual void recordDataPtrOnStream(c10::DataPtr&, const Stream&) const {}
 
   /**
    * Intended use of this class is to leak the DeviceGuardImpl at program end.

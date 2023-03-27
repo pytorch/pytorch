@@ -914,7 +914,11 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allgather(
 #ifdef USE_CUDA
           if (isCuda) {
             c10::cuda::CUDACachingAllocator::recordStream(
-                outputTensors[i][j].storage().data_ptr(), (*stream));
+                outputTensors[i][j]
+                    .storage()
+                    .unsafeGetStorageImpl()
+                    ->mutable_data_ptr(),
+                (*stream));
             asyncCopy = true;
           }
 #endif
@@ -1409,7 +1413,11 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter(
 #ifdef USE_CUDA
         if (isCuda) {
           c10::cuda::CUDACachingAllocator::recordStream(
-              inputTensors[i][j].storage().data_ptr(), (*stream));
+              inputTensors[i][j]
+                  .storage()
+                  .unsafeGetStorageImpl()
+                  ->mutable_data_ptr(),
+              (*stream));
           asyncCopy = true;
         }
 #endif

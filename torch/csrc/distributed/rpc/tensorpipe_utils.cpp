@@ -79,7 +79,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
     at::DataPtr dataPtr = at::getCPUAllocator()->allocate(length);
 
     tensorpipe::CpuBuffer buffer;
-    buffer.ptr = dataPtr.get();
+    buffer.ptr = dataPtr.mutable_get();
 
     tensorpipe::Allocation::Tensor tensor;
     tensor.buffer = buffer;

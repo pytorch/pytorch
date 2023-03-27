@@ -275,7 +275,7 @@ MemoryPlanner::MemoryPlanner(
 
 uint8_t* MemoryPlanner::allocateBuffer(size_t num_bytes) {
   buffer_ = allocate_buffer(num_bytes);
-  uint8_t* start = static_cast<uint8_t*>(buffer_.get());
+  uint8_t* start = static_cast<uint8_t*>(buffer_.mutable_get());
   buffer_start_ = start;
   buffer_end_ = start + num_bytes;
   return start;
@@ -291,7 +291,7 @@ void MemoryPlanner::allocateOutputTensors() {
   output_buffer_ = allocate_buffer(output_buffer_bytes_);
 
   size_t offset = 0;
-  uint8_t* start = static_cast<uint8_t*>(output_buffer_.get());
+  uint8_t* start = static_cast<uint8_t*>(output_buffer_.mutable_get());
 
   for (const auto& ms : managed_output_tensors_) {
     auto tensor_size = ms.first;

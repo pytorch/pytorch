@@ -144,7 +144,7 @@ struct C10_API PlacementDeleteContext {
       size_t size,
       Device device);
   ~PlacementDeleteContext() {
-    placement_dtor_(data_ptr_.get(), size_);
+    placement_dtor_(data_ptr_.mutable_get(), size_);
     // original memory will be freed when data_ptr_ is destructed
   }
 };

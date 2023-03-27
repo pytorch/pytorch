@@ -701,7 +701,7 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
     PlacementDtor placement_dtor,
     size_t size,
     at::Device device) {
-  auto* ptr = data_ptr.get();
+  auto* ptr = data_ptr.mutable_get();
   return {
       ptr,
       new PlacementDeleteContext(std::move(data_ptr), placement_dtor, size),

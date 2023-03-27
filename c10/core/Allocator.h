@@ -35,7 +35,10 @@ class C10_API DataPtr {
   void clear() {
     ptr_.clear();
   }
-  void* get() const {
+  const void* get() const {
+    return ptr_.get();
+  }
+  void* mutable_get() {
     return ptr_.get();
   }
   void* get_context() const {

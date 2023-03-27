@@ -355,16 +355,28 @@ void initializeStreamsEvents(
     if (tensors[i].is_sparse()) {
       if (tensors[i].is_coalesced()) {
         impl.recordDataPtrOnStream(
-            tensors[i].indices().storage().data_ptr(), streams[i]);
+            tensors[i]
+                .indices()
+                .storage()
+                .unsafeGetStorageImpl()
+                ->mutable_data_ptr(),
+            streams[i]);
         impl.recordDataPtrOnStream(
-            tensors[i].values().storage().data_ptr(), streams[i]);
+            tensors[i]
+                .values()
+                .storage()
+                .unsafeGetStorageImpl()
+                ->mutable_data_ptr(),
+            streams[i]);
       } else {
         // We will need to coalesce first, which means new tensors will
         // be allocated on the streams we just allocated, and there
         // is no need to record them separately.
       }
     } else {
-      impl.recordDataPtrOnStream(tensors[i].storage().data_ptr(), streams[i]);
+      impl.recordDataPtrOnStream(
+          tensors[i].storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+          streams[i]);
     }
   }
 }
@@ -411,7 +423,9 @@ void initializeStreamsEvents(
       // `tensors` are created on a different stream. Hence, they must record
       // new streams in this Work to prevent being freed before the Work
       // finishes.
-      impl.recordDataPtrOnStream(tensor.storage().data_ptr(), streams[i]);
+      impl.recordDataPtrOnStream(
+          tensor.storage().unsafeGetStorageImpl()->mutable_data_ptr(),
+          streams[i]);
     }
   }
 }

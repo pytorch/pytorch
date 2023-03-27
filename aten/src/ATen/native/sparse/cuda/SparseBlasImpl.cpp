@@ -221,7 +221,7 @@ void block_sparse_triangular_solve_vec(
             block_size,
             info.descriptor(),
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
-            work_data.get());
+            work_data.mutable_get());
 
         if (!unitriangular) {
           int first_zero_diag_idx = -1;
@@ -248,7 +248,7 @@ void block_sparse_triangular_solve_vec(
             B_->data_ptr<scalar_t>(),
             X_->data_ptr<scalar_t>(),
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
-            work_data.get());
+            work_data.mutable_get());
 
         bsrsv2_bsrsm2_may_need_to_sync();
       });
@@ -358,7 +358,7 @@ void block_sparse_triangular_solve_mat(
             block_size,
             info.descriptor(),
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
-            work_data.get());
+            work_data.mutable_get());
 
         if (!unitriangular) {
           int first_zero_diag_idx = -1;
@@ -389,7 +389,7 @@ void block_sparse_triangular_solve_mat(
             X_->data_ptr<scalar_t>(),
             ldx,
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
-            work_data.get());
+            work_data.mutable_get());
 
         bsrsv2_bsrsm2_may_need_to_sync();
       });
@@ -674,7 +674,7 @@ void spmm(
             descC.descriptor(),
             compute_type,
             algorithm,
-            work_data.get()));
+            work_data.mutable_get()));
       });
 
   if (!result.is_same(*result_)) {
@@ -769,7 +769,7 @@ void spgemm(
             CUSPARSE_SPGEMM_DEFAULT,
             spgemm_desc.descriptor(),
             &buffer_size1,
-            buffer1.get()));
+            buffer1.mutable_get()));
 
         // It's required to call compute twice
         size_t buffer_size2 = 0;
@@ -803,7 +803,7 @@ void spgemm(
             CUSPARSE_SPGEMM_DEFAULT,
             spgemm_desc.descriptor(),
             &buffer_size2,
-            buffer2.get()));
+            buffer2.mutable_get()));
 
         // Get how many specified elements are there in C
         int64_t C_num_rows, C_num_cols, C_nnz;
@@ -1037,7 +1037,7 @@ void addmv_out_sparse_csr(
             descY.descriptor(),
             compute_type,
             alg,
-            work_data.get()));
+            work_data.mutable_get()));
       });
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
@@ -1185,7 +1185,7 @@ void add_out_sparse_csr(
             desc.descriptor(),
             C_crow_indices_ptr,
             &nnzC,
-            work_data.get());
+            work_data.mutable_get());
 
         nnzC = fix_nnz(nnzC);
 
@@ -1217,7 +1217,7 @@ void add_out_sparse_csr(
             C_values_ptr,
             C_crow_indices_ptr,
             C_col_indices_ptr,
-            work_data.get());
+            work_data.mutable_get());
 
         if (output_indices_dtype == at::kLong) {
           static_cast<SparseCsrTensorImpl*>(C.unsafeGetTensorImpl())->set_member_tensors(
@@ -1318,7 +1318,7 @@ void triangular_solve_out_sparse_csr(
               compute_type,
               CUSPARSE_SPSV_ALG_DEFAULT,
               desc_spsv.descriptor(),
-              work_data.get()));
+              work_data.mutable_get()));
 
           TORCH_CUDASPARSE_CHECK(cusparseSpSV_solve(
               handle,
@@ -1378,7 +1378,7 @@ void triangular_solve_out_sparse_csr(
               compute_type,
               CUSPARSE_SPSM_ALG_DEFAULT,
               desc_spsm.descriptor(),
-              work_data.get()));
+              work_data.mutable_get()));
 
           TORCH_CUDASPARSE_CHECK(cusparseSpSM_solve(
               handle,
@@ -1471,7 +1471,7 @@ void sampled_addmm_out_sparse_csr(
               descC.descriptor(),
               compute_type,
               CUSPARSE_SDDMM_ALG_DEFAULT,
-              buffer.get()));
+              buffer.mutable_get()));
 
           TORCH_CUDASPARSE_CHECK(cusparseSDDMM(
               handle,
@@ -1484,7 +1484,7 @@ void sampled_addmm_out_sparse_csr(
               descC.descriptor(),
               compute_type,
               CUSPARSE_SDDMM_ALG_DEFAULT,
-              buffer.get()));
+              buffer.mutable_get()));
         }
       });
 #endif

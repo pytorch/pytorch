@@ -291,7 +291,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data for ", name.c_str());
   at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
-  mz_zip_reader_extract_to_mem(ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
+  mz_zip_reader_extract_to_mem(ar_.get(), key, retval.mutable_get(), stat.m_uncomp_size, 0);
   valid("reading file ", name.c_str());
 
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);

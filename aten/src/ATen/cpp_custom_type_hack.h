@@ -82,7 +82,10 @@ cast(const Tensor& packed) {
           caffe2::TypeMeta::Make<T>().deleteFn(),
       "Expected temporary cpp type wrapper of type ",
       caffe2::TypeMeta::TypeName<T>());
-  return *reinterpret_cast<T*>(packed.storage().data_ptr().get());
+  return *reinterpret_cast<T*>(packed.storage()
+                                   .unsafeGetStorageImpl()
+                                   ->mutable_data_ptr()
+                                   .mutable_get());
 }
 
 template <typename T>

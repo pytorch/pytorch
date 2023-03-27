@@ -179,7 +179,7 @@ void _csrmm2(
     descC,
     cusparse_value_type,      /* data type in which the computation is executed */
     CUSPARSE_SPMM_CSR_ALG1,   /* default computing algorithm for CSR sparse matrix format */
-    dataPtr.get()             /* external buffer */
+    dataPtr.mutable_get()     /* external buffer */
   ));
 
   TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(descA));

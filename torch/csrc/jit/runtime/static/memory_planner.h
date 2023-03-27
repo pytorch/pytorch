@@ -206,10 +206,10 @@ class MemoryPlanner {
       return false;
     }
     // TODO: Improve this once D31357486 is landed.
-    uint8_t* tensor_ptr =
-        static_cast<uint8_t*>(tensor.storage().data_ptr().get());
-    uint8_t* buffer_start = static_cast<uint8_t*>(output_buffer_.get());
-    uint8_t* buffer_end = buffer_start + output_buffer_bytes_;
+    auto* tensor_ptr =
+        static_cast<const uint8_t*>(tensor.storage().data_ptr().get());
+    auto* buffer_start = static_cast<const uint8_t*>(output_buffer_.get());
+    auto* buffer_end = buffer_start + output_buffer_bytes_;
     return buffer_start <= tensor_ptr && tensor_ptr < buffer_end;
   }
 

@@ -1176,7 +1176,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       }
       if (!storage->device().is_cpu()) {
         impl_.recordDataPtrOnStream(
-            storage->data_ptr(), impl_.getStream(storage->device()));
+            storage->mutable_data_ptr(), impl_.getStream(storage->device()));
       }
     }
   }

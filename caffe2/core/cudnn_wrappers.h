@@ -67,7 +67,7 @@ struct CuDNNWorkspace {
       nbytes_ = nbytes;
     }
     CAFFE_ENFORCE_GE(nbytes_, nbytes);
-    return data_.get();
+    return data_.mutable_get();
   }
 
   void reset() {

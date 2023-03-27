@@ -88,7 +88,8 @@ struct CudaIPCRefCountersFile final {
         refcounted_shared_mem_(std::move(data_ptr)) {}
 
   int64_t* counter_ptr() {
-    return static_cast<int64_t*>(refcounted_shared_mem_.get()) + next_offset_;
+    return static_cast<int64_t*>(refcounted_shared_mem_.mutable_get()) +
+        next_offset_;
   }
 
   void set_counter(uint64_t value) {

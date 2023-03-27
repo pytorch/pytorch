@@ -92,7 +92,7 @@ TEST(CachingHostAllocatorTest, check_raw_allocation) {
     }
   };
   auto iobuf =
-      std::make_unique<IOBuf>(data_ptr.get(), user_data_deleter, [](void* ctx) {
+      std::make_unique<IOBuf>(data_ptr.mutable_get(), user_data_deleter, [](void* ctx) {
         delete static_cast<UserDataDeleter*>(ctx);
       });
   auto pinned_tensor =
