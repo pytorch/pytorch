@@ -268,12 +268,16 @@ def clone_preserve_strides(x):
 def run_and_get_cpp_code(fn, args):
     torch._dynamo.reset()
     import io
-    from contextlib import redirect_stdout
+    import logging
 
-    f = io.StringIO()
-    with redirect_stdout(f):
-        fn(*args)
-    s = f.getvalue()
+    log_capture_string = io.StringIO()
+    ch = logging.StreamHandler(log_capture_string)
+    from torch._inductor.graph import output_code_log
+
+    output_code_log.addHandler(ch)
+    fn(*args)
+    s = log_capture_string.getvalue()
+    output_code_log.removeHandler(ch)
     return s
 
 
@@ -6432,6 +6436,38 @@ if HAS_CPU and not torch.backends.mps.is_available():
                     )
                     if codecache.valid_vec_isa_list():
                         assert metrics.generated_cpp_vec_kernel_count == 1
+
+        def test_do_not_insert_to_dtype_for_memory_copy_only_kernel(self):
+            def fn(x):
+                res = x.clone()
+                return (res,)
+
+            x = torch.randn((100, 100), dtype=torch.bfloat16)
+
+            torch._dynamo.reset()
+            metrics.reset()
+            traced = make_fx(fn)(x)
+            compiled = compile_fx_inner(traced, [x])
+            assert same(fn(x)[0], compiled([x])[0])
+            assert metrics.cpp_to_dtype_count == 0
+            if codecache.valid_vec_isa_list():
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+        def test_insert_to_dtype_count(self):
+            def fn(x):
+                res = x.relu()
+                return (res,)
+
+            x = torch.randn((100, 100), dtype=torch.bfloat16)
+
+            torch._dynamo.reset()
+            metrics.reset()
+            traced = make_fx(fn)(x)
+            compiled = compile_fx_inner(traced, [x])
+            assert same(fn(x)[0], compiled([x])[0])
+            assert metrics.cpp_to_dtype_count == 2
+            if codecache.valid_vec_isa_list():
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
