@@ -1873,6 +1873,14 @@ Tensor split_with_sizes_backward(
   return ret;
 }
 
+Tensor _nested_split_with_sizes_backward(
+    const std::vector<torch::autograd::Variable>& grads,
+    c10::SymIntArrayRef split_sizes,
+    int64_t dim,
+    const Tensor& self) {
+  return not_implemented("aten::split_with_sizes");
+}
+
 Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymInt split_size,

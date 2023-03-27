@@ -11,7 +11,7 @@ import warnings
 import torch
 from common import BenchmarkRunner, main
 
-from torch._dynamo.testing import collect_results
+from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
 
 
@@ -82,6 +82,14 @@ SKIP_TRAIN = {
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "cait_m36_384": 4,
+}
+
+SCALED_COMPUTE_LOSS = {
+    "ese_vovnet19b_dw",
+    "fbnetc_100",
+    "mnasnet_100",
+    "mobilevit_s",
+    "sebotnet33ts_256",
 }
 
 
@@ -268,6 +276,10 @@ class TimmRunnner(BenchmarkRunner):
         self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
+
+        if model_name in SCALED_COMPUTE_LOSS:
+            self.compute_loss = self.scaled_compute_loss
+
         if is_training and not use_eval_mode:
             model.train()
         else:
@@ -319,7 +331,11 @@ class TimmRunnner(BenchmarkRunner):
     def compute_loss(self, pred):
         # High loss values make gradient checking harder, as small changes in
         # accumulation order upsets accuracy checks.
-        return self.loss(pred, self.target) / 10.0
+        return reduce_to_scalar_loss(pred)
+
+    def scaled_compute_loss(self, pred):
+        # Loss values need zoom out further.
+        return reduce_to_scalar_loss(pred) / 1000.0
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast():
