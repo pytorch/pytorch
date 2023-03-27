@@ -2510,15 +2510,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 return gm.forward
 
             # Invoke AOTAutograd
-            return aot_module_simplified(
-                gm,
-                example_inputs,
-                fw_compiler=my_compiler
-            )
+            return aot_module_simplified(gm, example_inputs, fw_compiler=my_compiler)
 
         def my_example(t1, t2, d):
-          out = torch.add(t1, t2, alpha=d)
-          return out
+            out = torch.add(t1, t2, alpha=d)
+            return out
 
         compiled_fn = torch.compile(backend=my_aot_compiler, dynamic=True)(my_example)
 
@@ -2526,10 +2522,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         t2 = torch.arange(3, dtype=torch.float32).requires_grad_(True)
 
         ra = compiled_fn(t1, t2, 5)
-        self.assertEqual(ra, torch.tensor([0., 6., 12.]))
+        self.assertEqual(ra, torch.tensor([0.0, 6.0, 12.0]))
 
         ra = compiled_fn(t1, t2, 6)
-        self.assertEqual(ra, torch.tensor([0., 7., 14.]))
+        self.assertEqual(ra, torch.tensor([0.0, 7.0, 14.0]))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_implicit_guard(self):
