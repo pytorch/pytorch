@@ -795,3 +795,19 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         print(
             "No kernel with benchmark functionality found. Make sure you run inductor with config.benchmark_kernel being True"
         )
+
+
+def is_ones(items):
+    return all(x == 1 for x in items)
+
+
+def is_zeros(items):
+    return all(x == 0 for x in items)
+
+
+def is_cpu_device(inputs):
+    return all(
+        item.device == torch.device("cpu")
+        for item in inputs
+        if isinstance(item, torch.Tensor)
+    )

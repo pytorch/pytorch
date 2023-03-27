@@ -7347,6 +7347,53 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         c = a.permute(0, 1, 3, 2).matmul(b)
         self.assertEqual([c.min(), c.max(), c.sum()], [24, 24, 414720])
 
+    def test_bfloat16_accumulation_with_ref_path(self):
+        # fix https://github.com/pytorch/pytorch/issues/95125
+        # and https://github.com/pytorch/pytorch/issues/83863
+        # for bf16 accumulation in gemm ref path
+        def check_correctness(fn, *args):
+            expected = fn(*args).bfloat16()
+            with torch.backends.mkldnn.flags(enabled=False):
+                def test():
+                    bf16_args = (arg.bfloat16() for arg in args)
+                    tmp_result = fn(*bf16_args)
+                    return tmp_result
+                c = test()
+                assert (torch.all(c == expected)), "Incorrect result with\n" \
+                                                   f"expected: {expected}\n" \
+                                                   f"got: {c}\n"
+        # test matmul
+        for transa in [True, False]:
+            for transb in [True, False]:
+                a = torch.ones(300, 300)
+                b = torch.ones(300, 300)
+                if transa:
+                    a = a.transpose(0, 1).contiguous().transpose(0, 1)
+                if transb:
+                    b = b.transpose(0, 1).contiguous().transpose(0, 1)
+                check_correctness(torch.matmul, a, b)
+        # test bmm
+        a = torch.ones(1, 1, 300)
+        b = torch.ones(1, 300, 1)
+        check_correctness(torch.bmm, a, b)
+        # test baddbmm
+        a = torch.ones(1, 1, 300)
+        b = torch.ones(1, 300, 1)
+        c = torch.ones(1, 1, 1)
+        check_correctness(torch.baddbmm, c, a, b)
+        # test mv/addmv
+        for trans in [True, False]:
+            c = torch.ones(300) * -300
+            a = torch.ones(300, 300)
+            if trans:
+                a = a.transpose(0, 1).contiguous().transpose(0, 1)
+            b = torch.ones(300)
+            check_correctness(torch.mv, a, b)
+            check_correctness(torch.addmv, c, a, b)
+        # test dot
+        a = torch.ones(300)
+        b = torch.ones(300)
+        check_correctness(torch.dot, a, b)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
