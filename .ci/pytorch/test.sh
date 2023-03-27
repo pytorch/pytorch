@@ -287,25 +287,8 @@ test_perf_for_dashboard() {
   local suite="$1"
   shift
 
-  for dtype in amp float32; do
-    # Run accuracy test
-    # All the accuracy tests can be skipped once the CI accuracy checking is stable enough
-    for backend in eager aot_eager; do
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_${suite}_${dtype}_training_cuda_accuracy.csv"
-    done
-
-    # Run accuracy test for inductor with different configs
-    # --disable-cudagraphs is the default inductor behavior
-    # TODO: update here once cudagraphs is turned on as default
+  for dtype in amp; do
     backend=inductor
-    python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_training_cuda_accuracy.csv"
-    python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_accuracy.csv"
 
     # Run performance test
     # Skip dynamo-eager and aot-eager for performance test
