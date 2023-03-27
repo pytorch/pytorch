@@ -173,9 +173,9 @@ class FlatParameter(nn.Parameter):
     with them filtered. The former are prefixed with "_optional" and should
     mainly be used within this file. They are needed when iterating over the
     tensors in the ``FlatParameter`` or analogous tensors and the index
-    matters. Developers should take to *not* zip a data structure that includes
-    padding objects (i.e. with "_optional" prefix or ``_numels``) with one that
-    does not include padding objects.
+    matters. Developers should take care to *avoid* zipping a data structure
+    that includes padding objects (i.e. with "_optional" prefix or ``_numels``)
+    with one that does not include padding objects.
 
     Attributes:
         _unpadded_unsharded_size (torch.Size): Unsharded flat parameter's size
@@ -217,8 +217,8 @@ class FlatParameter(nn.Parameter):
             filtered.
         _num_params (int): Number of original parameters flattened into this
             flat parameter; this is the length of ``_param_infos``,
-            ``_shapes``, and ``_fqns``, which are *after* filtering padding
-            objects.
+            ``_shapes``, and ``_fqns``, which have their padding objects
+            filtered.
         _numels (Tuple[int, ...]): Each parameter's numel including entries for
             padding objects.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
@@ -236,7 +236,7 @@ class FlatParameter(nn.Parameter):
             where the parameters follow the order in which they were originally
             flattened; this indexes appropriately into any data structure that
             follows the flattening order (e.g. ``_param_infos``, ``_numels``,
-            etc.). The indices includes the alignment padding elements.
+            etc.). The indices include the alignment padding elements.
         _shard_numel_padded (int): Numel padded for this rank's sharded flat
             parameter.
 
