@@ -1546,7 +1546,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return static_cast<void*>(
-        static_cast<char*>(storage_.data()) +
+        static_cast<char*>(storage_.unsafeGetStorageImpl()->mutable_data()) +
         data_type_.itemsize() * storage_offset_);
   }
 
@@ -2111,7 +2111,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(
-          static_cast<char*>(storage_.data()) +
+          static_cast<char*>(storage_.mutable_data()) +
           storage_offset_ * meta.itemsize());
     } else {
       bool had_special_dtor = data_type_.placementDelete() != nullptr;
@@ -2127,7 +2127,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            (storage_.nbytes() >= (numel_ * data_type_.itemsize())))) {
         TORCH_INTERNAL_ASSERT(
             storage_offset_ == 0); // because we just reallocated
-        return storage_.data();
+        return storage_.mutable_data();
       }
       const Allocator* allocator = storage_.allocator();
       // Storage might have nullptr allocator in rare cases, for example, if
@@ -2146,7 +2146,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         auto data_ptr = allocator->allocate(numel_ * data_type_.itemsize());
         storage_.set_data_ptr_noswap(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
-        data_type_.placementNew()(storage_.data(), numel_);
+        data_type_.placementNew()(storage_.mutable_data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
         storage_.set_data_ptr_noswap(
@@ -2156,7 +2156,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_INTERNAL_ASSERT(
           storage_offset_ == 0); // because we just reallocated
       device_opt_ = storage_.device();
-      return storage_.data();
+      return storage_.mutable_data();
     }
   }
 
@@ -2169,7 +2169,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T* mutable_data() {
     if (storage_initialized() && data_type_.Match<T>()) {
-      return static_cast<T*>(storage_.data()) + storage_offset_;
+      return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
     // error in attempt to invoke TypeMeta::ctor()
