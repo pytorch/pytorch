@@ -27,29 +27,30 @@ class Sampler(Generic[T_co]):
             You may still have custom implementation that utilizes it.
 
     Example:
-        class AccedingSequenceLengthSampler(Sampler[int]):
-            def __init__(self, data: List[str]) -> None:
-                self.data = data
-
-            def __len__(self) -> int:
-                return len(self.data)
-
-            def __iter__(self) -> Iterator[int]:
-                sizes = torch.tensor([len(x) for x in self.data])
-                yield from torch.argsort(sizes).tolist()
-
-        class AccedingSequenceLengthBatchSampler(Sampler[List[int]]):
-            def __init__(self, data: List[str], batch_size: int) -> None:
-                self.data = data
-                self.batch_size = batch_size
-
-            def __len__(self) -> int:
-                return (len(self.data) + self.batch_size - 1) // self.batch_size
-
-            def __iter__(self) -> Iterator[List[int]]:
-                sizes = torch.tensor([len(x) for x in self.data])
-                for batch in torch.chunk(torch.argsort(sizes), len(self)):
-                    yield batch.tolist()
+        >>> # xdoctest: +SKIP
+        >>> class AccedingSequenceLengthSampler(Sampler[int]):
+        >>>     def __init__(self, data: List[str]) -> None:
+        >>>         self.data = data
+        >>>
+        >>>     def __len__(self) -> int:
+        >>>         return len(self.data)
+        >>>
+        >>>     def __iter__(self) -> Iterator[int]:
+        >>>         sizes = torch.tensor([len(x) for x in self.data])
+        >>>         yield from torch.argsort(sizes).tolist()
+        >>>
+        >>> class AccedingSequenceLengthBatchSampler(Sampler[List[int]]):
+        >>>     def __init__(self, data: List[str], batch_size: int) -> None:
+        >>>         self.data = data
+        >>>         self.batch_size = batch_size
+        >>>
+        >>>     def __len__(self) -> int:
+        >>>         return (len(self.data) + self.batch_size - 1) // self.batch_size
+        >>>
+        >>>     def __iter__(self) -> Iterator[List[int]]:
+        >>>         sizes = torch.tensor([len(x) for x in self.data])
+        >>>         for batch in torch.chunk(torch.argsort(sizes), len(self)):
+        >>>             yield batch.tolist()
 
     .. note:: The :meth:`__len__` method isn't strictly required by
               :class:`~torch.utils.data.DataLoader`, but is expected in any
