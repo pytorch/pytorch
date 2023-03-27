@@ -164,14 +164,15 @@ static PyObject* THPStorage_pynew(
             allocator,
             /*resizable=*/true));
     THPObjectPtr item;
+
+    c10::Storage storage = *std::move(self->cdata);
     try {
       for (Py_ssize_t i = 0; i < length; i++) {
         item = PySequence_GetItem(sequence, i);
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         uint8_t value = THPByteUtils_unpackReal(item.get());
-        const auto& storage = THPStorage_Unpack(self);
         if (allocator == c10::GetDefaultCPUAllocator()) {
-          storage.unsafe_data<uint8_t>()[i] = value;
+          storage.mutable_unsafe_data<uint8_t>()[i] = value;
         } else {
           // TODO: this might be slow - consider batched updates?
           storage_set(storage, i, value);
@@ -186,6 +187,7 @@ static PyObject* THPStorage_pynew(
           THPUtils_typename(item.get()));
       return nullptr;
     }
+    self->cdata = c10::MaybeOwned<c10::Storage>::owned(std::move(storage));
     return (PyObject*)self.release();
   }
   Py_RETURN_NONE;
