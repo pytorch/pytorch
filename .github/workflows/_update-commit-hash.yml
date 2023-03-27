@@ -18,7 +18,7 @@ on:
         description: Branch to fetch commit of
       pin-folder:
         type: string
-        description: Path to file with commit pin
+        description: Path to folder with commit pin
         required: false
         default: .github/ci_commit_pins
     secrets:
