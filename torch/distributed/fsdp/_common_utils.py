@@ -212,7 +212,9 @@ def _get_param_to_fqns(
                 else [param_name]
             )  # prefixed from `module`
             global_fqns = [
-                clean_tensor_name(prefix + name) for name in local_fqns
+                clean_tensor_name(prefix + name)
+                for name in local_fqns
+                if name is not None
             ]  # prefixed from the top level `model` (i.e. including `prefix`)
             is_shared_param = param in param_to_fqns
             if not is_shared_param:
