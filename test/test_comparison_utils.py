@@ -2,7 +2,7 @@
 # Owner(s): ["module: internals"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase
 
 class TestComparisonUtils(TestCase):
     def test_all_equal_no_assert(self):
@@ -30,7 +30,3 @@ class TestComparisonUtils(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch._assert_tensor_metadata(t, [3], [1], torch.float)
-
-
-if __name__ == '__main__':
-    run_tests()
