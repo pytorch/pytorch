@@ -301,17 +301,23 @@ test_perf_for_dashboard() {
     python "benchmarks/dynamo/$suite.py" \
         --accuracy --"$dtype" --backend "$backend" "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_accuracy.csv"
+    python "benchmarks/dynamo/$suite.py" \
+        --accuracy --"$dtype" --backend "$backend" --dynamic-shapes --disable-cudagraphs "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_training_cuda_accuracy.csv"
 
     # Run performance test
     # Skip dynamo-eager and aot-eager for performance test
     # Run performance test for inductor with different configs
-    # TODO: add more configs here, e.g. dynamic-shapes, max-autotune, etc.
+    # TODO: add more configs here, e.g. max-autotune, etc.
     python "benchmarks/dynamo/$suite.py" \
         --performance --cold-start-latency --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
         --performance --cold-start-latency --"$dtype" --backend "$backend" "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
+    python "benchmarks/dynamo/$suite.py" \
+        --performance --cold-start-latency --"$dtype" --backend "$backend" --dynamic-shapes --disable-cudagraphs "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_training_cuda_performance.csv"
   done
 }
 
