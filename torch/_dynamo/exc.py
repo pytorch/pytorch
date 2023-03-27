@@ -85,7 +85,8 @@ class UserErrorType(Enum):
 class UserError(TorchDynamoException):
     def __init__(self, error_type: UserErrorType, msg):
         """
-        Specifies illegal user code errors.
+        Type of errors that would be valid in Eager, but not supported in TorchDynamo.
+        The error message should tell user about next actions.
 
         error_type: Type of user error
         msg: Actionable error message
