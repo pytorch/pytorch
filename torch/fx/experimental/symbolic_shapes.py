@@ -1945,11 +1945,17 @@ class ShapeEnv:
         Given an expression, evaluates it, adding guards if necessary
         """
         if len(expr.free_symbols) == 0:
+            # NB: don't test float as there may be precision issues
+            if isinstance(hint, (int, bool)):
+                assert expr == hint, f"{expr} != {hint}"
             return expr
         expr = self.simplify(expr)
 
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
+            # NB: don't test float as there may be precision issues
+            if isinstance(hint, (int, bool)):
+                assert static_expr == hint, f"{static_expr} != {hint}"
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
