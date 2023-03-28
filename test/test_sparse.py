@@ -64,7 +64,7 @@ def gradcheck_semantics(test_name='gradcheck'):
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
-        subtest(gradcheck_sparse, name='sparse'),
+        subtest(gradcheck_sparse, name='non_masked'),
         subtest(gradcheck_masked, name='masked')])
 
 
@@ -4467,8 +4467,28 @@ class TestSparseAny(TestCase):
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
             t = t.clone().detach().requires_grad_(True)
-            r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=gradcheck.masked), t)
-            self.assertTrue(r)
+            gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=gradcheck.masked), t)
+
+    @all_sparse_layouts('layout', include_strided=True)
+    @dtypes(torch.float64, torch.complex128)
+    @parametrize("index_dtype", [torch.int64])
+    @gradcheck_semantics()
+    @parametrize('fast_mode', (True, False))
+    def test_gradcheck_sparse_input_function(self, layout, device, dtype, index_dtype, gradcheck, fast_mode):
+        for t in self.generate_simple_inputs(
+                layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            batch_dim = t.dim() - t.dense_dim() - t.sparse_dim()
+            if batch_dim > 0:
+                # TODO: implement batch support in _convert_indices_from_csr_to_coo
+                continue
+            t = t.clone().detach().requires_grad_(True)
+            if dtype.is_complex and layout is not torch.strided:
+                with self.assertRaisesRegex(
+                        NotImplementedError,
+                        r"Could not run 'aten::view_as_real' with arguments from the 'Sparse(Csr|Csc|Bsr|Bsc|)(CUDA|CPU)' backend"):
+                    gradcheck(lambda x: x, t, fast_mode=fast_mode)
+                self.skipTest(f"aten::view_as_real not implemented for layout {layout}")
+            gradcheck(lambda x: x, t, fast_mode=fast_mode)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)
