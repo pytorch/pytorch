@@ -42,7 +42,7 @@ import torch
 # Distributions tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-from torch._six import inf, nan
+from torch import inf, nan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
      gradcheck, skipIfTorchDynamo)
@@ -797,7 +797,7 @@ class DistributionsTestCase(TestCase):
     def setUp(self):
         """The tests assume that the validation flag is set."""
         torch.distributions.Distribution.set_default_validate_args(True)
-        super(DistributionsTestCase, self).setUp()
+        super().setUp()
 
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
@@ -2589,6 +2589,18 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Gumbel(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Gumbel(1.0, 1.0).sample().size(), ())
         self.assertEqual(Gumbel(1.0, 1.0).sample((1,)).size(), (1,))
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float32),
+                                torch.tensor(1.0, dtype=torch.float32),
+                                validate_args=False).cdf(20.0), 1.0, atol=1e-4, rtol=0)
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float64),
+                                torch.tensor(1.0, dtype=torch.float64),
+                                validate_args=False).cdf(50.0), 1.0, atol=1e-4, rtol=0)
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float32),
+                                torch.tensor(1.0, dtype=torch.float32),
+                                validate_args=False).cdf(-5.0), 0.0, atol=1e-4, rtol=0)
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float64),
+                                torch.tensor(1.0, dtype=torch.float64),
+                                validate_args=False).cdf(-10.0), 0.0, atol=1e-8, rtol=0)
 
         def ref_log_prob(idx, x, log_prob):
             l = loc.view(-1)[idx].detach()
@@ -3466,13 +3478,10 @@ class TestRsample(DistributionsTestCase):
 
 class TestDistributionShapes(DistributionsTestCase):
     def setUp(self):
-        super(TestDistributionShapes, self).setUp()
+        super().setUp()
         self.scalar_sample = 1
         self.tensor_sample_1 = torch.ones(3, 2)
         self.tensor_sample_2 = torch.ones(3, 2, 3)
-
-    def tearDown(self):
-        super(TestDistributionShapes, self).tearDown()
 
     def test_entropy_shape(self):
         for Dist, params in EXAMPLES:
@@ -3930,11 +3939,11 @@ class TestDistributionShapes(DistributionsTestCase):
 class TestKL(DistributionsTestCase):
 
     def setUp(self):
-        super(TestKL, self).setUp()
+        super().setUp()
 
         class Binomial30(Binomial):
             def __init__(self, probs):
-                super(Binomial30, self).__init__(30, probs)
+                super().__init__(30, probs)
 
         # These are pairs of distributions with 4 x 4 parameters as specified.
         # The first of the pair e.g. bernoulli[0] varies column-wise and the second
@@ -4593,7 +4602,7 @@ class TestNumericalStability(DistributionsTestCase):
 # TODO: make this a pytest parameterized test
 class TestLazyLogitsInitialization(DistributionsTestCase):
     def setUp(self):
-        super(TestLazyLogitsInitialization, self).setUp()
+        super().setUp()
         # ContinuousBernoulli is not tested because log_prob is not computed simply
         # from 'logits', but 'probs' is also needed
         self.examples = [e for e in EXAMPLES if e.Dist in
@@ -4640,7 +4649,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(DistributionsTestCase):
     def setUp(self):
-        super(TestAgainstScipy, self).setUp()
+        super().setUp()
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
@@ -4931,9 +4940,6 @@ class TestFunctors(DistributionsTestCase):
 
 
 class TestValidation(DistributionsTestCase):
-    def setUp(self):
-        super(TestValidation, self).setUp()
-
     def test_valid(self):
         for Dist, params in EXAMPLES:
             for param in params:
@@ -5020,9 +5026,6 @@ class TestValidation(DistributionsTestCase):
         sample = d.sample((2,))
         with self.assertWarns(UserWarning):
             d.log_prob(sample)
-
-    def tearDown(self):
-        super(TestValidation, self).tearDown()
 
 
 class TestJit(DistributionsTestCase):

@@ -5,10 +5,10 @@
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -263,6 +263,23 @@ Tensor& add_out_sparse_csr_cuda(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
+    TORCH_CHECK(
+      self.is_cuda(),
+      "add: expected 'self' to be CUDA tensor, but got tensor on device: ",
+      self.device());
+    TORCH_CHECK(
+      other.is_cuda(),
+      "add: expected 'other' to be CUDA tensor, but got tensor on device: ",
+      other.device());
+    TORCH_CHECK(
+      out.is_cuda(),
+      "add: expected 'out' to be CUDA tensor, but got tensor on device: ",
+      out.device());
+
+    if (only_sparse_compressed_add_trivial_cases(self, other, alpha, out)) {
+      return out;
+    }
+
     at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
   }

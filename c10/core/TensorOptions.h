@@ -613,7 +613,7 @@ inline TensorOptions dtype() {
   return dtype(caffe2::TypeMeta::Make<T>());
 }
 
-inline std::string toString(const TensorOptions options) {
+inline std::string toString(const TensorOptions& options) {
   std::ostringstream stream;
   stream << options;
   return stream.str();
@@ -763,7 +763,7 @@ inline TensorOptions dispatchKeyToTensorOptions(DispatchKey dispatch_key) {
 }
 
 namespace detail {
-inline bool backend_supports_empty_operator(const TensorOptions options) {
+inline bool backend_supports_empty_operator(const TensorOptions& options) {
   // Quantized backends don't support at::empty().
   // They have separate operators like at::empty_quantized() that take in
   // extra information about how to quantize the tensor.

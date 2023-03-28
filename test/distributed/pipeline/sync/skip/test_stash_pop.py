@@ -12,6 +12,7 @@ from torch import nn
 
 from torch.distributed.pipeline.sync.skip import pop, skippable, stash
 from torch.distributed.pipeline.sync.skip.tracker import SkipTracker, use_skip_tracker
+from torch.testing._internal.common_utils import run_tests
 
 
 @pytest.fixture(autouse=True)
@@ -136,3 +137,7 @@ def test_stash_none():
 
     l1 = Stash()
     l1(torch.tensor(42))
+
+
+if __name__ == "__main__":
+    run_tests()

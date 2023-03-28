@@ -32,7 +32,7 @@ from torch.distributed.elastic.multiprocessing import PContext, start_processes
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 
-log = get_logger()
+log = get_logger(__name__)
 
 __all__ = [
     "LocalElasticAgent",
@@ -113,7 +113,7 @@ class LocalElasticAgent(SimpleElasticAgent):
                         role="trainer",
                         local_world_size=nproc_per_process,
                         entrypoint="/usr/local/bin/trainer",
-                        args=("--trainer_args", "foobar"),
+                        args=("--trainer-args", "foobar"),
                         ...<OTHER_PARAMS...>)
             agent = LocalElasticAgent(spec)
             results = agent.run()

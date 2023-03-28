@@ -131,7 +131,7 @@ Tensor& bernoulli_out(const Tensor& self, c10::optional<Generator> gen, Tensor& 
 
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   // Random
-  m.impl("random_.from_int",             random_from_to);
+  m.impl("random_.from",             random_from_to);
   m.impl("random_.to",               random_to);
   m.impl("random_",                  random_);
   // Normal

@@ -58,7 +58,7 @@ class InputError(Exception):
     # Exception raised for errors in the input.
 
     def __init__(self, message):
-        super(InputError, self).__init__(message)
+        super().__init__(message)
         self.message = message
 
     def __str__(self):
@@ -799,14 +799,14 @@ def preprocessor(
             f = m.group(1)
             dirpath, filename = os.path.split(f)
             if (
-                f.startswith("ATen/cuda")
-                or f.startswith("ATen/native/cuda")
-                or f.startswith("ATen/native/nested/cuda")
-                or f.startswith("ATen/native/quantized/cuda")
-                or f.startswith("ATen/native/sparse/cuda")
-                or f.startswith("ATen/native/transformers/cuda")
-                or f.startswith("THC/")
-                or (f.startswith("THC") and not f.startswith("THCP"))
+                f.startswith(("ATen/cuda",
+                              "ATen/native/cuda",
+                              "ATen/native/nested/cuda",
+                              "ATen/native/quantized/cuda",
+                              "ATen/native/sparse/cuda",
+                              "ATen/native/transformers/cuda",
+                              "THC/")) or
+                (f.startswith("THC") and not f.startswith("THCP"))
             ):
                 return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))
             # if filename is one of the files being hipified for this extension
@@ -858,7 +858,7 @@ def preprocessor(
         output_source = processKernelLaunches(output_source, stats)
 
     # Replace std:: with non-std:: versions
-    if (filepath.endswith(".cu") or filepath.endswith(".cuh")) and "PowKernel" not in filepath:
+    if (filepath.endswith((".cu", ".cuh"))) and "PowKernel" not in filepath:
         output_source = replace_math_functions(output_source)
 
     # Include header if device code is contained.
