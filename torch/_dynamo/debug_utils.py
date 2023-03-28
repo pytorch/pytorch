@@ -25,6 +25,9 @@ log = logging.getLogger(__name__)
 inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
 
+if use_buck:
+    import libfb.py.build_info
+
 
 extra_deps = []
 extra_imports = ""
@@ -36,6 +39,7 @@ if use_buck:
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu",
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops",
     ]
+    cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")
     extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
 
 
@@ -71,6 +75,7 @@ python_binary(
         "//caffe2:torch",
         "//caffe2/functorch:functorch",
         "//triton:triton",
+        "{cur_target}",
     ],
     cpp_deps = [
 {extra_cpp_deps}
@@ -267,10 +272,26 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
     model_str += NNModuleToString.convert(gm)
 
-    model_str += f"args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type) for a in args]!r}\n"
-    model_str += (
-        "args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]\n"
-    )
+    model_str += "args = []\n"
+
+    # get hint shape/stride when dynamic shape enabled
+    def hint_if_symint(x):
+        return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
+
+    for arg in args:
+        if isinstance(arg, int):
+            model_str += f"args.append({arg})\n"
+        elif isinstance(arg, torch.SymInt):
+            model_str += f"args.append({arg.node.hint})  # {arg}\n"
+        elif isinstance(arg, torch.Tensor):
+            model_str += (
+                "args.append(rand_strided"
+                + f"{hint_if_symint(arg.shape), hint_if_symint(arg.stride()), arg.dtype, arg.device.type})"
+                + f"  # shape {tuple(arg.shape)}, stride {arg.stride()}\n"
+            )
+        else:
+            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
+
     # TODO: fake may be better for performance here
     tracing_mode = "real"
     if config.dynamic_shapes:
@@ -537,7 +558,10 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             # because inductor clears the tensor list in its codegen. And example_inputs
             # are available only for the first invocation.
             fake_mode = FakeTensorMode()
-            copy_tensor_attrs = [fake_mode.from_tensor(x) for x in real_inputs]
+            copy_tensor_attrs = [
+                fake_mode.from_tensor(x) if isinstance(x, torch.Tensor) else x
+                for x in real_inputs
+            ]
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
                 dump_to_minify(

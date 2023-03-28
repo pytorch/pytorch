@@ -367,7 +367,6 @@ class TestJitProfiler(JitTestCase):
             self.graph_executor_optimize_opt
         )
 
-    @unittest.skipIf(IS_WINDOWS, 'TODO: fix occasional windows failure')
     def test_profiler(self):
         torch._C._set_graph_executor_optimize(False)
 
@@ -11523,6 +11522,16 @@ dedent """
         python_type = eval(empty_tuple_type.annotation_str, g)
         assert python_type is typing.Tuple[()]
 
+    def test_tuple_str(self):
+        tuple1_type = torch._C.TupleType([torch._C.StringType.get()])
+        self.assertEqual(tuple1_type.annotation_str, "Tuple[str]")
+        tuple2_type = torch._C.TupleType([torch._C.StringType.get(), torch._C.StringType.get()])
+        self.assertEqual(tuple2_type.annotation_str, "Tuple[str, str]")
+
+    def test_dict_str(self):
+        dict_type = torch._C.DictType(torch._C.StringType.get(), torch._C.StringType.get())
+        self.assertEqual(dict_type.annotation_str, "Dict[str, str]")
+
     def test_none_type_str(self):
         none_type = torch._C.NoneType.get()
         g = {'NoneType' : type(None)}
@@ -15944,34 +15953,6 @@ dedent """
         for fuser_name in ['fuser0', 'fuser1', 'none']:
             with torch.jit.fuser(fuser_name):
                 self.checkModule(MyModule(), (x, y))
-
-    def test_scriptmodule_update_has_hooks(self):
-
-        class SimpleModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self):
-                pass
-
-        def forward_hook(self, input: Tuple[()], output: None):
-            pass
-
-        m = SimpleModule()
-        hook = m.register_forward_hook(forward_hook)
-        sm = torch.jit.script(m)
-        self.assertTrue(sm._has_hooks)
-
-        # Todo this is bad: ideally the handle would update the scriptmodule too,
-        # but this is a pre-existing bug
-        hook.remove()
-        self.assertTrue(sm._has_hooks)
-        self.assertFalse(m._has_hooks)
-
-        # at least manual use of the update function works
-        del sm._forward_hooks[0]
-        sm._update_has_hooks()
-        self.assertFalse(sm._has_hooks)
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {

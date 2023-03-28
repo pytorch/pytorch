@@ -140,7 +140,7 @@ logger = logging.getLogger(__name__)
 
 class _CPUinfo():
     """
-    Get CPU inforamation, such as cores list and NUMA information.
+    Get CPU information, such as cores list and NUMA information.
     """
     def __init__(self, test_input=""):
 
@@ -175,7 +175,7 @@ class _CPUinfo():
             self.node_nums = int(max([line[3] for line in self.cpuinfo])) + 1
             self.node_physical_cores: List[List[int]] = []  # node_id is index
             self.node_logical_cores: List[List[int]] = []   # node_id is index
-            self.physical_core_node_map = {}  # phyical core to numa node id
+            self.physical_core_node_map = {}  # physical core to numa node id
             self.logical_core_node_map = {}   # logical core to numa node id
 
             for node_id in range(self.node_nums):
@@ -222,7 +222,7 @@ class _CPUinfo():
 
     def numa_aware_check(self, core_list):
         """
-        Check whether all cores in core_list are in the same NUMA node. cross NUMA will reduce perforamnce.
+        Check whether all cores in core_list are in the same NUMA node. cross NUMA will reduce performance.
         We strongly advice to not use cores on different nodes.
         """
         cores_numa_map = self.logical_core_node_map
@@ -253,7 +253,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
 
     def add_lib_preload(self, lib_type):
         """
-        Enale TCMalloc/JeMalloc/intel OpenMP
+        Enable TCMalloc/JeMalloc/intel OpenMP
         """
         library_paths = []
         if "CONDA_PREFIX" in os.environ:
@@ -298,7 +298,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
         """
         Enable TCMalloc/JeMalloc with LD_PRELOAD and set configuration for JeMalloc.
         By default, PTMalloc will be used for PyTorch, but TCMalloc and JeMalloc can get better
-        memory resue and reduce page fault to improve performance.
+        memory reuse and reduce page fault to improve performance.
         """
         if enable_tcmalloc and enable_jemalloc:
             raise RuntimeError("Unable to enable TCMalloc and JEMalloc at the same time.")
@@ -363,7 +363,7 @@ Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
         """
         Set multi-thread configuration and enable Intel openMP and TCMalloc/JeMalloc.
         By default, GNU openMP and PTMalloc are used in PyTorch. but Intel openMP and TCMalloc/JeMalloc are better alternatives
-        to get performance benifit.
+        to get performance benefit.
         """
         self.set_memory_allocator(enable_tcmalloc, enable_jemalloc, use_default_allocator)
         self.set_env("OMP_NUM_THREADS", str(ncores_per_instance))
@@ -481,7 +481,7 @@ won\'t take effect even if it is set explicitly.')
                     enable_taskset = True
                 else:
                     logger.warning("Core binding with numactl is not available, and --disable_taskset is set. \
-                    Please unset --disable_taskset to use taskset insetad of numactl.")
+                    Please unset --disable_taskset to use taskset instead of numactl.")
                     exit(-1)
 
         if not args.disable_taskset:
@@ -589,7 +589,7 @@ def _add_multi_instance_params(parser):
 otherwise ncores_per_instance will be assigned sequentially to ninstances. Please refer to \
 https://github.com/intel/intel-extension-for-pytorch/blob/master/docs/tutorials/performance_tuning/launch_script.md")
     group.add_argument("--latency-mode", "--latency_mode", action="store_true", default=False,
-                       help="By detault 4 core per instance and use all physical cores")
+                       help="By default 4 core per instance and use all physical cores")
     group.add_argument("--throughput-mode", "--throughput_mode", action="store_true", default=False,
                        help="By default one instance per node and use all physical cores")
     group.add_argument("--node-id", "--node_id", metavar="\b", default=-1, type=int,

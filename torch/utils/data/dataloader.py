@@ -428,7 +428,7 @@ class DataLoader(Generic[T_co]):
     # since '_BaseDataLoaderIter' references 'DataLoader'.
     def __iter__(self) -> '_BaseDataLoaderIter':
         # When using a single worker the returned iterator should be
-        # created everytime to avoid reseting its state
+        # created everytime to avoid resetting its state
         # However, in the case of a multiple workers iterator
         # the iterator is only created once in the lifetime of the
         # DataLoader object so that workers can be reused
@@ -545,7 +545,7 @@ class DataLoader(Generic[T_co]):
                 pass
         if max_num_worker_suggest is None:
             # os.cpu_count() could return Optional[int]
-            # get cpu count first and check None in order to satify mypy check
+            # get cpu count first and check None in order to satisfy mypy check
             cpu_count = os.cpu_count()
             if cpu_count is not None:
                 max_num_worker_suggest = cpu_count
@@ -733,7 +733,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #
     #      First of all, `__del__` is **not** guaranteed to be called when
     #      interpreter exits. Even if it is called, by the time it executes,
-    #      many Python core library resources may alreay be freed, and even
+    #      many Python core library resources may already be freed, and even
     #      simple things like acquiring an internal lock of a queue may hang.
     #      Therefore, in this case, we actually need to prevent `__del__` from
     #      being executed, and rely on the automatic termination of daemonic
@@ -978,7 +978,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #        NOTE: (c) is better placed after (b) because it may leave corrupted
     #              data in `worker_result_queue`, which `pin_memory_thread`
     #              reads from, in which case the `pin_memory_thread` can only
-    #              happen at timeing out, which is slow. Nonetheless, same thing
+    #              happen at timing out, which is slow. Nonetheless, same thing
     #              happens if a worker is killed by signal at unfortunate times,
     #              but in other cases, we are better off having a non-corrupted
     #              `worker_result_queue` for `pin_memory_thread`.

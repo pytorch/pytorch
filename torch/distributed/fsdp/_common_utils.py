@@ -225,8 +225,8 @@ def _get_param_to_fqns(
                     # calls `named_child` to traverse the module recursively and
                     # calls `named_parameters` with `recurse=False`, parameters
                     # will be traversed more than once.
-                    # This hack is specificed designed for DMP + FSDP. We
-                    # overwite the flat_parameters traversal result to only obtain
+                    # This hack is specified designed for DMP + FSDP. We
+                    # overwrite the flat_parameters traversal result to only obtain
                     # the last one, which happens to be the correct one.
                     #
                     # TODO: Remove this hack once DMP + FSDP is not supported.
@@ -286,7 +286,7 @@ def _apply_to_modules(
                 else:
                     # DMP's named_parameter() will mess up the traversal with
                     # ``named_children`` + `named_parameter(recurse=False)``.
-                    # This hack is a must to make the travsersal work.
+                    # This hack is a must to make the traversal work.
                     # TODO: Remove this hack once DMP + FSDP is not supported.
                     if (
                         submodule_name == "_fsdp_wrapped_module"
@@ -295,6 +295,15 @@ def _apply_to_modules(
                         warnings.warn(
                             "An unexpected prefix is detected. This case "
                             " should only happen when using DMP with FSDP. "
+                            f"prefix = {prefix}, "
+                            f"submodule_name = {submodule_name}"
+                        )
+                        new_prefix = prefix
+                    elif submodule_name == "module":
+                        warnings.warn(
+                            "An unexpected prefix is detected. This case "
+                            " should only happen when DDP wraps the outer "
+                            " modules while FSDP wraps the inner ones."
                             f"prefix = {prefix}, "
                             f"submodule_name = {submodule_name}"
                         )

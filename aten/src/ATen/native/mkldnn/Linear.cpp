@@ -216,10 +216,13 @@ Tensor mkldnn_linear_pointwise(
   }
   const ideep::tensor w = itensor_from_tensor(weight_t);
 
-  auto it = fusion_unary_attr_map().find(attr);
-  TORCH_CHECK(
-      it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
-  ideep::attr_t op_attr = it->second(scalars, algorithm);
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (attr != "none") {
+    auto it = fusion_unary_attr_map().find(attr);
+    TORCH_CHECK(
+        it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
+    op_attr = it->second(scalars, algorithm);
+  }
 
   if (mkldnn_bias.has_value()) {
     ideep::inner_product_forward::compute(
@@ -324,25 +327,8 @@ Tensor mkldnn_linear_pointwise_binary(
   return output;
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
-  m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
-      TORCH_FN(mkldnn_linear_pointwise));
-  m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
-      TORCH_FN(mkldnn_linear_pointwise_binary));
-}
-
-} // namespace native
-} // namespace at
-
-#endif // AT_MKLDNN_ENABLED
-
-#if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
+#if AT_MKL_ENABLED()
 #include <mkl.h>
-
-namespace at {
-namespace native {
 
 Tensor mkl_linear(
     const Tensor& self,
@@ -423,7 +409,27 @@ TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
 }
 
+#endif // AT_MKL_ENABLED
+
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
+      TORCH_FN(mkldnn_linear_pointwise));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
+      TORCH_FN(mkldnn_linear_pointwise_binary));
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
+      TORCH_FN(mkldnn_linear_pointwise));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
+      TORCH_FN(mkldnn_linear_pointwise_binary));
+}
+
 } // namespace native
 } // namespace at
 
-#endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
+#endif // AT_MKLDNN_ENABLED
