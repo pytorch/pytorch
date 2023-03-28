@@ -46,6 +46,14 @@ void set_hpu_enabled(bool new_enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastHPU, !new_enabled);
 }
 
+bool is_privateuseone_enabled() {
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1);
+}
+
+void set_privateuseone_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1, !new_enabled);
+}
+
 namespace {
 // Imitate Apex and cache some of the casts to streamline parameter reuse.
 // Our heuristic is to cache lower_precision_fp casts of fp32 model weights (see cached_cast below).
@@ -88,6 +96,9 @@ thread_local bool cache_enabled = true;
 
 // autocast_gpu_dtype is the lower_precision_fp used by AutocastGPU.
 thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
+
+// autocast_privateuseone_dtype is the lower_precision_fp used by AutocastPrivateUse1.
+thread_local at::ScalarType autocast_privateuseone_dtype = at::kHalf;
 }
 
 void clear_cache() {
@@ -119,6 +130,10 @@ at::ScalarType get_autocast_hpu_dtype() {
   return autocast_hpu_dtype;
 }
 
+at::ScalarType get_autocast_privateuseone_dtype() {
+  return autocast_privateuseone_dtype;
+}
+
 void set_autocast_cpu_dtype(at::ScalarType dtype) {
   TORCH_CHECK(
       dtype == at::kBFloat16,
@@ -136,6 +151,10 @@ void set_autocast_xpu_dtype(at::ScalarType dtype) {
 
 void set_autocast_hpu_dtype(at::ScalarType dtype) {
   autocast_hpu_dtype = dtype;
+}
+
+void set_autocast_privateuseone_dtype(at::ScalarType dtype) {
+  autocast_privateuseone_dtype = dtype;
 }
 
 bool is_autocast_cache_enabled() {
@@ -507,11 +526,12 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(matmul, lower_precision_fp)
   KERNEL_CPU(conv_tbc, lower_precision_fp)
   KERNEL_CPU(mkldnn_rnn_layer, lower_precision_fp)
+  KERNEL_CPU(conv_transpose1d, lower_precision_fp)
+  KERNEL_CPU2(conv_transpose2d, input, lower_precision_fp)
+  KERNEL_CPU2(conv_transpose3d, input, lower_precision_fp)
+  KERNEL_CPU(prelu, lower_precision_fp)
 
   // fp32 cast policy
-  KERNEL_CPU(conv_transpose1d, fp32)
-  KERNEL_CPU2(conv_transpose2d, input, fp32)
-  KERNEL_CPU2(conv_transpose3d, input, fp32)
   KERNEL_CPU(avg_pool3d, fp32)
   KERNEL_CPU(binary_cross_entropy, fp32)
   KERNEL_CPU(grid_sampler, fp32)

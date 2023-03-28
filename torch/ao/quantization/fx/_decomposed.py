@@ -178,13 +178,14 @@ def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant
 
 quantized_decomposed_lib.define(
     "choose_qparams.tensor(Tensor input, int quant_min, int quant_max, "
-    "ScalarType dtype) -> (Tensor, Tensor)")
+    "float eps, ScalarType dtype) -> (Tensor, Tensor)")
 
 @impl(quantized_decomposed_lib, "choose_qparams.tensor", "CompositeExplicitAutograd")
 def choose_qparams_tensor(
         input: torch.Tensor,
         qmin: int,
         qmax: int,
+        eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """ Given an input Tensor, derive the per tensor affine quantization parameter
@@ -201,26 +202,79 @@ def choose_qparams_tensor(
        zero_point (int): quantization parameter for the target quantized Tensor
     """
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert dtype == torch.int8 or dtype == torch.uint8 or dtype == torch.int32, \
+        f"Expecting target dtype to be int8 uint8 or int32, but got: {dtype}"
     validate_qmin_qmax(qmin, qmax)
 
     min_val, max_val = torch.aminmax(input)
 
-    # Future QSchemes like per_tensor_symmetric will be supported in a different op 'choose_qparams_symmetric.
-    # Customized qrange is unused for non symmetric quant so just ignore and set to false here
     return determine_qparams(
-        min_val, max_val, qmin, qmax, input.dtype, torch.Tensor([torch.finfo(torch.float32).eps]), False)
+        min_val, max_val, qmin, qmax, dtype, torch.Tensor([eps]), has_customized_qrange=False)
+
+quantized_decomposed_lib.define(
+    "choose_qparams_symmetric.tensor(Tensor input, int quant_min, int quant_max, "
+    "float eps, ScalarType dtype) -> (Tensor, Tensor)")
+
+@impl(quantized_decomposed_lib, "choose_qparams_symmetric.tensor", "CompositeExplicitAutograd")
+def choose_qparams_symmetric_tensor(
+        input: torch.Tensor,
+        qmin: int,
+        qmax: int,
+        eps: float,
+        dtype: torch.dtype
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """ Given an input Tensor, derive the per tensor affine quantization parameter
+    (scale and zero_point) for target quantized Tensor from the Tensor
+
+    Args:
+       input (torch.Tensor): floating point input Tensor
+       quant_min (int): minimum quantized value for target quantized Tensor
+       quant_max (int): maximum quantized value for target quantized Tensor
+       dtype (torch.dtype): dtype for target quantized Tensor
+
+    Returns:
+       scale (float): quantization parameter for the target quantized Tensor
+       zero_point (int): quantization parameter for the target quantized Tensor
+    """
+    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert dtype == torch.int8 or dtype == torch.uint8 or dtype == torch.int32, \
+        f"Expecting target dtype to be int8 uint8 or int32, but got: {dtype}"
+    validate_qmin_qmax(qmin, qmax)
+
+    min_val, max_val = torch.aminmax(input)
+    return determine_qparams(
+        min_val,
+        max_val,
+        qmin,
+        qmax,
+        dtype,
+        torch.Tensor([eps]),
+        has_customized_qrange=False,
+        qscheme=torch.per_tensor_symmetric
+    )
 
 @impl(quantized_decomposed_lib, "choose_qparams.tensor", "Meta")
 def choose_qparams_tensor_meta(
         input: torch.Tensor,
         quant_min: int,
         quant_max: int,
+        eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
-    assert quant_min < quant_max, f"Expecting quant_min to be smaller than quant_max but received min: {quant_min} max: {quant_max}"
+    assert quant_min < quant_max, f"Expecting quant_min to be smaller than quant_max but received min: \
+        {quant_min} max: {quant_max}"
     return torch.empty(1, dtype=torch.float, device=input.device), torch.empty(1, dtype=torch.int32, device=input.device)
 
+@impl(quantized_decomposed_lib, "choose_qparams_symmetric.tensor", "Meta")
+def choose_qparams_symmetric_tensor_meta(
+        input: torch.Tensor,
+        quant_min: int,
+        quant_max: int,
+        eps: float,
+        dtype: torch.dtype
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    return torch.empty(1, dtype=torch.float, device=input.device), torch.empty(1, dtype=torch.int32, device=input.device)
 # Helper function used to implement per-channel quantization against any axis
 def _permute_to_axis_zero(x, axis):
     new_axis_list = list(range(x.dim()))

@@ -40,12 +40,26 @@ method to provide more details in the signature about the format arguments.
 _PY_RULE_CLASS_TEMPLATE = """\
 class _{pascal_case_name}(infra.Rule):
     \"\"\"{short_description}\"\"\"
-    def format_message(self, {message_arguments}) -> str:  # type: ignore[override]
+    def format_message(  # type: ignore[override]
+        self,
+        {message_arguments}
+    ) -> str:
         \"\"\"Returns the formatted default message of this Rule.
 
         Message template: {message_template}
         \"\"\"
         return self.message_default_template.format({message_arguments_assigned})
+
+    def format(  # type: ignore[override]
+        self,
+        level: infra.Level,
+        {message_arguments}
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        \"\"\"Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: {message_template}
+        \"\"\"
+        return self, level, self.format_message({message_arguments_assigned})
 
 """
 
@@ -128,7 +142,6 @@ def _format_rule_for_cpp(rule: _RuleType) -> str:
 def gen_diagnostics_python(
     rules: Sequence[_RuleType], out_py_dir: str, template_dir: str
 ) -> None:
-
     rule_class_lines = [_format_rule_for_python_class(rule) for rule in rules]
     rule_field_lines = [_format_rule_for_python_field(rule) for rule in rules]
 
@@ -151,7 +164,6 @@ def gen_diagnostics_python(
 def gen_diagnostics_cpp(
     rules: Sequence[_RuleType], out_cpp_dir: str, template_dir: str
 ) -> None:
-
     rule_lines = [_format_rule_for_cpp(rule) for rule in rules]
     rule_names = [f'"{_kebab_case_to_snake_case(rule["name"])}",' for rule in rules]
 
@@ -192,7 +204,6 @@ def gen_diagnostics(
     out_cpp_dir: str,
     out_docs_dir: str,
 ) -> None:
-
     with open(rules_path, "r") as f:
         rules = yaml.load(f, Loader=torchgen_utils.YamlLoader)
 

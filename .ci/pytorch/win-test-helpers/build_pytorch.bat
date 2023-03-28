@@ -111,23 +111,8 @@ if "%USE_CUDA%"=="1" (
   set CMAKE_CUDA_COMPILER_LAUNCHER=%TMP_DIR%/bin/randomtemp.exe;%TMP_DIR%\bin\sccache.exe
 )
 
-@echo off
-echo @echo off >> %TMP_DIR_WIN%\ci_scripts\pytorch_env_restore.bat
-for /f "usebackq tokens=*" %%i in (`set`) do echo set "%%i" >> %TMP_DIR_WIN%\ci_scripts\pytorch_env_restore.bat
-@echo on
-
-if "%REBUILD%" == "" (
-  if NOT "%BUILD_ENVIRONMENT%" == "" (
-    :: Create a shortcut to restore pytorch environment
-    echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
-    echo call "%TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
-    echo cd /D "%CD%" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
-
-    aws s3 cp "s3://ossci-windows/Restore PyTorch Environment.lnk" "C:\Users\circleci\Desktop\Restore PyTorch Environment.lnk"
-    if errorlevel 1 exit /b
-    if not errorlevel 0 exit /b
-  )
-)
+:: Print all existing environment variable for debugging
+set
 
 python setup.py bdist_wheel
 if errorlevel 1 exit /b
@@ -138,14 +123,7 @@ python -c "import os, glob; os.system('python -mpip install --no-index --no-deps
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (
-    if "%USE_CUDA%"=="1" (
-        7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torchgen %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\functorch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\nvfuser && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
-    ) else (
-        7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torchgen %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\functorch && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
-    )
-
-    if errorlevel 1 exit /b
-    if not errorlevel 0 exit /b
+    copy /Y "dist\*.whl" "%PYTORCH_FINAL_PACKAGE_DIR%"
 
     :: export test times so that potential sharded tests that'll branch off this build will use consistent data
     python tools/stats/export_test_times.py

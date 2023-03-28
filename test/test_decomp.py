@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch._dispatch.python import enable_python_dispatcher
-from torch._ops import has_key, DispatchKey
+from torch._ops import DispatchKey
 
 import itertools
 import functools
@@ -168,9 +168,14 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
         (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+        (torch.bfloat16, torch.ops.aten.var_mean.correction): 5e-7,
+        (torch.float16, torch.ops.aten.var_mean.correction): 5e-7,
         (torch.bfloat16, torch.ops.aten.var_mean.dim): 5e-7,
+        (torch.float16, torch.ops.aten.var_mean.dim): 5e-7,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
+        # see https://github.com/pytorch/pytorch/pull/96264
+        (torch.float16, torch.ops.aten.mv.default): 1e-5,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -326,6 +331,8 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "norm"),
     # native_batch_norm is only implicit when python dispatcher is on (and noncomposite otherwise)
     (None, None, "native_batch_norm"),
+
+    (None, None, "_upsample_bilinear2d_aa"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -710,7 +717,7 @@ class HasDecompTest(TestCase):
 
             try:
                 # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-                return not has_key(op, DispatchKey.CompositeImplicitAutograd)
+                return not op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
             except RuntimeError as e:
                 # has_key fails for some jit-registered ops, which shouldn't be
                 # relevant here anyway
@@ -736,9 +743,9 @@ class HasDecompTest(TestCase):
 
         # This is for operators that are only registered in some CI
         # configurations, so would cause the test to fail
-        allow_list = set([aten.get_gradients.default])
+        allow_list = {aten.get_gradients.default}
 
-        overloads_wanting_decomp = set(op for op in all_aten_overloads() if can_appear_in_trace(op))
+        overloads_wanting_decomp = {op for op in all_aten_overloads() if can_appear_in_trace(op)}
         ops_missing_decomp = overloads_wanting_decomp - decomposition_table.keys()
         ops_missing_decomp -= allow_list
         self.assertExpected("".join(sorted(op.name() + "\n" for op in ops_missing_decomp)))
