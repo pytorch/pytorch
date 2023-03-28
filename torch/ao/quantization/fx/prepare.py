@@ -766,7 +766,6 @@ def _maybe_insert_output_observer_for_node(
     node_name_to_match_result_with_qconfig: Dict[str, _MatchResultWithQConfig],
     matched_pattern: Any,
     qhandler: Optional[QuantizeHandler],
-    is_qat: bool,
 ) -> Optional[Node]:
     """
     If `node` needs an output observer, creates it, inserts it into `graph`
@@ -1084,7 +1083,6 @@ def insert_observers_for_model(
     equalization_config_map: Dict[str, Any],
     backend_config: BackendConfig,
     observed_node_names: Set[str],
-    is_qat: bool,
 ) -> Optional[Node]:
     """
     Inserts observers, using the following high level algorithm:
@@ -1370,7 +1368,7 @@ def insert_observers_for_model(
                             # this returns the new observer node if it was needed
                             maybe_output_obs_node = _maybe_insert_output_observer_for_node(
                                 node, model, named_modules, model.graph, node_name_to_match_result_with_qconfig,
-                                pattern, qhandler, is_qat)
+                                pattern, qhandler)
 
                             if maybe_output_obs_node is not None:
                                 # Update users of original node to use the output observer
@@ -1637,7 +1635,6 @@ def prepare(
         equalization_node_name_to_qconfig,
         backend_config,
         observed_node_names,
-        is_qat
     )
     model = GraphModule(model, model.graph)
 
