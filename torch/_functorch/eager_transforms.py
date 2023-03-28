@@ -32,7 +32,7 @@ from torch._C._functorch import (
     set_inplace_requires_grad_allowed,
     get_inplace_requires_grad_allowed
 )
-from torch._functorch.utils import exposed_in
+from torch._utils import exposed_in
 
 argnums_t = Union[int, Tuple[int, ...]]
 
