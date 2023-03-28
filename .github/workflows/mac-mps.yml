@@ -33,6 +33,23 @@ jobs:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
+  macos-12-py3-arm64-test:
+    name: macos-12-py3-arm64
+    uses: ./.github/workflows/_mac-test.yml
+    needs: macos-12-py3-arm64-build
+    with:
+      build-environment: macos-12-py3-arm64
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-12" },
+          { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-12" },
+          { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-12" },
+        ]}
+      arch: arm64
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+
   macos-12-py3-arm64-mps-test:
     name: macos-12-py3-arm64-mps
     uses: ./.github/workflows/_mac-test-mps.yml
