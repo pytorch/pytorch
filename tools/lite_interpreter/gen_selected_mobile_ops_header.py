@@ -47,7 +47,7 @@ selected_mobile_ops_preamble = """#pragma once
 
 def extract_root_operators(selective_builder: SelectiveBuilder) -> Set[str]:
     ops = []
-    for (op_name, op) in selective_builder.operators.items():
+    for op_name, op in selective_builder.operators.items():
         if op.is_root_operator:
             ops.append(op_name)
     return set(ops)
@@ -147,6 +147,7 @@ def main() -> None:
     )
     parser.add_argument(
         "-p",
+        "--yaml-file-path",
         "--yaml_file_path",
         type=str,
         required=True,
@@ -154,6 +155,7 @@ def main() -> None:
     )
     parser.add_argument(
         "-o",
+        "--output-file-path",
         "--output_file_path",
         type=str,
         required=True,

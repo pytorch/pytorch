@@ -22,7 +22,7 @@ from torch.distributed.elastic.utils.logging import get_logger
 
 __all__ = ['LaunchConfig', 'elastic_launch', 'launch_agent']
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -137,7 +137,7 @@ class elastic_launch:
 def _get_entrypoint_name(
     entrypoint: Union[Callable, str, None], args: List[Any]
 ) -> str:
-    """Retrive entrypoint name with the rule:
+    """Retrieve entrypoint name with the rule:
     1. If entrypoint is a function, use ``entrypont.__qualname__``.
     2. If entrypoint is a string, check its value:
         2.1 if entrypoint equals to ``sys.executable`` (like "python"), use the first element from ``args``
@@ -165,12 +165,12 @@ def _get_addr_and_port(
     endpoint = endpoint.strip()
     if not endpoint:
         raise ValueError(
-            "Endpoint is missing in endpoint. Try to add --master_addr and --master_port"
+            "Endpoint is missing in endpoint. Try to add --master-addr and --master-port"
         )
     master_addr, master_port = parse_rendezvous_endpoint(endpoint, default_port=-1)
     if master_port == -1:
         raise ValueError(
-            f"port is missing in endpoint: {endpoint}. Try to specify --master_port"
+            f"port is missing in endpoint: {endpoint}. Try to specify --master-port"
         )
     return (master_addr, master_port)
 

@@ -77,6 +77,7 @@ from torch.distributed.fsdp.api import (
     StateDictSettings,
     StateDictType,
 )
+from torch.distributed.utils import _p_assert
 
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
@@ -98,7 +99,6 @@ from ._unshard_param_utils import (
     _unshard_params,
     _unshard_params_recurse,
 )
-from ._utils import p_assert
 from .flat_param import FlatParameter
 from .wrap import _FSDPPolicy
 
@@ -318,6 +318,24 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             prevent too many in-flight all-gathers. This ``bool`` only affects
             the sharded strategies that schedule all-gathers. Enabling this can
             help lower the number of CUDA malloc retries.
+        use_orig_params (bool): Setting this to ``True`` has FSDP use
+            ``module`` 's original parameters. FSDP exposes those original
+            parameters to the user via :meth:`nn.Module.named_parameters`
+            instead of FSDP's internal :class:`FlatParameter` s. This means
+            that the optimizer step runs on the original parameters, enabling
+            per-original-parameter hyperparameters. FSDP preserves the original
+            parameter variables and manipulates their data between unsharded
+            and sharded forms, where they are always views into the underlying
+            unsharded or sharded :class:`FlatParameter`, respectively. With the
+            current algorithm, the sharded form is always 1D, losing the
+            original tensor structure. An original parameter may have all,
+            some, or none of its data present for a given rank. In the none
+            case, its data will be like a size-0 empty tensor. Users should not
+            author programs relying on what data is present for a given
+            original parameter in its sharded form. ``True`` is required to
+            use ``torch.compile()``. Setting this to ``False`` exposes FSDP's
+            internal :class:`FlatParameter` s to the user via
+            :meth:`nn.Module.named_parameters`. (Default: ``False``)
         ignored_parameters (Optional[Iterable[torch.nn.Parameter]]): Ignored
             parameters will not be managed by this FSDP instance,
             that means these parameters will not be flattened and sharded by FSDP,
@@ -535,7 +553,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     def _low_precision_hook_enabled(self) -> bool:
         """
-        Wether a low precision hook is registered or not.
+        Whether a low precision hook is registered or not.
         """
         return (
             self._communication_hook is not None
@@ -740,7 +758,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 self, self._handles, unshard_fn, self._fsdp_wrapped_module, args, kwargs
             )
             for handle in self._handles:
-                p_assert(
+                _p_assert(
                     handle.flat_param.device == self.compute_device,
                     "Expected `FlatParameter` to be on the compute device "
                     f"{self.compute_device} but got {handle.flat_param.device}",
@@ -827,10 +845,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """
         This deregisters the original parameters and exposes the
         :class:`FlatParameter` s. If a :class:`FlatParameter` is sharded, then
-        this refreshes the sharded views before exiting. This method shouuld
+        this refreshes the sharded views before exiting. This method should
         only be called when using the original parameters.
         """
-        p_assert(
+        _p_assert(
             self._use_orig_params,
             "`_deregister_orig_params_ctx()` should only be called when "
             "`_use_orig_params=True`",
@@ -1003,8 +1021,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # If every FSDP instance uses `NO_SHARD`, then we can directly use
         # the normal `nn.utils` one targeting local gradients
         all_no_shard = all(
-            not handle.uses_sharded_strategy
-            for handle in traversal_utils._get_fsdp_handles(self)
+            not handle.uses_sharded_strategy for handle in self._all_handles
         )
         if all_no_shard:
             return torch.nn.utils.clip_grad_norm_(
@@ -1017,7 +1034,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         sharded_params = set()
         nonsharded_params = set()  # `NO_SHARD` or not FSDP-managed
         grads: List[torch.Tensor] = []
-        for handle in traversal_utils._get_fsdp_handles(self):
+        for handle in self._all_handles:
             target_set = (
                 sharded_params if handle.uses_sharded_strategy else nonsharded_params
             )
@@ -1070,6 +1087,16 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             grad.detach().mul_(clip_coef_clamped.to(grad.device, grad.dtype))
         # Use the "largest" dtype by type promotion semantics to use the same
         # dtype as if we did not force local norm computation to be in FP32
+        if len(grads) == 0:
+            # If this rank has no gradients, then we must default to FP32
+            # unless we use additional communication, which we prefer to avoid
+            # since `clip_grad_norm_()` is called in the training loop
+            warnings.warn(
+                f"Called FSDP.clip_grad_norm_() on rank {self.rank} with no "
+                "gradients -- returning the total norm in the default dtype "
+                f"{total_norm.dtype}"
+            )  # warn since this is generally unexpected
+            return total_norm
         total_norm_dtype = functools.reduce(
             lambda dtype1, dtype2: torch.promote_types(dtype1, dtype2),
             [grad.dtype for grad in grads],
@@ -1683,13 +1710,25 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     def optim_state_dict(
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
+        optim_state_dict: Optional[Dict[str, Any]] = None,
         group: Optional[dist.ProcessGroup] = None,
     ) -> Dict[str, Any]:
         """
-        Returns the state dict of ``optim`` for the ``model`` that is (partially)
-        sharded by FSDP. The state may be sharded, consolidated, or consolidated
-        on rank 0 only depending on the ``state_dict_type`` set by
-        :meth:`set_state_dict_type` or :meth:`state_dict_type`.
+        Transforms the state_dict of ``optim`` for the ``model`` that is sharded
+        by FSDP to one of the three types: 1) full optimizer state_dict, 2)
+        sharded optimizer state_dict, 3) local optimizer state_dict.
+
+        For full optimizer state_dict, all states are unflattened and not sharded.
+        Rank0 only and CPU only can be specified via :meth:`state_dict_type` to
+        avoid OOM.
+
+        For sharded optimizer state_dict, all states are unflattend but sharded.
+        CPU only can be specified via :meth:`state_dict_type` to further save
+        memory.
+
+        For local state_dict, no transformation will be performed. But a state
+        will be converted from nn.Tensor to ShardedTensor to represent its sharding
+        nature (this is not supported yet).
 
         Example::
 
@@ -1711,7 +1750,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> save_a_checkpoint(state_dict, optim_state_dict)
             >>> # Load a checkpoint
             >>> model, optim = ...
-            >>> state_dict, optim_state_dict = load_a_checkponit()
+            >>> state_dict, optim_state_dict = load_a_checkpoint()
             >>> FSDP.set_state_dict_type(
             >>>     model,
             >>>     StateDictType.FULL_STATE_DICT,
@@ -1730,6 +1769,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 were passed into the optimizer ``optim``.
             optim (torch.optim.Optimizer): Optimizer for ``model`` 's
                 parameters.
+            optim_state_dict (Dict[str, Any]): the target optimizer state_dict to
+                transform. If the value is None, optim.state_dict() will be used. (
+                Default: ``None``)
             group (dist.ProcessGroup): Model's process group across which parameters
                 are sharded or ``None`` if using the default process group. (
                 Default: ``None``)
@@ -1740,10 +1782,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             ``state_dict_type``.
         """
         state_dict_settings = FullyShardedDataParallel.get_state_dict_type(model)
+        if optim_state_dict is None:
+            optim_state_dict = optim.state_dict()
         return FullyShardedDataParallel._optim_state_dict_impl(
             model=model,
             optim=optim,
-            optim_state_dict=optim.state_dict(),
+            optim_state_dict=optim_state_dict,
             optim_input=None,
             rank0_only=getattr(state_dict_settings, "rank0_only", False),
             full_state_dict=state_dict_settings.state_dict_type
@@ -1760,7 +1804,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """
         This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionaility is identical to ``:meth:optim_state_dict`` except
+        The functionality is identical to ``:meth:optim_state_dict`` except
         for the different arguments.
 
         Args:
@@ -1769,7 +1813,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 were passed into the optimizer ``optim``.
             optim (torch.optim.Optimizer): Optimizer for ``model`` 's
                 parameters.
-            optim (Dict[str, Any]: the optim_state_dict to be coverted. The value
+            optim (Dict[str, Any]: the optim_state_dict to be converted. The value
                is typically returned by ``NamedOptimizer.state_dict()``.
             group (dist.ProcessGroup): Model's process group across which parameters
                 are sharded or ``None`` if using the default process group. (
@@ -1794,16 +1838,18 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     @staticmethod
     def optim_state_dict_to_load(
-        optim_state_dict: Dict[str, Any],
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
+        optim_state_dict: Dict[str, Any],
         is_named_optimizer: bool = False,
+        load_directly: bool = False,
         group: Optional[dist.ProcessGroup] = None,
     ) -> Dict[str, Any]:
         """
-        Given a saved ``optim_state_dict``, converts it to the optimizer state_dict
-        that can be loaded to ``optim`` which is the optimizer for ``model``.
-        ``model`` is (partially) sharded by FullyShardedDataParallel.
+        Given a ``optim_state_dict`` that is transformed through
+        :meth:`optim_state_dict`, converts it to the flattened optimizer
+        state_dict that can be loaded to ``optim`` which is the optimizer for
+        ``model``.  ``model`` must be sharded by FullyShardedDataParallel.
 
             >>> # xdoctest: +SKIP("undefined variables")
             >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -1819,11 +1865,16 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>>     FullOptimStateDictConfig(rank0_only=False),
             >>> )
             >>> state_dict = model.state_dict()
-            >>> optim_state_dict = FSDP.optim_state_dict(model, optim)
+            >>> original_osd = optim.state_dict()
+            >>> optim_state_dict = FSDP.optim_state_dict(
+            >>>     model,
+            >>>     optim,
+            >>>     optim_state_dict=original_osd
+            >>> )
             >>> save_a_checkpoint(state_dict, optim_state_dict)
             >>> # Load a checkpoint
             >>> model, optim = ...
-            >>> state_dict, optim_state_dict = load_a_checkponit()
+            >>> state_dict, optim_state_dict = load_a_checkpoint()
             >>> FSDP.set_state_dict_type(
             >>>     model,
             >>>     StateDictType.FULL_STATE_DICT,
@@ -1837,21 +1888,25 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> optim.load_state_dict(optim_state_dict)
 
         Args:
-            optim_state_dict (Dict[str, Any]): The optimizer states to be loaded.
             model (torch.nn.Module): Root module (which may or may not be a
                 :class:`FullyShardedDataParallel` instance) whose parameters
                 were passed into the optimizer ``optim``.
             optim (torch.optim.Optimizer): Optimizer for ``model`` 's
                 parameters.
+            optim_state_dict (Dict[str, Any]): The optimizer states to be loaded.
             is_named_optimizer (bool): Is this optimizer a NamedOptimizer or
                 KeyedOptimizer. Only set to True if ``optim`` is TorchRec's
                 KeyedOptimizer or torch.distributed's NamedOptimizer.
+            load_directly (bool): If this is set to True, this API will also
+                call optim.load_state_dict(result) before returning the result.
+                Otherwise, users are responsible to call ``optim.load_state_dict()``
+                (Default: ``False``)
             group (dist.ProcessGroup): Model's process group across which parameters
                 are sharded or ``None`` if using the default process group. (
                 Default: ``None``)
         """
         state_dict_settings = FullyShardedDataParallel.get_state_dict_type(model)
-        return FullyShardedDataParallel._optim_state_dict_to_load_impl(
+        result = FullyShardedDataParallel._optim_state_dict_to_load_impl(
             optim_state_dict=optim_state_dict,
             model=model,
             optim_input=None,
@@ -1863,6 +1918,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             is_named_optimizer=is_named_optimizer,
             group=group,
         )
+        if load_directly:
+            optim.load_state_dict(result)
+        return result
 
     @staticmethod
     def load_optim_state_dict_pre_hook(
@@ -1873,7 +1931,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """
         This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionaility is identical to ``:meth:optim_state_dict_to_load``
+        The functionality is identical to ``:meth:optim_state_dict_to_load``
         except for the different arguments.
 
         Args:
@@ -1968,7 +2026,7 @@ def _get_grad_norm(
     if len(params_with_grad) == 0:
         return torch.tensor(0.0)
     grads = [param.grad for param in params_with_grad]
-    grad_dtypes = set(grad.dtype for grad in grads)
+    grad_dtypes = {grad.dtype for grad in grads}
     if len(grad_dtypes) != 1:
         raise ValueError(
             f"Requires uniform dtype across all gradients but got {grad_dtypes}"

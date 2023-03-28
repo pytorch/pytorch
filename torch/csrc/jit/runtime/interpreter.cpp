@@ -324,6 +324,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(STOREN): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(stack.size() >= inst.N);
             for (size_t i = inst.N; i > 0; --i) {
               reg(inst.X + i - 1) = pop(stack);
             }
@@ -521,8 +522,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(TYPECHECK): {
             INST_GUARD;
-            int num_inputs = inst.N, i = 0;
-            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+            unsigned num_inputs = inst.N, i = 0;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs && num_inputs > 0);
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
@@ -678,11 +678,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(DTYPE): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
             dtype(stack);
           }
             INST_NEXT;
           case INST(DIM): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
             dim(stack);
           }
             INST_NEXT;

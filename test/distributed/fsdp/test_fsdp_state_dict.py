@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import io
 import itertools
 import sys
 from contextlib import suppress
@@ -10,6 +11,7 @@ from typing import Any, Dict
 import torch
 import torch.nn as nn
 from torch import distributed as dist
+from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
     checkpoint_wrapper,
@@ -499,6 +501,7 @@ class TestFSDPStateDict(FSDPTest):
             use_orig_params and state_dict_type not in _UNFLATTENED_STATE_DICT_IMPLS
         ):
             return  # not supported
+        device = torch.device(self.rank)
         for model_call in [
             partial(
                 self._get_non_fsdp_root_module,
@@ -517,6 +520,14 @@ class TestFSDPStateDict(FSDPTest):
             ),
         ]:
             model = model_call()
+            if fp16:
+                model.half()
+            # Run a forward/backward to compute gradients to test the case
+            # where there are gradients populated
+            inp = torch.randn((3, 10), device=device)
+            if fp16:
+                inp = inp.half()
+            model(inp).sum().backward()
 
             ctx = self._get_state_dict_mgr(
                 model, state_dict_type, state_dict_rank0_and_offload
@@ -546,6 +557,12 @@ class TestFSDPStateDict(FSDPTest):
                 model_new = model_new.cuda()
             if fp16:
                 model_new.half()
+            # Run a forward/backward to compute gradients to test the case
+            # where there are gradients populated
+            inp = torch.randn((3, 10), device=device)
+            if fp16:
+                inp = inp.half()
+            model_new(inp).sum().backward()
 
             # zero the model to ensure parameters are different.
             _zero_model(model_new, zero_buffers=True)
@@ -768,24 +785,27 @@ class TestFSDPStateDict(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
     def test_state_dict_save_load_flow(self, state_dict_type):
-        for move_to_cpu in [True, False]:
-            with self.subTest(move_to_cpu=move_to_cpu):
-                fsdp_params = self._dist_train(
-                    wrap_fsdp=True,
-                    state_dict_type=state_dict_type,
-                    move_to_cpu=move_to_cpu,
-                )
-                ddp_params = self._dist_train(wrap_fsdp=False)
-                self.assertEqual(ddp_params, fsdp_params)
+        self.run_subtests(
+            {"move_to_cpu": [True, False]},
+            self._test_state_dict_save_load_flow,
+            state_dict_type=state_dict_type,
+        )
+
+    def _test_state_dict_save_load_flow(self, state_dict_type, move_to_cpu):
+        fsdp_params = self._dist_train(
+            wrap_fsdp=True,
+            state_dict_type=state_dict_type,
+            move_to_cpu=move_to_cpu,
+        )
+        ddp_params = self._dist_train(wrap_fsdp=False)
+        self.assertEqual(ddp_params, fsdp_params)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
     def test_fsdp_state_dict_keys(self, state_dict_type):
         state_dict = self._state_dict(self._initialize_model(True), state_dict_type)
         if state_dict_type == "local_state_dict":
-            self.assertEqual(
-                set([FLAT_PARAM, f"inner.{FLAT_PARAM}"]), state_dict.keys()
-            )
+            self.assertEqual({FLAT_PARAM, f"inner.{FLAT_PARAM}"}, state_dict.keys())
         elif state_dict_type in ("state_dict", "sharded_state_dict"):
             # Keys should match local model.
             local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
@@ -866,7 +886,6 @@ class TestFSDPStateDict(FSDPTest):
         if state_dict_rank0_and_offload:
             fsdp_state_dict = self._broadcast_state_dict(model, fsdp_state_dict)
 
-        # if self.rank == 0:
         blank_local_model.load_state_dict(fsdp_state_dict, strict=True)
         local_params = list(blank_local_model.parameters())
         for fsdp_param, local_param in zip(fsdp_params, local_params):
@@ -918,14 +937,14 @@ class TestFSDPStateDict(FSDPTest):
         # Check that it can be loaded into FSDP.
         new_fsdp, _ = _create_module()
         _zero_model(new_fsdp)
-        for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
+        for p1, p2 in zip(fsdp.parameters(), new_fsdp.parameters()):
             self.assertNotEqual(p1, p2)
         with FSDP.state_dict_type(new_fsdp, STATE_DICT_MAPPING[state_dict_type]):
             if state_dict_type != "local_state_dict":
                 # FlatParameter has not supported deepcopy yet.
                 state_dict = deepcopy(state_dict)
             new_fsdp.load_state_dict(state_dict, strict=True)
-        for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
+        for p1, p2 in zip(fsdp.parameters(), new_fsdp.parameters()):
             self.assertEqual(p1, p2)
 
         # Test that the checkpoint can be loaded into a local model.
@@ -935,7 +954,7 @@ class TestFSDPStateDict(FSDPTest):
                 param.zero_()
 
         with fsdp.summon_full_params(fsdp):
-            for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
+            for p1, p2 in zip(fsdp.parameters(), local.parameters()):
                 self.assertNotEqual(p1, p2)
 
         if state_dict_type == "local_state_dict":
@@ -944,7 +963,7 @@ class TestFSDPStateDict(FSDPTest):
         with fsdp.summon_full_params(fsdp):
             if self.rank == 0:
                 local.load_state_dict(state_dict, strict=True)
-                for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
+                for p1, p2 in zip(fsdp.parameters(), local.parameters()):
                     self.assertEqual(p1, p2)
 
     @skip_if_lt_x_gpu(2)
@@ -1066,6 +1085,23 @@ class TestFSDPStateDict(FSDPTest):
             model.load_state_dict(state_dict)
             with FSDP.summon_full_params(model):
                 self.assertEqual(model.my_parameter.item(), 3.1415926)
+
+    @skip_if_lt_x_gpu(2)
+    def test_torch_save_load(self):
+        model = Model(wrap_fsdp=True).cuda()
+        with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
+            state_dict = model.state_dict()
+            checkpoint = io.BytesIO()
+            torch.save(state_dict, checkpoint)
+            checkpoint.seek(0)
+            state_dict_saved = torch.load(checkpoint)
+            for k, v in state_dict_saved.items():
+                if isinstance(v, ShardedTensor):
+                    self.assertEqual(
+                        v._local_shards[0].tensor, state_dict[k]._local_shards[0].tensor
+                    )
+                else:
+                    self.assertEqual(v, state_dict[k])
 
 
 instantiate_parametrized_tests(TestFSDPStateDict)

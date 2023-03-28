@@ -26,7 +26,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 class MLPModule(torch.nn.Module):
     def __init__(self, device):
-        super(MLPModule, self).__init__()
+        super().__init__()
         torch.manual_seed(5)
         self.net1 = torch.nn.Linear(10, 16, device=device)
         self.relu = torch.nn.ReLU()
@@ -58,14 +58,25 @@ class TensorParallelAPITests(DTensorTestBase):
         one_dimention_mesh_shape = mesh_shape[self.rank // dim_one_size, :]
         pg = mesh.get_dim_groups()[1]
         new_mesh = _create_1d_device_mesh(mesh, 1)
-        expected_mesh = DeviceMesh(self.device_type, one_dimention_mesh_shape, [pg])
+        expected_mesh = DeviceMesh(
+            self.device_type,
+            one_dimention_mesh_shape,
+            _init_process_groups=False
+        )
+        expected_mesh._dim_groups = [pg]
+
         self.assertEqual(new_mesh.mesh, expected_mesh.mesh)
         self.assertEqual(new_mesh.device_type, expected_mesh.device_type)
         # When 1D dim is 0.
         one_dimention_mesh_shape = mesh_shape[:, self.rank % dim_one_size]
         pg = mesh.get_dim_groups()[0]
         new_mesh = _create_1d_device_mesh(mesh, 0)
-        expected_mesh = DeviceMesh(self.device_type, one_dimention_mesh_shape, [pg])
+        expected_mesh = DeviceMesh(
+            self.device_type,
+            one_dimention_mesh_shape,
+            _init_process_groups=False
+        )
+        expected_mesh._dim_groups = [pg]
         self.assertEqual(new_mesh.mesh, expected_mesh.mesh)
         self.assertEqual(new_mesh.device_type, expected_mesh.device_type)
 

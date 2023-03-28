@@ -432,6 +432,7 @@ Tensor internal_new_from_data(
   // to dispatch to it.
   // TODO: arguably it should have an autograd implementation that noops
   at::AutoDispatchBelowADInplaceOrView guard;
+
   return at::lift_fresh(tensor);
 }
 
@@ -487,6 +488,7 @@ void check_base_legacy_new(
         c10::DispatchKey::HPU,
         c10::DispatchKey::MPS,
         c10::DispatchKey::Meta,
+        c10::DispatchKey::PrivateUse1,
     });
     TORCH_CHECK(
         expected_key_set.has(dispatch_key),
@@ -553,14 +555,29 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
+    if (ctor_or_new == CtorOrNew::CTOR) {
+      TORCH_WARN_ONCE(
+          "torch.sparse.SparseTensor() is deprecated."
+          "  Please use torch.sparse_coo_tensor((0,), dtype=).");
+    }
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     return at::empty({0}, build_options(options, scalar_type, deviceOptional));
   } else if (r.idx == 1) {
+    if (ctor_or_new == CtorOrNew::CTOR) {
+      TORCH_WARN_ONCE(
+          "torch.sparse.SparseTensor(cdata=x._cdata) is deprecated."
+          "  Please use torch.sparse_coo_tensor(x._indices(), x._values(), x.shape).");
+    }
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
+    if (ctor_or_new == CtorOrNew::CTOR) {
+      TORCH_WARN_ONCE(
+          "torch.sparse.SparseTensor(indices, values, *, device=) is deprecated."
+          "  Please use torch.sparse_coo_tensor(indices, values, dtype=, device=).");
+    }
     // Note: this signature doesn't have a dtype, even though it has a device;
     // it probably shouldn't have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(2);
@@ -568,6 +585,11 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
+    if (ctor_or_new == CtorOrNew::CTOR) {
+      TORCH_WARN_ONCE(
+          "torch.sparse.SparseTensor(indices, values, shape, *, device=) is deprecated."
+          "  Please use torch.sparse_coo_tensor(indices, values, shape, dtype=, device=).");
+    }
     // Note: this signature doesn't have a dtype, even though it has a device;
     // it probably shouldn't have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(3);
@@ -584,13 +606,18 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
       // unless the sequences is a torch.Size
       if (ctor_or_new == CtorOrNew::CTOR) {
         throw TypeError(
-            "torch.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
+            "torch.sparse.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
             "or construct a strided tensor and convert it to sparse via to_sparse.");
       } else {
         throw TypeError(
             "SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
             "or construct a strided tensor and convert it to sparse via to_sparse.");
       }
+    }
+    if (ctor_or_new == CtorOrNew::CTOR) {
+      TORCH_WARN_ONCE(
+          "torch.sparse.SparseTensor(shape, *, device=) is deprecated."
+          "  Please use torch.sparse_coo_tensor(shape, dtype=, device=).");
     }
     return new_with_sizes(
         options, scalar_type, r.deviceOptional(1), r.symintlist(0));
@@ -1608,7 +1635,10 @@ Tensor asarray(
       THPObjectPtr ptr;
       auto arr = obj;
 
-      if (is_numpy_scalar) {
+      // PyArray_CheckScalar is true for both scalars and 0-dim arrays, per
+      // https://numpy.org/devdocs/reference/c-api/array.html#c.PyArray_CheckScalar
+      // But for 0-dim arrays no `PyArray_FromScalar` call is needed
+      if (is_numpy_scalar && !is_numpy_array) {
         TORCH_CHECK(
             !force_alias,
             "can't alias NumPy scalars. ",

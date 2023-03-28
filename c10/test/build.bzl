@@ -39,7 +39,10 @@ def define_targets(rules):
         name = "util_base_tests",
         srcs = rules.glob(
             ["util/*.cpp"],
-            exclude = ["util/typeid_test.cpp"],
+            exclude = [
+                "util/ssize_test.cpp",
+                "util/typeid_test.cpp",
+            ],
         ),
         copts = ["-Wno-deprecated-declarations"],
         deps = [
@@ -47,8 +50,17 @@ def define_targets(rules):
             ":complex_math_test_common",
             ":complex_test_common",
             "@com_google_googletest//:gtest_main",
-            "//c10/macros",
+            "//c10/macros:macros",
             "//c10/util:base",
+        ],
+    )
+
+    rules.cc_test(
+        name = "util/ssize_test",
+        srcs = ["util/ssize_test.cpp"],
+        deps = [
+            "@com_google_googletest//:gtest_main",
+            "//c10/util:ssize",
         ],
     )
 
@@ -74,7 +86,7 @@ def define_targets(rules):
         hdrs = ["util/complex_test_common.h"],
         deps = [
             "@com_google_googletest//:gtest",
-            "//c10/macros",
+            "//c10/macros:macros",
             "//c10/util:base",
         ],
         testonly = True,
