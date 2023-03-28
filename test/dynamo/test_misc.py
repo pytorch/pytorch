@@ -39,6 +39,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
+from torch._dynamo.guards import strip_function_call
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
@@ -5008,6 +5009,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(seen_frames[0].name, "fn")
         self.assertEqual(seen_frames[1].line, "def uwu_inline_me(x, y, z):")
 
+    def test_guards_strip_function_call(self):
+        test_case = [
+            ("___odict_getitem(a, 1)", "a"),
+            ("a.layers[slice(2)][0]._xyz", "a"),
+            ("getattr(a.layers[slice(2)][0]._abc, '0')", "a"),
+            ("getattr(getattr(a.x[3], '0'), '3')", "a"),
+        ]
+        # strip_function_call should extract the object from the string.
+        for name, expect_obj in test_case:
+            self.assertEqual(strip_function_call(name), expect_obj)
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
