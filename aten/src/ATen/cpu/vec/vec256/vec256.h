@@ -10,7 +10,6 @@
 #include <ATen/cpu/vec/vec256/vec256_float.h>
 #include <ATen/cpu/vec/vec256/vec256_float_neon.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
-#include <ATen/cpu/vec/vec256/vec256_float16.h>
 #include <ATen/cpu/vec/vec256/vec256_double.h>
 #include <ATen/cpu/vec/vec256/vec256_int.h>
 #include <ATen/cpu/vec/vec256/vec256_qint.h>
