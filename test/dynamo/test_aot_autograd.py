@@ -282,7 +282,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         compare_equal_outs_and_grads(self, F(), fxy, (x, z))
         self.assertExpectedInline(
             failure_reason,
-            "tensor 'y' requires_grad mismatch. expected requires_grad=1",
+            """tensor 'L['y']' requires_grad mismatch. expected requires_grad=1""",
         )
 
         # Reset failure reason

@@ -774,9 +774,14 @@ def enum_repr(value):
     # Workaround repr(Enum) returning invalid global reference before python 3.11
     # https://peps.python.org/pep-0663/
     if sys.version_info < (3, 11):
-        return str(value)
+        enum_name = str(value)
     else:
-        return repr(value)
+        enum_name = repr(value)
+    # TODO(voz): Do I need to check upstream guard_source against GuardSource.LOCAL(_NN_MODULE)
+    # or pass L/G?
+    name, val = enum_name.split(".")
+    local_name = f'L["{name}"].{val}'
+    return local_name
 
 
 def dict_param_key_ids(value):
@@ -793,7 +798,9 @@ def dict_const_keys_repr(const_keys):
         # by calling enum_repr and removing quotes to render enum in guard code.
         const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
-        )
+        ).replace(
+            "!", "'"
+        )  # lol
     else:
         const_keys_str = f"{const_keys!r}"
     return const_keys_str

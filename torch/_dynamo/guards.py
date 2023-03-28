@@ -795,6 +795,7 @@ def guard_fail_hook(
             reason = part
             break
 
+    breakpoint()
     if first:
         stashed_first_fail_reason = reason
 
@@ -830,6 +831,7 @@ def guard_error_hook(
     f_globals: Dict[str, object],
     last: bool,
 ):
+    breakpoint()
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"
     )
