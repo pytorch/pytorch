@@ -283,15 +283,13 @@ def get_kernel_metadata(node_schedule):
     for node in inductor_nodes:
         if "original_aten" in node.meta:
             original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
-                node
+                node.name
             )
     metadata = [
-        f"# Original ATen: {', '.join(original_aten_dict.keys())}\n",
+        f"# Original ATen: {', '.join(sorted(original_aten_dict.keys()))}\n",
     ]
-    for original_aten, nodes in original_aten_dict.items():
-        metadata.append(
-            f"# {original_aten} => {', '.join([node.name for node in nodes])}"
-        )
+    for original_aten, nodes in sorted(original_aten_dict.items()):
+        metadata.append(f"# {original_aten} => {', '.join(sorted(nodes))}")
     return "\n".join(metadata)
 
 
@@ -563,14 +561,17 @@ class DeferredLineBase:
 
 @functools.lru_cache(None)
 def is_big_gpu(index):
-    cores = torch.cuda.get_device_properties(index).multi_processor_count
-    if cores < 80:  # V100
-        log.warning("not enough cuda cores to use max_autotune_gemm mode")
+    sms = torch.cuda.get_device_properties(index).multi_processor_count
+    if sms < 80:  # V100
+        log.warning("not enough SMs to use max_autotune_gemm mode")
         return False
     return True
 
 
-def use_triton_template(layout):
+def use_triton_template(layout, *, enable_int32=False):
+    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    if enable_int32:
+        layout_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.int32)
     return (
         (
             config.max_autotune
@@ -578,7 +579,7 @@ def use_triton_template(layout):
             or config.search_autotune_cache
         )
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and layout.dtype in layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -797,3 +798,19 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         print(
             "No kernel with benchmark functionality found. Make sure you run inductor with config.benchmark_kernel being True"
         )
+
+
+def is_ones(items):
+    return all(x == 1 for x in items)
+
+
+def is_zeros(items):
+    return all(x == 0 for x in items)
+
+
+def is_cpu_device(inputs):
+    return all(
+        item.device == torch.device("cpu")
+        for item in inputs
+        if isinstance(item, torch.Tensor)
+    )

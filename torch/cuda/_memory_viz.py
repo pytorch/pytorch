@@ -26,7 +26,10 @@ def _frame_filter(name, filename):
         "CapturedTraceback::gather",
         "gather_with_cpp",
         "_start",
-        "__libc_start_main"
+        "__libc_start_main",
+        "PyEval_",
+        "PyObject_",
+        "PyFunction_",
     ]
     omit_filenames = [
         "core/boxing",

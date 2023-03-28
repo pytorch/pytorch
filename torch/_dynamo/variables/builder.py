@@ -12,7 +12,7 @@ import torch
 
 from torch import SymInt
 from torch._guards import GuardSource
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
@@ -95,7 +95,7 @@ from .tensor import (
 from .torch import (
     tensor_dunder_fns,
     torch_special_class_types,
-    TorchPyOperator,
+    TorchHigherOrderOperator,
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
@@ -462,8 +462,8 @@ class VariableBuilder:
             return HFPretrainedConfigVariable(
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
-        elif isinstance(value, PyOperator):
-            return TorchPyOperator(
+        elif isinstance(value, HigherOrderOperator):
+            return TorchHigherOrderOperator(
                 value,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
@@ -582,8 +582,12 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        if istype(value, (tuple, list)) and all(
-            [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+        if (
+            istype(value, (tuple, list))
+            and all(
+                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+            )
+            and not config.dynamic_shapes
         ):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
         else:
