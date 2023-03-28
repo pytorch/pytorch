@@ -2491,6 +2491,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                                 aot_config.keep_inference_input_mutations,
                                 aot_config.dynamic_shapes,
                                 inference_compiler=None,
+                                aot_autograd_arg_pos_to_source=None,
                             )
                         )
                     else:
@@ -2745,9 +2746,6 @@ def aot_function(
     set `decompositions` dictionary to decompose the operators into a sequence
     of core or simpler operators supported by the backend compilers.
 
-    :func:`aot_function` uses a compilation cache, based on input tensor
-    properties, to detect when there is a need of recompilation.
-
     .. warning::
         This API is experimental and likely to change.
 
@@ -2806,6 +2804,7 @@ def aot_function(
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic,
+        aot_autograd_arg_pos_to_source=None,
     )
     cached_res = None
 
