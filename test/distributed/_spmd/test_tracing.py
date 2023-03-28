@@ -530,11 +530,14 @@ class TraceTrainStepTest(DTensorTestBase):
         ddp_opt.zero_grad()
 
         # test parameter parity
-        # FIXME(@mrshenli): inplace op + DTensor does not trigger allreduce, so
-        # only testing local model for now
         train_step(mod, opt, inp)
 
         ddp_mod(ddp_inp).sum().backward()
+        # FIXME(@mrshenli): DDP by default divides grads by world size, but
+        # torch.distributed.compile does not do that yet.
+        with torch.no_grad():
+            for p in ddp_mod.parameters():
+                p.grad *= self.world_size
         ddp_opt.step()
 
         for p1, p2 in zip(mod.parameters(), ddp_mod.parameters()):
@@ -551,11 +554,11 @@ class TraceTrainStepTest(DTensorTestBase):
         rank = torch.distributed.get_rank()
         # FIXME(@mrshenli): remove manual seed once dist.compile can synchronize
         # module parameters.
-        torch.manual_seed(0)
+        torch.manual_seed(1)
         # FIXME(@mrshenli): gradients for bias is missing
         mod = nn.Linear(10, 10, bias=False).cuda(rank)
         # FIXME(@mrshenli): we have to enable foreach to get better perf
-        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=False)
+        opt = torch.optim.SGD(mod.parameters(), lr=1, foreach=False)
         inp = torch.randn(2, 10).cuda(rank)
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
