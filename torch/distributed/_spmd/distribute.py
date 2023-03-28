@@ -158,7 +158,6 @@ def _get_dtensor_dispatch_graph(
             args,
             kwargs,  # kwargs in this set of tests are all constants
             DTensor._propagator,
-            DTensor._custom_dispatch_ops,
         )
         node_to_obj[node] = out
 
