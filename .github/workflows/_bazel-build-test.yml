@@ -175,9 +175,6 @@ jobs:
           # then trim all special characters like single and double quotes to avoid unescaped inputs to
           # wreak havoc internally
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
-          # then truncate the message length to 10,000 characters, not doing so will make docker command
-          # fail due to nightly vs master difference
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES:0:10000}"
           export PR_BODY="${PR_BODY//[\'\"]}"
 
           # TODO: Stop building test binaries as part of the build phase
