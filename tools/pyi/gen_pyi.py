@@ -593,7 +593,7 @@ def gen_pyi(
                     ", ".join(
                         [
                             "size: _size",
-                            "fill_value: Union[Number, _complex]",
+                            "fill_value: Number",
                             "*",
                             "out: Optional[Tensor] = None",
                             "layout: _layout = strided",
@@ -605,7 +605,7 @@ def gen_pyi(
                     ", ".join(
                         [
                             "size: _size",
-                            "fill_value: Union[Number, _complex]",
+                            "fill_value: Number",
                             "*",
                             "names: List[Union[str, None]]",
                             "layout: _layout = strided",

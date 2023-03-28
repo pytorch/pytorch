@@ -5,7 +5,7 @@ What's happening?
 -----------------
 Batch Norm requires in-place updates to running_mean and running_var of the same size as the input.
 Functorch does not support inplace update to a regular tensor that takes in a batched tensor (i.e.
-``regular.add_(batched)`` is not allowed). So when vmapping over a batch of inputs to a single module,
+``regular.add_(batched)`` is not allowed). So when vmaping over a batch of inputs to a single module,
 we end up with this error
 
 How to fix

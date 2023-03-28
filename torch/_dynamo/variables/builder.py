@@ -12,7 +12,7 @@ import torch
 
 from torch import SymInt
 from torch._guards import GuardSource
-from torch._ops import HigherOrderOperator
+from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
@@ -27,6 +27,7 @@ from ..source import (
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
+    LocalInputSource,
     LocalSource,
     RandomValueSource,
     Source,
@@ -95,7 +96,7 @@ from .tensor import (
 from .torch import (
     tensor_dunder_fns,
     torch_special_class_types,
-    TorchHigherOrderOperator,
+    TorchPyOperator,
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
@@ -123,6 +124,11 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
+            # Mapping for downstream systems to remap back into dynamo arg positions
+            if isinstance(self.source, LocalInputSource):
+                if "graph_arg_pos" not in self.fake_tensor.__dict__:
+                    self.fake_tensor.__dict__["graph_arg_pos"] = []
+                self.fake_tensor.__dict__["graph_arg_pos"].append(self.source.pos)
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
@@ -462,8 +468,8 @@ class VariableBuilder:
             return HFPretrainedConfigVariable(
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
-        elif isinstance(value, HigherOrderOperator):
-            return TorchHigherOrderOperator(
+        elif isinstance(value, PyOperator):
+            return TorchPyOperator(
                 value,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
@@ -582,12 +588,8 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        if (
-            istype(value, (tuple, list))
-            and all(
-                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
-            )
-            and not config.dynamic_shapes
+        if istype(value, (tuple, list)) and all(
+            [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
         ):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
         else:
@@ -1075,8 +1077,7 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        assert source is not None
-        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
+        static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(

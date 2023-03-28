@@ -1127,7 +1127,7 @@ user-defined types if they implement the ``__contains__`` method.
 Identity Comparisons
 """"""""""""""""""""
 For all types except ``int``, ``double``, ``bool``, and ``torch.device``, operators ``is`` and ``is not`` test for the object’s identity;
-``x is y`` is ``True`` if and only if ``x`` and ``y`` are the same object. For all other types, ``is`` is equivalent to
+``x is y`` is ``True`` if and and only if ``x`` and ``y`` are the same object. For all other types, ``is`` is equivalent to
 comparing them using ``==``. ``x is not y`` yields the inverse of ``x is y``.
 
 Boolean Operations

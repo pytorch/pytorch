@@ -123,7 +123,7 @@ at::Generator make_generator_privateuse1(c10::DeviceIndex device_index) {
   return at::make_generator<PrivateGeneratorImpl>(device_index);
 }
 
-void register_generator() {
+void register_genertor() {
   REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
 }
 
@@ -134,5 +134,5 @@ void register_generator() {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
-    m.def("register_generator", &register_generator, "register generator for custom device");
+    m.def("register_genertor", &register_genertor, "register generator for custom device");
 }

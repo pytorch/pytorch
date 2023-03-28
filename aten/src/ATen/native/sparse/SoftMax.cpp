@@ -28,7 +28,8 @@
 
 #include <map>
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
@@ -656,4 +657,5 @@ Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, optional<ScalarType>
   return at::_sparse_log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-} // namespace at::native
+}
+}

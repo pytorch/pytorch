@@ -162,6 +162,14 @@ function clone_pytorch_xla() {
   fi
 }
 
+function install_matplotlib() {
+  pip_install matplotlib
+}
+
+function install_tabulate() {
+  pip_install tabulate
+}
+
 function checkout_install_torchdeploy() {
   local commit
   commit=$(get_pinned_commit multipy)
@@ -215,6 +223,10 @@ function checkout_install_torchbench() {
     python install.py --continue_on_fail
   fi
   popd
+}
+
+function test_functorch() {
+  python test/run_test.py --functorch --verbose
 }
 
 function print_sccache_stats() {

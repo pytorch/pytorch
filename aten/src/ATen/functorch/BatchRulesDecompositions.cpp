@@ -326,7 +326,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
 
   OP_DECOMPOSE2(linalg_matrix_rank, atol_rtol_tensor);
   OP_DECOMPOSE2(linalg_matrix_rank, atol_rtol_float);
-  OP_DECOMPOSE(linalg_ldl_factor);
 
   // comparison ops
   OP_DECOMPOSE2(greater, Scalar);

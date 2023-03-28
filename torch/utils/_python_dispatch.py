@@ -1,10 +1,8 @@
 import contextlib
-from typing import Optional
 
 import warnings
-import torch
 from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at,\
-    _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack, DispatchKey
+    _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -43,20 +41,15 @@ class TorchDispatchMode:
     ``__torch_dispatch__(self)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
-    def __init__(self, _dispatch_key=None):
-        if _dispatch_key is not None:
-            assert isinstance(_dispatch_key, torch._C.DispatchKey)
-            self.__dict__['_dispatch_key'] = _dispatch_key
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
 
     def __enter__(self):
-        _push_mode(self, self.__dict__.get("_dispatch_key", None))
+        _push_mode(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _pop_mode(self.__dict__.get("_dispatch_key", None))
+        _pop_mode()
 
     @classmethod
     def push(cls, *args, **kwargs):
@@ -73,41 +66,21 @@ def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
-def _push_mode(mode, k: Optional[DispatchKey] = None):
-    if k is not None:
-        from torch._ops import push_mode_for_key, get_cached_ops
-        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
-        # Clear the cache of every op that has been used so far, for this particular key.
-        for op in get_cached_ops():
-            op._uncache_dispatch(k)
-        push_mode_for_key(k, mode)
-    # Note [Per-Dispatch-Key Modes Must Be Reentrant]
-    # The idea here is that we are allowed to push modes onto any dispatch key's mode stack, but:
-    # (1) We **always** push the mode onto the python mode stack. Operators can have fallthrough
-    #     kernels registered to any dispatch key, so we use the Python mode stack as a catchall,
-    #     to guarantee that every op will be seen by our mode.
-    # (2) We expect the mode that you push to handle being re-entrant: If we end up invoking the mode
-    #     at both the Autograd key and the Python key, nothing bad should happen.
-    #     The main use case for this is pre-autograd tracing with TorchProxyDispatchMode.
+def _push_mode(mode):
     _push_on_torch_dispatch_stack(mode)
 
 
-def _pop_mode(k: Optional[DispatchKey] = None):
-    m = _pop_torch_dispatch_stack()
-    if k is not None:
-        from torch._ops import pop_mode_for_key
-        tmp = pop_mode_for_key(k)
-        assert m is tmp
-    return m
+def _pop_mode():
+    return _pop_torch_dispatch_stack()
 
 
 @contextlib.contextmanager
-def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
-    old = _pop_mode(k)
+def _pop_mode_temporarily():
+    old = _pop_mode()
     try:
         yield old
     finally:
-        _push_mode(old, k)
+        _push_mode(old)
 
 
 @contextlib.contextmanager
