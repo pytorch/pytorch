@@ -2758,7 +2758,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         encoding = BatchEncoding({"key": torch.rand((1, 4))})
         cloned_encoding = torch._dynamo.utils.clone_inputs(encoding)
-        self.assertTrue(dict(encoding) == cloned_encoding)
+        self.assertTrue(same(dict(encoding), cloned_encoding))
 
     def test_iadd_graph_break(self):
         def fn(x):
