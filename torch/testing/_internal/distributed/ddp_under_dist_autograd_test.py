@@ -469,7 +469,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         elif self.rank in TRAINER_RANKS:
             self._trainer_process(self.rank)
         else:
-            raise RuntimeError(f"Unknow process rank: {self.rank}")
+            raise RuntimeError(f"Unknown process rank: {self.rank}")
 
     @requires_gloo()
     @dist_init

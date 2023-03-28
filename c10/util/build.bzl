@@ -48,6 +48,14 @@ def define_targets(rules):
     )
 
     rules.cc_library(
+        name = "ssize",
+        hdrs = ["ssize.h"],
+        linkstatic = True,
+        visibility = ["//:__subpackages__"],
+        deps = [":base"],
+    )
+
+    rules.cc_library(
         name = "typeid",
         srcs = ["typeid.cpp"],
         hdrs = ["typeid.h"],
@@ -66,6 +74,7 @@ def define_targets(rules):
         srcs = rules.glob(
             ["*.h"],
             exclude = [
+                "ssize.h",
             ],
         ),
         visibility = ["//c10:__pkg__", "//:__pkg__"],
