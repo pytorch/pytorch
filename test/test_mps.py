@@ -9521,7 +9521,10 @@ class TestAdvancedIndexing(TestCaseMPS):
         def helper(dtype, accumulate, deterministic, num_tests=128):
             acc_expected = torch.tensor([233, 187, 360], device=device, dtype=dtype)
             non_acc_expected = torch.tensor([38, 37, 39], device=device, dtype=dtype)
-            t_idx = torch.tensor([0, 0, 0, 0, 2, 2, 1, 0, 2, 1, 0, 1, 2, 1, 0, 2, 2, 2, 2, 2, 0, 0, 2, 1, 2, 1, 0, 0, 2, 0, 2, 1, 1, 2, 2, 0, 2, 1, 0, 2])
+            t_idx = torch.tensor(
+                [0, 0, 0, 0, 2, 2, 1, 0, 2, 1, 0, 1, 2, 1, 0, 2, 2, 2, 2, 2,
+                 0, 0, 2, 1, 2, 1, 0, 0, 2, 0, 2, 1, 1, 2, 2, 0, 2, 1, 0, 2]
+            )
             for _ in range(num_tests):
                 try:
                     torch.use_deterministic_algorithms(deterministic)
