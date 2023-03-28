@@ -1576,7 +1576,7 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=is_size, integer=True)
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
