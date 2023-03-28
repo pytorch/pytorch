@@ -77,7 +77,7 @@ def new_factory_rule(op_schema: OpSchema) -> OutputSharding:
     )
 
 
-@register_prop_rule(aten.is_same_size.default)
+@register_prop_rule([aten.equal.default, aten.is_same_size.default])
 def non_tensor_prop_rule(op_schema: OpSchema) -> OutputSharding:
     # simply return None as it does not return DTensor
     return OutputSharding(

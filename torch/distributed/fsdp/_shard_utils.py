@@ -107,7 +107,7 @@ def _reshard_flatten_tensor(
 ) -> torch.Tensor:
     """
     Resharded a sharded flatten tensor, this is used by FSDP to do sharded
-    state_dict. But the functionaility is not supported by ShardedTensor.
+    state_dict. But the functionality is not supported by ShardedTensor.
     This API is designed to be used for FSDP; therefore this API supports only
     1-D ShardedTensor (hence the naming, reshard_flatten_tensor).
 
