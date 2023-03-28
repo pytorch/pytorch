@@ -670,6 +670,7 @@ class CUDAGraphNode:
                     src = new_inputs[idx]
                     self._copy_input(idx, dst, src)
         else:
+            # inputs are copied over in _allocate_recording_inputs and subsequently cleared
             assert len(new_inputs) == 0
 
         new_inputs.clear()
