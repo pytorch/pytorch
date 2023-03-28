@@ -15,6 +15,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
@@ -270,11 +271,21 @@ def align_inputs(model, inputs, static_input_idxs=()):
     if len(check_inputs) == 0:
         return model
 
+    static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
+
     def run(new_inputs):
         for i in check_inputs:
             if new_inputs[i].data_ptr() % ALIGNMENT:
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
-        return model(new_inputs)
+
+        static_refs = [StorageWeakRef(new_inputs[i].untyped_storage()) for i in static_input_idxs]
+
+        out = model(new_inputs)
+
+        for ref in static_refs:
+            assert not ref.expired(), f"{i} is expired but shouldnt be"
+
+        return out
 
     return run
 
@@ -316,6 +327,7 @@ def cudagraphify(
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
+            compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
 
     return run
