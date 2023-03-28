@@ -78,11 +78,7 @@ class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
 
 
-# TODO Ideally it should inherit from UnsupportedError
-# because if user code doesn't compile, we know it is not
-# supported. But seperate exception for now as to
-# not pollute the stat collector.
-class UserError(TorchDynamoException):
+class UserError(Unsupported):
     def __init__(self, error_type: UserErrorType, msg):
         """
         Type of errors that would be valid in Eager, but not supported in TorchDynamo.
