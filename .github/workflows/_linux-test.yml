@@ -162,6 +162,7 @@ jobs:
           else
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
+          exit 1
 
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
@@ -227,7 +228,7 @@ jobs:
 
       - name: Print remaining test logs
         shell: bash
-        if: steps.test.conclusion
+        if: always() && steps.test.conclusion
         run: |
           cat test/**/*.log || true
 

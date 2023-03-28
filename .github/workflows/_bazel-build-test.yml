@@ -147,7 +147,7 @@ jobs:
       - name: Test
         id: test
         # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        timeout-minutes: 1
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -210,7 +210,7 @@ jobs:
 
       - name: Print remaining test logs
         shell: bash
-        if: steps.test.conclusion
+        if: always() && steps.test.conclusion
         run: |
           cat test/**/*.log || true
 
