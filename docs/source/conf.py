@@ -601,6 +601,8 @@ def viewcode_follow_imported(app, modname, fullname):
 
     try:
         abs_path = inspect.getsourcefile(obj)
+        if abs_path is None:
+            return None
     except TypeError:
         # `inspect.sourcefile` can only handle certain types. One noteable exception are "builtin methods or functions",
         # i.e. C function wrappers.
