@@ -31,10 +31,10 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
 
 # TODO(After 1.13 release): Remove the deprecated SymbolicContext
 from ._exporter_states import ExportTypes, SymbolicContext
-
-from ._internal.driver import ExportOutput
 from ._type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
+
+from .experimental.driver import ExportOutput
 from .utils import (
     _optimize_graph,
     _run_symbolic_function,
@@ -138,6 +138,6 @@ log = _C._jit_onnx_log
 
 
 def flash_export(model, *args, **kwargs) -> ExportOutput:
-    from ._internal import impl
+    from .experimental import impl
 
     return impl.Exporter(model).export(*args, **kwargs)
