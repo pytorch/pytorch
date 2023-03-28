@@ -461,6 +461,9 @@ class WrapperCodeGen(CodeGen):
             )
 
             for name, value in V.graph.constants.items():
+                # all the constants are global variables, that's why we need
+                # these 'global var_name' lines
+                output.writeline(f"global {name}")
                 add_fake_input(
                     name, value.size(), value.stride(), value.device, value.dtype
                 )
