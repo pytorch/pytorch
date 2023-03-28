@@ -35,7 +35,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'flake8==3.8.2',
     'flake8-bugbear==20.1.4',
-    'flake8-comprehensions==3.3.0',
+    'flake8-comprehensions==3.11.1',
     'flake8-executable==2.0.4',
     'flake8-logging-format==0.9.0',
     'flake8-pyi==20.5.0',
