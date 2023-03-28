@@ -375,7 +375,6 @@ class DeviceMesh:
                 to scatter on, we by default choose the first rank on the
                 mesh dimension as source of truth.
             gather_dim (int, optional): Dimension to concatenate the resulting tensor.
-            gather_size (torch.Size, optional): Desired shape of the gathered tensor.
 
             This suppport up to 1 elem of padding on gather_dim.
         Returns:
@@ -457,10 +456,6 @@ class DeviceMesh:
             raise RuntimeError(
                 f"backend {self._backend} does not support reduce_scatter!"
             )
-
-        # if needs_padding:
-        #     if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
-        #         scatter_tensor = shard._unpad_tensor(scatter_tensor)
 
         return scatter_tensor
 
