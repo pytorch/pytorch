@@ -71,7 +71,7 @@ def _compare_owner_value(context_id, rref, grad):
         grad = grad.to_dense()
     else:
         assert not grad.is_sparse
-    return torch.equal(x, grad)
+    return (x == grad).all()
 
 
 def create_tensor():

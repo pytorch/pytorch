@@ -48,7 +48,7 @@ class TestQuantizer(unittest.TestCase):
         qtensor_data = qtensor.data.int()
         uniform_quantized_tensor = uniform_quantized.data.int()
 
-        self.assertTrue(torch.equal(qtensor_data, uniform_quantized_tensor))
+        self.assertEqual(qtensor_data, uniform_quantized_tensor, rtol=0, atol=0, exact_device=True)
 
     r""" Tests quantize_APoT for k != 1.
         Tests quantize_APoT result on random 1-dim tensor and hardcoded values for
@@ -92,7 +92,7 @@ class TestQuantizer(unittest.TestCase):
         # 0.0215 in tensor2quantize nearest 0.0208 in quantization_levels -> 3 in level_indices
         expected_qtensor = torch.tensor([0, 3, 8, 13, 5, 12], dtype=torch.int32)
 
-        self.assertTrue(torch.equal(qtensor_data, expected_qtensor))
+        self.assertEqual(qtensor_data, expected_qtensor, rtol=0, atol=0, exact_device=True)
 
     r""" Tests dequantize_apot result on random 1-dim tensor
         and hardcoded values for b, k.
@@ -137,7 +137,7 @@ class TestQuantizer(unittest.TestCase):
 
         result = final_apot.data.int()
 
-        self.assertTrue(torch.equal(original_input, result))
+        self.assertEqual(original_input, result, rtol=0, atol=0, exact_device=True)
 
     r""" Tests dequantize_apot result on random 1-dim tensor
         and hardcoded values for b, k.
@@ -182,7 +182,7 @@ class TestQuantizer(unittest.TestCase):
 
         result = final_apot.data.int()
 
-        self.assertTrue(torch.equal(original_input, result))
+        self.assertEqual(original_input, result, rtol=0, atol=0, exact_device=True)
 
     r""" Tests for correct dimensions in dequantize_apot result
          on random 3-dim tensor with random dimension sizes

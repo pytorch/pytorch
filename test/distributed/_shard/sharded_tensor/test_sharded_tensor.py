@@ -1125,8 +1125,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertTrue("sharded_tensor1" in loaded_dict_keys)
         self.assertTrue("submodule.sharded_tensor2" in loaded_dict_keys)
         # Verify after load.
-        self.assertTrue(torch.equal(m.sharded_tensor1, module_load.sharded_tensor1))
-        self.assertTrue(torch.equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2))
+        self.assertEqual(m.sharded_tensor1, module_load.sharded_tensor1, rtol=0, atol=0, exact_device=True)
+        self.assertEqual(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2, rtol=0, atol=0, exact_device=True)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1161,8 +1161,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
-        self.assertTrue(torch.equal(m.sharded_tensor1, module_load.sharded_tensor1))
-        self.assertTrue(torch.equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2))
+        self.assertEqual(m.sharded_tensor1, module_load.sharded_tensor1, rtol=0, atol=0, exact_device=True)
+        self.assertEqual(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2, rtol=0, atol=0, exact_device=True)
 
     @with_comms
     @skip_if_lt_x_gpu(4)

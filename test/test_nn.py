@@ -1698,7 +1698,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         vector_to_parameters(vec, model.parameters())
 
         sample = next(model.parameters())[0, 0, 0]
-        self.assertTrue(torch.equal(sample.data, vec.data[:5]))
+        self.assertEqual(sample.data, vec.data[:5], rtol=0, atol=0, exact_device=True)
 
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
@@ -5135,9 +5135,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # Forward random tensor
         _ = bn(torch.rand(input_size))
         # Ensure none of the buffers has been updated
-        self.assertTrue(torch.equal(num_batches, bn.num_batches_tracked))
-        self.assertTrue(torch.equal(running_mean, bn.running_mean))
-        self.assertTrue(torch.equal(running_var, bn.running_var))
+        self.assertEqual(num_batches, bn.num_batches_tracked, rtol=0, atol=0, exact_device=True)
+        self.assertEqual(running_mean, bn.running_mean, rtol=0, atol=0, exact_device=True)
+        self.assertEqual(running_var, bn.running_var, rtol=0, atol=0, exact_device=True)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_batchnorm_nhwc_cuda(self):
@@ -5149,7 +5149,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             inp2 = inp1.contiguous(memory_format=torch.channels_last)
             out1 = model(inp1)
             out2 = model(inp2)
-            self.assertTrue(torch.equal(out1, out2))
+            self.assertEqual(out1, out2, rtol=0, atol=0, exact_device=True)
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True)
