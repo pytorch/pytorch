@@ -1,5 +1,5 @@
 import torch.nn as nn
-from torch._functorch.utils import exposed_in
+from torch._utils import exposed_in
 
 
 def batch_norm_without_running_stats(module: nn.Module):

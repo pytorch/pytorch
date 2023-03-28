@@ -8,6 +8,7 @@ import warnings
 from typing import cast, List, Optional, Tuple, Union
 
 import torch
+from torch._utils import exposed_in
 
 _INTEGRAL_TYPES = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
 _FLOATING_TYPES = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
@@ -25,6 +26,7 @@ def _uniform_random_(t: torch.Tensor, low: float, high: float) -> torch.Tensor:
         return t.uniform_(low, high)
 
 
+@exposed_in("torch.testing")
 def make_tensor(
     *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
     dtype: torch.dtype,

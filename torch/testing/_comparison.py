@@ -18,6 +18,7 @@ from typing import (
 )
 
 import torch
+from torch._utils import exposed_in
 
 try:
     import numpy as np
@@ -1241,6 +1242,7 @@ def not_close_error_metas(
     return error_metas
 
 
+@exposed_in("torch.testing")
 def assert_close(
     actual: Any,
     expected: Any,
@@ -1514,6 +1516,7 @@ def assert_close(
         raise error_metas[0].to_error(msg)
 
 
+@exposed_in("torch.testing")
 def assert_allclose(
     actual: Any,
     expected: Any,

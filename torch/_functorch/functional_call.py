@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Sequence, Tuple, Union
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch._functorch.utils import exposed_in
+from torch._utils import exposed_in
 
 
 @exposed_in("torch.func")

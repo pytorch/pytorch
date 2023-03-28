@@ -21,7 +21,7 @@ from torch._C._functorch import (
     _vmap_increment_nesting,
     is_batchedtensor,
 )
-from torch._functorch.utils import exposed_in
+from torch._utils import exposed_in
 
 in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
