@@ -59,7 +59,6 @@ __all__ = [
     "get_new_attr_name_with_prefix",
     "get_non_observable_arg_indexes_and_types",
     "get_qconv_prepack_op",
-    "get_qconv_transpose_prepack_op",
     "get_skipped_module_name_and_classes",
     "graph_module_from_producer_nodes",
     "maybe_get_next_module",
@@ -147,20 +146,13 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
     prepack_ops = {
         torch.nn.functional.conv1d: torch.ops.quantized.conv1d_prepack,
         torch.nn.functional.conv2d: torch.ops.quantized.conv2d_prepack,
-        torch.nn.functional.conv3d: torch.ops.quantized.conv3d_prepack
-    }
-    prepack_op = prepack_ops.get(conv_op, None)
-    assert prepack_op, "Didn't find prepack op for {}".format(conv_op)
-    return prepack_op
-
-def get_qconv_transpose_prepack_op(conv_transpose_op: Callable) -> Callable:
-    prepack_ops = {
+        torch.nn.functional.conv3d: torch.ops.quantized.conv3d_prepack,
         torch.nn.functional.conv_transpose1d: torch.ops.quantized.conv_transpose1d_prepack,
         torch.nn.functional.conv_transpose2d: torch.ops.quantized.conv_transpose2d_prepack,
         torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
     }
-    prepack_op = prepack_ops.get(conv_transpose_op, None)
-    assert prepack_op, "Didn't find prepack op for {}".format(conv_transpose_op)
+    prepack_op = prepack_ops.get(conv_op, None)
+    assert prepack_op, "Didn't find prepack op for {}".format(conv_op)
     return prepack_op
 
 # Returns a function that can get a new attribute name for module with given
