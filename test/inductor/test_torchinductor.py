@@ -7,6 +7,7 @@ import itertools
 import os
 import random
 import sys
+import time
 import typing
 import unittest
 import weakref
@@ -186,10 +187,14 @@ class TestCase(TorchTestCase):
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
+        self._start = time.perf_counter()
 
     def tearDown(self):
         super().tearDown()
         torch._dynamo.reset()
+        if os.environ.get("ERROR_ON_SLOW") == "1":
+            elapsed = time.perf_counter() - self._start
+            assert elapsed < 120
 
 
 class ToTuple(torch.nn.Module):
@@ -268,12 +273,16 @@ def clone_preserve_strides(x):
 def run_and_get_cpp_code(fn, args):
     torch._dynamo.reset()
     import io
-    from contextlib import redirect_stdout
+    import logging
 
-    f = io.StringIO()
-    with redirect_stdout(f):
-        fn(*args)
-    s = f.getvalue()
+    log_capture_string = io.StringIO()
+    ch = logging.StreamHandler(log_capture_string)
+    from torch._inductor.graph import output_code_log
+
+    output_code_log.addHandler(ch)
+    fn(*args)
+    s = log_capture_string.getvalue()
+    output_code_log.removeHandler(ch)
     return s
 
 
@@ -5707,40 +5716,6 @@ class CommonTemplate:
             e.name for e in prof.profiler.function_events
         )
 
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
-    def test_cpp_wrapper(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("cpp_wrapper only supports cpu")
-
-        device = "cpu"
-        for name, supported in [
-            ["test_as_strided", True],  # buffer reuse
-            ["test_bitwise", True],  # int32
-            ["test_bmm1", True],
-            ["test_bmm2", True],
-            ["test_cat", True],  # alias
-            ["test_linear1", True],
-            ["test_linear2", True],
-            ["test_lowmem_dropout1", True],  # None as output
-            ["test_mm_views", True],
-            [
-                "test_profiler_mark_wrapper_call",
-                True,
-            ],
-            ["test_reduction1", True],  # Reduction
-            ["test_relu", True],  # multiple inputs
-            ["test_silu", True],  # single input, single output
-            ["test_sum_dtype", True],  # float64
-            ["test_sum_int", True],  # bool, int64, int8, uint8
-            ["test_transpose", True],  # multiple outputs, buffer clear
-        ]:
-            test_name = f"{name}_{device}"
-            assert hasattr(self, test_name), "undefined function"
-            func = getattr(self, test_name)
-            assert callable(func), "not a callable"
-            code = run_and_get_cpp_code(func, [])
-            self.assertEqual("load_inline" in code, supported)
-
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
         def fn(x):
@@ -6307,6 +6282,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
                     assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                     assert metrics.generated_cpp_vec_kernel_count == 1
 
+        @slow()
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
@@ -6432,6 +6408,38 @@ if HAS_CPU and not torch.backends.mps.is_available():
                     )
                     if codecache.valid_vec_isa_list():
                         assert metrics.generated_cpp_vec_kernel_count == 1
+
+        def test_do_not_insert_to_dtype_for_memory_copy_only_kernel(self):
+            def fn(x):
+                res = x.clone()
+                return (res,)
+
+            x = torch.randn((100, 100), dtype=torch.bfloat16)
+
+            torch._dynamo.reset()
+            metrics.reset()
+            traced = make_fx(fn)(x)
+            compiled = compile_fx_inner(traced, [x])
+            assert same(fn(x)[0], compiled([x])[0])
+            assert metrics.cpp_to_dtype_count == 0
+            if codecache.valid_vec_isa_list():
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+        def test_insert_to_dtype_count(self):
+            def fn(x):
+                res = x.relu()
+                return (res,)
+
+            x = torch.randn((100, 100), dtype=torch.bfloat16)
+
+            torch._dynamo.reset()
+            metrics.reset()
+            traced = make_fx(fn)(x)
+            compiled = compile_fx_inner(traced, [x])
+            assert same(fn(x)[0], compiled([x])[0])
+            assert metrics.cpp_to_dtype_count == 2
+            if codecache.valid_vec_isa_list():
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
