@@ -355,6 +355,22 @@ def skipIfNoONEDNN(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def skipIfNoX86(fn):
+    reason = 'Quantized operations require X86.'
+    if isinstance(fn, type):
+        if 'x86' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'x86' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 try:
     import torchvision  # noqa: F401
     HAS_TORCHVISION = True
@@ -409,7 +425,7 @@ class QuantizationTestCase(TestCase):
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
-            modules for quantization prepration, e.g.
+            modules for quantization preparation, e.g.
             quant, dequant and observer
         """
         self.assertFalse(hasattr(module, 'quant'))
@@ -425,7 +441,7 @@ class QuantizationTestCase(TestCase):
 
     def checkHasPrepModules(self, module):
         r"""Checks the module contains child
-            modules for quantization prepration, e.g.
+            modules for quantization preparation, e.g.
             quant, dequant and observer
         """
         self.assertTrue(hasattr(module, 'module'))
@@ -434,7 +450,7 @@ class QuantizationTestCase(TestCase):
 
     def checkObservers(self, module, propagate_qconfig_list=None, prepare_custom_config_dict=None):
         r"""Checks the module or module's leaf descendants
-            have observers in preperation for quantization
+            have observers in preparation for quantization
         """
         if propagate_qconfig_list is None:
             propagate_qconfig_list = get_default_qconfig_propagation_list()
@@ -862,7 +878,7 @@ class QuantizationTestCase(TestCase):
                     expected_node: NodeSpec
                         e.g. NodeSpec.call_function(torch.quantize_per_tensor)
                     expected_node_occurrence: a dict from NodeSpec to
-                        expected number of occurences (int)
+                        expected number of occurrences (int)
                         e.g. {NodeSpec.call_function(torch.quantize_per_tensor) : 1,
                                 NodeSpec.call_method('dequantize'): 1}
                     expected_node_list: a list of NodeSpec, used to check the order
@@ -888,7 +904,7 @@ class QuantizationTestCase(TestCase):
                        "quantized_reference": ...,  # the quantized reference model
                        "result": ...,  # the result for either quantized or
                                        # quantized_reference model depending on the
-                                       # is_reference arguemnt
+                                       # is_reference argument
                    }
             """
             # TODO: make img_data a single example instead of a list
@@ -903,8 +919,7 @@ class QuantizationTestCase(TestCase):
                 model.eval()
             else:
                 qconfig = default_dynamic_qconfig
-                qconfig_dict = {"" : qconfig}
-                qconfig_mapping = QConfigMapping.from_dict(qconfig_dict)
+                qconfig_mapping = QConfigMapping().set_global(qconfig)
                 model.eval()
 
             if quant_type == QuantType.QAT:
