@@ -283,15 +283,13 @@ def get_kernel_metadata(node_schedule):
     for node in inductor_nodes:
         if "original_aten" in node.meta:
             original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
-                node
+                node.name
             )
     metadata = [
-        f"# Original ATen: {', '.join(original_aten_dict.keys())}\n",
+        f"# Original ATen: {', '.join(sorted(original_aten_dict.keys()))}\n",
     ]
-    for original_aten, nodes in original_aten_dict.items():
-        metadata.append(
-            f"# {original_aten} => {', '.join([node.name for node in nodes])}"
-        )
+    for original_aten, nodes in sorted(original_aten_dict.items()):
+        metadata.append(f"# {original_aten} => {', '.join(sorted(nodes))}")
     return "\n".join(metadata)
 
 
@@ -563,14 +561,17 @@ class DeferredLineBase:
 
 @functools.lru_cache(None)
 def is_big_gpu(index):
-    cores = torch.cuda.get_device_properties(index).multi_processor_count
-    if cores < 80:  # V100
-        log.warning("not enough cuda cores to use max_autotune_gemm mode")
+    sms = torch.cuda.get_device_properties(index).multi_processor_count
+    if sms < 80:  # V100
+        log.warning("not enough SMs to use max_autotune_gemm mode")
         return False
     return True
 
 
-def use_triton_template(layout):
+def use_triton_template(layout, *, enable_int32=False):
+    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    if enable_int32:
+        layout_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.int32)
     return (
         (
             config.max_autotune
@@ -578,7 +579,7 @@ def use_triton_template(layout):
             or config.search_autotune_cache
         )
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and layout.dtype in layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -640,13 +641,18 @@ def developer_warning(msg):
         log.info(msg)
 
 
-def get_num_bytes(*args):
+def get_num_bytes(*args, num_in_out_args=0):
     """
     Return the total number of bytes the arguments of tensor type takes.
+
+    For in/out args, tensor sizes are counted twice: once for reading and
+    once for writing.
+
+    The first num_in_out_args arguments are in out tensors.
     """
     return sum(
-        arg.numel() * arg.element_size()
-        for arg in args
+        arg.numel() * arg.element_size() * (1 + int(i < num_in_out_args))
+        for i, arg in enumerate(args)
         if isinstance(arg, torch.Tensor)
     )
 
@@ -695,6 +701,29 @@ def get_benchmark_name():
             return arg[len("--only=") :]
 
 
+def get_kernel_category(kernel_mod):
+    """
+    Given the module defining a triton kernel, return the category of the kernel.
+    Cateogry can be one of:
+    - pointwise
+    - reduction
+    - persistent_reduction
+
+    Currently we simply decide the cateory depending on what decorator is imported
+    by the kernel.
+    """
+    choices = [
+        "pointwise",
+        "reduction",
+        "persistent_reduction",
+    ]
+    choices = [ch for ch in choices if ch in kernel_mod.__dict__]
+    if len(choices) == 1:
+        return choices[0]
+    else:
+        return "unknown"
+
+
 def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -711,8 +740,17 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     for kernel_key, kernel_mod in PyCodeCache.cache.items():
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
+
+        kernel_category = get_kernel_category(kernel_mod)
         args = kernel_mod.get_args()
-        num_gb = get_num_bytes(*args) / 1e9
+        num_in_out_ptrs = len(
+            [
+                arg_name
+                for arg_name in kernel_mod.triton_.fn.arg_names
+                if arg_name.startswith("in_out_ptr")
+            ]
+        )
+        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
 
         def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
             if not any(x is None for x in [n_regs, n_spills, shared]):
@@ -728,10 +766,13 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
             )
 
         bench_result = []
+        kernel_desc = (
+            f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
+        )
         if benchmark_all_configs:
             assert hasattr(kernel_mod, "benchmark_all_configs")
             bench_result = kernel_mod.benchmark_all_configs(args)
-            print(f"{benchmark_name:20} {kernel_key[:10]}")
+            print(kernel_desc)
             for launcher, ms in bench_result.items():
                 print(
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
@@ -748,7 +789,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     launcher.n_regs,
                     launcher.n_spills,
                     launcher.shared,
-                    prefix=f"{benchmark_name:20} {kernel_key[:10]} ",
+                    prefix=f"{kernel_desc} ",
                 )
             )
 
@@ -757,3 +798,28 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         print(
             "No kernel with benchmark functionality found. Make sure you run inductor with config.benchmark_kernel being True"
         )
+
+
+def is_ones(items):
+    return all(x == 1 for x in items)
+
+
+def is_zeros(items):
+    return all(x == 0 for x in items)
+
+
+def is_cpu_device(inputs):
+    return all(
+        item.device == torch.device("cpu")
+        for item in inputs
+        if isinstance(item, torch.Tensor)
+    )
+
+
+@contextlib.contextmanager
+def maybe_profile(should_profile, *args, **kwargs):
+    if should_profile:
+        with torch.profiler.profile(*args, **kwargs) as p:
+            yield p
+    else:
+        yield

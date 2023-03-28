@@ -139,6 +139,7 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
     aot_mode=False,
+    is_inference=False,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -162,6 +163,7 @@ def compile_fx_inner(
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
+
     fake_mode = fake_mode_from_tensors(
         example_inputs
     ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
@@ -184,6 +186,14 @@ def compile_fx_inner(
                 return compiled_fn
 
     if cudagraphs:
+        # output args are tuple of first argument
+        output = list(gm.graph.nodes)[-1]
+        assert len(output.args) == 1
+        stack_traces = [
+            (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
+            for arg in output.args[0]
+        ]
+
         complex_memory_overlap_inputs = any(
             complex_memory_overlap(t) for t in example_inputs
         )
@@ -193,9 +203,16 @@ def compile_fx_inner(
             and not graph.mutated_inputs
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
+            and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
             compiled_fn = cudagraphify(
-                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+                compiled_fn,
+                example_inputs,
+                static_input_idxs=range(num_fixed),
+                device_index=next(iter(graph.device_idxs)),
+                stack_traces=stack_traces,
+                is_backward=is_backward,
+                is_inference=is_inference,
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -208,6 +225,10 @@ def compile_fx_inner(
                 elif complex_memory_overlap_inputs:
                     developer_warning(
                         "skipping cudagraphs due to complex input striding"
+                    )
+                elif len(graph.device_idxs) > 1 and config.triton.cudagraph_trees:
+                    developer_warning(
+                        "skipping cudagraphs due to multiple device indexes"
                     )
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
@@ -259,10 +280,34 @@ def align_inputs(model, inputs, static_input_idxs=()):
 
 
 @dynamo_utils.dynamo_timed
-def cudagraphify(model, inputs, static_input_idxs=()):
+def cudagraphify(
+    model,
+    inputs,
+    static_input_idxs=(),
+    *,
+    device_index: int,
+    stack_traces: List[Optional[str]],
+    is_backward: bool,
+    is_inference: bool,
+):
+    from torch._inductor.cudagraph_trees import (
+        cudagraphify_impl as new_cudagraphify_impl,
+    )
+
+    if config.triton.cudagraph_trees:
+        cudagraphify_fn = functools.partial(
+            new_cudagraphify_impl,
+            device_index=device_index,
+            stack_traces=stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+        )
+    else:
+        cudagraphify_fn = cudagraphify_impl
+
     # if using fake tensors, defer cudagraphs until we get real inputs at runtime
     if not any(isinstance(inp, FakeTensor) for inp in inputs):
-        return cudagraphify_impl(model, inputs, static_input_idxs)
+        return cudagraphify_fn(model, inputs, static_input_idxs)
 
     compiled_fn = None
 
@@ -270,8 +315,7 @@ def cudagraphify(model, inputs, static_input_idxs=()):
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
-                compiled_fn = cudagraphify_impl(model, new_inputs, static_input_idxs)
-
+                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
 
     return run
@@ -290,27 +334,30 @@ def remove_unaligned_input_idxs(inputs, static_input_idxs):
     return static_input_idxs
 
 
+def static_input(x):
+    """
+    Copy and input while preserving strides
+    """
+    # TODO(jansel): figure out why this version doesn't work:
+    # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+    )
+    buffer = torch.empty(needed_size, dtype=x.dtype, device=x.device)
+    return torch.as_strided(buffer, x.size(), x.stride())
+
+
 def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
 
-    def static_input(x):
-        """
-        Copy and input while preserving strides
-        """
-        # TODO(jansel): figure out why this version doesn't work:
-        # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
-        needed_size = (
-            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-        )
-        buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
-        return torch.as_strided(buffer, x.size(), x.stride())
-
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        static_input(x) if idx not in static_input_idxs else x.detach()
+        static_input(x).copy_(x.detach())
+        if idx not in static_input_idxs
+        else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
@@ -445,10 +492,6 @@ def compile_fx(
         )
 
     if isinstance(model_, torch.fx.GraphModule):
-        with overrides.patch_functions():
-            model_ = overrides.replace_fx(model_)
-            model_ = overrides.fuse_fx(model_, example_inputs_)
-
         if isinstance(model_.graph._codegen, _PyTreeCodeGen):
             # this graph is the result of dynamo.export()
             return handle_dynamo_export_graph(
@@ -456,6 +499,12 @@ def compile_fx(
                 example_inputs_,
                 recursive_compile_fx,
             )
+
+        # Since handle_dynamo_export_graph will trigger compile_fx again,
+        # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
+        with overrides.patch_functions():
+            model_ = overrides.replace_fx(model_, example_inputs_)
+            model_ = overrides.fuse_fx(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -474,7 +523,7 @@ def compile_fx(
     graph_id = next(_graph_counter)
 
     @dynamo_utils.dynamo_timed
-    def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+    def fw_compiler_base(model: torch.fx.GraphModule, example_inputs, is_inference):
         fixed = len(example_inputs) - num_example_inputs
         # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
         # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
@@ -486,7 +535,11 @@ def compile_fx(
             num_fixed=fixed,
             cudagraphs=cudagraphs,
             graph_id=graph_id,
+            is_inference=is_inference,
         )
+
+    fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
+    inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
 
     # Save and restore dynamic shapes setting for backwards, as it is
     # sometimes done as a context manager which won't be set when we
@@ -515,6 +568,7 @@ def compile_fx(
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
+            inference_compiler=inference_compiler,
             decompositions=decompositions,
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
@@ -535,6 +589,11 @@ def _shape_env_from_inputs(inputs):
     if fake_mode is not None:
         return fake_mode.shape_env
 
+    # When there are no tensor inputs, get shape_env from the first SymInt.
+    for input in inputs:
+        if isinstance(input, torch.SymInt):
+            return input.node.shape_env
+
     # TODO(voz): Should we always have one anyway?
     return None
 
@@ -552,6 +611,14 @@ def graph_returns_tuple(gm: torch.fx.GraphModule):
         return True  # can't check this, assume true
     (rv,) = output_node(gm).args
     if isinstance(rv, (list, tuple)):
+        return True
+    if (
+        isinstance(rv, torch.fx.node.Node)
+        and hasattr(rv.target, "_schema")
+        and len(rv.target._schema.returns) > 1
+        and all(str(ret.type) == "Tensor" for ret in rv.target._schema.returns)
+    ):
+        # for graphs whose result is one node with multiple outputs
         return True
     return False
 
