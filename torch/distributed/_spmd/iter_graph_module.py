@@ -208,8 +208,9 @@ class IterGraph(fx.Graph):
                         node.users.pop(user)
                 if node.users:
                     raise RuntimeError(
-                        "IterGraph has not support moving the nodes that "
-                        "produce users output result."
+                        "IterGraph has not supported moving the nodes that "
+                        "produce users output result. "
+                        f"Error node: {node}."
                     )
                 self._fx_graph_call(graph, "erase_node", node)
                 erased.add(node)
