@@ -42,13 +42,13 @@ def validate_op_between_ort_torch(
             except IndexError as index_error:
                 # TODO(titaiwang): How to bound indices/dim: INT64
                 warnings.warn(
-                    f"\nPyTorch fails to run on Op {node.target} with error: \n{index_error}.\n"
-                    f"This is possibly raised by incompatible args {torch_args} of "
-                    f"randomnized dim/slices(INT64).\n"
+                    f"\nBypass the test of running on PyTorch Op {node.target} with "
+                    f"IndexError: \n{index_error}.\n This is possibly raised by "
+                    f"unsupported args {torch_args} of randomnized dim/slices(INT64).\n"
                 )
                 diagnostic = diagnostics.export_context().inflight_diagnostic()
                 diagnostic.with_additional_message(
-                    f"### Validation failed\n"
+                    f"### Validation bypass\n"
                     f"{diagnostics.decorator.format_exception_in_markdown(index_error)}"
                 )
                 diagnostic.level = diagnostics.levels.WARNING
@@ -66,14 +66,14 @@ def validate_op_between_ort_torch(
                 # TODO(titaiwang): trace_only function is not supported by onnxscript
                 # param_schema
                 warnings.warn(
-                    f"\nORT fails to run on Op {node.target} with error: \n{type_error}.\n"
-                    f"If this is a trace_only onnxscript function, the error is possibly"
-                    f"raised by wronly separated parameter schema in onnxscript. args "
-                    f"{input_onnx} and kwargs: {kwargs_onnx}.\n"
+                    f"\nBypass the test of running on ONNX function {function_name} with "
+                    f"TypeError: \n{type_error}.\n If this is a trace_only onnxscript "
+                    f"function, it is possibly raised by unsupported separated "
+                    f"parameter schema. args {input_onnx} and kwargs: {kwargs_onnx}.\n"
                 )
                 diagnostic = diagnostics.export_context().inflight_diagnostic()
                 diagnostic.with_additional_message(
-                    f"### Validation failed\n"
+                    f"### Validation bypass\n"
                     f"{diagnostics.decorator.format_exception_in_markdown(type_error)}"
                 )
                 diagnostic.level = diagnostics.levels.WARNING
