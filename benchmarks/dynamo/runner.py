@@ -93,10 +93,15 @@ DEFAULTS = {
         "inductor",
         "inductor_no_cudagraphs",
     ],
-    "inference": ["ts_nvfuser_cudagraphs", "inductor"],
+    "inference": [
+        "eager",
+        "aot_eager",
+        "inductor",
+        "inductor_no_cudagraphs",
+    ],
     "flag_compilers": {
         "training": ["inductor", "inductor_no_cudagraphs"],
-        "inference": ["inductor"],
+        "inference": ["inductor", "inductor_no-cudagraphs"],
     },
     "dtypes": [
         "float32",
