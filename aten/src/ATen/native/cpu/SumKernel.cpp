@@ -116,7 +116,7 @@ struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
     auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
     vacc_t first, second;
-    vec::load_fp32_from_ptr(ptr, first, second);
+    vec::load_fp32_from_bf16(ptr, first, second);
     return first + second;
   }
 };
@@ -158,7 +158,7 @@ struct OuterSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
     auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
     vacc_t values;
-    vec::load_fp32_from_ptr(ptr, values);
+    vec::load_fp32_from_bf16(ptr, values);
     return values;
   }
 };
@@ -244,7 +244,7 @@ struct InnerNanSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
     auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
     vacc_t first, second;
-    vec::load_fp32_from_ptr(ptr, first, second);
+    vec::load_fp32_from_bf16(ptr, first, second);
     const vacc_t zero(0);
     return (vacc_t::blendv(first, zero, first.isnan()) +
             vacc_t::blendv(second, zero, second.isnan()));
