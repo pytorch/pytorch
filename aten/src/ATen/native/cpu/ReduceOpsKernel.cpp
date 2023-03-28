@@ -450,7 +450,7 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
-REGISTER_DISPATCH(mean_stub, &mean_kernel_cpu);
+REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
 REGISTER_DISPATCH(or_stub, &or_kernel_impl);
