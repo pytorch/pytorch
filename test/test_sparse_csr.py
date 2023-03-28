@@ -904,7 +904,7 @@ class TestSparseCompressed(TestCase):
 
 
 def _npref_block_addmm_addmv(c, a, b, alpha, beta):
-    return alpha * (a @ b) + beta * c
+    return alpha * (a.to_dense() @ b) + beta * c
 
 
 class TestSparseCSR(TestCase):
@@ -1460,7 +1460,7 @@ class TestSparseCSR(TestCase):
         expected = ref(c, a, b, alpha, beta)
 
         self.assertEqual(actual, out)
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected, lambda msg: f"{msg}\na={a}\nc={c}\nb={b}\nalpha={alpha} beta={beta}")
 
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
