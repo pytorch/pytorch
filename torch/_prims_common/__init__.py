@@ -4,6 +4,7 @@ from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, 
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
+import sympy
 import weakref
 import torch
 from torch import sym_float, sym_int, sym_max
@@ -1221,6 +1222,14 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
         return type(x)
 
 
+def symbol_type(x: sympy.Symbol) -> Type:
+    if x.is_integer:  # type: ignore[attr-defined]
+        return int
+    else:
+        # NB: Not strictly correct, but we don't support SymPy complex or bool.
+        return float
+
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -1316,7 +1325,7 @@ def elementwise_dtypes(
 
     highest_type: type = bool
     for x in args:
-        if not isinstance(x, (Number, TensorLike)):
+        if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = (
                 "Unexpected type {0} when computing elementwise type promotion!".format(
                     str(type(x))
@@ -1326,6 +1335,8 @@ def elementwise_dtypes(
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
+        elif isinstance(x, sympy.Symbol):
+            highest_type = get_higher_type(highest_type, symbol_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))

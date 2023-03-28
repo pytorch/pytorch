@@ -51,7 +51,7 @@ def redirect(std: str, to_file: str):
     """
     Redirects ``std`` (one of ``"stdout"`` or ``"stderr"``) to a file
     in the path specified by ``to_file``. This method redirects the
-    underlying std file descriptor (not just pyton's ``sys.stdout|stderr``).
+    underlying std file descriptor (not just python's ``sys.stdout|stderr``).
     See usage for details.
 
     Directory of ``dst_filename`` is assumed to exist and the destination file
