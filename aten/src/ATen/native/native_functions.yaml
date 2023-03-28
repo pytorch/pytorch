@@ -633,6 +633,13 @@
 - func: _test_check_tensor(Tensor self) -> Tensor
   variants: function
 
+# Note; this function is only for testing
+- func: _test_functorch_fallback(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _test_functorch_fallback
+  autogen: _test_functorch_fallback.out
+
 - func: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: all.out
@@ -3835,6 +3842,14 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
+- func: _int_mm(Tensor self, Tensor mat2) -> Tensor
+  dispatch:
+    CUDA: _int_mm_cuda
+
+- func: _int_mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CUDA: _int_mm_out_cuda
+
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 
@@ -5197,6 +5212,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
+    NestedTensorCPU, NestedTensorCUDA: split_with_sizes_nested
 
 - func: hsplit.int(Tensor(a -> *) self, int sections) -> Tensor(a)[]
   variants: function, method
