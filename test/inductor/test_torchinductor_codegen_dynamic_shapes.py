@@ -79,31 +79,9 @@ def check_codegen(
     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
 
     if is_cpp_code:
-        code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
-        for_loop_found = False
-        lines = code.split("\n")
-        for line in lines:
-            if "for(" in line:
-                for_loop_found = True
-                self.assertTrue(
-                    re.search(r";.*ks.*;", line) is not None,
-                    msg=f"Failed to find dynamic for loop variable\n{code}",
-                )
-        self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
+        raise Exception("CPP check failed")
     else:
-        code = run_and_get_triton_code(run, *example_inputs, **kwargs)
-        triton_kernel_found = False
-        lines = code.split("\n")
-        for line in lines:
-            if "def triton" in line:
-                triton_kernel_found = True
-                continue
-            if "xnumel =" in line:
-                self.assertTrue(
-                    re.search(r"xnumel = \d+$", line) is None,
-                    msg=f"Found static xnumel\n{code}",
-                )
-        self.assertTrue(triton_kernel_found, f"Failed to find triton kernel\n{code}")
+        raise Exception("CUDA check failed")
 
     assert called, "Ran graph without calling compile_fx"
 
