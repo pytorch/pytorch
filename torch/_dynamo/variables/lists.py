@@ -9,17 +9,9 @@ from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
-from ..utils import check_constant_args, namedtuple_fields, proxy_args_kwargs
+from ..utils import check_constant_args, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
-
-
-def unpack_into_example(item):
-    from .tensor import SymNodeVariable
-
-    if isinstance(item, SymNodeVariable):
-        return item.sym_num
-    return item.as_python_constant()
 
 
 class BaseListVariable(VariableTracker):
@@ -61,7 +53,13 @@ class BaseListVariable(VariableTracker):
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
-        index = unpack_into_example(arg)
+        from .tensor import SymNodeVariable
+
+        if isinstance(arg, SymNodeVariable):
+            index = arg.sym_num
+        else:
+            index = arg.as_python_constant()
+
         if isinstance(index, slice):
             if self.source is not None:
                 return self.clone(
@@ -407,27 +405,9 @@ class SizeVariable(TupleVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        from .tensor import SymNodeVariable
-
         index = arg.as_python_constant()
         if isinstance(index, slice):
-
-            def _dynamo_get_item_lambda(target, index):
-                return torch.Size.__getitem__(target, index)
-
-            parent_proxy = self.as_proxy()
-            proxy = tx.output.create_proxy(
-                "call_function",
-                _dynamo_get_item_lambda,
-                *proxy_args_kwargs([self, arg], {}),
-            )
-            items = self.items[index]
-
-            # Mirror the indexing into example_value for downstream correctness
-            proxy.node.meta["example_value"] = parent_proxy.node.meta["example_value"][
-                index
-            ]
-            return SizeVariable(items, proxy=proxy).add_options(arg, self)
+            return SizeVariable(self.items[index]).add_options(arg, self)
         else:
             assert isinstance(index, int)
             return self.items[index].add_options(arg, self)
