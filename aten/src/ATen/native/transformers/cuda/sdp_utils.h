@@ -165,7 +165,7 @@ inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(at:
                                                                            c10::string_view param_name,
                                                                            bool debug) {
   const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
-  const at::Tensor& sizes = nt_tensor_impl->get_nested_size_tensor();
+  const at::Tensor& sizes = nt_tensor_impl->get_nested_sizes();
   auto num_head_dims = nt_tensor_impl->opt_size(1);
   if (!num_head_dims.has_value() ) {
     // num_head_dims is ragged
@@ -243,7 +243,7 @@ inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
   }
 
   const auto nt_q_tensor_impl = at::native::get_nested_tensor_impl(params.query);
-  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_size_tensor();
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_sizes();
   auto* sizes_ptr = sizes.data_ptr<int64_t>();
   const int64_t n_tensors = params.query.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
@@ -492,10 +492,11 @@ inline bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
   bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-  if (!(is_sm8x || is_sm75)) {
+  bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
+  if (!(is_sm90 || is_sm8x || is_sm75)) {
     if (debug) {
       TORCH_WARN(
-        "Flash attention only supports sm75 and sm8x gpu architectures. Attempting to run on a sm ",
+        "Flash attention only supports {sm75, sm8x, sm90} gpu architectures. Attempting to run on a sm ",
         dprops->major,
         ".",
         dprops->minor,
