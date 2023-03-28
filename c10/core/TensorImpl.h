@@ -1508,7 +1508,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data_ptr_impl() {
-    return legacy_mutable_data_ptr_impl();
+    return legacy_mutable_data_ptr_impl<T>();
   }
 
  private:
