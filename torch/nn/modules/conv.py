@@ -38,7 +38,10 @@ convolution_notes = \
 
         In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
         a depthwise convolution with a depthwise multiplier `K` can be performed with the arguments
-        :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`."""}  # noqa: B950
+        :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`.""",
+
+        "shape_computation_note": r"""Output shapes can also be computed using meta tensors, see
+        `Reasoning About Shapes <https://pytorch.org/tutorials/recipes/recipes/reasoning_about_shapes.html>.`__"""}  # noqa: B950
 
 
 
@@ -193,6 +196,8 @@ class Conv1d(_ConvNd):
     where :math:`\star` is the valid `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     :math:`L` is a length of signal sequence.
+
+    {shape_computation_note}
     """ + r"""
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
@@ -330,6 +335,8 @@ class Conv2d(_ConvNd):
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     :math:`H` is a height of input planes in pixels, and :math:`W` is
     width in pixels.
+
+    {shape_computation_note}
     """ + r"""
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
@@ -473,7 +480,9 @@ class Conv3d(_ConvNd):
         out(N_i, C_{out_j}) = bias(C_{out_j}) +
                                 \sum_{k = 0}^{C_{in} - 1} weight(C_{out_j}, k) \star input(N_i, k)
 
-    where :math:`\star` is the valid 3D `cross-correlation`_ operator
+    where :math:`\star` is the valid 3D `cross-correlation`_ operator.
+
+    {shape_computation_note}
     """ + r"""
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
@@ -743,6 +752,8 @@ class ConvTranspose1d(_ConvTransposeNd):
               L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding} + \text{dilation}
                         \times (\text{kernel\_size} - 1) + \text{output\_padding} + 1
 
+          {shape_computation_note}
+
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
                          :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},`
@@ -877,6 +888,8 @@ class ConvTranspose2d(_ConvTransposeNd):
         .. math::
               W_{out} = (W_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1] + \text{dilation}[1]
                         \times (\text{kernel\_size}[1] - 1) + \text{output\_padding}[1] + 1
+
+        {shape_computation_note}
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -1038,6 +1051,8 @@ class ConvTranspose3d(_ConvTransposeNd):
         .. math::
               W_{out} = (W_{in} - 1) \times \text{stride}[2] - 2 \times \text{padding}[2] + \text{dilation}[2]
                         \times (\text{kernel\_size}[2] - 1) + \text{output\_padding}[2] + 1
+
+        {shape_computation_note}
 
 
     Attributes:
