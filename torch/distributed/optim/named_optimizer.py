@@ -20,7 +20,7 @@ class _NamedOptimizer(optim.Optimizer):
     """
     ``_NamedOptimizer`` takes a dict of parameters and exposes ``state_dict`` by
     parameter key. We replace the original key (number) in an optim to the
-    fully qualifed name (FQN) string. User can initialize the optim as they
+    fully qualified name (FQN) string. User can initialize the optim as they
     initialize a PyTorch optim, the only difference is that they also need to
     pass in the FQN of each parameters.
 
@@ -120,8 +120,8 @@ class _NamedOptimizer(optim.Optimizer):
 
     def state_dict(self) -> Dict[str, Any]:
         """
-        Return the ``state_dict`` of the optimzer. Instead of using number to index
-        parameters, we will use module fully qualifed name (FQN) as the key.
+        Return the ``state_dict`` of the optimizer. Instead of using number to index
+        parameters, we will use module fully qualified name (FQN) as the key.
         """
         state_dict = self._optimizer.state_dict()
         param_groups = state_dict["param_groups"]
