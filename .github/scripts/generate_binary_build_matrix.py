@@ -196,10 +196,11 @@ def generate_wheels_matrix(os: str,
     for python_version in python_versions:
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
-            gpu_arch_version = "" if arch_version == "cpu" or arch_version == "cpu-cxx11-abi" else arch_version
-            # Skip rocm 3.11 binaries for now as the docker image are not correct
-            if python_version == "3.11" and gpu_arch_type == "rocm":
-                continue
+            gpu_arch_version = (
+                ""
+                if arch_version == "cpu" or arch_version == "cpu-cxx11-abi"
+                else arch_version
+            )
 
             # special 11.7 wheels package without dependencies
             # dependency downloaded via pip install
