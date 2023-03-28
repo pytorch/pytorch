@@ -18,13 +18,13 @@ from typing import List
 
 import numpy as np
 import torch
-import torch.library
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 
 import torch._functorch.config
+import torch.library
 
 try:
     from test_minifier import requires_cuda
