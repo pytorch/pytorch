@@ -36,7 +36,7 @@ __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
 #  input(torch.Tensor) -> Module A -> Module B -> Module C -> output (torch.Tensor)
 #
 # Suppose I only want to make Module B be a sharded module with
-# DistributedTensor params, we would need to make the folloing
+# DistributedTensor params, we would need to make the following
 # flow to work:
 #
 #  input(torch.Tensor) -> Module A
@@ -411,7 +411,7 @@ def distribute_tensor(
     """
     # get default device mesh if there's nothing specified
     device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
-    # convert tensor to the correponding device type if it's not in that device type
+    # convert tensor to the corresponding device type if it's not in that device type
     if not tensor.is_meta:
         tensor = tensor.to(device_mesh.device_type)
     # set default placements to replicated if not specified
