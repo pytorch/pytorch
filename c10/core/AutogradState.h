@@ -18,7 +18,7 @@ struct C10_API AutogradState {
       : grad_mode_(grad_mode),
         inference_mode_(inference_mode),
         fw_grad_mode_(fw_grad_mode),
-        multithreading_enabled_(multithreading_enabled) {}
+        mulithreading_enabled_(multithreading_enabled) {}
 
   void set_grad_mode(bool enabled) {
     grad_mode_ = enabled;
@@ -32,8 +32,8 @@ struct C10_API AutogradState {
     inference_mode_ = enabled;
   }
 
-  void set_multithreading_enabled(bool multithreading_enabled) {
-    multithreading_enabled_ = multithreading_enabled;
+  void set_multithreading_enabled(bool mulithreading_enabled) {
+    mulithreading_enabled_ = mulithreading_enabled;
   }
 
   void set_view_replay_enabled(bool view_replay_enabled) {
@@ -53,7 +53,7 @@ struct C10_API AutogradState {
   }
 
   bool get_multithreading_enabled() const {
-    return multithreading_enabled_;
+    return mulithreading_enabled_;
   }
 
   bool get_view_replay_enabled() const {
@@ -64,7 +64,7 @@ struct C10_API AutogradState {
   bool grad_mode_ : 1;
   bool inference_mode_ : 1;
   bool fw_grad_mode_ : 1;
-  bool multithreading_enabled_ : 1;
+  bool mulithreading_enabled_ : 1;
   bool view_replay_enabled_ : 1;
 };
 

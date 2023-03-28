@@ -87,14 +87,15 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
         user_scope: Optional[Dict[str, object]],
+        local: bool,
         check_fn_manager: "CheckFunctionManager",
     ):
         self.id_ref = id_ref
         self.source_ref = source_ref
         if user_scope:
-            scope = {'E': user_scope}
+            scope = {"L" if local else "G": user_scope}
         else:
-            scope = {'E': dict()}
+            scope = {"L" if local else "G": dict()}
         self.scope: Dict[str, object] = scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
@@ -504,8 +505,9 @@ class GuardBuilder(GuardBuilderBase):
             # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
             # compiled with that same
             # tensor + more onerous user directives.
-            assert guard.source is not None
-            static, reason = tensor_always_has_static_shape(value, is_tensor=True)
+            static, reason = tensor_always_has_static_shape(
+                value, guard.source, is_tensor=True
+            )
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
@@ -619,11 +621,10 @@ class CheckFunctionManager:
             self.id_ref,
             source_ref,
             combine_scopes(f_globals, f_locals),
+            True,
             self,
         )
-        global_builder = GuardBuilder(
-            self.id_ref, source_ref, f_globals, self
-        )
+        global_builder = GuardBuilder(self.id_ref, source_ref, f_globals, False, self)
         # source_ref can cause a cycle, make sure we break it with weakref
         w_local = weakref.ref(local_builder)
         w_global = weakref.ref(global_builder)
@@ -647,7 +648,14 @@ class CheckFunctionManager:
     def compile_check_fn(
         self, local_builder, global_builder, guards_out, guard_fail_fn
     ):
-        assert not (set(local_builder.argnames) & set(global_builder.argnames))
+        intersection = set(local_builder.argnames) & set(global_builder.argnames)
+        # if intersection not in [{'E'}, set()]:
+        # raise AssertionError(f"Bad intersection {intersection}")
+        # if intersection == {'E'}:
+        # breakpoint()
+        # print("Delta", local_builder.scope['E'].keys() - global_builder.scope['E'].keys())
+
+        # assert not (set(local_builder.argnames) & set(global_builder.argnames)), breakpoint()
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
         largs += [a for a in local_builder.argnames if a != "___implicit0"]
@@ -694,9 +702,19 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                source_a = guard.input_source_a
-                source_b = guard.input_source_b
-                code_part = f"{source_a.name()} is {source_b.name()}"
+                pos_a = self.output_graph.pos_to_arg[guard.input_pos_a]
+                pos_b = self.output_graph.pos_to_arg[guard.input_pos_b]
+                assert (
+                    pos_b >= 0 and pos_a >= 0
+                ), "Deduped args out of bounds, cannot be negative"
+
+                assert self.output_graph.graphargs[
+                    pos_a
+                ].is_tensor, "Deduped arg must be a tensor"
+                assert self.output_graph.graphargs[
+                    pos_b
+                ].is_tensor, "Deduped arg must be a tensor"
+                code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
             else:
@@ -706,12 +724,18 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
+        # TODO(voz): Make this a real util
+        def _print_true(*args):
+            print("PRINTING TRUE", args)
+            return True
+
         code = " and ".join(unique(code_parts))
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
+                ("__print_true", _print_true),
                 ("tensor_check_names", tensor_check_names),
             ]
             + list(SYMPY_INTERP.items())
@@ -719,8 +743,9 @@ class CheckFunctionManager:
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda E: {code}
+    return lambda L, G: {code}
 """
+        # print("py_code", py_code)
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
@@ -728,6 +753,8 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         # print("RUNNING PY CODE", py_code)
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
+        # print([f"{str(val)} \n" for val in closure_vars.values()])
+        # breakpoint()
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
@@ -752,25 +779,19 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         return id(obj)
 
 
-stashed_first_fail_reason = None
-
-
 def guard_fail_hook(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
-    index: int,
+    f_globals: Dict[str, object],
     last: bool,
 ) -> None:
     """
     called whenever a guard fails.
     """
-    first = index == 0
-    global stashed_first_fail_reason
-    # Don't waste time computing the fail reason for guards we aren't going to report out.
-    if not guard_fn.guard_fail_fn and not (first or last):
+    if not guard_fn.guard_fail_fn and not last:
         return
-    scope = {'E': f_locals}
+    scope = {"L": f_locals}
     scope.update(guard_fn.closure_vars)
     reason = None
     for part in guard_fn.verbose_code_parts:
@@ -783,22 +804,6 @@ def guard_fail_hook(
         elif isinstance(fail_reason, bool) and not fail_reason:
             reason = part
             break
-
-    if first:
-        stashed_first_fail_reason = reason
-
-    if not last:
-        return
-
-    # Technically, we're failing our last guard, which is our oldest guard due to the
-    # eval_frame.c logic that moves newest frames to head, but for logging purposes
-    # it's more useful to see the 'first' failure (if we never got a hit) since it's
-    # likely not yet been logged as a failure reason in a case of repeating failures.
-    assert stashed_first_fail_reason
-    guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
-    stashed_first_fail_reason = None
-
-    # TODO should we GuardFail our stashed_first_fail_reason too?
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
@@ -810,12 +815,15 @@ def guard_fail_hook(
             exc_info=True,
         )
 
+    if last:
+        guard_failures[orig_code_map[code]].append(reason)
+
 
 def guard_error_hook(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
-    index: int,
+    f_globals: Dict[str, object],
     last: bool,
 ):
     print(

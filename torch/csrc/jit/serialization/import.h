@@ -4,6 +4,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 
 #include <istream>
 
@@ -15,8 +16,6 @@ class ReadAdapterInterface;
 
 namespace torch {
 namespace jit {
-
-class DeserializationStorageContext;
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,

@@ -322,7 +322,7 @@ class TestFX(JitTestCase):
         def f(x, y):
             x = control_flow.cond(x[0] == 0, true, false, [x, y])
 
-        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace HigherOrderOperators"):
+        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace PyOperators"):
             _ = symbolic_trace(f)
 
     def test_disallow_override(self):
