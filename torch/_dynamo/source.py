@@ -109,7 +109,7 @@ class GlobalWeakRefSource(Source):
         return GuardSource.GLOBAL
 
     def name(self):
-        return f"L[{repr(self.global_name)}]()"
+        return f"G[{repr(self.global_name)}]()"
 
 
 @dataclasses.dataclass
@@ -139,6 +139,12 @@ class AttrSource(Source):
         if not self.member.isidentifier():
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
+
+
+@dataclasses.dataclass
+class ParamBufferSource(AttrSource):
+    def guard_source(self):
+        return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
 
 
 class TensorProperty(enum.Enum):

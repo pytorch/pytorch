@@ -221,7 +221,7 @@ class WrapperCodeGen(CodeGen):
                 """
                 import triton
                 import triton.language as tl
-                from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
+                from torch._inductor.triton_heuristics import grid, start_graph, end_graph
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
@@ -307,13 +307,7 @@ class WrapperCodeGen(CodeGen):
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
             if config.profiler_mark_wrapper_call:
-                self.wrapper_call.writeline(
-                    "from torch.profiler import record_function"
-                )
-                self.wrapper_call.writeline(
-                    "with record_function('inductor_wrapper_call'):"
-                )
-                stack.enter_context(self.wrapper_call.indent())
+                self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
                 self.wrapper_call.writeline("start_graph()")
 
@@ -523,6 +517,11 @@ class WrapperCodeGen(CodeGen):
     def wrap_kernel_call(self, name, call_args):
         return "{}({})".format(name, ", ".join(call_args))
 
+    def generate_profiler_mark_wrapper_call(self, stack):
+        self.wrapper_call.writeline("from torch.profiler import record_function")
+        self.wrapper_call.writeline("with record_function('inductor_wrapper_call'):")
+        stack.enter_context(self.wrapper_call.indent())
+
     def generate_kernel_call(self, name, call_args):
         self.writeline(
             self.wrap_kernel_call(name, call_args),
@@ -705,6 +704,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             #include <dlfcn.h>
             #include <assert.h>
 
+            typedef at::BFloat16 bfloat16;
+
             template <typename KernelFunc>
             KernelFunc load_cpp_kernel(const char* so_filename) {
                 KernelFunc kernel_cpp;
@@ -721,10 +722,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         inputs_len = len(V.graph.graph_inputs.keys())
         output_refs = self.get_output_refs()
         if output_refs:
-            if len(output_refs) == 1:
-                output_types = "at::Tensor"
-            else:
-                output_types = "std::vector<at::Tensor>"
+            output_types = "std::vector<at::Tensor>"
         else:
             output_types = "void"
 
@@ -786,17 +784,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_return(self, output_refs):
         if output_refs:
-            if len(output_refs) == 1:
-                self.wrapper_call.writeline(
-                    f"return {output_refs[0]};{self.return_end_str()}"
-                )
-            else:
-                self.wrapper_call.writeline(
-                    "return std::vector<at::Tensor>({"
-                    + ", ".join(output_refs)
-                    + "});"
-                    + self.return_end_str()
-                )
+            self.wrapper_call.writeline(
+                "return std::vector<at::Tensor>({"
+                + ", ".join(output_refs)
+                + "});"
+                + self.return_end_str()
+            )
         else:
             self.wrapper_call.writeline(f"return;{self.return_end_str()}")
 
@@ -859,6 +852,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def make_buffer_free(self, buffer):
         return f"{buffer.get_name()}.reset();"
+
+    def generate_profiler_mark_wrapper_call(self, stack):
+        self.wrapper_call.writeline(
+            'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>({{}}));'
+        )
 
     def make_buffer_allocation(self, buffer):
         from .cpp import DTYPE_TO_ATEN
