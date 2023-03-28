@@ -593,7 +593,9 @@ class CUDAGraphNode:
             self.expected_dead_indices_before_graph = different_indices
 
         recording_inputs = self._allocate_recording_inputs(inputs)
+        # recording inputs will copy over memory, so we can free non recording inputs
         inputs.clear()
+        del inputs
 
         # graph used for recording model invocation
         self.graph = torch.cuda.CUDAGraph()
@@ -769,8 +771,8 @@ class CUDAGraphNode:
                     self.live_indices_after_graph.append((depth, output_index))
 
         self.debug_check_invariants_after_invocation()
-        # if config.triton.fast_cudagraph_asserts:
-        #     check_memory_pool(self.cuda_graphs_pool, list(self.path_live_weakrefs()))
+        if config.triton.fast_cudagraph_asserts:
+            check_memory_pool(self.cuda_graphs_pool, list(self.path_live_weakrefs()))
 
     def _add_replayed_outputs(self, outputs):
         self.outputs_weakrefs.clear()
@@ -952,10 +954,6 @@ class CUDAGraphNode:
     def _allocate_recording_inputs(self, inputs):
         "Allocate inputs for non static, non cudagraph managraphed managed tensors in the memory pool"
 
-        # How come we need another cuda graph?  This graph is never replayed;
-        # it is just a way to force allocations to go into the shared pool
-        inps_alloc_graph = torch.cuda.CUDAGraph()
-
         torch.cuda.synchronize()
         self.stream.wait_stream(torch.cuda.current_stream())
         recording_inputs = []
@@ -1111,11 +1109,11 @@ class CUDAGraphTreeManager:
         # will not be reused; separate recordings would have use the same memory pool, but not
         # the same memory.
 
-        torch.cuda.synchronize()
-        self.stream = torch.cuda.Stream()
-        self.stream.wait_stream(torch.cuda.current_stream())
-
         with torch.cuda.device(device_index):
+            torch.cuda.synchronize()
+            self.stream = torch.cuda.Stream()
+            self.stream.wait_stream(torch.cuda.current_stream())
+
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
             # Keeps Memory Pool Alive
             self.graph = torch.cuda.CUDAGraph()
