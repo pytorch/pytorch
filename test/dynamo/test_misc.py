@@ -32,7 +32,7 @@ from torch._dynamo.testing import (
     unsupported,
 )
 
-from torch._dynamo.utils import CompileProfiler, ifunspec
+from torch._dynamo.utils import CompileProfiler, ifdyn, ifunspec
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
@@ -1811,6 +1811,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         x = torch.empty([4, 9, 8])
         self.assertTrue(opt_fn(x, 1) == 9)
         self.assertTrue(opt_fn(x, -2) == 9)
+
+    def test_stride_dim(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, dim):
+            return x.stride(dim=dim)
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.empty([4, 9, 8])
+        self.assertTrue(opt_fn(x, 0) == 72)
+        self.assertTrue(opt_fn(x, -2) == 8)
 
     def test_torch_seed(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -4524,6 +4535,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.optimize("eager", nopython=True)(fn)(
             torch.randn([4, 4]), torch.randn([4, 4]), (4, 4)
         )
+
+    def test_int_list(self):
+        # if dynamic_shapes == True: unspec int list
+        # if dynamic_shapes == False: spec int list
+        def fn(x, y):
+            return torch.sin(x + y[1] % 2)
+
+        x = torch.randn(6)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        for i in range(10, 25, 3):
+            y = [i, i + 1, i + 2]
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnt.frame_count, ifunspec(ifdyn(1, 5), 5))
 
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
