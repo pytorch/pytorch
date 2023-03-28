@@ -121,9 +121,9 @@ std::vector<Tensor> not_implemented_list(const char* name, const char* reason) {
 Tensor maybe_multiply(const Tensor& t, const Scalar& s) {
   bool is_one = false;
   if (s.isFloatingPoint()) {
-    is_one = s.toDouble() == 1;
+    is_one = s.toSymFloat() == 1;
   } else if (s.isIntegral(true)) {
-    is_one = s.toLong() == 1;
+    is_one = s.toSymInt() == 1;
   }
 
   if (is_one) {
@@ -1871,6 +1871,14 @@ Tensor split_with_sizes_backward(
 
   auto ret = at::cat(grads_all_defined, dim);
   return ret;
+}
+
+Tensor _nested_split_with_sizes_backward(
+    const std::vector<torch::autograd::Variable>& grads,
+    c10::SymIntArrayRef split_sizes,
+    int64_t dim,
+    const Tensor& self) {
+  return not_implemented("aten::split_with_sizes");
 }
 
 Tensor split_backward(
