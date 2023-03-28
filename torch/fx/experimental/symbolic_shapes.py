@@ -2010,7 +2010,7 @@ class ShapeEnv:
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
             # Also don't do anything if the symbol isn't positive
-            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val) or not k.is_positive:
+            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
                 new_range_env[k] = vr
                 continue
             # Positive means >= 1
@@ -2254,15 +2254,11 @@ class ShapeEnv:
         Given an expression, evaluates it, adding guards if necessary
         """
         if len(expr.free_symbols) == 0:
-            if hint is not None:
-                assert expr == hint
             return expr
         expr = self.simplify(expr)
 
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
-            if hint is not None:
-                assert static_expr == hint
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
