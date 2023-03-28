@@ -312,10 +312,10 @@ test_perf_for_dashboard() {
     # Run performance test for inductor with different configs
     # TODO: add more configs here, e.g. dynamic-shapes, max-autotune, etc.
     python "benchmarks/dynamo/$suite.py" \
-        --performance --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+        --performance --cold-start-latency --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --performance --"$dtype" --backend "$backend" "$@" \
+        --performance --cold-start-latency --"$dtype" --backend "$backend" "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
   done
 }

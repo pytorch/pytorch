@@ -2,7 +2,7 @@ name: inductor-A100-perf-nightly
 
 on:
   schedule:
-    - cron: 45 1,7,13,19 * * *
+    - cron: 45 1,13 * * *
   workflow_dispatch:
 
 concurrency:
@@ -38,4 +38,4 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
-      timeout-minutes: 300
+      timeout-minutes: 720
