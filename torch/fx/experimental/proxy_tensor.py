@@ -679,7 +679,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, pre_autograd=False):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, *, pre_autograd=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
