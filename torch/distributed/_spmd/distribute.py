@@ -445,9 +445,16 @@ def _convert_to_distributed(
             )
 
         elif isinstance(node.target, torch._ops.OpOverload):
-            node_replacements[node] = _get_dtensor_dispatch_graph(
-                node, node_to_obj
-            )
+            if not node.target._schema.name[-1] == "_":
+                node_replacements[node] = _get_dtensor_dispatch_graph(
+                    node, node_to_obj
+                )
+            else:
+                # FIXME(@mrshenli, @wanchaol): this prevents DTensor to insert
+                # allreduce for partial DTensor objects.
+                # FIXME: assuming it's inplace on the first arugment
+                node_to_obj[node] = node_to_obj[node.args[0]]
+                logger.info(f"Skipping expanding inplace operator {node.target.name()}")
         elif node.op == OP.OUTPUT:
             if not _allow_partial:
                 # Returns an expanded dummy add node that ensures
