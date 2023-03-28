@@ -162,7 +162,7 @@ def add(import_name: str):
     assert isinstance(import_name, str)
     try:
         module_spec = importlib.util.find_spec(import_name)
-    except ImportError:
+    except Exception:
         return
     if not module_spec:
         return
