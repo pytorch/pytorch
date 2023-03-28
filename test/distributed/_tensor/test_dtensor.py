@@ -307,6 +307,12 @@ class DTensorMeshTest(DTensorTestBase):
     def world_size(self):
         return 8
 
+    def sub_mesh_assert_equal(self, mesh, exp_in_mesh, exp_out_of_mesh, tensor):
+        if self.rank in mesh:
+            self.assertEqual(tensor, exp_in_mesh)
+        else:
+            self.assertEqual(tensor, exp_out_of_mesh)
+
     @with_comms
     def test_dtensor_device_mesh_device_conversion(self):
         # construct a cuda device mesh
@@ -426,21 +432,62 @@ class DTensorMeshTest(DTensorTestBase):
         dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)])
         self.assertEqual(dtensor.size(), torch.Size([6, 4]))
 
-        if self.rank == 0 or self.rank == 2:
-            self.assertEqual(dtensor.to_local(), torch.ones(3, 4))
-        else:
-            self.assertEqual(dtensor.to_local(), torch.tensor([]))
+        self.sub_mesh_assert_equal(
+            mesh.mesh,
+            torch.ones(3, 4),
+            torch.tensor([]),
+            dtensor.to_local(),
+        )
 
         # test dtensor created in submesh, the operation should only
         # be applied to the local shard inside the mesh, not the whole
         # world, so only 0/2 really run the computation
-        new_dtensor = dtensor + 2
+        dtensor = dtensor + 2
 
-        if self.rank == 0 or self.rank == 2:
-            self.assertEqual(new_dtensor.to_local(), torch.ones(3, 4) + 2)
-        else:
-            self.assertEqual(new_dtensor.to_local(), torch.tensor([]))
+        self.sub_mesh_assert_equal(
+            mesh.mesh,
+            torch.ones(3, 4) + 2,
+            torch.tensor([]),
+            dtensor.to_local(),
+        )
 
+    @with_comms
+    def test_default_value_sub_mesh(self):
+        mesh = DeviceMesh(self.device_type, [0, 2])
+
+        # test scalar return value
+        local_tensor1 = torch.ones(4, 3)
+        local_tensor2 = torch.ones(4, 3)
+        dtensor1 = DTensor.from_local(local_tensor1, mesh, [Shard(0)])
+        dtensor2 = DTensor.from_local(local_tensor2, mesh, [Shard(0)])
+        local_res = dtensor1.equal(dtensor2)  # equal returns local result
+        self.sub_mesh_assert_equal(
+            mesh.mesh,
+            True,
+            True,
+            local_res,
+        )
+
+        # test 0-d tensor return value
+        local_tensor = torch.ones(4, 3)
+        dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)]).sum()
+        self.sub_mesh_assert_equal(
+            mesh.mesh,
+            torch.tensor(12.),
+            torch.tensor(0.),
+            dtensor.to_local(),
+        )
+
+        # test List[torch.Tensor] return value
+        local_tensor = torch.ones(3, 4)
+        dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)])
+        dtensor_list = dtensor.split([2, 2], dim=1)
+        self.sub_mesh_assert_equal(
+            mesh.mesh,
+            [torch.ones(3, 2)] * 2,
+            [torch.tensor([])] * 2,
+            [dt.to_local() for dt in dtensor_list],
+        )
 
 
 if __name__ == "__main__":

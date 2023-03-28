@@ -2217,7 +2217,7 @@ TEST_P(LiteInterpreterDynamicTypeTestFixture, Conformance) {
   }
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     PyTorch,
     LiteInterpreterDynamicTypeTestFixture,
     ::testing::Range(
