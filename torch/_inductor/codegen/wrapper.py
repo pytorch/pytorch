@@ -205,6 +205,10 @@ class WrapperCodeGen(CodeGen):
                 import torch
                 import math
                 import random
+                import os
+                import tempfile
+                from torch._inductor.utils import maybe_profile
+
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
@@ -221,7 +225,7 @@ class WrapperCodeGen(CodeGen):
                 """
                 import triton
                 import triton.language as tl
-                from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
+                from torch._inductor.triton_heuristics import grid, start_graph, end_graph
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
@@ -307,13 +311,7 @@ class WrapperCodeGen(CodeGen):
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
             if config.profiler_mark_wrapper_call:
-                self.wrapper_call.writeline(
-                    "from torch.profiler import record_function"
-                )
-                self.wrapper_call.writeline(
-                    "with record_function('inductor_wrapper_call'):"
-                )
-                stack.enter_context(self.wrapper_call.indent())
+                self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
                 self.wrapper_call.writeline("start_graph()")
 
@@ -463,6 +461,9 @@ class WrapperCodeGen(CodeGen):
             )
 
             for name, value in V.graph.constants.items():
+                # all the constants are global variables, that's why we need
+                # these 'global var_name' lines
+                output.writeline(f"global {name}")
                 add_fake_input(
                     name, value.size(), value.stride(), value.device, value.dtype
                 )
@@ -500,6 +501,7 @@ class WrapperCodeGen(CodeGen):
                     "parser = argparse.ArgumentParser()",
                     'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
                     'parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")',  # noqa: B950, line too long
+                    'parser.add_argument("--profile", "-p", action="store_true", help="Whether to profile the compiled module")',  # noqa: B950, line too long
                     "args = parser.parse_args()",
                     "",
                     "if args.benchmark_kernels:",
@@ -511,7 +513,19 @@ class WrapperCodeGen(CodeGen):
                 )
             output.writeline("else:")
             with output.indent():
-                output.writeline("benchmark_compiled_module()")
+                output.writeline("with maybe_profile(args.profile) as p:")
+                with output.indent():
+                    output.writeline("benchmark_compiled_module()")
+                output.writeline("")
+                output.writeline("if p:")
+                with output.indent():
+                    output.writelines(
+                        [
+                            'path = f"{tempfile.gettempdir()}/compiled_module_profile.json"',
+                            "p.export_chrome_trace(path)",
+                            'print(f"Chrome trace for the profile is written to {path}")',
+                        ]
+                    )
 
     def define_kernel(self, name: str, kernel: str, metadata: str = None):
         metadata_comment = f"{metadata}\n" if metadata else ""
@@ -522,6 +536,11 @@ class WrapperCodeGen(CodeGen):
 
     def wrap_kernel_call(self, name, call_args):
         return "{}({})".format(name, ", ".join(call_args))
+
+    def generate_profiler_mark_wrapper_call(self, stack):
+        self.wrapper_call.writeline("from torch.profiler import record_function")
+        self.wrapper_call.writeline("with record_function('inductor_wrapper_call'):")
+        stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(self, name, call_args):
         self.writeline(
@@ -705,6 +724,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             #include <dlfcn.h>
             #include <assert.h>
 
+            typedef at::BFloat16 bfloat16;
+
             template <typename KernelFunc>
             KernelFunc load_cpp_kernel(const char* so_filename) {
                 KernelFunc kernel_cpp;
@@ -721,10 +742,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         inputs_len = len(V.graph.graph_inputs.keys())
         output_refs = self.get_output_refs()
         if output_refs:
-            if len(output_refs) == 1:
-                output_types = "at::Tensor"
-            else:
-                output_types = "std::vector<at::Tensor>"
+            output_types = "std::vector<at::Tensor>"
         else:
             output_types = "void"
 
@@ -786,17 +804,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_return(self, output_refs):
         if output_refs:
-            if len(output_refs) == 1:
-                self.wrapper_call.writeline(
-                    f"return {output_refs[0]};{self.return_end_str()}"
-                )
-            else:
-                self.wrapper_call.writeline(
-                    "return std::vector<at::Tensor>({"
-                    + ", ".join(output_refs)
-                    + "});"
-                    + self.return_end_str()
-                )
+            self.wrapper_call.writeline(
+                "return std::vector<at::Tensor>({"
+                + ", ".join(output_refs)
+                + "});"
+                + self.return_end_str()
+            )
         else:
             self.wrapper_call.writeline(f"return;{self.return_end_str()}")
 
@@ -859,6 +872,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def make_buffer_free(self, buffer):
         return f"{buffer.get_name()}.reset();"
+
+    def generate_profiler_mark_wrapper_call(self, stack):
+        self.wrapper_call.writeline(
+            'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>({{}}));'
+        )
 
     def make_buffer_allocation(self, buffer):
         from .cpp import DTYPE_TO_ATEN
