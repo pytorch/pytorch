@@ -1595,7 +1595,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Just propagates the const-ness from the ReturnType to a
     // C-string.
     using BytesPtr = std::conditional_t<
-        std::is_const_v<std::remove_pointer_t<ReturnType>>,
+        std::is_const<std::remove_pointer_t<ReturnType>>::value,
         const char*,
         char*>;
     return static_cast<ReturnType>(
