@@ -1,13 +1,21 @@
 # Owner(s): ["module: inductor"]
+import sys
+import unittest
+
 import torch._dynamo
 from torch._inductor import config
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 try:
-    from . import test_torchinductor
-except ImportError:
-    import test_torchinductor
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
 
 class TestCppWrapper(TorchTestCase):
