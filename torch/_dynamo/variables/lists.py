@@ -16,6 +16,7 @@ from .constant import ConstantVariable
 
 def unpack_into_example(item):
     from .tensor import SymNodeVariable
+
     if isinstance(item, SymNodeVariable):
         return item.sym_num
     return item.as_python_constant()
