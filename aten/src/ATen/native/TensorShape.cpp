@@ -930,16 +930,14 @@ std::vector<Tensor> tensor_split_sections_symint(const Tensor& self, c10::SymInt
   int64_t sections = sym_sections.guard_int(__FILE__, __LINE__);
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
   const auto dim_size = self.sym_size(dim_);
-  std::vector<Tensor> splits(sections);
+  std::vector<c10::SymInt> split_sizes(sections);
   auto min_split_size = dim_size / sections;
   auto num_splits_one_extra = dim_size % sections;
-  c10::SymInt start_idx = 0;
   for (const auto split_idx : c10::irange(sections)) {
     auto split_size = (num_splits_one_extra > split_idx) ? (min_split_size + 1) : min_split_size;
-    splits[split_idx] = at::slice_symint(self, dim_, start_idx, start_idx + split_size);
-    start_idx += split_size;
+    split_sizes[split_idx] = split_size;
   }
-  return splits;
+  return self.split_with_sizes_symint(split_sizes, dim);
 }
 
 template <typename T>
