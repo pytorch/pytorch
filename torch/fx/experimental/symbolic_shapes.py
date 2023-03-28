@@ -1576,7 +1576,10 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=is_size, integer=True)
+            positive = None
+            if is_size:
+                positive = True
+            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, integer=True)
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
@@ -2006,7 +2009,8 @@ class ShapeEnv:
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
-            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
+            # Also don't do anything if the symbol isn't positive
+            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val) or not k.is_positive:
                 new_range_env[k] = vr
                 continue
             # Positive means >= 1
@@ -2250,11 +2254,15 @@ class ShapeEnv:
         Given an expression, evaluates it, adding guards if necessary
         """
         if len(expr.free_symbols) == 0:
+            if hint is not None:
+                assert expr == hint
             return expr
         expr = self.simplify(expr)
 
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
+            if hint is not None:
+                assert static_expr == hint
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
