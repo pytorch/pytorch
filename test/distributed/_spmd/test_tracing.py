@@ -558,7 +558,7 @@ class TraceTrainStepTest(DTensorTestBase):
         # FIXME(@mrshenli): gradients for bias is missing
         mod = nn.Linear(10, 10, bias=False).cuda(rank)
         # FIXME(@mrshenli): we have to enable foreach to get better perf
-        opt = torch.optim.SGD(mod.parameters(), lr=1, foreach=False)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=False)
         inp = torch.randn(2, 10).cuda(rank)
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
