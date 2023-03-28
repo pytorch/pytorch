@@ -2500,6 +2500,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
+    def test_graph_break_unsupported_fake(self):
+        # Custom operator that only supports CPU
+        lib = torch.library.Library("test_sample", "DEF")
+        lib.define("foo(Tensor self) -> Tensor")
+        lib.impl("foo", torch.sin, "CPU")
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(counter, dynamic=True)
+        def f(x):
+            return torch.ops.test_sample.foo(x + 1) + 1
+
+        f(torch.randn(3))
+
+        self.assertEqual(counter.op_count, 2)
+        self.assertEqual(counter.frame_count, 2)
+
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_implicit_guard(self):
         def f(x):
