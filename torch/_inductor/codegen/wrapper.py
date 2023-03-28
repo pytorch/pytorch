@@ -451,7 +451,9 @@ class WrapperCodeGen(CodeGen):
         def add_expr_input(name, val):
             output.writeline(f"{name} = {val}")
 
-        output.writelines(["", "", "def benchmark_compiled_module(times=10, repeat=10):"])
+        output.writelines(
+            ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]
+        )
         with output.indent():
             output.splice(
                 """
@@ -516,15 +518,21 @@ class WrapperCodeGen(CodeGen):
             with output.indent():
                 output.writeline("times = 10")
                 output.writeline("repeat = 10")
-                output.writeline("wall_time_ms = benchmark_compiled_module(times=times, repeat=repeat) / times * 1000")
+                output.writeline(
+                    "wall_time_ms = benchmark_compiled_module(times=times, repeat=repeat) / times * 1000"
+                )
 
                 output.writeline("if not args.profile:")
                 with output.indent():
                     output.writeline("sys.exit(0)")
 
-                output.writeline("with maybe_profile(args.profile, record_shapes=True) as p:")
+                output.writeline(
+                    "with maybe_profile(args.profile, record_shapes=True) as p:"
+                )
                 with output.indent():
-                    output.writeline("benchmark_compiled_module(times=times, repeat=repeat)")
+                    output.writeline(
+                        "benchmark_compiled_module(times=times, repeat=repeat)"
+                    )
                 output.writeline("")
                 output.writeline("if p:")
                 with output.indent():
@@ -533,9 +541,9 @@ class WrapperCodeGen(CodeGen):
                             'path = f"{tempfile.gettempdir()}/compiled_module_profile.json"',
                             "p.export_chrome_trace(path)",
                             'print(f"Chrome trace for the profile is written to {path}")',
-                            'event_list = p.key_averages(group_by_input_shape=True)',
+                            "event_list = p.key_averages(group_by_input_shape=True)",
                             'print(event_list.table(sort_by="self_cuda_time_total", row_limit=10))',
-                            'parse_profile_event_list(event_list, wall_time_ms, times * repeat)',
+                            "parse_profile_event_list(event_list, wall_time_ms, times * repeat)",
                         ]
                     )
 

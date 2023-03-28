@@ -1,8 +1,7 @@
 import collections
-from collections import defaultdict
 import contextlib
-import functools
 import dataclasses
+import functools
 import itertools
 import logging
 import math
@@ -13,6 +12,7 @@ import sys
 import tempfile
 import textwrap
 import time
+from collections import defaultdict
 from io import StringIO
 from typing import Any, Dict, List, NamedTuple, Optional, Union
 from unittest import mock
@@ -703,11 +703,13 @@ def get_benchmark_name():
         if arg.startswith("--only="):
             return arg[len("--only=") :]
 
+
 _kernel_category_choices = [
     "pointwise",
     "reduction",
     "persistent_reduction",
 ]
+
 
 def get_kernel_category(kernel_mod):
     """
@@ -725,6 +727,7 @@ def get_kernel_category(kernel_mod):
         return choices[0]
     else:
         return "unknown"
+
 
 def get_kernel_category_by_source_code(src_code):
     """
@@ -848,8 +851,8 @@ class ProfileEvent:
     # runs. It should be an integer but define a float just in case.
     count: float
 
-def parse_profile_event_list(event_list, wall_time_ms, nruns):
 
+def parse_profile_event_list(event_list, wall_time_ms, nruns):
     def get_self_cuda_time(ev):
         """
         ev.self_cuda_time_total is in microsecond. Convert to millisecond.
@@ -866,7 +869,7 @@ def parse_profile_event_list(event_list, wall_time_ms, nruns):
             count=ev.count / nruns,  # average across all runs
         )
         all_events[category].append(profile_ev)
-        
+
     for ev in event_list:
         assert not ev.is_legacy, "Don't support the legacy profiler"
         if ev.device_type == DeviceType.CPU:
@@ -897,13 +900,24 @@ def parse_profile_event_list(event_list, wall_time_ms, nruns):
         for ev in profile_events:
             total_time += ev.self_cuda_time_ms
             percent = f"{ev.self_cuda_time_ms / wall_time_ms * 100:.2f}%"
-            rows.append([ev.key[:30], ev.self_cuda_time_ms, ev.count, percent])
-        rows.append(["Total", total_time, "", f"{total_time / wall_time_ms * 100:.2f}%"])
-        print(tabulate(rows, headers=["Kernel", "Self CUDA TIME (ms)", "Count", "Percent"]))
+            rows.append([ev.key[:120], ev.self_cuda_time_ms, ev.count, percent])
+        rows.append(
+            ["Total", total_time, "", f"{total_time / wall_time_ms * 100:.2f}%"]
+        )
+        print(
+            tabulate(
+                rows, headers=["Kernel", "Self CUDA TIME (ms)", "Count", "Percent"]
+            )
+        )
         return total_time
-        
+
     def report():
-        category_list = ["triton_pointwise", "triton_reduction", "triton_persistent_reduction", "unknown"]
+        category_list = [
+            "triton_pointwise",
+            "triton_reduction",
+            "triton_persistent_reduction",
+            "unknown",
+        ]
         assert set(all_events.keys()).issubset(set(category_list))
 
         per_category_wall_time = {}
@@ -914,6 +928,9 @@ def parse_profile_event_list(event_list, wall_time_ms, nruns):
                 per_category_wall_time[category] = _time
                 total_cuda_ms += _time
 
-        print(f"\nPercent of time when GPU is busy: {total_cuda_ms / wall_time_ms * 100:.2f}%")
+        print(
+            f"\nPercent of time when GPU is busy: {total_cuda_ms / wall_time_ms * 100:.2f}%"
+        )
+        print(f"Total wall time {wall_time_ms:.3f} ms")
 
     report()
