@@ -23,7 +23,7 @@ from torch.distributed._tensor import (
 )
 from torch.distributed._tensor.dispatch import (
     _CURRENT_DECOMPOSITION_TABLE,
-    operator_dispatch
+    operator_dispatch,
 )
 from torch.distributed._tensor.redistribute import (
     _redistribute_with_local_tensor,
@@ -72,10 +72,14 @@ def _dispatch_with_local_tensors(
     op: torch._ops.OpOverload,
     local_args: Tuple[object, ...],
     kwargs: Optional[Dict[str, object]] = None,
-    specs: Optional[Dict[
-        torch.Tensor,
-        Tuple[torch.Size, DeviceMesh, Sequence[Placement], Sequence[Placement]],
-    ]] = None,
+    specs: Optional[
+        Dict[
+            torch.Tensor,
+            Tuple[
+                torch.Size, DeviceMesh, Sequence[Placement], Sequence[Placement]
+            ],
+        ]
+    ] = None,
 ) -> object:
     if kwargs is None:
         kwargs = {}
@@ -251,7 +255,11 @@ def _convert_output(
 
         traced_dispatch, result_obj = _build_dummy_add_graph(dt, node_to_obj)
 
-        wait = [n for n in traced_dispatch.graph.nodes if n.name == "wait_comm" or n.name == "wait_tensor"]
+        wait = [
+            n
+            for n in traced_dispatch.graph.nodes
+            if n.name == "wait_comm" or n.name == "wait_tensor"
+        ]
         add = [n for n in traced_dispatch.graph.nodes if n.name == "add"]
         assert len(wait) == 1 and len(add) == 1
 
