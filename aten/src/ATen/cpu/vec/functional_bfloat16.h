@@ -9,7 +9,7 @@ namespace at { namespace vec {
 
 // Vector conversion between float and bfloat16/half
 template <typename scalar_t,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_to_float(const Vectorized<scalar_t>&);
 
 template <>
@@ -23,7 +23,7 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_to_float<Half> (
 }
 
 template <typename scalar_t,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline Vectorized<scalar_t> convert_from_float(const Vectorized<float>&, const Vectorized<float>&);
 
 template <>
@@ -42,7 +42,7 @@ inline Vectorized<Half> convert_from_float<Half>(const Vectorized<float>& a, con
 //   Vec one = Vec(BFloat16(1));
 //   vec::map([](Vec x) { return one / (one + x.exp()); }, y_ptr, x_ptr, N);
 //
-// Then why we still need to specialize "funtional"?
+// Then why we still need to specialize "functional"?
 //   If we do specialization at Vectorized<> level, the above example would need 3 pairs of
 //   conversion of bf16->fp32/fp32->bf16, each for ".exp()", "+" and "/".
 //   If we do specialization at vec::map<>() level, we have only 1 pair of conversion
@@ -59,7 +59,7 @@ inline Vectorized<Half> convert_from_float<Half>(const Vectorized<float>& a, con
 //    aten/src/ATen/test/vec_test_all_types.cpp
 //
 template <typename scalar_t, typename Op,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
   using bVec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
@@ -101,7 +101,7 @@ inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size
 }
 
 template <typename scalar_t, typename Op1, typename Op2,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2& vec_fun2,
     const scalar_t* data, int64_t size) {
   using bVec = vec::Vectorized<scalar_t>;
@@ -159,7 +159,7 @@ inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2&
 }
 
 template <typename scalar_t, typename MapOp, typename ReduceOp,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t map_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
@@ -215,7 +215,7 @@ inline scalar_t map_reduce_all(
 }
 
 template <typename scalar_t, typename MapOp, typename ReduceOp,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t map2_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
@@ -284,7 +284,7 @@ inline scalar_t map2_reduce_all(
 }
 
 template <typename scalar_t, typename MapOp, typename ReduceOp,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t map3_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
@@ -366,7 +366,7 @@ inline scalar_t map3_reduce_all(
 }
 
 template <typename scalar_t, typename Op,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -396,7 +396,7 @@ inline void map(
 }
 
 template <typename scalar_t, typename Op,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map2(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -433,7 +433,7 @@ inline void map2(
 }
 
 template <typename scalar_t, typename Op,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map3(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -477,7 +477,7 @@ inline void map3(
 }
 
 template <typename scalar_t, typename Op,
-          typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map4(
     const Op& vec_fun,
     scalar_t* output_data,

@@ -32,6 +32,7 @@ from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 #   and you're expected to populate information once during
 #   construction.
 
+
 # Represent a source location; used for better error reporting
 @dataclass(frozen=True)
 class Location:
@@ -62,6 +63,7 @@ AUTOGRAD_KEYS = ["AutogradNestedTensor"] + [
 ]
 
 FRAGMENT_NAMESPACES = {"quantized", "quantized_decomposed"}
+
 
 # This doesn't have to be in sync with the header, it only needs to contain
 # entries that we actually use in the codegen or want pyi entries for
@@ -241,6 +243,7 @@ dispatch_keys = [
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
 ]
+
 
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
@@ -1652,6 +1655,7 @@ class FunctionSchema:
 
 # Here is the rest of the data model, described more briefly.
 
+
 # Simplified version for what actually shows up in built-ins.
 # Look at alias_info.h for expanded syntax.  If you need the structure,
 # you also need to make this structure recursive so it can be lined
@@ -2368,6 +2372,7 @@ AUGMENTED_ASSIGNMENT_NAMES = [
     "xor",
     "or",
 ]
+
 
 # A BaseOperatorName is what we think of the operator name, without
 # the overload name.  Unusually, we don't represent this as just a

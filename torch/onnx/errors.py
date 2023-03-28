@@ -53,11 +53,7 @@ class UnsupportedOperatorError(OnnxExporterError):
             msg = diagnostic_rule.format_message(name, version, supported_version)
             diagnostics.diagnose(diagnostic_rule, diagnostics.levels.ERROR, msg)
         else:
-            if (
-                name.startswith("aten::")
-                or name.startswith("prim::")
-                or name.startswith("quantized::")
-            ):
+            if name.startswith(("aten::", "prim::", "quantized::")):
                 diagnostic_rule = diagnostics.rules.missing_standard_symbolic_function
                 msg = diagnostic_rule.format_message(
                     name, version, _constants.PYTORCH_GITHUB_ISSUES_URL
