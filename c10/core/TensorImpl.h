@@ -1491,7 +1491,34 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for you; this class is available from 'Tensor'.
    */
   template <typename T>
-  inline T* data() const {
+  inline const T* data() const {
+    TORCH_CHECK(
+        data_type_.Match<T>(),
+        "Tensor type mismatch, caller expects elements to be ",
+        caffe2::TypeMeta::TypeName<T>(),
+        ", while tensor contains ",
+        data_type_.name(),
+        ". ");
+    return legacy_mutable_data_ptr_impl<T>();
+  }
+
+  /**
+   * Return a typed data pointer to the actual data which this tensor refers to.
+   * This checks that the requested type (from the template parameter) matches
+   * the internal type of the tensor.
+   *
+   * It is invalid to call data() on a dtype-uninitialized tensor, even if
+   * the size is 0.
+   *
+   * WARNING: If a tensor is not contiguous, you MUST use strides when
+   * performing index calculations to determine the location of elements in
+   * the tensor.  We recommend using 'TensorAccessor' to handle this computation
+   * for you; this class is available from 'Tensor'.
+   */
+  template <typename T>
+  inline T* legacy_mutable_data_for_caffe2() {
+    // TODO How is this different from mutable_data<T>()? Do we want
+    // to keep both?
     TORCH_CHECK(
         data_type_.Match<T>(),
         "Tensor type mismatch, caller expects elements to be ",

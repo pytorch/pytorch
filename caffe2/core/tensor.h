@@ -356,7 +356,7 @@ class TORCH_API Tensor final {
 
   template <typename T>
   inline T* data() const {
-    return impl_.get()->data<T>();
+    return impl_.get()->legacy_mutable_data_for_caffe2<T>();
   }
 
   inline void* raw_mutable_data(const TypeMeta meta) const {
