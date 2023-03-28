@@ -2737,9 +2737,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(param_grad_ref())
     
     def test_batch_encoding_clone_inputs(self):
-        from collections import UserDict
 
-        class BatchEncoding(UserDict):
+        class BatchEncoding(dict):
             """
             Copied from test_tokenization
             """
