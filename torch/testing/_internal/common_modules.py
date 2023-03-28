@@ -5,6 +5,7 @@ from enum import Enum
 from functools import wraps, partial
 from itertools import chain, product
 import itertools
+import math
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.testing import make_tensor
@@ -646,9 +647,41 @@ def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, train
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2. * ((.5 * i).exp() - 1))),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
                     forward_input=FunctionInput(make_input(())),
-                    reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1)),
+                    reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2. * ((.5 * i).exp() - 1)),
                     desc='scalar'),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
+                    forward_input=FunctionInput(make_input((3,))),
+                    desc='no_batch_dim',
+                    reference_fn=no_batch_dim_reference_fn)]
+
+
+def module_inputs_torch_nn_GLU(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((5, 6)))),
+        ModuleInput(constructor_input=FunctionInput(1),
+                    forward_input=FunctionInput(make_input((5, 6, 7))),
+                    desc='dim'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((4,))),
+                    desc='no_batch_dim',
+                    reference_fn=no_batch_dim_reference_fn)]
+
+
+def module_inputs_torch_nn_GELU(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput('none'),
+                    forward_input=FunctionInput(make_input(())),
+                    reference_fn=lambda m, p, x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput('none'),
+                    forward_input=FunctionInput(make_input((3, 2, 5))),
+                    reference_fn=lambda m, p, x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))),
+        ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input((3,))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
@@ -659,7 +692,11 @@ def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad, train
 
     return [
         ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(())),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
                     desc='no_batch_dim'),
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input((2, 3, 4, 5))),
@@ -667,6 +704,116 @@ def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad, train
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input((2, 3, 3, 4, 5))),
                     desc='channels_last_3d_mem_format')]
+
+
+def module_inputs_torch_nn_ReLU6(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(())),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5))),
+                    desc='channels_last_mem_format'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((2, 3, 3, 4, 5))),
+                    desc='channels_last_3d_mem_format')]
+
+
+def module_inputs_torch_nn_LeakyReLU(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((3, 2, 5)))),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput((make_input(4))),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim'),
+        ModuleInput(constructor_input=FunctionInput(0.5),
+                    forward_input=FunctionInput(make_input((3, 2, 5))),
+                    desc='with_negval'),
+        ModuleInput(constructor_input=FunctionInput(0.0),
+                    forward_input=FunctionInput(make_input((10, 10))),
+                    desc='with_zero_negval'),
+        ModuleInput(constructor_input=FunctionInput(0.5),
+                    forward_input=FunctionInput(make_input(())),
+                    desc='with_negval_scalar')]
+
+
+def module_inputs_torch_nn_PReLU(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput((make_input(()))),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput((make_input(4))),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((2, 3, 4))),
+                    reference_fn=lambda m, p, i: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+                    desc='1d'),
+        ModuleInput(constructor_input=FunctionInput(3),
+                    forward_input=FunctionInput((make_input((2, 3, 4)))),
+                    reference_fn=lambda m, p, i: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+                    desc='1d_multiparam'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5))),
+                    reference_fn=lambda m, p, i: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+                    desc='2d'),
+        ModuleInput(constructor_input=FunctionInput(3),
+                    forward_input=FunctionInput((make_input((2, 3, 4, 5)))),
+                    reference_fn=lambda m, p, i: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+                    desc='2d_multiparam'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5, 6))),
+                    reference_fn=lambda m, p, i: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+                    desc='3d'),
+        ModuleInput(constructor_input=FunctionInput(3),
+                    forward_input=FunctionInput((make_input((2, 3, 4, 5, 6)))),
+                    reference_fn=lambda m, p, i: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+                    desc='3d_multiparam')]
+
+
+def module_inputs_torch_nn_SELU(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((3, 2, 5)))),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(())),
+                    desc='scalar')]
+
+
+def module_inputs_torch_nn_SiLU(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(())),
+                    reference_fn=lambda m, p, x, *_: x * torch.sigmoid(x),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((5, 6, 7))),
+                    reference_fn=lambda m, p, x, *_: x * torch.sigmoid(x),
+                    desc='scalar')]
 
 
 def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -758,6 +905,17 @@ def module_inputs_torch_nn_Sigmoid(module_info, device, dtype, requires_grad, tr
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input(())),
+            desc='scalar'
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input(4)),
+            reference_fn=no_batch_dim_reference_fn,
+            desc='no_batch_dim',
+        ),
         ModuleInput(
             constructor_input=FunctionInput(),
             forward_input=FunctionInput(make_input((2, 3, 4, 5))),
@@ -1439,6 +1597,11 @@ module_db: List[ModuleInfo] = [
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
+    ModuleInfo(torch.nn.CELU,
+               module_inputs_func=module_inputs_torch_nn_CELU,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.Conv1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -1769,6 +1932,16 @@ module_db: List[ModuleInfo] = [
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
+    ModuleInfo(torch.nn.GELU,
+               module_inputs_func=module_inputs_torch_nn_GELU,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.GLU,
+               module_inputs_func=module_inputs_torch_nn_GLU,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
                skips=(
@@ -1827,6 +2000,21 @@ module_db: List[ModuleInfo] = [
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
+    ModuleInfo(torch.nn.LeakyReLU,
+               module_inputs_func=module_inputs_torch_nn_LeakyReLU,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ReLU6,
+               module_inputs_func=module_inputs_torch_nn_ReLU6,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.PReLU,
+               module_inputs_func=module_inputs_torch_nn_PReLU,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
                skips=(
@@ -1844,6 +2032,11 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Sigmoid,
                module_inputs_func=module_inputs_torch_nn_Sigmoid,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.SiLU,
+               module_inputs_func=module_inputs_torch_nn_SiLU,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
@@ -1902,6 +2095,11 @@ module_db: List[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.SELU,
+               module_inputs_func=module_inputs_torch_nn_SELU,
+               skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.ZeroPad1d,
