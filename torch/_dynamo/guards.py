@@ -649,13 +649,6 @@ class CheckFunctionManager:
         self, local_builder, global_builder, guards_out, guard_fail_fn
     ):
         intersection = set(local_builder.argnames) & set(global_builder.argnames)
-        # if intersection not in [{'E'}, set()]:
-        # raise AssertionError(f"Bad intersection {intersection}")
-        # if intersection == {'E'}:
-        # breakpoint()
-        # print("Delta", local_builder.scope['E'].keys() - global_builder.scope['E'].keys())
-
-        # assert not (set(local_builder.argnames) & set(global_builder.argnames)), breakpoint()
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
         largs += [a for a in local_builder.argnames if a != "___implicit0"]
@@ -745,16 +738,12 @@ class CheckFunctionManager:
 def ___make_guard_fn({','.join(closure_vars.keys())}):
     return lambda L, G: {code}
 """
-        # print("py_code", py_code)
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out: Dict[str, Any] = dict()
-        # print("RUNNING PY CODE", py_code)
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
-        # print([f"{str(val)} \n" for val in closure_vars.values()])
-        # breakpoint()
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
