@@ -92,6 +92,15 @@ jobs:
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
+        with:
+          driver-version: "525.85.05"
+
+      - name: Lock NVIDIA A100 40GB Frequency
+        run: |
+          sudo nvidia-smi -pm 1
+          sudo nvidia-smi -ac 1215,1410
+          nvidia-smi
+        if: contains(matrix.runner, 'a100')
 
       - name: Start monitoring script
         id: monitor-script
