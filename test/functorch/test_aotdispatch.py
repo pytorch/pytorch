@@ -2809,6 +2809,11 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.ReplicationPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReflectionPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReflectionPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.AdaptiveAvgPool3d,  # could not find kernel for aten._adaptive_avg_pool3d_backward.default at dispatch key
+                                 # DispatchKey.Meta
+    torch.nn.AdaptiveMaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 
