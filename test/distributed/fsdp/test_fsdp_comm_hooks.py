@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_WITH_ROCM,
 )
 
 if not dist.is_available():
@@ -32,9 +31,10 @@ if not dist.is_available():
 # bfloat16 is only supported by CUDA 11+
 BFLOAT16_AVAILABLE = (
     torch.cuda.is_available()
-    and torch.version.cuda is not None
-    and int(torch.version.cuda.split(".")[0]) >= 11
-) or TEST_WITH_ROCM
+    and ((torch.version.cuda is not None
+    and int(torch.version.cuda.split(".")[0]) >= 11)
+    or torch.version.hip is not None)
+)
 
 
 class Net(nn.Module):
