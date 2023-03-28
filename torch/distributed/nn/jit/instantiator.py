@@ -73,10 +73,10 @@ def _write(out_path, text):
         old_text = None
     if old_text != text:
         with open(out_path, "w") as f:
-            logger.info("Writing {}".format(out_path))
+            logger.info("Writing %s", out_path)
             f.write(text)
     else:
-        logger.info("Skipped writing {}".format(out_path))
+        logger.info("Skipped writing %s", out_path)
 
 
 def _do_instantiate_remote_module_template(

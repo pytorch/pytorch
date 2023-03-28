@@ -365,9 +365,8 @@ class EtcdRendezvous:
         active_version, this_rank = self.join_rendezvous(expected_version)
         state = json.loads(active_version.value)
         log.info(
-            "Joined rendezvous version {} as rank {}. Full state: {}".format(
-                state["version"], this_rank, state
-            )
+            "Joined rendezvous version %s as rank %s. Full state: %s",
+            state["version"], this_rank, state
         )
 
         # If this worker was first to reach num_min_workers requirement,
@@ -380,10 +379,10 @@ class EtcdRendezvous:
         # when min_num_workers is reached.
 
         if this_rank == self._num_min_workers - 1 and state["status"] == "joinable":
-            log.info("Rank {} is responsible for join last call.".format(this_rank))
+            log.info("Rank %s is responsible for join last call.", this_rank)
             last_call_deadline = time.time() + self._last_call_timeout
             self.handle_join_last_call(expected_version, last_call_deadline)
-            log.info("Rank {} finished join last call.".format(this_rank))
+            log.info("Rank %s finished join last call.", this_rank)
 
         # Wait for rendezvous state to be frozen, which means a fixed set of peers
         log.info("Waiting for remaining peers.")
