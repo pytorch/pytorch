@@ -234,6 +234,16 @@ class TestPythonKey(AOTTestCase):
         grads2 = [a.grad for a in mod.parameters()]
         self.assertEqual(grads, grads2)
 
+def get_base(t):
+    return t._base if t._is_view() else t
+
+def is_in_base(t, maybe_tensors):
+    t_base = get_base(t)
+    for maybe_tensor in maybe_tensors:
+        if isinstance(maybe_tensor, torch.Tensor):
+            if t_base is get_base(maybe_tensor):
+                return True
+    return False
 
 class TestAOTAutograd(AOTTestCase):
     # test_mutation will:
@@ -320,11 +330,9 @@ class TestAOTAutograd(AOTTestCase):
                 if isinstance(ref_o, torch.Tensor):
                     self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
                     self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
-                    # See Note [Intermediate Bases Optimization]
-                    # In cases where we know that an output's view-ness is safe to hide from autograd
-                    # (the output is a view of an intermediate that doesn't escape the graph),
-                    # we hide the view-ness from autograd.
-                    # self.assertEqual(ref_o._is_view(), test_o._is_view())
+                    ref_is_view_of_non_interm = is_in_base(ref_o, graph_inps) or is_in_base(ref_o, ref_out)
+                    test_is_view_of_non_interm = is_in_base(test_o, graph_inps_copy) or is_in_base(test_o, test_out)
+                    self.assertEqual(ref_is_view_of_non_interm, test_is_view_of_non_interm)
                     self.assertEqual(ref_o, test_o)
                     if test_mutation:
                         # This tests that autograd meta is set properly on the output we can

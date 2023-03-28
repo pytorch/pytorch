@@ -775,7 +775,7 @@ def run_functionalized_fw_and_collect_metadata(
                     # to prevent autograd from yelling at us if the user later tries to
                     # mutate that output.
                     # However, the common case here is if we have an output that aliases an intermediate,
-                    # but doesn't alias any other outputs.'
+                    # but doesn't alias any other outputs.
                     # In that case, autograd shouldn't have to worry about the aliasing at all
                     # (if that output is mutated, there are no other live aliases for autograd to worry about).
                     # The "intermediate bases" can hurt inductor perf by forcing more variables to become outputs.
@@ -950,6 +950,8 @@ def fn_prepped_for_autograd(
         ]
 
         outs = fn(*args_maybe_cloned)
+        assert isinstance(outs, (tuple, list))
+        outs = list(outs)
         assert len(meta.output_info) == len(outs)
 
         mutated_inputs_to_return = [
@@ -964,7 +966,7 @@ def fn_prepped_for_autograd(
                 intermediate_bases.append(o._base)
             elif info.output_type == OutputType.unsafe_view_alias:
                 # See Note [Intermediate Bases Optimization]
-                outs[i] = torch.ops.aten._unsafe_view(o, o.shape)
+                outs[i] = torch.ops.aten._unsafe_view.default(o, o.shape)
 
         assert meta.num_intermediate_bases == len(intermediate_bases)
 
