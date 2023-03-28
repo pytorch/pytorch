@@ -694,12 +694,10 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
             fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=True,
                 allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
             shape_env = ShapeEnv()
             fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=False,
                 allow_non_fake_inputs=_allow_non_fake_inputs,
                 shape_env=shape_env)
         else:
