@@ -2746,9 +2746,6 @@ def aot_function(
     set `decompositions` dictionary to decompose the operators into a sequence
     of core or simpler operators supported by the backend compilers.
 
-    :func:`aot_function` uses a compilation cache, based on input tensor
-    properties, to detect when there is a need of recompilation.
-
     .. warning::
         This API is experimental and likely to change.
 
