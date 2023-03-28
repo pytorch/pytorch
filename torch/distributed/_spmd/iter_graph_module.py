@@ -1,6 +1,5 @@
 import copy
 import inspect
-import itertools
 import logging
 from contextlib import contextmanager, ExitStack
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
@@ -107,9 +106,12 @@ class IterGraph(fx.Graph):
 
     @staticmethod
     def _find_output(graph: fx.Graph) -> fx.Node:
+        output: Optional[fx.Node] = None
         for output in reversed(graph.nodes):
             if output.target == "output":
-                return output
+                break
+        assert output is not None
+        return output
 
     @staticmethod
     def _is_connect_to_output(subgraph: List[fx.Node], output: fx.Node) -> bool:
@@ -133,7 +135,7 @@ class IterGraph(fx.Graph):
         subgraph: List[fx.Node], graph: fx.Graph, target: fx.Node
     ) -> List[fx.Node]:
         all_nodes = set(subgraph)
-        mapping = dict()
+        mapping: Dict[fx.Node, fx.Node] = dict()
         cloned_subgraph = []
         with graph.inserting_before(target):
             for node in subgraph:
@@ -291,8 +293,13 @@ class IterGraph(fx.Graph):
         # For the setup graph, no additional input is needed but additional
         # outputs will be created. The additional output represents the input of
         # the action to be moved to the next iteration -- main graph.
+        setup_subgraph: List[fx.Node] = []
+        for node in subgraph:
+            mapped_node = self._lookup_node(node, self.setup_graph)
+            assert mapped_node is not None
+            setup_subgraph.append(mapped_node)
         setup_extra_input = self._forward_subgraph_inputs(
-            subgraph=[self._lookup_node(node, self.setup_graph) for node in subgraph],
+            subgraph=setup_subgraph,
             graph=self.setup_graph,
             erase_node=True,
         )
@@ -302,8 +309,13 @@ class IterGraph(fx.Graph):
         # needed to perform the action moved from the last itertion.
         target_cleanup_node = self._lookup_node(target_node, self.cleanup_graph)
         assert target_cleanup_node is not None, "The target_cleanup_node is None."
+        cleanup_subgraph: List[fx.Node] = []
+        for node in subgraph:
+            mapped_node = self._lookup_node(node, self.cleanup_graph)
+            assert mapped_node is not None
+            cleanup_subgraph.append(mapped_node)
         cloned_subgraph = self._clone_subgraph(
-            subgraph=[self._lookup_node(node, self.cleanup_graph) for node in subgraph],
+            subgraph=cleanup_subgraph,
             graph=self.cleanup_graph,
             target=target_cleanup_node,
         )
@@ -323,12 +335,14 @@ class IterGraph(fx.Graph):
             target_node.prepend(node)
         self._forward_inputs_to_subgraph(subgraph, self, main_extra_input)
 
+        # TODO: This is a temporary solution. We are going to remove DCE usage
+        # or have something to replace fx DCE.
         for node in self.cleanup_graph.nodes:
             if len(node.users) == 0:
-                node.users["__hold__"] = None
+                node.users["__hold__"] = None  # type: ignore[index]
         for node in self.nodes:
             if len(node.users) == 0:
-                node.users["__hold__"] = None
+                node.users["__hold__"] = None  # type: ignore[index]
         self.num_extra_output += main_extra_input
 
     def move_before(self, nodes: List[fx.Node], target_node: fx.Node) -> None:
@@ -421,6 +435,7 @@ class IterGraph(fx.Graph):
         )
         self._setup_mapping[main_placeholder] = setup_placeholder
         self._cleanup_mapping[main_placeholder] = cleanup_placeholder
+        return main_placeholder
 
     def output(self, result: Argument, type_expr: Optional[Any] = None) -> fx.Node:
         if self._freeze_cross_iter_movement:
