@@ -1222,38 +1222,42 @@ CONVERT_NON_VECTORIZED_INIT(Half, half);
 #endif // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
-inline void load_fp32_from_ptr(const T *data, Vectorized<float>& out) {
-  auto values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data));
-  __m512 out_values;
-  cvt_to_fp32<T>(values, out_values);
-  out = out_values;
+#define LOAD_FP32_VECTORIZED_INIT(type, name) \
+inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
+  auto values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data)); \
+  __m512 out_values; \
+  cvt_to_fp32<type>(values, out_values); \
+  out = out_values; \
+} \
+\
+inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vectorized<float>& out2) { \
+  auto vec = Vectorized<type>::loadu(data); \
+  __m512 out1_values, out2_values; \
+  cvt_to_fp32<type>(vec, out1_values, out2_values); \
+  out1 = out1_values; \
+  out2 = out2_values; \
 }
+LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
+LOAD_FP32_VECTORIZED_INIT(Half, fp16);
 
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
-inline void load_fp32_from_ptr(const T *data, Vectorized<float>& out1, Vectorized<float>& out2) {
-  auto vec = Vectorized<T>::loadu(data);
-  __m512 out1_values, out2_values;
-  cvt_to_fp32<T>(vec, out1_values, out2_values);
-  out1 = out1_values;
-  out2 = out2_values;
-}
 #else // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
-inline void load_fp32_from_ptr(const T *data, Vectorized<float>& out) {
-  __at_align__ float values[Vectorized<float>::size()];
-  for (const auto k : c10::irange(Vectorized<float>::size())) {
-    values[k] = data[k];
-  }
-  out = Vectorized<float>::loadu(values);
+#define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \
+inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
+  __at_align__ float values[Vectorized<float>::size()]; \
+  for (const auto k : c10::irange(Vectorized<float>::size())) { \
+    values[k] = data[k]; \
+  } \
+  out = Vectorized<float>::loadu(values); \
+} \
+\
+inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vectorized<float>& out2) { \
+  load_fp32_from_##name(data, out1); \
+  data += Vectorized<float>::size(); \
+  load_fp32_from_##name(data, out2); \
 }
+LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
+LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
 
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
-inline void load_fp32_from_ptr(const T *data, Vectorized<float>& out1, Vectorized<float>& out2) {
-  load_fp32_from_ptr(data, out1);
-  data += Vectorized<float>::size();
-  load_fp32_from_ptr(data, out2);
-}
 #endif
 
 }}}
