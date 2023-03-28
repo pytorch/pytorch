@@ -512,8 +512,8 @@ class QConvPackWeightInt8 final {
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
-      torch::List<int64_t> dilation,
-      int64_t groups) {
+      int64_t groups,
+      torch::List<int64_t> dilation) {
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
                 /*transpose=*/true);
   }
@@ -597,8 +597,8 @@ class QConv1dPackWeightInt8 final {
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
-      torch::List<int64_t> dilation,
-      int64_t groups) {
+      int64_t groups,
+      torch::List<int64_t> dilation) {
     return _run(std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
                 /*transpose=*/true);
   }
