@@ -323,9 +323,9 @@ def parse_args():
         help="Do not include --cold-start-latency on inductor benchmarks",
     )
     parser.add_argument(
-        "--inductor-mode",
+        "--inductor-compile-mode",
         default=None,
-        help="torch.compile mode argument for inductor runs."
+        help="torch.compile mode argument for inductor runs.",
     )
     args = parser.parse_args()
     return args
@@ -407,10 +407,14 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
 
-                    if compiler in (
-                        "inductor",
-                        "inductor_no_cudagraphs",
-                    ) and not args.no_cold_start_latency:
+                    if (
+                        compiler
+                        in (
+                            "inductor",
+                            "inductor_no_cudagraphs",
+                        )
+                        and not args.no_cold_start_latency
+                    ):
                         cmd = f"{cmd} --cold-start-latency"
 
                     if args.batch_size is not None:
@@ -425,8 +429,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     if args.partition_id is not None:
                         cmd = f"{cmd} --partition-id {args.partition_id}"
 
-                    if args.inductor_mode is not None:
-                        cmd = f"{cmd} --inductor-mode {args.inductor_mode}"
+                    if args.inductor_compile_mode is not None:
+                        cmd = f"{cmd} --inductor-compile-mode {args.inductor_compile_mode}"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
