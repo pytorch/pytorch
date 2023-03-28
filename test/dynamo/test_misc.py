@@ -5254,6 +5254,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ("a.layers[slice(2)][0]._xyz", "a"),
             ("getattr(a.layers[slice(2)][0]._abc, '0')", "a"),
             ("getattr(getattr(a.x[3], '0'), '3')", "a"),
+            ("a.layers[slice(None, -1, None)][0]._xyz", "a"),
+            ("a.layers[func('offset', -1, None)][0]._xyz", "a"),
         ]
         # strip_function_call should extract the object from the string.
         for name, expect_obj in test_case:

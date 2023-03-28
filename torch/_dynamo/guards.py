@@ -70,11 +70,20 @@ def strip_function_call(name):
     "a.layers[slice(2)][0]._xyz" ==> "a"
     "getattr(a.layers[slice(2)][0]._abc, '0')" ==> "a"
     "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
+    "a.layers[slice(None, -1, None)][0]._xyz" ==> "a"
     """
-    # recursively find valid object name in fuction's first param
-    m = re.search(r"([a-z0-9_]+)\(([A-Za-z_][^),]*)[^()]*", name)
-    if m:
-        return strip_function_call(m.group(2))
+    # recursively find valid object name in fuction
+    valid_name = re.compile("[A-Za-z_].*")
+    curr = ""
+    for char in name:
+        if char in ' (':
+            curr = ""
+        elif char in '),[]':
+            if curr and curr!='None' and valid_name.match(curr):
+                return strip_function_call(curr)
+        else:
+            curr += char
+
     return strip_getattr_getitem(name)
 
 
