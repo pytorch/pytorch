@@ -1,4 +1,4 @@
-merge_base_with = "master"
+merge_base_with = "origin/master"
 
 [[linter]]
 code = 'FLAKE8'
