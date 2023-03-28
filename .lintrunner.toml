@@ -826,6 +826,8 @@ init_command = [
 [[linter]]
 code = 'UFMT'
 include_patterns = [
+    '.github/**/*.py',
+    'test/run_test.py',
     'test/onnx/**/*.py',
     'test/test_dynamo_cudagraphs.py',
     'tools/**/*.py',
