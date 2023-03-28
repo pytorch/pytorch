@@ -12,6 +12,7 @@ from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
 from torch.testing._internal.inductor_utils import HAS_CUDA
+import numpy as np
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
@@ -211,6 +212,25 @@ class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         b = torch.compile(model, backend="aot_eager")(example_input)
         self.assertTrue(torch.equal(a, b))
+
+class TestDynamoModeArgParser(torch._dynamo.test_case.TestCase):
+    def test_trace_numpy_int_into_symint_list_type(self):
+        class MyModule(torch.nn.Linear):
+            def __init__(self):
+                super().__init__(np.int_(16), np.int_(16))
+
+            def forward(self, x):
+                # passing numpy int into param of symlint_list type
+                # will be wrapped as FakeTensor, arg parser should
+                # support this use case.
+                return x.reshape(self.in_features)
+
+        x = torch.rand([4, 4])
+        model = MyModule()
+        orig_out = model(x)
+        opt_model = torch._dynamo.optimize("eager")(MyModule())
+        opt_out = opt_model(x)
+        self.assertTrue(same(orig_out, opt_out))
 
 
 if __name__ == "__main__":
