@@ -5803,7 +5803,7 @@ class CommonTemplate:
             a = a.max(0).values
             c = torch.cat((a, b))
             c = c.round()
-            b >= a[0]
+            b >= a[0]  # noqa: B015
             return c
 
         some_const = torch.tensor(6324)
@@ -5811,7 +5811,7 @@ class CommonTemplate:
         def fn2():
             a = torch.tensor([[0.6324]])
             ret = torch.cat((a, a), dim=0)
-            some_const >= a[0]
+            some_const >= a[0]  # noqa: B015
             return ret
 
         self.common(fn1, (torch.tensor([[4.0]]), torch.tensor([5.0])))
