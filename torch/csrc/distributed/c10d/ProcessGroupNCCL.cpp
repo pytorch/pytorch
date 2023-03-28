@@ -833,11 +833,10 @@ void ProcessGroupNCCL::abortTimedOutCollectives(
           " milliseconds before timing out.");
       if (desyncDebug_) {
         try {
-            exceptionMsg += retrieveDesyncReport(store_, "NCCL", rank_, size_);
-        }
-        catch (const std::exception &e) {
-            LOG(ERROR) << "Failed to retrieve NCCL desync report with error: "
-                       << e.what() << " Please report an issue to PyTorch.";
+          exceptionMsg += retrieveDesyncReport(store_, "NCCL", rank_, size_);
+        } catch (const std::exception& e) {
+          LOG(ERROR) << "Failed to retrieve NCCL desync report with error: "
+                     << e.what() << " Please report an issue to PyTorch.";
         }
       }
       LOG(ERROR) << exceptionMsg;
