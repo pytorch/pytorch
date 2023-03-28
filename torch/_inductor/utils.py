@@ -18,6 +18,7 @@ from unittest import mock
 import sympy
 
 import torch
+from torch.autograd import DeviceType
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config
@@ -823,3 +824,28 @@ def maybe_profile(should_profile, *args, **kwargs):
             yield p
     else:
         yield
+
+
+def parse_profile_event_list(event_list, wall_time_ms, nruns):
+    total_cuda_ms = 0
+    total_triton_ms = 0
+
+    def get_self_cuda_time(ev):
+        """
+        ev.self_cuda_time_total is in microsecond. Convert to millisecond.
+        """
+        return ev.self_cuda_time_total / 1000 / nruns
+
+    for ev in event_list:
+        assert not ev.is_legacy, "Don't support the legacy profiler"
+        if ev.key.startswith("triton_"):
+            assert ev.device_type == DeviceType.CUDA
+            print(f"{ev.key} {get_self_cuda_time(ev):.3f} ms")
+
+            total_triton_ms += get_self_cuda_time(ev)
+
+        if ev.device_type == DeviceType.CUDA:
+            total_cuda_ms += get_self_cuda_time(ev)
+
+    print(f"total cuda time: {total_cuda_ms:.3f} ms, total triton time {total_triton_ms:.3f} ms")
+    print(f"wall time {wall_time_ms:.3f} ms")

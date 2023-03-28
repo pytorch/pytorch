@@ -208,6 +208,7 @@ class WrapperCodeGen(CodeGen):
                 import os
                 import tempfile
                 from torch._inductor.utils import maybe_profile
+                import sys
 
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
@@ -450,7 +451,7 @@ class WrapperCodeGen(CodeGen):
         def add_expr_input(name, val):
             output.writeline(f"{name} = {val}")
 
-        output.writelines(["", "", "def benchmark_compiled_module():"])
+        output.writelines(["", "", "def benchmark_compiled_module(times=10, repeat=10):"])
         with output.indent():
             output.splice(
                 """
@@ -479,7 +480,7 @@ class WrapperCodeGen(CodeGen):
                     )
 
             output.writeline(
-                f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
+                f"return print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]), times=times, repeat=repeat)"
             )
 
     def add_benchmark_harness(self, output):
@@ -496,7 +497,7 @@ class WrapperCodeGen(CodeGen):
             output.writelines(
                 [
                     "import argparse",
-                    "from torch._inductor.utils import benchmark_all_kernels",
+                    "from torch._inductor.utils import benchmark_all_kernels, parse_profile_event_list",
                     "",
                     "parser = argparse.ArgumentParser()",
                     'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
@@ -513,9 +514,17 @@ class WrapperCodeGen(CodeGen):
                 )
             output.writeline("else:")
             with output.indent():
-                output.writeline("with maybe_profile(args.profile) as p:")
+                output.writeline("times = 10")
+                output.writeline("repeat = 10")
+                output.writeline("wall_time_ms = benchmark_compiled_module(times=times, repeat=repeat) / times * 1000")
+
+                output.writeline("if not args.profile:")
                 with output.indent():
-                    output.writeline("benchmark_compiled_module()")
+                    output.writeline("sys.exit(0)")
+
+                output.writeline("with maybe_profile(args.profile, record_shapes=True) as p:")
+                with output.indent():
+                    output.writeline("benchmark_compiled_module(times=times, repeat=repeat)")
                 output.writeline("")
                 output.writeline("if p:")
                 with output.indent():
@@ -524,6 +533,9 @@ class WrapperCodeGen(CodeGen):
                             'path = f"{tempfile.gettempdir()}/compiled_module_profile.json"',
                             "p.export_chrome_trace(path)",
                             'print(f"Chrome trace for the profile is written to {path}")',
+                            'event_list = p.key_averages(group_by_input_shape=True)',
+                            'print(event_list.table(sort_by="self_cuda_time_total", row_limit=10))',
+                            'parse_profile_event_list(event_list, wall_time_ms, times * repeat)',
                         ]
                     )
 
