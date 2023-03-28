@@ -31,7 +31,7 @@ from ..utils import (
 from .base import VariableTracker
 from .lists import ListVariable, TupleVariable
 from .misc import AutocastModeVariable, NullContextVariable
-from .tensor import TensorWithTFOverrideVariable, has_same_metadata
+from .tensor import has_same_metadata, TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
 

@@ -41,10 +41,8 @@ supported_const_comparison_ops = {
 
 
 def has_same_metadata(t1, t2):
-    return (
-        t1.size == t2.size
-        and t1.stride == t2.stride
-    )
+    return t1.size == t2.size and t1.stride == t2.stride
+
 
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
