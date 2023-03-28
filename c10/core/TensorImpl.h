@@ -28,6 +28,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <type_traits>
 #include <utility>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -1534,7 +1535,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  public:
   /**
-   * Return a void* data pointer to the actual data which this tensor refers to.
+   * Return a const void* data pointer to the actual data which this
+   * tensor refers to.
    *
    * It is invalid to call data() on a dtype-uninitialized tensor, even if the
    * size is 0.
@@ -1543,7 +1545,39 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * assume that itemsize() * numel() is sufficient to compute the bytes that
    * can be validly read from this tensor.
    */
-  inline void* data() const {
+  inline const void* data() const {
+    return data(&StorageImpl::data);
+  }
+
+  /**
+   * Return a void* data pointer to the actual data which this tensor refers to.
+   *
+   * It is invalid to call mutable_data() on a dtype-uninitialized
+   * tensor, even if the size is 0.
+   *
+   * WARNING: The data pointed to by this tensor may not contiguous; do NOT
+   * assume that itemsize() * numel() is sufficient to compute the bytes that
+   * can be validly read from this tensor.
+   */
+  inline void* mutable_data() {
+    return data(&StorageImpl::mutable_data);
+  }
+
+ private:
+  // Templated implementation of data() and mutable_data().
+  //
+  // We are able to pull this off because unsafeGetStorageImpl() is a
+  // const method that returns a non-const StorageImpl.
+  template <
+      // A member function pointer on StorageImpl that gets the raw
+      // data.
+      typename StorageImplFunc,
+      // The result of applying StorageImplFunc to the storage. This
+      // is ultimately the same type we return, but we mayy manipulate
+      // it before returning.
+      typename ReturnType = decltype((
+          std::declval<StorageImpl>().*std::declval<StorageImplFunc>())())>
+  ReturnType data(const StorageImplFunc& data_accessor) const {
     TORCH_CHECK(
         has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
@@ -1557,11 +1591,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (is_empty()) {
       return nullptr;
     }
-    return static_cast<void*>(
-        static_cast<char*>(storage_.unsafeGetStorageImpl()->mutable_data()) +
-        data_type_.itemsize() * storage_offset_);
+    auto* data = (storage_.unsafeGetStorageImpl()->*data_accessor)();
+    // Just propagates the const-ness from the ReturnType to a
+    // C-string.
+    using BytesPtr = std::conditional_t<
+        std::is_const_v<std::remove_pointer_t<ReturnType>>,
+        const char*,
+        char*>;
+    return static_cast<ReturnType>(
+        static_cast<BytesPtr>(data) + data_type_.itemsize() * storage_offset_);
   }
 
+ public:
   /**
    * Like data<T>(), but performs no checks.  You are responsible for ensuring
    * that all invariants required by data() are upheld here.
