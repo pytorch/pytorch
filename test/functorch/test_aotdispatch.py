@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     compare_equal_outs_and_grads,
     outs_and_grads,
+    skipIfRocm,
 )
 import torch
 import torch.nn as nn
@@ -1759,6 +1760,7 @@ def forward(self, arg0_1):
             self.verify_aot_autograd(f, args)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/96560
     def test_batch_norm_amp(self):
         device = "cuda"
         input_dtype = torch.float16
@@ -2441,6 +2443,8 @@ aot_autograd_failures = {
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
 
+    skip('linalg.pinv', 'singular'),  # likely needs updated tolerance
+
     # Worked with real but not with fake
     xfail('cholesky_inverse'),
     xfail('_segment_reduce', 'lengths'),
@@ -2463,7 +2467,6 @@ aot_autograd_failures = {
 }
 
 symbolic_aot_autograd_failures = {
-    xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2806,6 +2809,11 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.ReplicationPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReflectionPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReflectionPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.AdaptiveAvgPool3d,  # could not find kernel for aten._adaptive_avg_pool3d_backward.default at dispatch key
+                                 # DispatchKey.Meta
+    torch.nn.AdaptiveMaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 

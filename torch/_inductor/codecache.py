@@ -15,6 +15,7 @@ import sys
 import sysconfig
 import tempfile
 import types
+from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
 from functools import partial
@@ -635,11 +636,16 @@ class CppCodeCache:
 
 class PyCodeCache:
     cache = dict()
+    linemaps = dict()
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, source_code, extra=""):
+    def load(cls, source_code, extra="", linemap=()):
         key, path = write(source_code, "py", extra)
+        return cls.load_by_key_path(key, path, linemap)
+
+    @classmethod
+    def load_by_key_path(cls, key, path, linemap=()):
         if key not in cls.cache:
             with open(path) as f:
                 try:
@@ -654,7 +660,36 @@ class PyCodeCache:
                 exec(code, mod.__dict__, mod.__dict__)
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)
+                # unzip into separate lines/nodes lists
+                cls.linemaps[path] = list(zip(*linemap))
+
         return cls.cache[key]
+
+    @classmethod
+    @functools.lru_cache(None)
+    def stack_frames_for_code(cls, path, lineno):
+        if path not in cls.linemaps:
+            return None
+        # [(starting_line, <fx node>), ...]
+        lines, nodes = cls.linemaps[path]
+        p = bisect_right(lines, lineno)
+        if p == 0:
+            return None
+        entry = nodes[p - 1]
+        if not entry:
+            return None
+
+        def parse_stack_trace(stack_trace):
+            # ideally fx stores stack traces as data rather than a string
+            # but this is not along a performance critical path
+            regex = r'File "(.+)", line (\d+), in (.+)\n'
+            matches = re.findall(regex, stack_trace)
+            return [
+                {"filename": f, "line": int(l), "name": n}
+                for f, l, n in reversed(matches)
+            ]
+
+        return parse_stack_trace(entry.stack_trace)
 
 
 class TritonCodeCache:

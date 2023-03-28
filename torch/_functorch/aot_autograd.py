@@ -18,7 +18,8 @@ import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import dynamo_timed, format_graph_code
+from torch._logging import getArtifactLogger
 from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
@@ -27,9 +28,11 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from . import config
 from .partitioners import default_partition
-from torch._guards import TracingContext, DuplicateInputs
+from torch._guards import TracingContext, DuplicateInputs, Source
 
 log = logging.getLogger(__name__)
+aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
+aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 MutationType = Enum(
     "MutationType", ("none", "metadata_only", "data", "data_and_metadata")
@@ -67,7 +70,7 @@ pytree._register_pytree_node(
     immutable_collections.immutable_dict,
     lambda x: (list(x.values()), list(x.keys())),
     lambda x, c: immutable_collections.immutable_dict(
-        {key: value for key, value in zip(c, x)}
+        dict(zip(c, x))
     ),
 )
 
@@ -844,6 +847,8 @@ class AOTConfig:
     aot_id: int
     keep_inference_input_mutations: bool
     dynamic_shapes: bool = False
+    aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
+    inference_compiler: Optional[Callable] = None
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
@@ -1112,7 +1117,7 @@ def create_functionalized_graph(
         return functionalized_f_helper(*args)
 
     with enable_python_dispatcher():
-        return make_fx(joint_helper if trace_joint else fwd_helper, aot_config.decompositions)(*args)
+        return make_fx(joint_helper if trace_joint else fwd_helper, decomposition_table=aot_config.decompositions)(*args)
 
 
 def normalize_as_list(x):
@@ -1234,22 +1239,25 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
         trace_joint=False,
     )
 
-    if not aot_config.keep_inference_input_mutations:
-        # As long as we opted to remove input mutations, then
-        # there should be *NO* mutating ops in the graph at this point.
-        assert_functional_graph(fw_module.graph)
-        fw_module.graph.eliminate_dead_code()
-        fw_module.recompile()
+    # As long as we opted to remove input mutations, then
+    # there should be *NO* mutating ops in the graph at this point.
+    copy_count = assert_functional_graph(fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)
 
-    if config.debug_graphs:
-        log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
-        log.debug(fw_module.print_readable(print_output=False))
+    fw_module.graph.eliminate_dead_code()
+    fw_module.recompile()
+
+    copy_count2 = assert_functional_graph(fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)
+
+    assert copy_count == copy_count2
+
+    aot_graphs_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
 
     with context(), track_graph_compiling(aot_config, "inference"):
-        compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
+        compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
+        compiled_fw = compiler(fw_module, flat_args)
 
     compiled_fn = create_runtime_wrapper(
         compiled_fw,
@@ -1261,11 +1269,27 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     return compiled_fn
 
 
-def assert_functional_graph(fx_g: torch.fx.Graph):
+# Returns the number of detected copy_
+def assert_functional_graph(fx_g: torch.fx.Graph, *, allow_input_mutations: bool = False) -> int:
+    placeholders = set()
+    copy_count = 0
+    # NB: It would also be nice to verify that the mutations all happen at the
+    # end, but we also do some administrative views after mutations so this
+    # isn't actually true.  (TODO: Could this cause problems for Inductor?)
     for n in fx_g.nodes:
+        if n.op == "placeholder":
+            placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            assert not n.target._schema.is_mutable, \
-                f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+            if n.target is aten.copy_.default and allow_input_mutations:
+                suffix = True
+                # Can only copy_ into an input, and can only do so once
+                assert n.args[0] in placeholders
+                placeholders.remove(n.args[0])
+                copy_count += 1
+            else:
+                assert not n.target._schema.is_mutable, \
+                    f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+    return copy_count
 
 
 @contextmanager
@@ -1838,22 +1862,15 @@ def aot_wrapper_dedupe(
     updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask)
 
     tracing_context = TracingContext.get()
-    if tracing_context:
+    if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
         for dupe_arg_pos, kept_pos in add_dupe_map.items():
-            dupe_arg_dict = flat_args[dupe_arg_pos].__dict__
-            kept_arg_dict = flat_args[kept_pos].__dict__
-            if 'graph_arg_pos' in dupe_arg_dict and 'graph_arg_pos' in kept_arg_dict:
-                d_positions = dupe_arg_dict['graph_arg_pos']
-                k_positions = kept_arg_dict['graph_arg_pos']
-                assert(d_positions == k_positions)
-                if len(d_positions) > 1:
-                    for i in range(1, len(d_positions)):
-                        pos = d_positions[i]
-                        pre_pos = d_positions[i - 1]
-                        tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(pre_pos, pos))
+            if dupe_arg_pos != kept_pos:
+                dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[dupe_arg_pos]
+                kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[kept_pos]
+                tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_arg_source, dupe_arg_source))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
@@ -2052,7 +2069,14 @@ def create_runtime_wrapper(
         compiled_fn = make_boxed_func(compiled_fn)
 
     def runtime_wrapper(*args):
-        with torch.autograd._force_original_view_tracking(True):
+        if trace_joint:
+            with torch.autograd._force_original_view_tracking(True):
+                all_outs = call_func_with_args(
+                    compiled_fn,
+                    args,
+                    disable_amp=True,
+                )
+        else:
             all_outs = call_func_with_args(
                 compiled_fn,
                 args,
@@ -2247,9 +2271,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             "Graph partitioning without functionalization is not sound, we may introduce errors"
         )
 
-    if config.debug_joint:
-        log.debug(f"====== Joint graph {aot_config.aot_id} ======")
-        log.debug(fx_g.print_readable(print_output=False))
+    aot_joint_log.info(format_graph_code(f"====== Joint graph {aot_config.aot_id} =====\n", fx_g))
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
@@ -2266,11 +2288,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             ]
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
-        if config.debug_graphs:
-            log.debug(f"====== Forward graph {aot_config.aot_id} ======")
-            log.debug(fw_module.print_readable(print_output=False))
-            log.debug(f"====== Backward graph {aot_config.aot_id} ======")
-            log.debug(bw_module.print_readable(print_output=False))
+        aot_graphs_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
+        aot_graphs_log.info(format_graph_code(f"====== Backward graph {aot_config.aot_id} ======\n", bw_module))
 
         with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(
@@ -2470,7 +2489,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                                 aot_config.bw_compiler, None, None,
                                 aot_config.decompositions, 0, aot_config.aot_id,
                                 aot_config.keep_inference_input_mutations,
-                                aot_config.dynamic_shapes
+                                aot_config.dynamic_shapes,
+                                inference_compiler=None,
+                                aot_autograd_arg_pos_to_source=None,
                             )
                         )
                     else:
@@ -2581,8 +2602,6 @@ def create_aot_dispatcher_function(
         **aot_autograd_decompositions,
         **aot_config.decompositions,
     }
-
-    log.setLevel(config.log_level)
 
     # NB: don't bother setting allow_fallback_kernels; this should not actually
     # be configurable in fake tensor, we should automatically do the right
@@ -2710,6 +2729,7 @@ def aot_function(
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
     keep_inference_input_mutations: bool = False,
+    inference_compiler: Optional[Callable] = None,
     *,
     # Whether or not to trace with dynamic shapes
     dynamic=False,
@@ -2725,9 +2745,6 @@ def aot_function(
     function can be used to perform optimizations such as recomputation. One can
     set `decompositions` dictionary to decompose the operators into a sequence
     of core or simpler operators supported by the backend compilers.
-
-    :func:`aot_function` uses a compilation cache, based on input tensor
-    properties, to detect when there is a need of recompilation.
 
     .. warning::
         This API is experimental and likely to change.
@@ -2747,7 +2764,11 @@ def aot_function(
             backward graphs.
         decompositions (Dict): A dictionary to define the decomposition of
             larger Aten ops into simpler or core Aten ops.
-
+        inference_compiler (Optional[Callable]): A Python function that accepts an
+            Fx graph with Aten ops and input args, and returns a Callable that
+            semantically is equivalent to the input Fx graph. inference_compiler is invoked
+            if no autograd is needed. Default: None
+            (when None, it defaults to the :attr:`fw_compiler`)
     Returns:
         Returns a ``Callable`` that retains the eager behavior of the original
         :attr:`fn`, but with forward and backward graph compiled via
@@ -2771,15 +2792,19 @@ def aot_function(
 
     if bw_compiler is None:
         bw_compiler = fw_compiler
+    if inference_compiler is None:
+        inference_compiler = fw_compiler
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
+        inference_compiler=fw_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic,
+        aot_autograd_arg_pos_to_source=None,
     )
     cached_res = None
 
@@ -2897,6 +2922,7 @@ def aot_module_simplified(
     hasher_type=None,
     static_argnums=None,
     keep_inference_input_mutations=False,
+    inference_compiler: Optional[Callable] = None,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -2962,10 +2988,39 @@ def aot_module_simplified(
     assert static_argnums is None
     if bw_compiler is None:
         bw_compiler = fw_compiler
+    if inference_compiler is None:
+        inference_compiler = fw_compiler
 
     full_args = []
+    # First, the params
     full_args.extend(params_flat)
+
+    aot_autograd_arg_pos_to_source = None
+    # Then, the params 1:1 mapped sources, if relevant.
+    if hasattr(mod, "_param_name_to_source"):
+        aot_autograd_arg_pos_to_source = []
+        # We now know this came from dynamo, and (1) we care about guards,
+        # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
+        # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
+        for name in params.keys():
+            assert name in mod._param_name_to_source, f"{name} not found."
+            aot_autograd_arg_pos_to_source.append(mod._param_name_to_source[name])
+
+    # Next, the input args
     full_args.extend(args)
+
+    if hasattr(mod, "graph"):
+        # Non dynamo entrypoints can get to here...
+        for i, node in enumerate(mod.graph.nodes):
+            if node.op == "placeholder":
+                if hasattr(node, "_dynamo_source"):
+                    # ... but not here!
+                    if aot_autograd_arg_pos_to_source is None:
+                        aot_autograd_arg_pos_to_source = []
+                    aot_autograd_arg_pos_to_source.append(node._dynamo_source)
+
+    if aot_autograd_arg_pos_to_source is not None:
+        assert len(full_args) == len(aot_autograd_arg_pos_to_source)
 
     dynamic_shapes = False
     for x in full_args:
@@ -2976,12 +3031,14 @@ def aot_module_simplified(
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
+        inference_compiler=inference_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
         num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
-        dynamic_shapes=dynamic_shapes
+        dynamic_shapes=dynamic_shapes,
+        aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source
     )
 
     compiled_fn = create_aot_dispatcher_function(
