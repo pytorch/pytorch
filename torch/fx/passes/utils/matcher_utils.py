@@ -9,7 +9,7 @@ from typing import Dict, List, Set, Any, Union, Tuple
 import logging
 import os
 
-__all__ = ['SubgraphMatcher', 'InternalMatch', 'replace_literals_with_placeholders']
+__all__ = ['SubgraphMatcher', 'InternalMatch']
 
 # Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
 def _init_logger():
@@ -52,7 +52,8 @@ class SubgraphMatcher:
     def __init__(self, pattern: Graph,
                  match_output: bool = False,
                  match_placeholder: bool = False,
-                 remove_overlapping_matches: bool = True) -> None:
+                 remove_overlapping_matches: bool = True,
+                 ignore_literals: bool = False) -> None:
         """
         Args:
             pattern: the targeted matching pattern, represented in fx.Graph.
@@ -62,12 +63,15 @@ class SubgraphMatcher:
                 the targeted pattern. If False, placeholder nodes will be used a wildcard.
             remove_overlapping_matches: If True, in the case of overlapping matches, only the first match
                 will be returned.
+            ignore_literals: If True, will not check if literals are equal and
+                will instead treat them as wildcards.
         """
 
         self.pattern = pattern
         self.match_output = match_output
         self.match_placeholder = match_placeholder
         self.remove_overlapping_matches = remove_overlapping_matches
+        self.ignore_literals = ignore_literals
 
         if len(pattern.nodes) == 0:
             raise ValueError("SubgraphMatcher cannot be initialized with an empty pattern")
@@ -217,7 +221,8 @@ class SubgraphMatcher:
                 elif isinstance(a1, (list, tuple)) and isinstance(a2, (list, tuple)):
                     matched = _match_args(a1, a2)
                 else:
-                    matched = self._match_literals(a1, a2, match)
+                    if not self.ignore_literals:
+                        matched = self._match_literals(a1, a2, match)
 
                 if not matched:
                     return False
@@ -350,52 +355,3 @@ class SubgraphMatcher:
         logger.info(f"Matches returned: {matches}")
 
         return matches
-
-
-@compatibility(is_backward_compatible=False)
-def replace_literals_with_placeholders(graph: torch.fx.Graph) -> torch.fx.Graph:
-    """
-    Replaces all the literals that are passed into call_function nodes in the
-    graph as placeholders in the graph. This way during matching these literals
-    will not be compared and will instead be wildcards.
-
-    Note that after this pass the graph module might no longer runnable since
-    we add new arguments/placeholders which can also cause a misalignment
-    between the in_spec and the actual inputs to the graph.
-    """
-    last_placeholder = None  # Place to insert more placeholder nodes
-    for node in graph.nodes:
-        if node.op != "call_function":
-            if node.op == "placeholder":
-                last_placeholder = node
-            continue
-
-        with graph.inserting_after(last_placeholder):
-            if hasattr(node.target, "_schema"):
-                schemas = node.target._schema.arguments
-            else:
-                schemas = None
-
-            args_mapped = []
-            for i, arg in enumerate(node.args):
-                if not isinstance(arg, torch.fx.Node):
-                    # Create a placeholder node
-                    name = schemas[i].name if schemas is not None else "ph"
-                    new_placeholder = graph.placeholder(name)
-                    args_mapped.append(new_placeholder)
-                else:
-                    args_mapped.append(arg)
-
-            kwargs_mapped = {}
-            for kw, arg in node.kwargs.items():
-                if not isinstance(arg, torch.fx.Node):
-                    # Create a placeholder node
-                    new_placeholder = graph.placeholder(kw)
-                    kwargs_mapped[kw] = new_placeholder
-                else:
-                    kwargs_mapped[kw] = arg
-
-        node.args = tuple(args_mapped)
-        node.kwargs = kwargs_mapped
-
-    return graph
