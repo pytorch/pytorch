@@ -169,7 +169,7 @@ def compile_fx_inner(
     ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
 
     with V.set_fake_mode(fake_mode):
-        pattern_matcher.fx_passes(gm)
+        pattern_matcher.post_grad_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
         graph = GraphLowering(
