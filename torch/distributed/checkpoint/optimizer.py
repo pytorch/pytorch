@@ -202,7 +202,7 @@ def load_sharded_optimizer_state_dict(
     storage_reader: dist_cp.StorageReader,
 ) -> STATE_DICT_TYPE:
     """
-    Loads a state_dict in conjuntion with FSDP sharded optimizer state.
+    Loads a state_dict in conjunction with FSDP sharded optimizer state.
     This is the current recommended way to checkpoint FSDP.
     >>> # xdoctest: +SKIP
     >>> import torch.distributed.checkpoint as dist_cp

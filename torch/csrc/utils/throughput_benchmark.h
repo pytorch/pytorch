@@ -46,7 +46,7 @@ struct BenchmarkConfig {
   int num_calling_threads{1};
   // Worker threads are not supported yet. This is just an example that we plan
   // to support some sort of multi-threaded forward calls. We may change this
-  // setting in the future to support different intra and inter op parallelizm
+  // setting in the future to support different intra and inter op parallelism
   // which is not available in PyTorch yet
   int num_worker_threads{1};
   // Warmup iters are used to make sure we run a module a few times before
@@ -79,7 +79,7 @@ class BenchmarkHelper {
   // even when running in the nn.Module mode. Otherwise destructor of the result
   // would race with Python
   void runOnce(Input&&) const;
-  // This method is to be used when calling from Python dirrectly
+  // This method is to be used when calling from Python directly
   Output runOnce(py::args&&, py::kwargs&&) const;
   // Aggregate input in the format Model expects in order to avoid further
   // conversions at the benchmark time
@@ -162,7 +162,7 @@ void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
  * component to support inter and intra-op parallelism as well as multiple
  * models running in a single process.
  *
- * For current available configurations refer to the BenchmkarConfig
+ * For current available configurations refer to the BenchmarkConfig
  * documentation
  *
  * The class supports working with either nn.Module or ScriptModule.
@@ -180,7 +180,7 @@ class C10_HIDDEN ThroughputBenchmark {
   // validation of its own
   void addInput(py::args args, py::kwargs kwargs);
 
-  // Equivalent to just running the model dirrectly on the given input
+  // Equivalent to just running the model directly on the given input
   py::object runOnce(py::args&& args, py::kwargs&& kwargs);
 
   // The main method of the class allows to perform a multi-threaded benchmark
