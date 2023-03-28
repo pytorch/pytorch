@@ -254,7 +254,7 @@ int MaybeExchangeDevice(int to_device) {
   if (hasPrimaryContext(to_device)) {
     return c10::cuda::MaybeSetDevice(to_device);
   }
-
+  targetDeviceIndex = -1;
   int cur_device;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
   if (to_device == cur_device) {
