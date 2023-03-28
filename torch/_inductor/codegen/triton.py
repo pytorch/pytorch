@@ -922,7 +922,9 @@ class TritonKernel(Kernel):
 
         if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             if copy_shape:
-                index_str = f"{index_str} + tl.zeros({copy_shape}.shape, {self.index_dtype})"
+                index_str = (
+                    f"{index_str} + tl.zeros({copy_shape}.shape, {self.index_dtype})"
+                )
                 expand_str = f"{copy_shape}.shape"
             else:
                 index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, {self.index_dtype})"
@@ -1638,13 +1640,20 @@ class TritonScheduling:
 
     @staticmethod
     def can_use_32bit_indexing(buffers: Iterable[ir.Buffer]):
-        int_max = 2**31 - 1
-        buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
-        if not all(V.graph.sizevars.size_hint(size) <= int_max for size in buf_sizes):
-            return False
+        int_max = torch.iinfo(torch.int32).max
+        buf_numel = [sympy_product(buf.get_size()) for buf in buffers]
+        buf_storage_sizes = [buf.get_layout().storage_size() for buf in buffers]
+        for numel, storage_size in zip(buf_numel, buf_storage_sizes):
+            if V.graph.sizevars.size_hint(numel) > int_max:
+                return False
+            if V.graph.sizevars.size_hint(storage_size) > int_max:
+                return False
 
-        for size in buf_sizes:
-            V.graph.sizevars.guard_leq(size, int_max)
+        # Only install guards for 32-bit indexing as there is no correctness
+        # issue with using 64-bit for everything
+        for numel, storage_size in zip(buf_numel, buf_storage_sizes):
+            V.graph.sizevars.guard_leq(numel, int_max)
+            V.graph.sizevars.guard_leq(storage_size, int_max)
         return True
 
     @staticmethod

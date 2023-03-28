@@ -1859,7 +1859,7 @@ class MutationLayout(Layout):
             target.get_size(),
             None,  # type: ignore[arg-type]
         )
-        self.target = target.target if isinstance(target, MutationLayout) else target
+        self.target = target
 
     @Layout.stride.getter
     def stride(self):
@@ -1869,7 +1869,17 @@ class MutationLayout(Layout):
         return self.real_layout().storage_size()
 
     def real_layout(self):
-        return self.target.layout
+
+        def unwrap_views(target):
+            if isinstance(target, MutationLayout):
+                return unwrap_views(target.target)
+            if isinstance(target, BaseView):
+                return unwrap_views(target.unwrap_view())
+            if isinstance(target, MutableBox):
+                return unwrap_views(target.data)
+            return target
+
+        return unwrap_views(self.target).layout
 
     @classmethod
     def realize_into(cls, src, dst):
