@@ -892,6 +892,8 @@ class CppKernel(Kernel):
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = DeferredIndentedBuffer()
+        self.reduction_prefix_prepend = []
+        self.reduction_suffix_prepend = []
         self.reduction_var_map = {}
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.preloads = IndentedBuffer()
@@ -951,7 +953,7 @@ class CppKernel(Kernel):
         index = self.rename_indexing(index)
         self.reduction_var_map[tmpvar] = reduction_type
         if argmax_or_argmin:
-            self.reduction_prefix.writelines(
+            self.reduction_prefix_prepend.extend(
                 argmax_argmin_prefix(reduction_type, src_dtype, tmpvar)
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
@@ -965,11 +967,11 @@ class CppKernel(Kernel):
             )
         else:
             if dtype in (torch.float16, torch.bfloat16):
-                self.reduction_prefix.writeline(
+                self.reduction_prefix_prepend.append(
                     f"float {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
             else:
-                self.reduction_prefix.writeline(
+                self.reduction_prefix_prepend.append(
                     f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
             self.stores.writeline(
@@ -979,8 +981,8 @@ class CppKernel(Kernel):
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
             member_name = ".index" if argmax_or_argmin else ""
-            self.reduction_suffix.writeline(
-                name, f"{var}[{cexpr(index)}] = {tmpvar}{member_name};"
+            self.reduction_suffix_prepend.append(
+                (name, f"{var}[{cexpr(index)}] = {tmpvar}{member_name};")
             )
         self.cse.store_cache[name] = tmpvar
 
@@ -1033,6 +1035,32 @@ class CppKernel(Kernel):
                 if hasattr(kernel, "codegen_inner_loops"):
                     code.splice(kernel.poststores)
 
+            def get_reduction_code_buffer(loops, is_suffix=True):
+                """Dedup the lines in prefix/suffix prepended list"""
+                code = DeferredIndentedBuffer() if is_suffix else IndentedBuffer()
+                dedup = set()
+                for loop in loops:
+                    for kernel in loop.get_kernels():
+                        reduction_prepend = (
+                            kernel.reduction_suffix_prepend
+                            if is_suffix
+                            else kernel.reduction_prefix_prepend
+                        )
+                        for item in reduction_prepend:
+                            line = item[1] if is_suffix else item
+                            if line not in dedup:
+                                if is_suffix:
+                                    code.writeline(item[0], line)
+                                else:
+                                    code.writeline(line)
+                                dedup.add(line)
+                        code.splice(
+                            kernel.reduction_suffix
+                            if is_suffix
+                            else kernel.reduction_prefix
+                        )
+                return code
+
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
                 with contextlib.ExitStack() as stack_outer:
                     if loops:
@@ -1040,12 +1068,12 @@ class CppKernel(Kernel):
                         if loop.is_reduction() and not in_reduction:
                             kernels = loop.get_kernels()
                             assert kernels
-                            # TODO(jgong5): should gen prefix for all kernels.
-                            # currently, Vec kernel generates prefix for both
-                            # vector and scalar kernels.
-                            if kernels[0].reduction_prefix:
+                            reduction_prefix = get_reduction_code_buffer(
+                                loops, is_suffix=False
+                            )
+                            if reduction_prefix:
                                 stack_outer.enter_context(code.indent())
-                            code.splice(kernels[0].reduction_prefix)
+                            code.splice(reduction_prefix)
                         if loop_nest.is_reduction_only() and loop.parallel:
                             worksharing.parallel(threads)
 
@@ -1053,13 +1081,13 @@ class CppKernel(Kernel):
                         gen_loop(loop, in_reduction)
 
                     if loops:
+                        loop = loops[0]
                         if loop_nest.is_reduction_only() and loop.parallel:
                             worksharing.close()
-                        for loop in loops:
-                            if loop.is_reduction() and not in_reduction:
-                                kernels = loop.get_kernels()
-                                for kernel in kernels:
-                                    code.splice(kernel.reduction_suffix)
+                        if loop.is_reduction() and not in_reduction:
+                            code.splice(
+                                get_reduction_code_buffer(loops, is_suffix=True)
+                            )
 
             def gen_loop(loop: LoopLevel, in_reduction=False):
                 with contextlib.ExitStack() as stack:
@@ -1236,7 +1264,7 @@ class CppVecKernel(CppKernel):
             vec_reduc_prefix += f"{reduction_init(reduction_type, dtype)}"
             vec_reduc_prefix += "}})"
             self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
-            self.reduction_prefix.writeline(vec_reduc_prefix)
+            self.reduction_prefix_prepend.append(vec_reduc_prefix)
 
         tmpvar = self.reduction_cse.generate(
             self.loads, f"reduction {name} {cexpr(index)}", write=False
@@ -1245,10 +1273,10 @@ class CppVecKernel(CppKernel):
 
         index = self.rename_indexing(index)
         self.reduction_var_map[tmpvar_vec] = reduction_type
-        self.reduction_prefix.writeline(
+        self.reduction_prefix_prepend.append(
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
-        self.reduction_prefix.writeline(
+        self.reduction_prefix_prepend.append(
             f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
         )
         self.stores.writeline(
@@ -1270,9 +1298,8 @@ class CppVecKernel(CppKernel):
             reduce_all_body += "}"
             vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
             next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
-            self.reduction_suffix.writeline(
-                name,
-                f"{reduction_combine(reduction_type, tmpvar, next_value)};",
+            self.reduction_suffix_prepend.append(
+                (name, f"{reduction_combine(reduction_type, tmpvar, next_value)};")
             )
         elif name not in V.graph.removed_buffers:
             # Vertical reduction
@@ -1280,8 +1307,8 @@ class CppVecKernel(CppKernel):
             new_index = self.scale_index_with_offset(
                 index, self.tiling_factor, itervar_idx=self.tiling_idx
             )
-            self.reduction_suffix.writeline(
-                name, f"{tmpvar_vec}.store({var} + {cexpr(new_index)});"
+            self.reduction_suffix_prepend.append(
+                (name, f"{tmpvar_vec}.store({var} + {cexpr(new_index)});")
             )
         self.cse.store_cache[name] = tmpvar
 
