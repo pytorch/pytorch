@@ -385,7 +385,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
     const Tensor& qkv_bias,
     const int64_t num_head) {
   auto B = qkv.is_nested()
-      ? get_nested_tensor_impl(qkv)->get_nested_size_tensor().size(0)
+      ? get_nested_tensor_impl(qkv)->get_nested_sizes().size(0)
       : qkv.size(0);
   // TODO: calculate this without the std::vector -- NestedTensor_to_mask wants
   // this too
@@ -452,7 +452,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
         if (qkv.is_nested()) {
           auto* nt_qkv = get_nested_tensor_impl(qkv);
           const at::Tensor& nt_qkv_buffer = nt_qkv->get_buffer();
-          auto sizes = collapse_dims_1_and_2(nt_qkv->get_nested_size_tensor());
+          auto sizes = collapse_dims_1_and_2(nt_qkv->get_nested_sizes());
           auto offsets =
               NestedTensor_batch_offsets_from_size_tensor(sizes, sizes.numel());
           at::native::narrow_symint(offsets, 0, sizes.numel() + 1, sizes.numel())
@@ -542,7 +542,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
       "expected `qkv_weight` second dim to be embed_Dim");
   TORCH_CHECK(
       qkv_bias.dim() == 1,
-      "expected 2-D `qkv_bias`, got ",
+      "expected 1-D `qkv_bias`, got ",
       qkv_bias.dim(),
       "-D tensor");
   TORCH_CHECK(
@@ -552,7 +552,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
 #ifndef NDEBUG
   const auto B = query.is_nested()
-      ? get_nested_tensor_impl(query)->get_nested_size_tensor().size(0)
+      ? get_nested_tensor_impl(query)->get_nested_sizes().size(0)
       : query.sizes()[0];
   auto T = query.is_nested() ? 0 : query.sizes()[1];
 
@@ -800,23 +800,6 @@ int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Te
   }
   return static_cast<int64_t>(backend);
 }
-bool _chunk_grad_outputs_efficient_attention(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    bool is_causal) {
-
-  int64_t M = query.size(2);
-  int64_t N = key.size(2);
-
-  bool grad_kv_needs_init = is_causal && N > M;
-  bool is_aliased = query.storage().is_alias_of(key.storage()) && query.storage().is_alias_of(value.storage());
-  bool equal_seq_len = query.size(2) == key.size(2);
-  bool q_v_same_head_dim = query.size(3) == value.size(3);
-  bool chunk_grad_outputs = (!grad_kv_needs_init && equal_seq_len && q_v_same_head_dim && is_aliased);
-  return chunk_grad_outputs;
-}
-
 
 std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
     const Tensor& query,
@@ -1041,6 +1024,25 @@ Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tenso
 }
 
 REGISTER_CUDA_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cuda);
+
+// !!This function is deprecated. See FunctionsManual.cpp for the implementation!!
+bool _chunk_grad_outputs_efficient_attention(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool is_causal) {
+
+  int64_t M = query.size(2);
+  int64_t N = key.size(2);
+
+  bool grad_kv_needs_init = is_causal && N > M;
+  bool is_aliased = query.storage().is_alias_of(key.storage()) && query.storage().is_alias_of(value.storage());
+  bool equal_seq_len = query.size(2) == key.size(2);
+  bool q_v_same_head_dim = query.size(3) == value.size(3);
+  bool chunk_grad_outputs = (!grad_kv_needs_init && equal_seq_len && q_v_same_head_dim && is_aliased);
+  return chunk_grad_outputs;
+}
+
 
 } // namespace native
 } // namespace at

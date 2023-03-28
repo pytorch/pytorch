@@ -10,20 +10,24 @@ import functools
 import gc
 import inspect
 import itertools
-import logging.config
+import logging
 import math
 import operator
 import os
 import pstats
 import re
 import sys
+import textwrap
 import time
 import types
 import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
+
+import torch._logging
+from . import config
 
 try:
     import numpy as np
@@ -43,10 +47,8 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
-from . import config, logging as torchdynamo_logging
-
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
+troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
@@ -255,21 +257,38 @@ class DuplicateWarningChecker:
 graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
-def init_logging():
-    torchdynamo_logging.init_logging(
-        config.log_level, log_file_name=config.log_file_name
-    )
+def setup_compile_debug():
+    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    exitstack = contextlib.ExitStack()
+
+    if compile_debug:
+        torch._logging.set_logs(
+            dynamo=logging.DEBUG,
+            aot=logging.DEBUG,
+            inductor=logging.DEBUG,
+            output_code=True,  # this is off by default
+        )
+
+        debug_file_handler = add_file_handler()
+        exitstack.callback(lambda: log.removeHandler(debug_file_handler))
+
+    return exitstack
+
+
+def reset_graph_break_dup_checker():
     graph_break_dup_warning_checker.reset()
 
 
-def format_graph_tabular(graph):
-    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
-    return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
+def add_file_handler():
+    log_path = os.path.join(get_debug_dir(), "torchdynamo")
+    if not os.path.exists(log_path):
+        os.makedirs(log_path)
 
-
-def format_bytecode(prefix, name, filename, line_no, code):
-    return f"{prefix} {name} {filename}\
- line {line_no} \n{dis.Bytecode(code).dis()}\n "
+    log_file = logging.FileHandler(os.path.join(log_path, "debug.log"))
+    log_file.setLevel(logging.DEBUG)
+    logger = logging.getLogger("torch._dynamo")
+    logger.addHandler(log_file)
+    return log_file
 
 
 def gen_record_file_name(exc, code):
@@ -1059,43 +1078,57 @@ class CompileProfiler:
             [format_func_info(code), num_recompiles(code), recompile_reasons(code)]
             for code in gf
         ]
-        rpt = "Torchdynamo Profiler Report\n"
-        if "graph_break" in counters:
-            rpt += "\n"
-            rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
-            rpt += (
-                "You may gain additional insight by passing `nopython=True` to torch._dynamo.optimize, "
-                "to break on the first condition.\n"
-            )
-            graph_breaks = counters["graph_break"]
-            rpt += tabulate(
-                [[msg, graph_breaks[msg]] for msg in graph_breaks],
-                headers=["Graph Break Reason", "Count"],
-            )
 
-        if len(gf):
-            max_recompiles = max([num_recompiles(code) for code in gf])
-            rpt += "\n"
-            rpt += (
-                "These subgraphs were recompiled more than once due to guard failures."
-            )
-            rpt += (
-                "Guard failures indicate some condition assumed to be static by the tracer changed, "
-                "making it unsafe to reuse the compiled program."
-            )
-            rpt += tabulate(
-                summarized_gf,
-                headers=["Function", "Num Recompiles", "Recompile Reasons"],
-            )
-            rpt += "\n"
-            rpt += (
-                f"Set torch._dynamo.config.cache_size_limit to "
-                f"{max_recompiles} to avoid being cache limited.\n"
-            )
-        else:
-            rpt += "No cache-limited recompilations detected.\n"
+        def graph_break_report():
+            if "graph_break" in counters:
+                graph_breaks = counters["graph_break"]
+                return tabulate(
+                    [[msg, graph_breaks[msg]] for msg in graph_breaks],
+                    headers=["Graph Break Reason", "Count"],
+                )
 
-        return rpt
+        def recompilation_report():
+            if len(gf):
+                max_recompiles = max([num_recompiles(code) for code in gf])
+                recomp_table = tabulate(
+                    summarized_gf,
+                    headers=["Function", "Recompiles", "Recompile Reasons"],
+                )
+                return recomp_table + textwrap.dedent(
+                    f"""
+
+                    Set torch._dynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.
+                """
+                )
+
+        report = textwrap.dedent(
+            """
+            Torchdynamo Profiler Report
+            ===========================
+
+            Graph Breaks
+            ------------
+            Graph breaks happen when torchdynamo encounters code it can't safely trace.
+            If you want to find out why breaks are happening, check below for each break reason
+            You may gain additional insight by passing `fullgraph=True` to torch.compile,
+            to stop at the first break.
+
+        """
+        )
+        report += graph_break_report() or "No graph breaks detected."
+        report += textwrap.dedent(
+            """
+
+            Recompilation
+            -------------
+            These subgraphs were recompiled more than once due to guard failures
+            Guard failures indicate some condition assumed to be static by the tracer changed,
+            making it unsafe to reuse the compiled program.
+
+        """
+        )
+        report += recompilation_report() or "No recompilation detected.\n"
+        return report
 
 
 # return same dir unless user changes config between calls
@@ -1336,15 +1369,12 @@ def get_custom_getattr(value: Any):
 
 
 class TensorStaticReason(enum.Enum):
-    NO_SOURCE = 1
     PARAMETER = 2
     CONFIG_NOT_DYN = 3
     NOT_TENSOR = 4
 
 
 def tensor_static_reason_to_message(reason: TensorStaticReason):
-    if reason == TensorStaticReason.NO_SOURCE:
-        return "mark_dynamic usage without a source is illegal."
     if reason == TensorStaticReason.PARAMETER:
         return "mark_dynamic on parameter, parameters are always static today."
     if reason == TensorStaticReason.CONFIG_NOT_DYN:
@@ -1355,23 +1385,19 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 
 
 def tensor_always_has_static_shape(
-    tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
+    tensor: Union[torch.Tensor, Any], is_tensor: bool
 ) -> Tuple[bool, TensorStaticReason]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
 
     Args:
     tensor - the real tensor to evaluate, parameters force a static shape.
-    source - an optional source, None forces a static shape
     is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
     tensors not in a TensorVariable for whatever reason are forced static.
 
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    if source is None:
-        # TODO(voz): Look into why we need this case?
-        return True, TensorStaticReason.NO_SOURCE
     if type(tensor) is torch.nn.Parameter:
         return True, TensorStaticReason.PARAMETER
     if config.dynamic_shapes is False:
@@ -1379,3 +1405,33 @@ def tensor_always_has_static_shape(
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     return False, None
+
+
+def format_graph_code(name, gm):
+    return _format_graph_code(
+        name, gm.forward.__code__.co_filename, gm.print_readable(print_output=False)
+    )
+
+
+def _format_graph_code(name, filename, graph_str):
+    return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
+
+
+def format_graph_tabular(fn_name, gm):
+    try:
+        from tabulate import tabulate  # TODO: Check that this is installed
+    except ImportError:
+        return (
+            "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
+            + format_graph_code(fn_name, gm)
+        )
+
+    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes]
+    graph_str = tabulate(
+        node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
+    )
+    return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
+
+
+def format_bytecode(prefix, name, filename, line_no, code):
+    return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
