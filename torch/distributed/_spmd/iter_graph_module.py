@@ -108,6 +108,7 @@ class IterGraph(fx.Graph):
     def _find_output(graph: fx.Graph) -> fx.Node:
         output: Optional[fx.Node] = None
         for output in reversed(graph.nodes):
+            assert output is not None
             if output.target == "output":
                 break
         assert output is not None
