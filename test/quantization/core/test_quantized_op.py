@@ -4521,7 +4521,7 @@ class TestQuantizedConv(TestCase):
 
         if transposed:
             W_packed = qconv_prepack_fn(W_q, bias, strides, i_pads, o_pads,
-                                        dilations, groups)
+                                        groups, dilations)
         else:
             W_packed = qconv_prepack_fn(W_q, bias, strides, i_pads, dilations,
                                         groups)
@@ -4696,7 +4696,7 @@ class TestQuantizedConv(TestCase):
         if qconv_prepack_fn is not None:
             if use_transpose:
                 W_prepack = qconv_prepack_fn(
-                    W_q, bias_float, strides, pads, o_pads, dilations, groups)
+                    W_q, bias_float, strides, pads, o_pads, groups, dilations)
             else:
                 W_prepack = qconv_prepack_fn(
                     W_q, bias_float, strides, pads, dilations, groups)
