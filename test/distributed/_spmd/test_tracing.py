@@ -114,7 +114,9 @@ class TraceDeviceMeshTestBase:
             to_receive = torch.empty_like(
                 scattered_tensors[mesh.get_coordinate()[dim]]
             )
-            traced_fn = make_fx(fn)(to_receive, [t + 1 for t in scattered_tensors])
+            traced_fn = make_fx(fn)(
+                to_receive, [t + 1 for t in scattered_tensors]
+            )
 
             received_tensor = traced_fn(to_receive, scattered_tensors)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
@@ -148,7 +150,9 @@ class TraceDeviceMeshTestBase:
 
             self.assertEqual(len(gathered_list), dim_group_size)
             for idx, gathered_tensor in enumerate(gathered_list):
-                self.assertEqual(gathered_tensor, torch.ones(3, 3) * global_ranks[idx])
+                self.assertEqual(
+                    gathered_tensor, torch.ones(3, 3) * global_ranks[idx]
+                )
 
 
 class TraceDeviceMesh3DTest(DTensorTestBase, TraceDeviceMeshTestBase):
@@ -206,10 +210,14 @@ class TraceModuleTest(DTensorTestBase):
         spmd = SPMD(
             deepcopy(model),
             schema=Schema(
-                mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
+                mesh=DeviceMesh(
+                    self.device_type, torch.arange(self.world_size)
+                ),
                 placements=[Replicate()],
             ),
-            input_schemas=kwargs["inp_schemas"] if "inp_schemas" in kwargs else None,
+            input_schemas=kwargs["inp_schemas"]
+            if "inp_schemas" in kwargs
+            else None,
         )
         if "inp_schemas" in kwargs:
             del kwargs["inp_schemas"]
@@ -229,7 +237,8 @@ class TraceModuleTest(DTensorTestBase):
             # _Partial tensor shouldn't do that automatically. Hence explicitly
             # do division here.
             self.assertTrue(
-                p1.grad.allclose(p2.grad / self.world_size) or p1.grad.allclose(p2.grad)
+                p1.grad.allclose(p2.grad / self.world_size)
+                or p1.grad.allclose(p2.grad)
             )
 
     @with_comms
@@ -250,7 +259,9 @@ class TraceModuleTest(DTensorTestBase):
         inp_kwargs = {}
         inp_kwargs["inp_schemas"] = [
             Schema(
-                mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
+                mesh=DeviceMesh(
+                    self.device_type, torch.arange(self.world_size)
+                ),
                 placements=[Replicate()],
             )
         ]
@@ -308,7 +319,9 @@ class TraceModuleTest(DTensorTestBase):
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.module_list = nn.ModuleList([nn.Linear(10, 10) for _ in range(2)])
+                self.module_list = nn.ModuleList(
+                    [nn.Linear(10, 10) for _ in range(2)]
+                )
 
             def forward(self, x):
                 return sum([m(x) for m in self.module_list])
@@ -334,7 +347,9 @@ class TraceModuleTest(DTensorTestBase):
             SPMD(
                 deepcopy(top_model),
                 schema=Schema(
-                    mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
+                    mesh=DeviceMesh(
+                        self.device_type, torch.arange(self.world_size)
+                    ),
                     placements=[Replicate()],
                 ),
             ),
@@ -349,7 +364,8 @@ class TraceModuleTest(DTensorTestBase):
             # _Partial tensor shouldn't do that automatically. Hence explicitly
             # do division here.
             self.assertTrue(
-                p1.grad.allclose(p2.grad / self.world_size) or p1.grad.allclose(p2.grad)
+                p1.grad.allclose(p2.grad / self.world_size)
+                or p1.grad.allclose(p2.grad)
             )
 
 
