@@ -269,10 +269,9 @@ class TritonTemplateKernel(TritonKernel):
         result, *mask = super().indexing(
             index,
             dense_indexing=False,
-            copy_shape=copy_shape,
+            copy_shape=self.template_mask,
             override_mask=self.template_mask,
         )
-        result += f" + tl.zeros({self.template_mask}.shape, tl.int32)"
         return (result, *mask)
 
     def initialize_range_tree(self, pid_cache):

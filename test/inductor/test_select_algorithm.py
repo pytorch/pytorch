@@ -105,6 +105,18 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
+    def test__int_mm(self):
+        @torch.compile
+        def foo(a, b):
+            return torch._int_mm(a, b)
+
+        foo(
+            torch.randint(-10, 10, (64, 32), device="cuda", dtype=torch.int8),
+            torch.randint(-10, 10, (32, 64), device="cuda", dtype=torch.int8),
+        )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
     def test_mm_skip(self):
         @torch.compile
         def foo(a, b):
@@ -193,6 +205,22 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(34, device="cuda"),
         )
         # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_mm_dropout(self):
+        @torch.compile
+        def fn(x1, x2, seed):
+            mm_4 = torch.ops.aten.mm.default(x2, x1)
+            rnd = torch.ops.prims.philox_rand_like.default(mm_4, seed, 0)
+            return mm_4 * rnd
+
+        # sizes picked so triton autotuning wins
+        fn(
+            torch.randn(512, 1024, dtype=torch.float16, device="cuda"),
+            torch.randn(384, 512, dtype=torch.float16, device="cuda"),
+            torch.tensor(12345, device="cuda"),
+        )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
