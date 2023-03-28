@@ -171,7 +171,7 @@ class DeviceMesh:
 
         if self.mesh.ndim == 1 and len(unique_mesh_values) == get_world_size():
             # if the mesh is the same as world_pg, we just append the default
-            # pg to the first dim goups, as new_group cannot have the exact
+            # pg to the first dim groups, as new_group cannot have the exact
             # same ranks as world
             dim_groups.append(default_pg)
         else:
