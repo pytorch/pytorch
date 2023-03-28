@@ -176,7 +176,7 @@ jobs:
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           # then truncate the message length to 50,000 characters, not doing so will make docker command
           # fail due to large nightly vs master difference
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES:0:50000}"
+          COMMIT_MESSAGES="${COMMIT_MESSAGES:0:50000}"
           export PR_BODY="${PR_BODY//[\'\"]}"
 
           # detached container should get cleaned up by teardown_ec2_linux
