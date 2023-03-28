@@ -902,14 +902,14 @@ at::Tensor PackedLinearWeightsOnednn:: apply_tanh(
       std::move(input), output_scale, output_zero_point);
 }
 
-static at::Tensor onednn_linear_int8_with_prepacked_weight_bias(
+static at::Tensor linear_int8_with_mkldnn_weight_bias(
     at::Tensor input, // contains quantized values but not QTensor
     double input_scale,
     int64_t input_zero_point,
-    at::Tensor weight, // MKLDNN tensor with quantized values
+    at::Tensor mkldnn_weight, // MKLDNN tensor with quantized values
     at::Tensor inv_weight_scales,
     at::Tensor weight_zero_points,
-    c10::optional<at::Tensor> bias, // Bias is packed if not None
+    c10::optional<at::Tensor> mkldnn_bias,
     std::string post_op_name, // in lower case (e.g. "none", "relu")
     double output_scale,
     int64_t output_zero_point) {
@@ -919,7 +919,7 @@ static at::Tensor onednn_linear_int8_with_prepacked_weight_bias(
       "qlinear (ONEDNN): input dim should be at least 1, but got 0");
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte,
       "qlinear (ONEDNN): data type of input should be uint8 (unsigned char).");
-  TORCH_CHECK(weight.scalar_type() == c10::ScalarType::Char,
+  TORCH_CHECK(mkldnn_weight.scalar_type() == c10::ScalarType::Char,
       "qlinear (ONEDNN): data type of input should be int8 (char).");
 
   /*********************************/
@@ -944,7 +944,7 @@ static at::Tensor onednn_linear_int8_with_prepacked_weight_bias(
   const ideep::zero_point_t dst_zero_points = ideep::zero_point_t(1, output_zero_point);
 
   // Weight
-  auto packed_weight = at::native::itensor_from_mkldnn(weight);
+  auto packed_weight = at::native::itensor_from_mkldnn(mkldnn_weight);
   // Here we check weight desc and reorder weight if necessary
   // because input shape may change and so does weight layout
   auto op_attr = ideep::attr_t();
@@ -956,14 +956,14 @@ static at::Tensor onednn_linear_int8_with_prepacked_weight_bias(
   op_attr.set_zero_points(DNNL_ARG_SRC, 0, src_zero_points);
   op_attr.set_zero_points(DNNL_ARG_DST, 0, dst_zero_points);
   auto w_desc = ideep::matmul_forward::expected_weights_desc(
-      weight.sizes().vec(), dnnl::memory::data_type::s8, dnnl::memory::data_type::u8);
+      mkldnn_weight.sizes().vec(), dnnl::memory::data_type::s8, dnnl::memory::data_type::u8);
   ideep::tensor expected_weight = packed_weight.reorder_if_differ_in(w_desc);
 
   // Bias
   c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
-  bool with_bias = bias.has_value();
+  bool with_bias = mkldnn_bias.has_value();
   if (with_bias) {
-    onednn_bias = at::native::itensor_from_mkldnn(bias.value());
+    onednn_bias = at::native::itensor_from_mkldnn(mkldnn_bias.value());
   }
   const auto& expected_bias = with_bias ? onednn_bias.value() : ideep::tensor();
 
@@ -1094,22 +1094,22 @@ class QLinearInt8FusedQDQ final {
 
 class LinearInt8CpuTensor final {
  public:
-  static Tensor run_with_packed_weight_bias(
+  static Tensor run_with_mkldnn_weight_bias(
       Tensor act, // CPU tensor with quantized values
       double act_scale,
       int64_t act_zero_point,
-      Tensor weight, // MkldnnCPU tensor with quantized values
+      Tensor mkldnn_weight, // MkldnnCPU tensor with quantized values
       Tensor inv_weight_scales,
       Tensor weight_zero_points,
-      c10::optional<Tensor> bias,
+      c10::optional<Tensor> mkldnn_bias,
       std::string post_op_name,
       double output_scale,
       int64_t output_zero_point) {
 #if AT_MKLDNN_ENABLED()
-    return onednn_linear_int8_with_prepacked_weight_bias(
+    return linear_int8_with_mkldnn_weight_bias(
         act, act_scale, act_zero_point,
-        weight, inv_weight_scales, weight_zero_points,
-        bias, post_op_name, output_scale, output_zero_point
+        mkldnn_weight, inv_weight_scales, weight_zero_points,
+        mkldnn_bias, post_op_name, output_scale, output_zero_point
     );
 #endif
     TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
@@ -1135,7 +1135,7 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(quantized, MkldnnCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_mkldnn_weight_bias"),      TORCH_FN(LinearInt8CpuTensor::run_with_packed_weight_bias));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_mkldnn_weight_bias"),      TORCH_FN(LinearInt8CpuTensor::run_with_mkldnn_weight_bias));
 }
 
 } // namespace

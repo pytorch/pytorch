@@ -12,7 +12,7 @@ import torch
 
 from torch import SymInt
 from torch._guards import GuardSource
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
@@ -25,10 +25,8 @@ from ..source import (
     AttrSource,
     ConstantSource,
     GetItemSource,
-    GlobalSource,
     GlobalWeakRefSource,
     is_constant_source,
-    LocalInputSource,
     LocalSource,
     RandomValueSource,
     Source,
@@ -87,7 +85,7 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
-from .nn_module import UnspecializedNNModuleVariable
+from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
     SymNodeVariable,
     TensorVariable,
@@ -97,7 +95,7 @@ from .tensor import (
 from .torch import (
     tensor_dunder_fns,
     torch_special_class_types,
-    TorchPyOperator,
+    TorchHigherOrderOperator,
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
@@ -125,11 +123,6 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
-            # Mapping for downstream systems to remap back into dynamo arg positions
-            if isinstance(self.source, LocalInputSource):
-                if "graph_arg_pos" not in self.fake_tensor.__dict__:
-                    self.fake_tensor.__dict__["graph_arg_pos"] = []
-                self.fake_tensor.__dict__["graph_arg_pos"].append(self.source.pos)
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
@@ -469,8 +462,8 @@ class VariableBuilder:
             return HFPretrainedConfigVariable(
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
-        elif isinstance(value, PyOperator):
-            return TorchPyOperator(
+        elif isinstance(value, HigherOrderOperator):
+            return TorchHigherOrderOperator(
                 value,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
@@ -589,8 +582,12 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        if istype(value, (tuple, list)) and all(
-            [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+        if (
+            istype(value, (tuple, list))
+            and all(
+                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+            )
+            and not config.dynamic_shapes
         ):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
         else:
@@ -649,20 +646,42 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
-        elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
+        elif issubclass(
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
-            if getattr(value, "_is_fsdp_managed_module", False):
-                # Note: we can't do this assert inside FSDP constructor,
-                # since we don't know yet whether dynamo will be used
-                assert getattr(
-                    value, "_fsdp_use_orig_params", False
-                ), "Dynamo only supports FSDP with use_orig_params=True"
-
-            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-            # in fully_sharded_data_parallel.py for more information
             return UnspecializedNNModuleVariable(
                 value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
+        elif getattr(value, "_is_fsdp_managed_module", False):
+            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+            # in fully_sharded_data_parallel.py for more information
+
+            # we can't do this assert inside FSDP constructor,
+            # since we don't know yet whether dynamo will be used
+            assert getattr(
+                value, "_fsdp_use_orig_params", False
+            ), "Dynamo only supports FSDP with use_orig_params=True"
+
+            # Note on FSDP guarding
+            # 1. We expect FSDP wrapping mutates an nn module irreversably (no way to de-wrap).
+            # 2. Eager FSDP already assumes (requires, but without enforcement) that users don't mutate their
+            #    model parameters/structure after FSDP wrapping, because FSDP wouldn't notice or update its FlatParams.
+            #
+            # Due to (1), once we enter this path we expect not to go back nor have to guard on type
+            # or _is_fsdp_managed_module.
+            #
+            # TODO(whc) We could add a guard on the opposite case, where a user compiled/ran
+            # pre-FSDP-wrapped model, then wrapped, to ensure that we recompile with the FSDP handling.
+            #
+            # Due to (2), we skip guards on inner contents of fsdp_managed modules, by using FSDPNNModuleSource as the
+            # guard source.  This behavior is gated on config.skip_fsdp_guards.
+            #
+            # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
+            # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
+            return FSDPManagedNNModuleVariable(
+                value,
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH),
+                source=self.get_source(),
             )
         else:
             return self.tx.output.register_attr_or_module(
@@ -673,17 +692,22 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        if type(value) is int and not config.specialize_int and config.dynamic_shapes:
+        unspec = not config.specialize_int and config.dynamic_shapes
+        if unspec and type(value) is torch.Size:
+            return SizeVariable(
+                [
+                    VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(v)
+                    for i, v in enumerate(value)
+                ],
+                guards=self.make_guards(GuardBuilder.LIST_LENGTH),
+            )
+        elif unspec and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if (
                 value in self._common_constants()
-                or isinstance(self.source, GlobalSource)
-                or isinstance(self.source, GetItemSource)
-                or (
-                    isinstance(self.source, AttrSource)
-                    and isinstance(self.source.base, GlobalSource)
-                )
+                # Assume integers from global variables want to be specialized
+                or not self.source.guard_source().is_local()
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
@@ -702,7 +726,12 @@ class VariableBuilder:
             )
 
     def wrap_tensor(self, value: torch.Tensor):
-        if self.get_source().guard_source().is_nn_module():
+        source = self.get_source()
+
+        if (
+            source.guard_source().is_nn_module()
+            and not source.guard_source().is_fsdp_module()
+        ):
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
@@ -827,6 +856,14 @@ class VariableBuilder:
             )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
+                if self.tx.export and not isinstance(
+                    self.get_source(), LocalInputSource
+                ):
+                    raise AssertionError(
+                        "Dynamo attempts to add additional input during export: value={}, source={}".format(
+                            wrapped_value, self.get_source()
+                        )
+                    )
                 fake_tensor_value = None
                 example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
@@ -1050,6 +1087,14 @@ class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
 
+    def __hash__(self) -> int:
+        return hash((self.fake, self.source.name()))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, TrackedFake):
+            return self.fake == other.fake and self.source.name() == other.source.name()
+        return False
+
 
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
@@ -1057,7 +1102,8 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
+        assert source is not None
+        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(

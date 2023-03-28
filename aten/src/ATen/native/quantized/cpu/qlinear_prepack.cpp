@@ -281,7 +281,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
 }
 
 std::tuple<at::Tensor, at::Tensor>
-prepack_qlinear_weight_bias_onednn(
+prepack_linear_int8_weight_bias_to_mkldnn_tensors(
     at::Tensor weight, // from CPU backend instead of QuantizedCPU
     at::Tensor weight_scales, // Weight zero points must be 0s for onednn
     torch::List<int64_t> input_shape,
@@ -459,7 +459,7 @@ class QLinearPackWeightBiasInt8CpuTensor final {
     int64_t input_zero_point,
     c10::optional<at::Tensor> bias) {
 #if AT_MKLDNN_ENABLED()
-    return prepack_qlinear_weight_bias_onednn(
+    return prepack_linear_int8_weight_bias_to_mkldnn_tensors(
         weight, weight_scales, input_shape, input_scale, input_zero_point, bias);
 #else
     TORCH_CHECK(false, "Unimplemented as onednn is not available.");

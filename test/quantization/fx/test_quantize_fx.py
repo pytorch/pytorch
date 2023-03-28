@@ -6147,6 +6147,70 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.assertEqual(tanh_dq.args[0].args[0], tanh_node)
                 self.assertEqual(linear2_dq.args[0].args[0], linear2_node)
 
+    def test_lowering_functional_conv_with_kwargs(self):
+        dim_to_op = {
+            1: F.conv1d,
+            2: F.conv2d,
+            3: F.conv3d,
+        }
+        dim_to_qop = {
+            1: torch.ops.quantized.conv1d,
+            2: torch.ops.quantized.conv2d,
+            3: torch.ops.quantized.conv3d,
+        }
+
+        class Mod(nn.Module):
+            def __init__(self, in_channels, out_channels, kernel_size, dimension):
+                super().__init__()
+                self.dim = dimension
+                self.op = dim_to_op[dimension]
+                kernel_sizes = [kernel_size] * self.dim
+                self.weight = nn.Parameter(torch.randn(out_channels, in_channels, *kernel_sizes))
+
+            def forward(self, input):
+                return self.op(input, self.weight, bias=None, stride=[1] * self.dim,
+                               padding=[0] * self.dim, dilation=[1] * self.dim, groups=1)
+
+        for dimension in [1, 2, 3]:
+            model = Mod(3, 16, 3, dimension)
+            model.eval()
+            qconfig_mapping = get_default_qconfig_mapping()
+            input_shape = (1, 3, *([8] * dimension))
+            example_inputs = torch.randn(input_shape)
+            prepared_model = prepare_fx(model, qconfig_mapping, example_inputs)
+            prepared_model(example_inputs)
+            quantized_model = convert_fx(prepared_model)
+            # This should pass
+            quantized_model(example_inputs)
+            # Ensure the quantized model has the expected op
+            node_occurrence = {
+                ns.call_function(dim_to_qop[dimension]): 1,
+            }
+            self.checkGraphModuleNodes(quantized_model, expected_node_occurrence=node_occurrence)
+
+    def test_lowering_functional_linear_with_kwargs(self):
+        class Mod(nn.Module):
+            def __init__(self, in_channels, out_channels):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(out_channels, in_channels))
+
+            def forward(self, input):
+                return F.linear(input, self.weight, bias=None)
+
+        model = Mod(8, 4)
+        model.eval()
+        qconfig_mapping = get_default_qconfig_mapping()
+        example_inputs = torch.randn(1, 8)
+        prepared_model = prepare_fx(model, qconfig_mapping, example_inputs)
+        prepared_model(example_inputs)
+        quantized_model = convert_fx(prepared_model)
+        # This should pass
+        quantized_model(example_inputs)
+        # Ensure the quantized model has the expected op
+        node_occurrence = {
+            ns.call_function(torch.ops.quantized.linear): 1,
+        }
+        self.checkGraphModuleNodes(quantized_model, expected_node_occurrence=node_occurrence)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
