@@ -12,7 +12,7 @@ import torch
 
 from torch import SymInt
 from torch._guards import GuardSource
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
@@ -85,7 +85,7 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
-from .nn_module import UnspecializedNNModuleVariable
+from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
     SymNodeVariable,
     TensorVariable,
@@ -95,7 +95,7 @@ from .tensor import (
 from .torch import (
     tensor_dunder_fns,
     torch_special_class_types,
-    TorchPyOperator,
+    TorchHigherOrderOperator,
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
@@ -462,8 +462,8 @@ class VariableBuilder:
             return HFPretrainedConfigVariable(
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
-        elif isinstance(value, PyOperator):
-            return TorchPyOperator(
+        elif isinstance(value, HigherOrderOperator):
+            return TorchHigherOrderOperator(
                 value,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
@@ -582,8 +582,12 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        if istype(value, (tuple, list)) and all(
-            [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+        if (
+            istype(value, (tuple, list))
+            and all(
+                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+            )
+            and not config.dynamic_shapes
         ):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
         else:
@@ -642,20 +646,42 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
-        elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
+        elif issubclass(
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
-            if getattr(value, "_is_fsdp_managed_module", False):
-                # Note: we can't do this assert inside FSDP constructor,
-                # since we don't know yet whether dynamo will be used
-                assert getattr(
-                    value, "_fsdp_use_orig_params", False
-                ), "Dynamo only supports FSDP with use_orig_params=True"
-
-            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-            # in fully_sharded_data_parallel.py for more information
             return UnspecializedNNModuleVariable(
                 value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
+        elif getattr(value, "_is_fsdp_managed_module", False):
+            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+            # in fully_sharded_data_parallel.py for more information
+
+            # we can't do this assert inside FSDP constructor,
+            # since we don't know yet whether dynamo will be used
+            assert getattr(
+                value, "_fsdp_use_orig_params", False
+            ), "Dynamo only supports FSDP with use_orig_params=True"
+
+            # Note on FSDP guarding
+            # 1. We expect FSDP wrapping mutates an nn module irreversably (no way to de-wrap).
+            # 2. Eager FSDP already assumes (requires, but without enforcement) that users don't mutate their
+            #    model parameters/structure after FSDP wrapping, because FSDP wouldn't notice or update its FlatParams.
+            #
+            # Due to (1), once we enter this path we expect not to go back nor have to guard on type
+            # or _is_fsdp_managed_module.
+            #
+            # TODO(whc) We could add a guard on the opposite case, where a user compiled/ran
+            # pre-FSDP-wrapped model, then wrapped, to ensure that we recompile with the FSDP handling.
+            #
+            # Due to (2), we skip guards on inner contents of fsdp_managed modules, by using FSDPNNModuleSource as the
+            # guard source.  This behavior is gated on config.skip_fsdp_guards.
+            #
+            # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
+            # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
+            return FSDPManagedNNModuleVariable(
+                value,
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH),
+                source=self.get_source(),
             )
         else:
             return self.tx.output.register_attr_or_module(
@@ -700,7 +726,12 @@ class VariableBuilder:
             )
 
     def wrap_tensor(self, value: torch.Tensor):
-        if self.get_source().guard_source().is_nn_module():
+        source = self.get_source()
+
+        if (
+            source.guard_source().is_nn_module()
+            and not source.guard_source().is_fsdp_module()
+        ):
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
