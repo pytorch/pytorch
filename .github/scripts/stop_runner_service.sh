@@ -10,7 +10,7 @@ echo "GitHub self-hosted runner service: ${RUNNER_SERVICE}"
 if [[ -n "${RUNNER_SERVICE}" ]]; then
   echo "The self-hosted runner has encountered an unrecoverable error and will be shutdown"
 
-  pushd "${RUNNER_WORKSPACE}/../.."
+  pushd "${RUNNER_WORKSPACE}/../../"
   # Stop it to prevent the runner from receiving new jobs
   sudo ./svc.sh stop
   # then uninstall the service
