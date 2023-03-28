@@ -1036,7 +1036,7 @@ class CppKernel(Kernel):
                     code.splice(kernel.poststores)
 
             def get_reduction_code_buffer(loops, is_suffix=True):
-                """Dedup the lines in prefix/suffix prepended list"""
+                """Dedup the lines in prefix/suffix prepended list for all the kernels under loops"""
                 code = DeferredIndentedBuffer() if is_suffix else IndentedBuffer()
                 dedup = set()
                 for loop in loops:
