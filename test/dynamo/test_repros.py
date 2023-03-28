@@ -933,11 +933,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # idx should be 1 -> slicing off [1:] of 8 elem tensor
         self.assertEqual(list(out.shape), [7])
 
-        expected_ops = ifdyn(5, 4)
-        expected_frame = ifdyn(1, 2)
-
-        self.assertEqual(expected_ops, expected_ops)
-        self.assertEqual(expected_frame, expected_frame)
+        self.assertEqual(counter.op_count, 2)
+        self.assertEqual(counter.frame_count, 1)
 
         self.assertEqual(list(opt_fn(torch.tensor([4])).shape), [4])
 
