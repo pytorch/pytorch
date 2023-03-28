@@ -593,9 +593,7 @@ test_distributed() {
     "$TORCH_BIN_DIR"/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
     MPIEXEC=$(command -v mpiexec)
-    # TODO: this is disabled on GitHub Actions until this issue is resolved
-    # https://github.com/pytorch/pytorch/issues/60756
-    if [[ -n "$MPIEXEC" ]] && [[ -z "$GITHUB_ACTIONS" ]]; then
+    if [[ -n "$MPIEXEC" ]]; then
       MPICMD="${MPIEXEC} -np 2 $TORCH_BIN_DIR/ProcessGroupMPITest"
       eval "$MPICMD"
     fi

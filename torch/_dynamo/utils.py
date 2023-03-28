@@ -162,7 +162,7 @@ def dynamo_timed(original_function=None, phase_name=None):
             key = func.__qualname__
             if key not in compilation_metrics:
                 compilation_metrics[key] = []
-            with torch.profiler.record_function(f"{key} (dynamo_timed)")
+            with torch.profiler.record_function(f"{key} (dynamo_timed)"):
                 t0 = time.time()
                 r = func(*args, **kwargs)
                 time_spent = time.time() - t0
