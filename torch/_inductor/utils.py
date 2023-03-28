@@ -568,7 +568,10 @@ def is_big_gpu(index):
     return True
 
 
-def use_triton_template(layout):
+def use_triton_template(layout, *, enable_int32=False):
+    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    if enable_int32:
+        layout_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.int32)
     return (
         (
             config.max_autotune
@@ -576,7 +579,7 @@ def use_triton_template(layout):
             or config.search_autotune_cache
         )
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and layout.dtype in layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -803,3 +806,20 @@ def is_ones(items):
 
 def is_zeros(items):
     return all(x == 0 for x in items)
+
+
+def is_cpu_device(inputs):
+    return all(
+        item.device == torch.device("cpu")
+        for item in inputs
+        if isinstance(item, torch.Tensor)
+    )
+
+
+@contextlib.contextmanager
+def maybe_profile(should_profile, *args, **kwargs):
+    if should_profile:
+        with torch.profiler.profile(*args, **kwargs) as p:
+            yield p
+    else:
+        yield

@@ -3666,6 +3666,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             output_cpu = rnn(input.cpu(), hx)
             self.assertEqual(output_cuda, output_cpu)
 
+
     def test_transformer_args_check(self):
         model_name = 'Transformer'
         d_model = 128
@@ -3687,7 +3688,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         def test(encoder_input_shape, decoder_input_shape,
                  src_mask_len=None, tgt_mask_len=None, memory_mask_size=None,
                  src_key_padding_mask_size=None, tgt_key_padding_mask_size=None,
-                 memory_key_padding_mask_size=None):
+                 memory_key_padding_mask_size=None,
+                 raises=False):
             encoder_input = torch.randn(encoder_input_shape)
             decoder_input = torch.randn(decoder_input_shape)
             model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers,
@@ -3723,7 +3725,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             else:
                 memory_key_padding_mask = None
 
-            with self.assertRaises(RuntimeError):
+            if raises:
+                with self.assertRaises(RuntimeError):
+                    model(encoder_input, decoder_input,
+                          src_mask=src_mask,
+                          tgt_mask=tgt_mask,
+                          memory_mask=memory_task,
+                          src_key_padding_mask=src_key_padding_mask,
+                          tgt_key_padding_mask=tgt_key_padding_mask,
+                          memory_key_padding_mask=memory_key_padding_mask)
+            else:
                 model(encoder_input, decoder_input,
                       src_mask=src_mask,
                       tgt_mask=tgt_mask,
@@ -3744,22 +3755,22 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # Incorrect encoder_input batch size
         encoder_input_shape = update_shape(correct_encoder_input_shape, 1, wrong_bsz)
         decoder_input_shape = correct_decoder_input_shape
-        test(encoder_input_shape, decoder_input_shape)
+        test(encoder_input_shape, decoder_input_shape, raises=True)
 
         # Incorrect decoder_input batch size
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = update_shape(correct_decoder_input_shape, 1, wrong_bsz)
-        test(encoder_input_shape, decoder_input_shape)
+        test(encoder_input_shape, decoder_input_shape, raises=True)
 
         # Incorrect encoder_input input size
         encoder_input_shape = update_shape(correct_encoder_input_shape, 2, wrong_d_model)
         decoder_input_shape = correct_decoder_input_shape
-        test(encoder_input_shape, decoder_input_shape)
+        test(encoder_input_shape, decoder_input_shape, raises=True)
 
         # Incorrect decoder_input input size
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = update_shape(correct_decoder_input_shape, 2, wrong_d_model)
-        test(encoder_input_shape, decoder_input_shape)
+        test(encoder_input_shape, decoder_input_shape, raises=True)
 
         # Incorrect nhead
         encoder_input_shape = correct_encoder_input_shape
@@ -3778,14 +3789,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_tgt_mask_size = tgt_len + 1
-        test(encoder_input_shape, decoder_input_shape, tgt_mask_len=wrong_tgt_mask_size)
+        test(encoder_input_shape, decoder_input_shape, tgt_mask_len=wrong_tgt_mask_size, raises=True)
 
         # Incorrect memory_mask
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_tgt_mask_size = tgt_len + 1
         test(encoder_input_shape, decoder_input_shape,
-             memory_mask_size=(wrong_tgt_mask_size, wrong_src_mask_size))
+             memory_mask_size=(wrong_tgt_mask_size, wrong_src_mask_size),
+             raises=True)
 
         # Incorrect src_key_padding_mask
         encoder_input_shape = correct_encoder_input_shape
@@ -3816,6 +3828,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaises(RuntimeError):
             model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers, num_decoder_layers,
                                             dim_feedforward, dropout, wrong_activation)
+
 
     def test_transformer_layer_args_check(self):
         model_names = ['TransformerEncoderLayer', 'TransformerDecoderLayer']
@@ -11397,6 +11410,16 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
         if reduction != "none":
             self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
+
+    def test_smoothl1loss_backward_zero_beta(self, device):
+        input = torch.randn(300, 256, requires_grad=True, device=device)
+        target = input.detach()
+
+        loss = F.smooth_l1_loss(input, target, beta=0.0, reduction='sum')
+        loss.backward()
+
+        grad_max_abs = input.grad.abs().max().item()
+        self.assertLessEqual(grad_max_abs, 1.0)
 
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
