@@ -864,7 +864,7 @@ class ProfileEvent:
     count: float
 
 
-def parse_profile_event_list(event_list, wall_time_ms, nruns):
+def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
     def get_self_cuda_time(ev):
         """
         ev.self_cuda_time_total is in microsecond. Convert to millisecond.
@@ -940,10 +940,23 @@ def parse_profile_event_list(event_list, wall_time_ms, nruns):
                 per_category_wall_time[category] = _time
                 total_cuda_ms += _time
 
-        print(
-            f"\nPercent of time when GPU is busy: {total_cuda_ms / wall_time_ms * 100:.2f}%"
-        )
+        gpu_busy_percent = f"{total_cuda_ms / wall_time_ms * 100:.2f}%"
+        print(f"\nPercent of time when GPU is busy: {gpu_busy_percent}")
         print(f"Total wall time {wall_time_ms:.3f} ms")
+
+        # output such a line so we can gather such line from all compiled modules from all
+        # benchmarks and tabulate it!
+        # Columns: benchmark_name, pointwise_percent, reduction_percent, persistent_reduction_percent,
+        #   unknown_category_percent, GPU_busy_percent, wall_time_ms
+        tabulate_line = f"Output for tabulate: {benchmark_name}"
+        for category in category_list:
+            percent = (
+                f"{per_category_wall_time.get(category, 0.0) / wall_time_ms * 100:.2f}%"
+            )
+            tabulate_line += f", {percent}"
+        tabulate_line += f", {gpu_busy_percent}, {wall_time_ms:.3f}ms"
+
+        print(tabulate_line)
 
     report()
 
@@ -996,4 +1009,6 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         print(f"Chrome trace for the profile is written to {path}")
         event_list = p.key_averages(group_by_input_shape=True)
         print(event_list.table(sort_by="self_cuda_time_total", row_limit=10))
-        parse_profile_event_list(event_list, wall_time_ms, times * repeat)
+        parse_profile_event_list(
+            benchmark_name, event_list, wall_time_ms, times * repeat
+        )
