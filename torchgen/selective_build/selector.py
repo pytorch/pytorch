@@ -11,6 +11,7 @@ from torchgen.selective_build.operator import (
     strip_operator_overload_name,
 )
 
+
 # A SelectiveBuilder holds information extracted from the selective build
 # YAML specification.
 #
@@ -20,7 +21,6 @@ from torchgen.selective_build.operator import (
 #
 @dataclass(frozen=True)
 class SelectiveBuilder:
-
     # If true, then the build is not selective, and includes all
     # operators.
     include_all_operators: bool
@@ -91,14 +91,14 @@ class SelectiveBuilder:
         operators_dict = data.get("operators", {})
         assert isinstance(operators_dict, dict)
 
-        for (k, v) in operators_dict.items():
+        for k, v in operators_dict.items():
             operators[k] = SelectiveBuildOperator.from_yaml_dict(k, v)
 
         kernel_metadata = {}
         kernel_metadata_dict = data.get("kernel_metadata", {})
         assert isinstance(kernel_metadata_dict, dict)
 
-        for (k, v) in kernel_metadata_dict.items():
+        for k, v in kernel_metadata_dict.items():
             kernel_metadata[str(k)] = list(map(lambda dtype: str(dtype), v))
 
         custom_classes = data.get("custom_classes", [])
@@ -223,7 +223,7 @@ class SelectiveBuilder:
             "include_all_operators": self.include_all_operators,
         }
         operators = {}
-        for (op_name, op) in self.operators.items():
+        for op_name, op in self.operators.items():
             operators[op_name] = op.to_dict()
         ret["operators"] = operators
 
@@ -246,7 +246,7 @@ def merge_kernel_metadata(
     rhs: Dict[str, List[str]],
 ) -> Dict[str, List[str]]:
     kernel_metadata: Dict[str, List[str]] = {}
-    for (tag_name, dtypes) in list(lhs.items()) + list(rhs.items()):
+    for tag_name, dtypes in list(lhs.items()) + list(rhs.items()):
         dtypes_copy = set(dtypes)
         if tag_name in kernel_metadata:
             dtypes_copy |= set(kernel_metadata[tag_name])
