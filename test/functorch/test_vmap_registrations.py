@@ -146,7 +146,6 @@ xfail_not_implemented = {
     "aten::linalg_cond.p_str",
     "aten::linalg_eigh",
     "aten::linalg_eigh.eigvals",
-    "aten::linalg_ldl_factor",
     "aten::linalg_lu_factor",
     "aten::linalg_matrix_rank",
     "aten::linalg_matrix_rank.out_tol_tensor",
