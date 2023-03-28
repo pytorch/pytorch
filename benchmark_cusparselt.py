@@ -39,15 +39,34 @@ class Model(nn.Module):
 # compare different dtypes
 def compare_dtype(m, k, n, batch_size, dtype):
 
-    model = Model(m, k).type(dtype).eval().cuda()
+    print(dtype)
 
-    input_tensor = torch.randint(
-        10,
-        (batch_size, n, k),
-        device=model.linear.weight.device,
-        dtype=dtype,
-    )
+    # model = Model(m, k).eval().type(dtype)
+    weight = torch.ones(m, k, dtype=dtype)
+    input = torch.ones(1, n, k, dtype=dtype)
+    bias = torch.zeros(m, n, dtype=dtype)
 
+    res = weight.matmul(input.mT).mT + bias
+    print(res.shape)
+
+    weight.cuda()
+    input.cuda()
+    bias.cuda()
+
+    num_bytes = weight.nelement() * weight.element_size()
+    print(num_bytes)
+    compressed_size = num_bytes * 10 // 16 
+    print("compresseds", compressed_size)
+    weight_compressed = torch.empty((compressed_size // weight.element_size(), ), 
+                                    dtype=weight.dtype, 
+                                    device=device)
+    print(weight_compressed.nelement())
+
+    cslt = torch.classes.cusparselt.CusparseLtLinear(weight_compressed,
+                                                     bias)
+
+    cslt.set_compressed(weight)
+    print(cslt.masked_mm(input.mT).mT)
 
     latency = benchmark.Timer(
         stmt="model(input_tensor)",
@@ -380,12 +399,11 @@ if __name__ == "__main__":
     elif args.mode == "memory":
         results = [compare_memory(4096, 4096, 4096, 1)]
    
-    # TODO this is still a wip
     elif args.mode == "int8-fp16-linear":
-        dtypes = [torch.float32, torch.float16]
-        batch_sizes = [4, 16, 64, 256]
+        dtypes = [torch.int8, torch.float32, torch.float16]
+        batch_sizes = [4]
         results = (
-            compare_dtype(768, 3072, 768, batch_size, dtype) 
+            compare_dtype(1024, 1024, 1024, batch_size, dtype) 
             for batch_size, dtype in tqdm(product(batch_sizes, dtypes), total=len(dtypes)*len(batch_sizes))
         )
 
