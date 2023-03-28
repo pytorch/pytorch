@@ -54,6 +54,10 @@ class LibKinetoClient : public libkineto::ClientInterface {
   void stop() override {
     (void)disableProfiler();
   }
+  void crumble() override {
+     char *p = nullptr;
+     *p = 11;
+  }
 
  private:
   bool reportInputShapes_{true};
