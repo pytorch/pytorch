@@ -12,6 +12,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
+#include <c10/util/ssize.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -1251,11 +1252,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       }
       return [](ProcessedNode* pnode) {
         const auto& elems = pnode->Input(0).toTupleRef().elements();
-        const auto num_elems = elems.size();
+        using c10::ssize;
+        const auto num_elems = ssize(elems);
         const auto idx = pnode->Input(1).toInt();
         const auto norm_idx = normalizeIndex(idx, num_elems);
-        if (norm_idx < 0 ||
-            norm_idx >= static_cast<decltype(norm_idx)>(num_elems)) {
+        if (norm_idx < 0 || norm_idx >= num_elems) {
           // Use std::runtime_error instead of c10::Error to be consistent with
           // JIT
           throw std::out_of_range("Tuple index out of range");

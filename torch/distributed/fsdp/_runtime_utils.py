@@ -130,7 +130,7 @@ def _validate_and_get_hybrid_shard_state(
         return None
     error_prefix = "At least one instance uses a hybrid sharding strategy but has no "
     if len(intra_node_pgs) > 0 and len(inter_node_pgs) == 0:
-        raise AssertionError(error_prefix + "inter-node proces group set")
+        raise AssertionError(error_prefix + "inter-node process group set")
     if len(intra_node_pgs) == 0 and len(inter_node_pgs) > 0:
         raise AssertionError(error_prefix + "intra-node process group set")
     error_prefix = "Some instances use a hybrid sharding strategy, but "
@@ -459,7 +459,7 @@ def _post_forward(
         module (nn.Module): Module whose forward just ran, which should be a
             fully sharded module (see [Note: Fully Sharded Module]); expected
             by the hook signature.
-        input (Any): Unused; exepcted by the hook signature.
+        input (Any): Unused; expected by the hook signature.
         output (Any): Forward pass output; pre-backward hooks are registered on
             the tensors that require gradients in this output.
 
