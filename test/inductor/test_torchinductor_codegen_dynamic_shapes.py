@@ -86,7 +86,7 @@ def check_codegen(
             if "for(" in line:
                 for_loop_found = True
                 self.assertTrue(
-                    "ks" in line,
+                    re.search(r";.*ks.*;", line) is not None,
                     msg=f"Failed to find dynamic for loop variable\n{code}",
                 )
         self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
@@ -137,8 +137,8 @@ test_failures = {
     "test_layer_norm_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace1_dynamic_shapes": TestFailure(("cpu",)),
     "test_narrow_dynamic_shapes": TestFailure(("cpu",)),
-    "test_reflection_pad2d_dynamic_shapes": TestFailure(("cpu",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(("cpu",)),
+    "test_reflection_pad2d_dynamic_shapes": TestFailure(("cpu",)),
     "test_repeat_dynamic_shapes": TestFailure(("cpu",)),
     "test_roll_dynamic_shapes": TestFailure(("cpu",)),
     "test_slice1_dynamic_shapes": TestFailure(("cpu",)),
@@ -206,31 +206,89 @@ test_failures = {
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
     #
-    # Tests not using 'common':
+    # Tests not using 'common' or directly calling 'assertEqual':
     #
-    "test_cauchy_dynamic_shapes": TestFailure(("cuda",), is_skip=True),
-    "test_gather_scatter_dynamic_shapes": TestFailure(("cuda",), is_skip=True),
+    "test_arange5_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_cat_inplace_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_cat_of_loops_and_extern_kernel_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_cauchy_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_conv_used_from_multiple_places_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_dropout_deterministic_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_dropout_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_dtype_mismatch_issue_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
     "test_forced_buffer_realize_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    "test_gather2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_gather_scatter_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_inplace_add_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_inplace_mixed_dtype_ops_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_input_mutation1_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_input_mutation2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_input_mutation3_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_input_mutation4_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_kernel_names_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_lerp_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_linear_binary_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_linear_buffer_reuse_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    "test_linear_unary_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_linear_used_from_multiple_places_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_list_clearing_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_lowmem_dropout1_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_lowmem_dropout2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_masked_fill_promotion_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_min_max_reduction_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_move_arange_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_multi_gpu_device_dynamic_shapes": TestFailure(("cpu" "cuda"), is_skip=True),
+    "test_multi_gpu_recompile_on_index_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_output_strides_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_pow3_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_profiler_mark_wrapper_call_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_rand_like_deterministic_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
     "test_scheduler_vertical_fusion1_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
-    "test_softmax_one_kernel_loop_dynamic_shapes": TestFailure(("cuda",), is_skip=True),
-    "test_softmax_one_kernel_persist_dynamic_shapes": TestFailure(
-        ("cuda",), is_skip=True
+    "test_slice_mutation2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_softmax_one_kernel_loop_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
     ),
-    "test_transpose_add_dynamic_shapes": TestFailure(("cuda",), is_skip=True),
+    "test_softmax_one_kernel_persist_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_strided_inputs_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_transpose_add_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_transposed_propagates_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_unspec_inputs_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_vertical_fusion1_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_zero_dim_reductions_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
     #
     # The following tests do not support dynamic shapes yet:
     #
-    "test_cpp_wrapper_dynamic_shapes": TestFailure(("cpu",)),
     "test_cudnn_rnn_dynamic_shapes": TestFailure(("cuda",)),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
