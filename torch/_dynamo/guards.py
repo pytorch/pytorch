@@ -427,6 +427,7 @@ class GuardBuilder(GuardBuilderBase):
             [a.source for a in fs],
             source_ref=self.source_ref,
         )
+        output_graph.shape_env.freeze()
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
