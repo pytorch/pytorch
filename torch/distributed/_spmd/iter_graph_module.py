@@ -1,4 +1,5 @@
 import copy
+import inspect
 import itertools
 import logging
 from contextlib import contextmanager, ExitStack
@@ -8,8 +9,8 @@ import torch.nn as nn
 from torch import fx
 from torch.fx.graph import PythonCode
 from torch.fx.node import Argument
-from torch.utils._pytree import tree_flatten, tree_map
 from torch.profiler import record_function
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -49,9 +50,7 @@ class IterGraph(fx.Graph):
         self._codegen = copy.deepcopy(orig_graph._codegen)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
-        super().output(
-            output_val, type_expr=getattr(old_output_val, "type", None)
-        )
+        super().output(output_val, type_expr=getattr(old_output_val, "type", None))
 
         self.setup_graph = setup_graph
         self.cleanup_graph = cleanup_graph
@@ -64,6 +63,7 @@ class IterGraph(fx.Graph):
         self._setup_mapping: Dict[fx.Node, fx.Node] = {}
         self._cleanup_mapping: Dict[fx.Node, fx.Node] = {}
         self._freeze_cross_iter_movement = False
+        self._cross_iter_block_count = 0
 
         for node, setup_node, cleanup_node in zip(
             self.nodes, self.setup_graph.nodes, self.cleanup_graph.nodes
@@ -85,9 +85,7 @@ class IterGraph(fx.Graph):
             for graph in self._all_graphs:
                 if node:
                     actual_node = self._lookup_node(node, graph)
-                    assert (
-                        actual_node is not None
-                    ), "Cannot handle None case now."
+                    assert actual_node is not None, "Cannot handle None case now."
                 else:
                     actual_node = node
                 stack.enter_context(getattr(graph, func)(actual_node))
@@ -108,79 +106,184 @@ class IterGraph(fx.Graph):
         return self._insert_context("inserting_before", node)
 
     @staticmethod
-    def _is_sese_graph(subgraph: List[fx.Node]) -> bool:
-        """
-        Check if the given subgraph forms a single-entry-single-exit (SESE) graph.
-        We borrow the SESE graph term from the graph theory because the graph
-        looks similar to SESE graph.
-
-        1. Only one node has inputs/args from the external nodes (not in subgraph).
-        2. Only one node has a user from the the external nodes and the user must
-           be output. The output condition is not strictly enforced due to the
-           testing purpose.
-
-        SESE graph is very restrict and is not applicable for all optimizations.
-        But this gives a good start point to explor cross-iteration optimizations.
-        """
-        all_nodes: Set[fx.Node] = set(subgraph)
-        for i, node in enumerate(subgraph):
-            pytree_args, _ = tree_flatten(node.args)
-            pytree_kwargs, _ = tree_flatten(node.kwargs)
-            for arg in itertools.chain(pytree_args, pytree_kwargs):
-                if arg not in all_nodes and i > 0:
-                    return False
-            if i == len(subgraph) - 1:
-                # TODO: the only user must be the output. Otherwise, we don't
-                # know how to move this subgraph. We currently do not stricly
-                # force this attribute because some test code create fake output.
-                if len(node.users) > 1:
-                    return False
-            else:
-                for user in node.users:
-                    if user not in all_nodes:
-                        return False
-        return True
-
-    def _convert_sese_input_to_output(
-        self, nodes: List[fx.Node], graph: fx.Graph, erase_node: bool
-    ) -> None:
+    def _find_output(graph: fx.Graph) -> fx.Node:
         for output in reversed(graph.nodes):
             if output.target == "output":
-                break
-        first_node = self._lookup_node(nodes[0], graph)
-        assert first_node is not None, "The first_node is None."
-        # TODO: We currently assume there is only one input to simplify the
-        # coding. We may have to deal with a more general case.
-        sese_arguments = first_node.args[0]
-        # TODO: Do we need to remove the output of the SESE subgraph?
-        # new_output =  tuple(
-        #   arg for arg in output.args if arg != nodes[-1]
-        # ) + (arguments,)
-        new_output = output.args + (sese_arguments,)
+                return output
+
+    @staticmethod
+    def _is_connect_to_output(subgraph: List[fx.Node], output: fx.Node) -> bool:
+        """
+        This function ensure the nodes in subgraph satisfy one of the following:
+        1. The user of the node is in ``subgraph``.
+        2. The user of the node is output.
+        3. There are no users -- the node is a side-effect node.
+        """
+        all_nodes: Set[fx.Node] = set(subgraph)
+        for node in subgraph:
+            for user in node.users:
+                if not isinstance(user, fx.Node):
+                    continue
+                if user not in all_nodes and user != output:
+                    return False
+        return True
+
+    @staticmethod
+    def _clone_subgraph(
+        subgraph: List[fx.Node], graph: fx.Graph, target: fx.Node
+    ) -> List[fx.Node]:
+        all_nodes = set(subgraph)
+        mapping = dict()
+        cloned_subgraph = []
+        with graph.inserting_before(target):
+            for node in subgraph:
+                cloned_node = graph.call_function(
+                    node.target, node.args, node.kwargs, node.type
+                )
+                # TODO: there are many flatten/unflatten in IterGraph that
+                # can be simplified with tree_map. Will simplify this in
+                # a follow-up PR.
+                original_input, _ = tree_flatten((node.args, node.kwargs))
+                cloned_input, spec = tree_flatten(
+                    (cloned_node.args, cloned_node.kwargs)
+                )
+                mapped_cloned_input = []
+                for original_input_node, cloned_input_node in zip(
+                    original_input, cloned_input
+                ):
+                    if original_input_node in all_nodes:
+                        assert original_input_node in mapping
+                        mapped_cloned_input.append(mapping[original_input_node])
+                    else:
+                        mapped_cloned_input.append(cloned_input_node)
+                cloned_node.args, cloned_node.kwargs = tree_unflatten(
+                    mapped_cloned_input, spec
+                )
+                mapping[node] = cloned_node
+                cloned_subgraph.append(cloned_node)
+        return cloned_subgraph
+
+    def _forward_subgraph_inputs(
+        self, subgraph: List[fx.Node], graph: fx.Graph, erase_node: bool
+    ) -> int:
+        """
+        This function make the inputs of a subgraph become the extra output
+        of the entire graph. If ``erase_node`` is True, the subgraph will be
+        erased from the graph -- essentially forward the inputs of the subgraph
+        to the output of the graph.
+        """
+        output = self._find_output(graph)
+        inputs = []
+        all_nodes: Set[fx.Node] = set(subgraph)
+
+        for node in subgraph:
+            node_inputs, _ = tree_flatten((node.args, node.kwargs))
+            for _input in node_inputs:
+                if not isinstance(_input, fx.Node):
+                    continue
+                if _input in all_nodes:
+                    continue
+                inputs.append(_input)
+
+        new_output = output.args + tuple(inputs)
         if erase_node:
-            for node in nodes:
-                graph_node = self._lookup_node(node, graph)
-                assert graph_node is not None, "The graph_node is None."
-                self._fx_graph_call(graph, "erase_node", graph_node)
+            # We have to remove the node in the reversed order to ensure the
+            # node has zero users.
+            erased = set()
+            for node in reversed(subgraph):
+                if len(node.users) == 1:
+                    key = next(iter(node.users.keys()))
+                    # This is the optimizer case where IterGraph functionalize
+                    # the optimizer. Remove the dependency.
+                    if key not in new_output and key == output:
+                        node.users.clear()
+                # This is the step case where there is a virtual data dependency
+                # (in-place update) between step and optimizer. And
+                # functionalize_optim add this dependency
+                for user in list(node.users.keys()):
+                    if user in erased:
+                        node.users.pop(user)
+                if node.users:
+                    raise RuntimeError(
+                        "IterGraph has not support moving the nodes that "
+                        "produce users output result."
+                    )
+                self._fx_graph_call(graph, "erase_node", node)
+                erased.add(node)
         self._fx_graph_call(graph, "erase_node", output)
         self._fx_graph_call(graph, "output", new_output)
+        logger.info(f"Extended outputs from the subgraph inputs: {inputs}")
+        return len(inputs)
+
+    def _forward_inputs_to_subgraph(
+        self, subgraph: List[fx.Node], graph: fx.Graph, extra_input: int
+    ) -> None:
+        last_placeholder = None
+        for node in graph.nodes:
+            if str(node.op) != "placeholder":
+                break
+            last_placeholder = node
+        assert last_placeholder is not None
+        with self._fx_graph_call(graph, "inserting_after", last_placeholder):
+            new_input_nodes = reversed(
+                [
+                    self._fx_graph_call(
+                        graph,
+                        "placeholder",
+                        f"cross_iter_input_{self._cross_iter_block_count}_{i}",
+                    )
+                    for i in reversed(range(extra_input))
+                ]
+            )
+
+        all_nodes = set(subgraph)
+        try:
+            for node in subgraph:
+                node_inputs, spec = tree_flatten((node.args, node.kwargs))
+                new_node_inputs = []
+                for input_node in node_inputs:
+                    if input_node in all_nodes or not isinstance(input_node, fx.Node):
+                        new_node_inputs.append(input_node)
+                    else:
+                        new_node_inputs.append(next(new_input_nodes))
+                node.args, node.kwargs = tree_unflatten(new_node_inputs, spec)
+        except StopIteration:
+            raise RuntimeError("There are no enough input nodes")
+        try:
+            unused_node = next(new_input_nodes)
+            raise RuntimeError(f"There are unused nodes {unused_node}")
+        except StopIteration:
+            pass
 
     def move_to_next_iter_before(
-        self, nodes: List[fx.Node], target_node: fx.Node
-    ):
+        self, subgraph: List[fx.Node], target_node: fx.Node
+    ) -> None:
+        """
+        Move the ``subgraph`` to the next iteration before ``target_node``.
+        The ``subgraph`` is a list of fx.Node and must satisfy the following
+        restrictions:
+            1. The order of the nodes in ``subgraph`` must obey the topological
+               sort order.
+            2. The users of the node in ``subgraph`` must be one of the following:
+                a.) the user is also a node in ``subgraph``.
+                b.) the user is the output of the full graph.
+                c.) the node has users (side effect node).
+        """
         if self._freeze_cross_iter_movement:
             raise RuntimeError(
-                "The cross-iteration movement has been freeze for the given "
+                "The cross-iteration movement has been frozen for the given "
                 "IterGraph."
             )
 
-        if not self._is_sese_graph(nodes):
+        if not self._is_connect_to_output(subgraph, self._find_output(self)):
             raise ValueError(
-                "The nodes for move_to_next_iter_before must form a SESE "
-                "subgraph. The output of this subgraph should be the output "
-                " of the whole graph."
+                "The target nodes for ``move_to_next_iter_before`` must "
+                "satisfy one of the following conditions: 1) the user of the "
+                "node is in the target nodes, 2) the user is the ouput of the "
+                "graph, 3) there are no users -- the node is a side-effect node. "
             )
 
+        self._cross_iter_block_count += 1
         # The main graph must be the last one to be modified. Otherwise, the
         # mapping may change and hence intorduce incorrect mapping for setup
         # and cleanup graphs.
@@ -188,76 +291,45 @@ class IterGraph(fx.Graph):
         # For the setup graph, no additional input is needed but additional
         # outputs will be created. The additional output represents the input of
         # the action to be moved to the next iteration -- main graph.
-        self._convert_sese_input_to_output(
-            nodes=nodes, graph=self.setup_graph, erase_node=True
+        setup_extra_input = self._forward_subgraph_inputs(
+            subgraph=[self._lookup_node(node, self.setup_graph) for node in subgraph],
+            graph=self.setup_graph,
+            erase_node=True,
         )
 
         # For the cleanup graph, additional input is required to get the output
         # from the last iteration -- main graph. Additional nodes are also
         # needed to perform the action moved from the last itertion.
-        new_input_node = self.cleanup_graph.placeholder(
-            nodes[0].name + "_input"
-        )
         target_cleanup_node = self._lookup_node(target_node, self.cleanup_graph)
-        assert (
-            target_cleanup_node is not None
-        ), "The target_cleanup_node is None."
-        node_mapping: Dict[fx.Node, fx.Node] = {}
-        with self.cleanup_graph.inserting_before(target_cleanup_node):
-            last_new_cleanup_node: Optional[fx.Node] = None
-            for i, node in enumerate(nodes):
-                cleanup_node = self._lookup_node(node, self.cleanup_graph)
-                assert cleanup_node is not None, "The cleanup_node is None."
-                # TODO: generalize the node copy process. We only support
-                # call_function now and trivial args, kwargs for the first node.
-                if i == 0:
-                    args = (new_input_node,)
-                    kwargs = {}
-                else:
-                    args = tree_map(
-                        lambda arg: node_mapping[arg]
-                        if isinstance(arg, fx.Node)
-                        else arg,
-                        cleanup_node.args,
-                    )
-                    kwargs = tree_map(
-                        lambda arg: node_mapping[arg]
-                        if isinstance(arg, fx.Node)
-                        else arg,
-                        cleanup_node.kwargs,
-                    )
-                new_cleanup_node = self.cleanup_graph.call_function(
-                    cleanup_node.target,
-                    args,
-                    kwargs,
-                    cleanup_node.type,
-                )
-                if i == 0:
-                    new_cleanup_node.prepend(new_input_node)
-                node_mapping[cleanup_node] = new_cleanup_node
-                last_new_cleanup_node = new_cleanup_node
-            assert last_new_cleanup_node is not None
-            # TODO: Figure out how to properly avoid dead code elimination that
-            # clean up the newly added node properly. Right now, we manually
-            # update the users of the last node of the new SESE graph even
-            # though the target node does not use that node.
-            last_new_cleanup_node.users[target_cleanup_node] = None
+        assert target_cleanup_node is not None, "The target_cleanup_node is None."
+        cloned_subgraph = self._clone_subgraph(
+            subgraph=[self._lookup_node(node, self.cleanup_graph) for node in subgraph],
+            graph=self.cleanup_graph,
+            target=target_cleanup_node,
+        )
+        self._forward_inputs_to_subgraph(
+            cloned_subgraph, self.cleanup_graph, setup_extra_input
+        )
 
         # For the main graph, additional input will be created to represent
         # the output from the last iteration -- main graph or setup graph.
         # Additional output will also be generated to represent the input for
         # the next iteration -- the main graph or the cleanup graph.
-        self._convert_sese_input_to_output(
-            nodes=nodes, graph=self, erase_node=False
+        main_extra_input = self._forward_subgraph_inputs(
+            subgraph=subgraph, graph=self, erase_node=False
         )
-        new_input_node = self.placeholder(nodes[0].name + "_input")
-        nodes[0].args = (new_input_node,)
-        for node in nodes:
+        assert main_extra_input == setup_extra_input
+        for node in subgraph:
             target_node.prepend(node)
-        nodes[0].prepend(new_input_node)
-        nodes[-1].users[target_node] = None
+        self._forward_inputs_to_subgraph(subgraph, self, main_extra_input)
 
-        self.num_extra_output += 1
+        for node in self.cleanup_graph.nodes:
+            if len(node.users) == 0:
+                node.users["__hold__"] = None
+        for node in self.nodes:
+            if len(node.users) == 0:
+                node.users["__hold__"] = None
+        self.num_extra_output += main_extra_input
 
     def move_before(self, nodes: List[fx.Node], target_node: fx.Node) -> None:
         for graph in self._all_graphs:
@@ -333,11 +405,26 @@ class IterGraph(fx.Graph):
         cleanup_node = self._lookup_node(to_erase, self.cleanup_graph)
         self.cleanup_graph.erase_node(cleanup_node)
 
-    def output(
-        self, result: Argument, type_expr: Optional[Any] = None
+    def placeholder(
+        self,
+        name: str,
+        type_expr: Optional[Any] = None,
+        default_value: Any = inspect.Signature.empty,
     ) -> fx.Node:
         if self._freeze_cross_iter_movement:
-            return super().output(result, type_expr)
+            return super().placeholder(name, type_expr, default_value)
+
+        main_placeholder = super().placeholder(name, type_expr, default_value)
+        setup_placeholder = self.setup_graph.placeholder(name, type_expr, default_value)
+        cleanup_placeholder = self.cleanup_graph.placeholder(
+            name, type_expr, default_value
+        )
+        self._setup_mapping[main_placeholder] = setup_placeholder
+        self._cleanup_mapping[main_placeholder] = cleanup_placeholder
+
+    def output(self, result: Argument, type_expr: Optional[Any] = None) -> fx.Node:
+        if self._freeze_cross_iter_movement:
+            return super().placeholder(result, type_expr)
 
         main_output = super().output(result, type_expr)
         setup_result = tree_map(
@@ -458,7 +545,7 @@ class IterGraph(fx.Graph):
 
     def keep_unused_nodes(self) -> None:
         for node in self.nodes:
-            if len(node.users) == 0:
+            if len(node.users) == 0 and str(node.op) != "output":
                 self.node_add_user(node, "__hold__")
 
     def functionalize_optim(self) -> None:
@@ -527,9 +614,7 @@ class IterGraphModule(nn.Module):
         self.cleanup_gm = _copy_gm(main_gm, copy.deepcopy(main_gm.graph))
         self.main_gm = _copy_gm(
             main_gm,
-            IterGraph(
-                main_gm.graph, self.setup_gm.graph, self.cleanup_gm.graph
-            ),
+            IterGraph(main_gm.graph, self.setup_gm.graph, self.cleanup_gm.graph),
         )
 
         self._iter = 0
@@ -562,8 +647,7 @@ class IterGraphModule(nn.Module):
                     output, tuple
                 ), f"Only support tuple output now. {type(output)}"
                 num_actual_output = (
-                    len(output)
-                    - cast(IterGraph, self.main_gm.graph).num_extra_output
+                    len(output) - cast(IterGraph, self.main_gm.graph).num_extra_output
                 )
                 assert num_actual_output > 0
                 self._previous_output = output[num_actual_output:]
@@ -574,9 +658,7 @@ class IterGraphModule(nn.Module):
             # No cross-iteration optimization is done. Simply call the
             # GraphModule.
             output = gm(*args, **kwargs)
-        logger.debug(
-            f"The output information: size={len(output)}, type={type(output)}"
-        )
+        logger.debug(f"The output information: size={len(output)}, type={type(output)}")
         return output
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
