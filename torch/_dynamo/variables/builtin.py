@@ -355,7 +355,7 @@ class BuiltinVariable(VariableTracker):
             return None
 
         # Return first handler that matches the type checks
-        for ((type1, type2), handler) in handlers[op]:
+        for (type1, type2), handler in handlers[op]:
             if isinstance(a, type1) and isinstance(b, type2):
                 return handler
 
@@ -641,7 +641,6 @@ class BuiltinVariable(VariableTracker):
                 )
                 for i in [a, b]
             ):
-
                 if any([isinstance(val, FakeItemVariable) for val in [a, b]]):
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
@@ -678,7 +677,6 @@ class BuiltinVariable(VariableTracker):
             )
             return SymNodeVariable.create(tx, proxy, None)
         else:
-
             unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
     call_min = _call_min_max
