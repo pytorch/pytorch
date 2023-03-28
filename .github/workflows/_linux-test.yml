@@ -280,8 +280,17 @@ jobs:
         env:
           RUNNER_WORKSPACE: ${{ runner.workspace }}
         run: |
-          echo "NVIDIA driver installation has failed, shutting down the runner..."
-          .github/scripts/stop_runner_service.sh
+          set +e
+          set -x
+
+          nvidia-smi
+          NVIDIA_SMI_STATUS=$?
+
+          # These are acceptable return code from nvidia-smi as copied from setup-nvidia GitHub action
+          if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
+            echo "NVIDIA driver installation has failed, shutting down the runner..."
+            .github/scripts/stop_runner_service.sh
+          fi
 
       - name: Check GPU health (run this last)
         if: failure() && contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
