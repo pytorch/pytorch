@@ -2054,8 +2054,9 @@ def sample_inputs_elementwise_unary(
     _L = S if kwargs.get("small_inputs_only", False) else L
 
     low, high = op_info.domain
-    low = low if low is None else low + op_info._domain_eps
-    high = high if high is None else high - op_info._domain_eps
+    is_floating = dtype.is_floating_point or dtype.is_complex
+    low = low if low is None or not is_floating else low + op_info._domain_eps
+    high = high if high is None or not is_floating else high - op_info._domain_eps
     if (
         op_info.supports_sparse_csr
         or op_info.supports_sparse_csc
@@ -2100,8 +2101,9 @@ def _replace_values_in_tensor(tensor, condition, safe_value):
 # Helper to create a unary elementwise tensor with valid inputs
 def _make_unary_elementwise_tensor(shape, *, op, dtype, **kwargs):
     low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
+    is_floating = dtype.is_floating_point or dtype.is_complex
+    low = low if low is None or not is_floating else low + op._domain_eps
+    high = high if high is None or not is_floating else high - op._domain_eps
 
     a = make_tensor(shape, low=low, high=high, dtype=dtype, **kwargs)
 
@@ -2120,8 +2122,9 @@ def _filter_unary_elementwise_tensor(a, *, op):
         return a
 
     low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
+    is_floating = a.dtype.is_floating_point or a.dtype.is_complex
+    low = low if low is None or not is_floating else low + op._domain_eps
+    high = high if high is None or not is_floating else high - op._domain_eps
 
     if a.dtype is torch.uint8 and low is not None:
         low = max(low, 0)
@@ -2215,10 +2218,6 @@ def generate_elementwise_unary_extremal_value_tensors(
 def generate_elementwise_unary_noncontiguous_tensors(
     op, *, device, dtype, requires_grad=False
 ):
-    low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
-
     make_arg = partial(
         _make_unary_elementwise_tensor,
         op=op,
