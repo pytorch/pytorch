@@ -609,12 +609,12 @@ def retry_shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=N
         exit_code = shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout)
         if exit_code == 0 or retries == 0:
             return exit_code
-        print(f"Got exit code {exit_code}, retrying (retries left={retries})", file=stdout)
+        print(f"Got exit code {exit_code}, retrying (retries left={retries})", file=stdout, flush=True)
     except subprocess.TimeoutExpired:
         if retries == 0:
-            print(f"Command took >{timeout // 60}min, returning 124", file=stdout)
+            print(f"Command took >{timeout // 60}min, returning 124", file=stdout, flush=True)
             return 124
-        print(f"Command took >{timeout // 60}min, retrying (retries left={retries})", file=stdout)
+        print(f"Command took >{timeout // 60}min, retrying (retries left={retries})", file=stdout, flush=True)
     return retry_shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout, retries=retries - 1)
 
 
