@@ -105,7 +105,7 @@ struct InnerSumCastLoadPolicy<scalar_t, scalar_t>:
     LoadPolicy<scalar_t> {
 };
 
-#define INNER_SUM_CAST_LOAD_POLICY_INIT(type) \
+#define INNER_SUM_CAST_LOAD_POLICY_INIT(type, name) \
 template <> \
 struct InnerSumCastLoadPolicy<Vectorized<type>, Vectorized<float>> { \
   using vec_t = Vectorized<type>; \
@@ -118,12 +118,12 @@ struct InnerSumCastLoadPolicy<Vectorized<type>, Vectorized<float>> { \
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) { \
     auto ptr = reinterpret_cast<const type*>(data + stride * index); \
     vacc_t first, second; \
-    vec::load_fp32_from_ptr(ptr, first, second); \
+    vec::load_fp32_from_##name(ptr, first, second); \
     return first + second; \
   } \
 }
-INNER_SUM_CAST_LOAD_POLICY_INIT(BFloat16);
-INNER_SUM_CAST_LOAD_POLICY_INIT(Half);
+INNER_SUM_CAST_LOAD_POLICY_INIT(BFloat16, bf16);
+INNER_SUM_CAST_LOAD_POLICY_INIT(Half, fp16);
 
 // For outer sum, load a partial vec_t of size vacc_t then cast to vacc_t
 template <typename vec_t, typename vacc_t>
@@ -150,7 +150,7 @@ struct OuterSumCastLoadPolicy {
   }
 };
 
-#define OUTER_SUM_CAST_LOAD_POLICY_INIT(type) \
+#define OUTER_SUM_CAST_LOAD_POLICY_INIT(type, name) \
 template <> \
 struct OuterSumCastLoadPolicy<Vectorized<type>, Vectorized<float>> { \
   using vec_t = Vectorized<type>; \
@@ -163,12 +163,12 @@ struct OuterSumCastLoadPolicy<Vectorized<type>, Vectorized<float>> { \
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) { \
     auto ptr = reinterpret_cast<const type*>(data + stride * index); \
     vacc_t values; \
-    vec::load_fp32_from_ptr(ptr, values); \
+    vec::load_fp32_from_##name(ptr, values); \
     return values; \
   } \
 }
-OUTER_SUM_CAST_LOAD_POLICY_INIT(BFloat16);
-OUTER_SUM_CAST_LOAD_POLICY_INIT(Half);
+OUTER_SUM_CAST_LOAD_POLICY_INIT(BFloat16, bf16);
+OUTER_SUM_CAST_LOAD_POLICY_INIT(Half, fp16);
 
 template <typename scalar_t>
 struct OuterSumCastLoadPolicy<scalar_t, scalar_t>:
@@ -239,7 +239,7 @@ struct InnerNanSumCastLoadPolicy<scalar_t, scalar_t> :
     NanSumLoadPolicy<scalar_t> {
 };
 
-#define INNER_NAN_SUM_CAST_LOAD_POLICY_INIT(type) \
+#define INNER_NAN_SUM_CAST_LOAD_POLICY_INIT(type, name) \
 template <> \
 struct InnerNanSumCastLoadPolicy<Vectorized<type>, Vectorized<float>> { \
   using vec_t = Vectorized<type>; \
@@ -252,14 +252,14 @@ struct InnerNanSumCastLoadPolicy<Vectorized<type>, Vectorized<float>> { \
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) { \
     auto ptr = reinterpret_cast<const type*>(data + stride * index); \
     vacc_t first, second; \
-    vec::load_fp32_from_ptr(ptr, first, second); \
+    vec::load_fp32_from_##name(ptr, first, second); \
     const vacc_t zero(0); \
     return (vacc_t::blendv(first, zero, first.isnan()) + \
             vacc_t::blendv(second, zero, second.isnan())); \
   } \
 }
-INNER_NAN_SUM_CAST_LOAD_POLICY_INIT(BFloat16);
-INNER_NAN_SUM_CAST_LOAD_POLICY_INIT(Half);
+INNER_NAN_SUM_CAST_LOAD_POLICY_INIT(BFloat16, bf16);
+INNER_NAN_SUM_CAST_LOAD_POLICY_INIT(Half, fp16);
 
 template <typename vec_t, typename vacc_t>
 struct OuterNanSumCastLoadPolicy {
