@@ -270,7 +270,7 @@ def clone_preserve_strides(x):
 
 
 @patch.object(config, "debug", True)
-def run_and_get_cpp_code(fn, args):
+def run_and_get_cpp_code(fn, *args, **kwargs):
     torch._dynamo.reset()
     import io
     import logging
@@ -280,7 +280,7 @@ def run_and_get_cpp_code(fn, args):
     from torch._inductor.graph import output_code_log
 
     output_code_log.addHandler(ch)
-    fn(*args)
+    fn(*args, **kwargs)
     s = log_capture_string.getvalue()
     output_code_log.removeHandler(ch)
     return s
@@ -2146,7 +2146,7 @@ class CommonTemplate:
                 return mod(*ex, **kwargs)
 
             run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, (v,))
+            code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
@@ -5696,7 +5696,7 @@ class CommonTemplate:
 
         inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
         fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, inps)
+        code = run_and_get_cpp_code(fn_opt, *inps)
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
 
@@ -6395,7 +6395,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
                 f_opt = torch.compile()(f)
 
-                code = run_and_get_cpp_code(f_opt, (inps[0], inps[1]))
+                code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
                 FileCheck().check_not("void kernel").run(code)
 
                 self.assertEqual(
@@ -6408,7 +6408,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
                     return x[torch.tensor(1) :] * 2
 
                 f_opt = torch.compile()(f)
-                code = run_and_get_cpp_code(f_opt, (inps[0],))
+                code = run_and_get_cpp_code(f_opt, inps[0])
                 FileCheck().check_not("void kernel").run(code)
                 self.assertEqual(f_opt(inps[0]), f(inps[0]))
 
