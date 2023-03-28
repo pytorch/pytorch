@@ -1555,9 +1555,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * that all invariants required by data() are upheld here.
    */
   template <typename T>
-  inline T* unsafe_data() const {
-    return storage_.unsafeGetStorageImpl()->mutable_unsafe_data<T>() +
-        storage_offset_;
+  inline const T* unsafe_data() const {
+    return storage_.unsafe_data<T>() + storage_offset_;
   }
 
   /**
