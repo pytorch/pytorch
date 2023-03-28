@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
+import math
 import os
 import sys
 import unittest
@@ -8,7 +9,10 @@ from functools import partial
 
 import torch
 from torch._dynamo.testing import make_test_cls_with_patches
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
@@ -34,27 +38,15 @@ from inductor.test_torchinductor import (
     check_model_cuda,
     CommonTemplate,
     copy_tests,
+    TestFailure,
 )
 
 importlib.import_module("filelock")
 
-test_skips = {
-    "test_cpp_wrapper_dynamic_shapes": ("cpu",),
-    "test_cudnn_rnn_dynamic_shapes": ("cuda",),
-    "test_kwargs_dynamic_shapes": ("cpu",),
-    # test_roi_align uses torchvision, which doesn't work with dynamic shapes
-    "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
-    #
-    # These are from switching to specialize_int=False
-    #
-    "test_div5_dynamic_shapes": (
-        "cpu",
-        "cuda",
-    ),  # The values for attribute 'dtype' do not match
-    "test_div8_dynamic_shapes": ("cpu", "cuda"),  # StopIteration
-    # NotImplementedError: argument of type: <class 'sympy.core.add.Add'>
-    "test_reflection_pad2d_backward_dynamic_shapes": ("cpu", "cuda"),
-    "test_both_scalars_dynamic_shapes": ("cpu", "cuda"),  # StopIteration
+# xfail by default, set is_skip=True to skip
+test_failures = {
+    "test_cpp_wrapper_dynamic_shapes": TestFailure(("cpu",)),
+    "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
 }
 
 
@@ -76,7 +68,7 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
-    copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_skips)
+    copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
@@ -85,7 +77,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         common = check_model_cuda
         device = "cuda"
 
-    copy_tests(DynamicShapesCommonTemplate, DynamicShapesCudaTests, "cuda", test_skips)
+    copy_tests(
+        DynamicShapesCommonTemplate, DynamicShapesCudaTests, "cuda", test_failures
+    )
 
 
 class TestInductorDynamic(TestCase):
@@ -135,6 +129,30 @@ class TestInductorDynamic(TestCase):
         res = opt(a)
         ref = fn(a)
         self.assertEqual(res, ref)
+
+    @onlyCUDA
+    def test_pad_dynamic(self, device):
+        def get_same_padding(x: int, k: int, s: int, d: int):
+            return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)
+
+        def pad_same(x, k, s, d=(1, 1), value=0):
+            ih, iw = x.size()[-2:]
+            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
+                iw, k[1], s[1], d[1]
+            )
+            if pad_h > 0 or pad_w > 0:
+                x = torch.nn.functional.pad(
+                    x,
+                    [pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2],
+                    value=value,
+                )
+            return x
+
+        x = torch.randn(2, 24, 110, 110, device=device)
+        opt = self.compile_fn(pad_same)
+        res = opt(x, (5, 5), (2, 2))
+        ref = pad_same(x, (5, 5), (2, 2))
+        self.assertEqual(res, ref, atol=0, rtol=0)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals())

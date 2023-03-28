@@ -28,6 +28,13 @@ class TorchRuntimeError(TorchDynamoException):
     pass
 
 
+class InvalidBackend(TorchDynamoException):
+    def __init__(self, name):
+        super().__init__(
+            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
+        )
+
+
 class ResetRequired(TorchDynamoException):
     def __init__(self):
         super().__init__(

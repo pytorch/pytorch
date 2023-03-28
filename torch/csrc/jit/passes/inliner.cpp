@@ -61,7 +61,7 @@ void inlineCalls(Block* block) {
               g = exec_plans.begin()->second.graph;
               // optimized_graph() calls Inline, so we only need to explicitly
               // invoke inlining on the jit optimized graph with recursive
-              // fallback funciton calls
+              // fallback function calls
               Inline(*g.get());
             }
           }
