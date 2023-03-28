@@ -1163,6 +1163,21 @@ class TestVmapAPI(TestCase):
         self.assertEqual(out, f(None, y))
         self.assertEqual(out_dims, (None, None, None))
 
+    def test_data_attribute(self):
+        def foo(x):
+            y = x.data
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "accessing `data` under vmap transform"):
+            torch.func.vmap(foo)(torch.randn(3, 3))
+
+        def foo(x):
+            x.data = torch.ones(3, 3)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "mutating directly with `.data` under vmap"):
+            torch.func.vmap(foo)(torch.randn(3, 3))
+
 
 def slice_inputs(inputs, bdims, i):
     result = []
