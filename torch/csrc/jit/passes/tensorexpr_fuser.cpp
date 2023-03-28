@@ -683,7 +683,7 @@ class TensorExprFuser {
 
     // Try to merge adjacent fusion groups together. Because we have only merged
     // by looking at graph inputs, without this we would not attempt to merge
-    // adjacent fusion groups that don't have a depdency on each other
+    // adjacent fusion groups that don't have a dependency on each other
 
     std::vector<Node*> initial_fusion_groups;
     for (Node* n : block->nodes()) {
@@ -699,7 +699,7 @@ class TensorExprFuser {
       // Try merging the just created fusion group into the previous one.
       // If it did not work, then put the previous fusion group into
       // fusion_groups vector - we will not touch it anymore in this loop.
-      // If merging suceeded, save the merged group as the "previous" fusion
+      // If merging succeeded, save the merged group as the "previous" fusion
       // group so that we can try to merge the next one into it.
 
       Node* fusion_group = initial_fusion_groups[i];
@@ -1151,7 +1151,7 @@ class TensorExprFuser {
     REQ(tensorexpr::isSupported(node));
     REQ(typesAreSupported(node));
 
-    // A hook to optimizations limitter to allow bisecting the pass
+    // A hook to optimizations limiter to allow bisecting the pass
     REQ(JIT_OPT_ALLOWED);
 
     if (fuse_to_dynamic_shapes_) {
