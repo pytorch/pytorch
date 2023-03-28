@@ -1363,6 +1363,20 @@ class TestAssertCloseQuantized(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn()
 
+class TestAssertNotClose(TestCase):
+    def test_not_close(self):
+        actual = torch.tensor(0)
+        expected = torch.tensor(1)
+
+        torch.testing.assert_not_close(actual, expected)
+
+    def test_close(self):
+        actual = torch.tensor(0)
+        expected = actual.clone()
+
+        with self.assertRaisesRegex(AssertionError, "are close"):
+            torch.testing.assert_not_close(actual, expected)
+
 
 class TestMakeTensor(TestCase):
     supported_dtypes = dtypes(
