@@ -36,6 +36,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/reportMemoryUsage_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/scalar_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/scalar_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/StorageUtils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/stride_properties_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test_parallel.cpp
@@ -107,6 +108,7 @@ list(APPEND ATen_VEC_TEST_SRCS
 
 list(APPEND ATen_MPS_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_print.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_allocator.cpp
   )
 
 # Caffe2 specific tests

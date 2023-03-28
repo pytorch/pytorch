@@ -109,13 +109,7 @@ elseif(APPLE)
 else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
-      -Wno-write-strings
       -Wno-strict-aliasing)
-endif()
-
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
-      -Wno-writable-strings)
 endif()
 
 if(USE_ITT)
@@ -285,6 +279,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
 endif()
 
+if(NOT MSVC)
+  # cudaProfilerInitialize must go away
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations")
+endif()
+
 # coreml
 if(USE_COREML_DELEGATE)
   list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/backend.cpp)
@@ -387,9 +386,9 @@ add_custom_command(
     "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
   COMMAND
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
-      --is_debug=${TORCH_VERSION_DEBUG}
-      --cuda_version=${CUDA_VERSION}
-      --hip_version=${HIP_VERSION}
+      --is-debug=${TORCH_VERSION_DEBUG}
+      --cuda-version=${CUDA_VERSION}
+      --hip-version=${HIP_VERSION}
   DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )

@@ -1,23 +1,23 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/OpMathType.h>
-#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorIndexing.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/Parallel.h>
-#include <ATen/TensorIndexing.h>
-#include <ATen/TensorIterator.h>
-#include <ATen/TensorOperators.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/native/mkldnn/Matmul.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
@@ -1533,14 +1533,16 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
   int64_t js = result.size(2);
   int64_t ks = self.size(2);
 
-  scalar_t alpha = alpha_.to<scalar_t>();
-  scalar_t beta = beta_.to<scalar_t>();
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t alpha = alpha_.to<opmath_t>();
+  opmath_t beta = beta_.to<opmath_t>();
 
   auto r0 = result.accessor<scalar_t, 3>();
   auto s0 = self.accessor<scalar_t, 3>();
   auto m0 = mat2.accessor<scalar_t, 3>();
 
   int64_t grain_size = std::min(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
+  using opmath_t = at::opmath_type<scalar_t>;
   parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
       for (const auto b : c10::irange(b_begin, b_end)) {
         auto r1 = r0[b];
@@ -1550,16 +1552,19 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
           auto r2 = r1[i];
           auto s2 = s1[i];
           for (const auto j : c10::irange(js)) {
-            scalar_t &r = r2[j];
+            opmath_t acc_value = 0;//is_bmm ? opmath_t(0) : opmath_t(r2[j]);
+            for (const auto k : c10::irange(ks)) {
+              acc_value += static_cast<opmath_t>(s2[k]) *
+                  static_cast<opmath_t>(m1[k][j]);
+            }
             if (is_bmm) {
-              r = 0;
-              for (const auto k : c10::irange(ks)) {
-                r += s2[k] * m1[k][j];
-              }
+              r2[j] = acc_value;
             } else {
-              r *= beta;
-              for (const auto k : c10::irange(ks)) {
-                r += alpha * s2[k] * m1[k][j];
+              // For beta == 0, the r's value will be ignored, especially for nan value.
+              if (beta == opmath_t{0}) {
+                r2[j] = alpha * acc_value;
+              } else {
+                r2[j] = static_cast<opmath_t>(r2[j]) * beta + alpha * acc_value;
               }
             }
           }
@@ -1797,9 +1802,21 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-bool should_fold(const Tensor& tensor1, const int64_t dim_tensor2) {
+bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
   const auto dim_tensor1 = tensor1.dim();
+  const auto dim_tensor2 = tensor2.dim();
   if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
+    // Suppose we don't fold here. Let t1.shape = [b, m, n] t2.shape = [n, k] like in a transformer
+    // t2 will be expanded to a tensor of shape [b, n, k] and then we do t1.bmm(t2_expanded)
+    // The issue appears in the backward.
+    // The output gradient g of this operation would have shape [b, m, k]
+    // The backward wrt. t2 of bmm would be given by t1.mH @ g, which has shape [b, n, k]
+    // Then, the backward of expand is simply `sum(0)`. As such, we are instantiating a tensor
+    // of shape [b, n, k] unnacessarily, which may cause a large memory footprint, and in the
+    // worst case, an OOM
+    if (tensor2.requires_grad()) {
+      return true;
+    }
     const auto t1_sizes_ptr = tensor1.sizes().cbegin();
     const auto t1_strides = tensor1.strides();
     if (dim_tensor1 == 3 && dim_tensor2 == 2 &&
@@ -1862,7 +1879,7 @@ Tensor _matmul_impl(
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
-  } else if (should_fold(tensor1, dim_tensor2) || should_fold(tensor2, dim_tensor1)) {
+  } else if (should_fold(tensor1, tensor2) || should_fold(tensor2, tensor1)) {
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
     // and some condition on the strides is fulfilled
@@ -1940,6 +1957,18 @@ Tensor _matmul_impl(
     const int64_t p = dim_tensor2 > 1 ? tensor2.sizes().back() : 1LL;
     const IntArrayRef batch_tensor2(tensor2.sizes().data(),
                                     std::max<int64_t>(dim_tensor2 - 2, 0LL));
+
+    // Same optimization for the gradients as that in should_fold
+    // If we're going to broadcast we force it to go through the should_fold branch
+    if (dim_tensor1 == 3 && dim_tensor2 == 3 && batch_tensor1[0] != batch_tensor2[0]) {
+      if (batch_tensor1[0] == 1 && (tensor1.requires_grad() || isTensorSubclassLike(tensor1))) {
+        return _matmul_impl(out, tensor1.squeeze(0), tensor2);
+      }
+      if (batch_tensor2[0] == 1 && (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
+        return _matmul_impl(out, tensor1, tensor2.squeeze(0));
+      }
+    }
+
     auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
 
     const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);

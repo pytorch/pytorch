@@ -1157,7 +1157,7 @@ TEST(RunTimeTest, ParseOperator) {
 
   // class Add(torch.nn.Module):
   //     def __init__(self):
-  //         super(Add, self).__init__()
+  //         super().__init__()
 
   //     def forward(self, a, b):
   //         return a + b
@@ -2217,7 +2217,7 @@ TEST_P(LiteInterpreterDynamicTypeTestFixture, Conformance) {
   }
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     PyTorch,
     LiteInterpreterDynamicTypeTestFixture,
     ::testing::Range(

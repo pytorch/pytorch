@@ -1,10 +1,11 @@
 import argparse
-from common import run, topics, get_features
+from common import run, topics, get_features, frontend_categories
 from collections import defaultdict
 import os
 from pathlib import Path
 import csv
 import pprint
+import common
 from common import get_commit_data_cache, features_to_dict
 import re
 import dataclasses
@@ -17,19 +18,20 @@ Example Usages
 Create a new commitlist for consumption by categorize.py.
 Said commitlist contains commits between v1.5.0 and f5bc91f851.
 
-    python commitlist.py --create_new tags/v1.5.0 f5bc91f851
+    python commitlist.py --create-new tags/v1.5.0 f5bc91f851
 
 Update the existing commitlist to commit bfcb687b9c.
 
-    python commitlist.py --update_to bfcb687b9c
+    python commitlist.py --update-to bfcb687b9c
 
 """
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=False)
 class Commit:
     commit_hash: str
     category: str
     topic: str
     title: str
+    files_changed: str
     pr_link: str
     author: str
 
@@ -86,7 +88,7 @@ class CommitList:
             writer.writerow(commit_fields)
             for commit in commit_list:
                 writer.writerow(dataclasses.astuple(commit))
-
+    @staticmethod
     def keywordInFile(file, keywords):
         for key in keywords:
             if key in file:
@@ -103,8 +105,56 @@ class CommitList:
             pr_link = f"https://github.com/pytorch/pytorch/pull/{features['pr_number']}"
         else:
             pr_link = None
+        files_changed_str = ' '.join(features['files_changed'])
+        return Commit(commit_hash, category, topic, features["title"], files_changed_str,  pr_link, features["author"], a1, a2, a3)
 
-        return Commit(commit_hash, category, topic, features["title"], pr_link, features["author"], a1, a2, a3)
+    @staticmethod
+    def category_remapper(category: str) -> str:
+        if category in frontend_categories:
+            category = category + '_frontend'
+            return category
+        if category == 'Meta API':
+            category = 'composability'
+            return category
+        if category in common.quantization.categories:
+            category = common.quantization.name
+            return category
+        if category in common.distributed.categories:
+            category = common.distributed.name
+            return category
+        return category
+
+    @staticmethod
+    def bracket_category_matcher(title: str):
+        """Categorize a commit based on the presence of a bracketed category in the title.
+
+        Args:
+            title (str): title to seaarch
+
+        Returns:
+            optional[str]
+        """
+        pairs = [
+            ('[dynamo]', 'dynamo'),
+            ('[torchdynamo]', 'dynamo'),
+            ('[torchinductor]', 'inductor'),
+            ('[inductor]', 'inductor'),
+            ('[codemod', 'skip'),
+            ('[profiler]', 'profiler'),
+            ('[functorch]', 'functorch'),
+            ('[autograd]', 'autograd_frontend'),
+            ('[quantization]', 'quantization'),
+            ('[nn]', 'nn_frontend'),
+            ('[complex]', 'complex_frontend'),
+            ('[mps]', 'mps'),
+            ('[optimizer]', 'optimizer_frontend'),
+            ('[xla]', 'xla'),
+        ]
+        title_lower = title.lower()
+        for bracket, category in pairs:
+            if bracket in title_lower:
+                return category
+        return None
 
     @staticmethod
     def categorize(features):
@@ -113,6 +163,10 @@ class CommitList:
         category = 'Uncategorized'
         topic = 'Untopiced'
 
+        # Revert commits are merged directly to master with no associated PR number
+        if features['pr_number'] is None:
+            if title.startswith("Revert"):
+                return 'skip', topic
 
         # We ask contributors to label their PR's appropriately
         # when they're first landed.
@@ -121,6 +175,7 @@ class CommitList:
         for label in labels:
             if label.startswith('release notes: '):
                 category = label.split('release notes: ', 1)[1]
+                category = CommitList.category_remapper(category)
                 already_categorized = True
             if label.startswith('topic: '):
                 topic = label.split('topic: ', 1)[1]
@@ -131,14 +186,16 @@ class CommitList:
         # update this to check if each file starts with caffe2
         if 'caffe2' in title:
             return 'caffe2', topic
-        if '[codemod]' in title.lower():
-            return 'skip', topic
         if 'Reverted' in labels:
             return 'skip', topic
         if 'bc_breaking' in labels:
             topic = 'bc-breaking'
         if 'module: deprecation' in labels:
             topic = 'deprecation'
+
+        found_bracket_category = CommitList.bracket_category_matcher(title)
+        if found_bracket_category:
+            return found_bracket_category, topic
 
         files_changed = features['files_changed']
         for file in files_changed:
@@ -169,11 +226,11 @@ class CommitList:
                 category = 'fx'
                 break
             if CommitList.keywordInFile(file, ['torch/ao', 'test/ao']):
-                category = 'ao'
+                category = common.quantization.name
                 break
             # torch/quantization, test/quantization, aten/src/ATen/native/quantized, torch/nn/{quantized, quantizable}
             if CommitList.keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz']):
-                category = 'quantization'
+                category = common.quantization.name
                 break
             if CommitList.keywordInFile(file, ['torch/package', 'test/package']):
                 category = 'package'
@@ -196,10 +253,19 @@ class CommitList:
             if CommitList.keywordInFile(file, ['torch/csrc/jit', 'torch/jit']):
                 category = 'jit'
                 break
+            if CommitList.keywordInFile(file, ['torch/_meta_registrations.py', 'torch/_decomp', 'torch/_prims', 'torch/_refs']):
+                category = 'composability'
+                break
+            if CommitList.keywordInFile(file, ['torch/_dynamo']):
+                category = 'dynamo'
+                break
+            if CommitList.keywordInFile(file, ['torch/_inductor']):
+                category = 'inductor'
+                break
         else:
             # Below are some extra quick checks that aren't necessarily file-path related,
             # but I found that to catch a decent number of extra commits.
-            if len(files_changed) > 0 and all([f_name.endswith('.cu') or f_name.endswith('.cuh') for f_name in files_changed]):
+            if len(files_changed) > 0 and all([f_name.endswith(('.cu', '.cuh')) for f_name in files_changed]):
                 category = 'cuda'
             elif '[PyTorch Edge]' in title:
                 category = 'mobile'
@@ -210,6 +276,9 @@ class CommitList:
                 # individual torch_docs changes are usually for python ops
                 category = 'python_frontend'
 
+        # If we couldn't find a category but the topic is not user facing we can skip these:
+        if category == "Uncategorized" and topic == "not user facing":
+            category = "skip"
 
         return category, topic
 
@@ -260,13 +329,13 @@ def update_existing(path, new_version):
 
 def rerun_with_new_filters(path):
     current_commits = CommitList.from_existing(path)
-    for i in range(len(current_commits.commits)):
-        c = current_commits.commits[i]
-        if 'Uncategorized' in str(c):
-            feature_item = get_commit_data_cache().get(c.commit_hash)
+    for i, commit in enumerate(current_commits.commits):
+        current_category = commit.category
+        if current_category == 'Uncategorized' or current_category not in common.categories:
+            feature_item = get_commit_data_cache().get(commit.commit_hash)
             features = features_to_dict(feature_item)
             category, topic = CommitList.categorize(features)
-            current_commits[i] = dataclasses.replace(c, category=category, topic=topic)
+            current_commits.commits[i] = dataclasses.replace(commit, category=category, topic=topic)
     current_commits.write_result()
 
 def get_hash_or_pr_url(commit: Commit):
@@ -318,14 +387,14 @@ def get_markdown_header(category):
 
 The main goal of this process is to rephrase all the commit messages below to make them clear and easy to read by the end user. You should follow the following instructions to do so:
 
-* **Please cleanup, and format commit titles to be readable by the general pytorch user.** [Detailed intructions here](https://fb.quip.com/OCRoAbEvrRD9#HdaACARZZvo)
+* **Please cleanup, and format commit titles to be readable by the general pytorch user.** [Detailed instructions here](https://docs.google.com/document/d/14OmgGBr1w6gl1VO47GGGdwrIaUNr92DFhQbY_NEk8mQ/edit)
 * Please sort commits into the following categories (you should not rename the categories!), I tried to pre-sort these to ease your work, feel free to move commits around if the current categorization is not good.
 * Please drop any commits that are not user-facing.
 * If anything is from another domain, leave it in the UNTOPICED section at the end and I'll come and take care of it.
 
 The categories below are as follows:
 
-* BC breaking: All commits that are BC-breaking. These are the most important commits. If any pre-sorted commit is actually BC-breaking, do move it to this section. Each commit should contain a paragraph explaining the rational behind the change as well as an example for how to update user code (guidelines here: https://quip.com/OCRoAbEvrRD9)
+* BC breaking: All commits that are BC-breaking. These are the most important commits. If any pre-sorted commit is actually BC-breaking, do move it to this section. Each commit should contain a paragraph explaining the rational behind the change as well as an example for how to update user code [BC-Guidelines](https://docs.google.com/document/d/14OmgGBr1w6gl1VO47GGGdwrIaUNr92DFhQbY_NEk8mQ/edit#heading=h.a9htwgvvec1m).
 * Deprecations: All commits introducing deprecation. Each commit should include a small example explaining what should be done to update user code.
 * new_features: All commits introducing a new feature (new functions, new submodule, new supported platform etc)
 * improvements: All commits providing improvements to existing feature should be here (new backend for a function, new argument, better numerical stability)
@@ -342,21 +411,22 @@ def main():
     parser = argparse.ArgumentParser(description='Tool to create a commit list')
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--create_new', nargs=2)
-    group.add_argument('--update_to')
+    group.add_argument('--create-new', '--create_new', nargs=2)
+    group.add_argument('--update-to', '--update_to')
     # I found this flag useful when experimenting with adding new auto-categorizing filters.
     # After running commitlist.py the first time, if you add any new filters in this file,
     # re-running with "rerun_with_new_filters" will update the existing commitlist.csv file,
     # but only affect the rows that were previously marked as "Uncategorized"
-    group.add_argument('--rerun_with_new_filters', action='store_true')
+    group.add_argument('--rerun-with-new-filters', '--rerun_with_new_filters', action='store_true')
     group.add_argument('--stat', action='store_true')
-    group.add_argument('--export_markdown', action='store_true')
-    group.add_argument('--export_csv_categories', action='store_true')
+    group.add_argument('--export-markdown', '--export_markdown', action='store_true')
+    group.add_argument('--export-csv-categories', '--export_csv_categories', action='store_true')
     parser.add_argument('--path', default='results/commitlist.csv')
     args = parser.parse_args()
 
     if args.create_new:
         create_new(args.path, args.create_new[0], args.create_new[1])
+        print("Finished creating new commit list. Results have been saved to results/commitlist.csv")
         return
     if args.update_to:
         update_existing(args.path, args.update_to)

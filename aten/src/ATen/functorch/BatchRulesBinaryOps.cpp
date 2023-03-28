@@ -384,6 +384,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE2(clamp_max, Tensor);
   UNARY_POINTWISE(clamp_max);
   POINTWISE_BOXED(clamp_max_);
+  BINARY_POINTWISE(complex);
 
   VARIADIC_BDIMS_BOXED(_euclidean_dist);
   // Implementation note: _binary_pointwise_helper performs a dtype promotion if args are scalars,
@@ -391,8 +392,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(_cdist_forward);
   VMAP_SUPPORT(_cdist_backward, cdist_backward_batch_rule);
 
-  // Commented out so we have a test op
-  // BINARY_SCALAR_2(copysign, Tensor, Scalar);
+  BINARY_SCALAR_2(copysign, Tensor, Scalar);
+  POINTWISE_BOXED(copysign_.Tensor);
+  POINTWISE_BOXED(copysign_.Scalar);
   BINARY_SCALAR_2(div, Tensor, Scalar);
   BINARY_SCALAR_2(div, Tensor_mode, Scalar_mode);
 

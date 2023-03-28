@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <mutex>
 #include <set>
+#include <unordered_set>
 #include <mach/vm_page_size.h>
 #include <c10/util/flat_hash_map.h>
 
@@ -241,8 +242,8 @@ public:
     m_small_pool_private(m_device, UsageFlags::SMALL   | UsageFlags::PRIVATE | UsageFlags::HAZARD),
     // no Hazard Tracking required for the Scalar pool (synchronized manually)
     m_scalar_pool(m_device, UsageFlags::SMALL | UsageFlags::SHARED | UsageFlags::SCALAR),
-    m_total_allocated_memory(0), m_max_buffer_size([m_device maxBufferLength]),
-    m_stream(getDefaultMPSStream())
+    m_total_allocated_memory(0), m_current_allocated_memory(0),
+    m_max_buffer_size([m_device maxBufferLength]), m_stream(getDefaultMPSStream())
   {
     init_allocator();
   }
@@ -276,11 +277,19 @@ public:
   // (see m_max_total_allowed_size for description)
   size_t getHighWatermarkLimit() const { return m_max_total_allowed_size; }
   // (see m_total_allocated_memory for description)
-  size_t getTotalAllocatedMemory() const {return m_total_allocated_memory; }
+  size_t getTotalAllocatedMemory() const { return m_total_allocated_memory; }
+  // (see m_current_allocated_memory for description)
+  size_t getCurrentAllocatedMemory() const { return m_current_allocated_memory; }
+  // total GPU memory allocated in the process by Metal driver; including
+  // implicit allocations from MPS/MPSGraph frameworks and MPSHeapAllocatorImpl.
+  size_t getDriverAllocatedMemory() const { return current_allocated_size(); }
   // (see enum DebugVerbosity for description)
   uint32_t getDebugVerbosity() const { return m_debug_verbosity; }
   // returns the device that we allocate from
   inline id<MTLDevice> Device() const { return m_device; }
+
+  // TODO: make a common function to do size unit conversions in PyTorch.
+  inline std::string format_size(uint64_t size) const;
 
 private:
   // (see m_high_watermark_ratio for description)
@@ -293,7 +302,7 @@ private:
   constexpr static double default_low_watermark_ratio_discrete = 1.0;
 
   const id<MTLDevice> m_device;
-  std::mutex m_mutex;
+  std::recursive_mutex m_mutex;
   // allocated buffers by device pointer
   ska::flat_hash_map<void*, BufferBlock*> m_allocated_buffers;
   // unallocated cached buffers larger than 1 MB
@@ -302,21 +311,26 @@ private:
   BufferPool m_small_pool_shared, m_small_pool_private;
   // small cached buffers to import scalar values into MPS stream
   BufferPool m_scalar_pool;
-  // total memory allocated by HeapAllocator
+  // total memory allocated by HeapAllocator (including blocks in pools)
   size_t m_total_allocated_memory;
+  // currently active memory allocations in use (i.e., blocks not in pools)
+  size_t m_current_allocated_memory;
   // max buffer size allowed by Metal
   size_t m_max_buffer_size;
   // maximum total size allowed to be allocated
   size_t m_max_total_allowed_size;
-  // high watermark ratio is a hard limit for the total allowed allocations (between 0 and 1)
-  // 0 means unlimited (would spill to disk or system failure if OOM)
-  // 1 is maximum allowed by device.recommendedMaxWorkingSetSize
-  // (e.g., value 0.95 means we allocate up to 95% of total memory; beyond that allocations fail)
+  // high watermark ratio is a hard limit for the total allowed allocations
+  // 0. : disables high watermark limit (may cause system failure if system-wide OOM occurs)
+  // 1. : recommended maximum allocation size (i.e., device.recommendedMaxWorkingSetSize)
+  // >1.: allows limits beyond the device.recommendedMaxWorkingSetSize
+  // e.g., value 0.95 means we allocate up to 95% of recommended maximum
+  // allocation size; beyond that, the allocations would fail with OOM error.
   double m_high_watermark_ratio;
   // low watermark ratio is a soft limit to attempt limiting memory allocations up to the lower watermark
   // level by garbage collection or committing command buffers more frequently (a.k.a, adaptive commit).
   // Value between 0 to m_high_watermark_ratio (setting 0.0 disables adaptive commit and garbage collection)
-  // (e.g., value 0.9 means we 'attempt' to limit allocations up to 90% of total memory)
+  // e.g., value 0.9 means we 'attempt' to limit allocations up to 90% of recommended maximum
+  // allocation size.
   double m_low_watermark_ratio;
   // low watermark size limit (in Bytes) at the time we initialize the allocator
   size_t m_low_watermark_limit;
@@ -358,22 +372,11 @@ private:
   // total allocated size instead of manually tracking in MPSAllocator
   size_t current_allocated_size() const { return [m_device currentAllocatedSize]; }
 
-  void trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {
+  bool trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {
     for (const auto& name : MPSAllocatorCallbacksRegistry()->Keys()) {
-      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block->buffer, event);
+      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block ? buffer_block->buffer : nullptr, event);
     }
-  }
-
-  // TODO: make a common function to do size unit conversions in PyTorch.
-  static std::string format_size(uint64_t size) {
-    std::ostringstream os;
-    os.precision(2);
-    os << std::fixed;
-    if (size <= 1024UL) { os << size << " bytes"; }
-    else if (size <= 1048576UL) { os << ((float) size / 1024.0) << " KB"; }
-    else if (size <= 1073741824UL) { os << ((float) size / 1048576.0) << " MB"; }
-    else { os << ((float) size / 1073741824.0) << " GB"; }
-    return os.str();
+    return true;
   }
 };
 
