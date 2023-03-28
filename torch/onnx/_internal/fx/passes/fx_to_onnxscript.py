@@ -565,15 +565,6 @@ def export_fx_to_onnxscript(
             options,
         )
 
-    # Apply TorchScript's type promotion code.
-    # Ideally, we should implement our type promotion but
-    # to save time, we just reuse.
-    onnxscript_graph.apply(
-        torch._C._jit_pass_onnx_scalar_type_analysis,
-        lowprecision_cast=True,
-        opset_version=options.opset_version,
-    )
-
     return onnxscript_graph
 
 

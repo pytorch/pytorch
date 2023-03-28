@@ -296,7 +296,12 @@ void initPythonBindings(PyObject* module) {
 
   py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
       m, "CapturedTraceback");
-  m.def("gather_traceback", CapturedTraceback::gather);
+  m.def(
+      "gather_traceback",
+      CapturedTraceback::gather,
+      py::arg("python") = true,
+      py::arg("script") = true,
+      py::arg("cpp") = true);
   m.def("symbolize_tracebacks", py_symbolize);
   installCapturedTracebackPython();
 }

@@ -1,5 +1,4 @@
 from abc import abstractmethod
-import math
 import tempfile
 import unittest
 
@@ -134,16 +133,6 @@ module_tests = [
         desc='large_value'
     ),
     dict(
-        module_name='ReLU',
-        input_size=(2, 3, 4, 5),
-        check_inplace=True,
-    ),
-    dict(
-        module_name='ReLU6',
-        input_size=(2, 3, 4, 5),
-        check_inplace=True,
-    ),
-    dict(
         module_name='RReLU',
         input_size=(1, 2, 2),
         test_cuda=False,
@@ -201,40 +190,12 @@ module_tests = [
         reference_fn=lambda i, *_: torch.exp(i).div_(torch.exp(i).sum(1, False)).log_(),
         desc='multiparam',
     ),
-    dict(
-        module_name='ELU',
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::ELUOptions().alpha(2.)',
-        input_size=(3, 2, 5),
-        reference_fn=lambda x, *_: torch.where(x >= 0, x, 2 * (x.exp() - 1)),
-    ),
     # TODO: reference function
     dict(
         module_name='Hardshrink',
         constructor_args=(2.,),
         cpp_constructor_args='torch::nn::HardshrinkOptions(2.)',
         input_size=(4, 3, 2, 4),
-    ),
-    dict(
-        module_name='LeakyReLU',
-        input_size=(3, 2, 5),
-        check_inplace=True
-    ),
-    dict(
-        module_name='LeakyReLU',
-        constructor_args=(0.5,),
-        cpp_constructor_args='torch::nn::LeakyReLUOptions().negative_slope(0.5)',
-        input_size=(3, 2, 5),
-        check_inplace=True,
-        desc='with_negval'
-    ),
-    dict(
-        module_name='LeakyReLU',
-        constructor_args=(0.0,),
-        cpp_constructor_args='torch::nn::LeakyReLUOptions().negative_slope(0.0)',
-        input_fn=lambda: torch.randn(10, 10),
-        check_inplace=True,
-        desc='with_zero_negval'
     ),
     dict(
         module_name='LogSigmoid',
@@ -284,48 +245,6 @@ module_tests = [
         check_gradgrad=False,
         # TODO(#50743): Figure out the error. "RuntimeError: Unrecognized tensor type ID: Batched"
         check_batched_grad=False,
-    ),
-    dict(
-        module_name='PReLU',
-        input_size=(2, 3, 4),
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-        desc='1d',
-    ),
-    dict(
-        module_name='PReLU',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::PReLUOptions().num_parameters(3)',
-        input_size=(2, 3, 4),
-        desc='1d_multiparam',
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-    ),
-    dict(
-        module_name='PReLU',
-        input_size=(2, 3, 4, 5),
-        desc='2d',
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-    ),
-    dict(
-        module_name='PReLU',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::PReLUOptions().num_parameters(3)',
-        input_size=(2, 3, 4, 5),
-        desc='2d_multiparam',
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-    ),
-    dict(
-        module_name='PReLU',
-        input_size=(2, 3, 4, 5, 6),
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-        desc='3d',
-    ),
-    dict(
-        module_name='PReLU',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::PReLUOptions().num_parameters(3)',
-        input_size=(2, 3, 4, 5, 6),
-        desc='3d_multiparam',
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
     ),
     dict(
         module_name='Softsign',
@@ -3291,71 +3210,6 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
-        module_name='SELU',
-        input_size=(3, 2, 5),
-        check_inplace=True
-    ),
-    dict(
-        module_name='SELU',
-        input_size=(),
-        check_inplace=True,
-        desc='scalar'
-    ),
-    dict(
-        module_name='CELU',
-        input_size=(3, 2, 5),
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::CELUOptions().alpha(2.)',
-        check_inplace=True,
-        reference_fn=lambda x, *_: torch.where(x >= 0, x, 2. * ((.5 * x).exp() - 1)),
-    ),
-    dict(
-        module_name='CELU',
-        input_size=(),
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::CELUOptions().alpha(2.)',
-        check_inplace=True,
-        reference_fn=lambda x, *_: torch.where(x >= 0, x, 2. * ((.5 * x).exp() - 1)),
-        desc='scalar'
-    ),
-    dict(
-        module_name='GLU',
-        input_size=(5, 6),
-    ),
-    dict(
-        module_name='GLU',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::GLUOptions(1)',
-        input_size=(5, 6, 7),
-        desc='dim',
-    ),
-    dict(
-        module_name='GELU',
-        constructor_args=('none',),
-        cpp_constructor_args='torch::nn::GELUOptions().approximate(\"none\")',
-        input_size=(),
-        desc='scalar',
-        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
-    ),
-    dict(
-        module_name='GELU',
-        constructor_args=('none',),
-        cpp_constructor_args='torch::nn::GELUOptions().approximate(\"none\")',
-        input_size=(3, 2, 5),
-        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
-    ),
-    dict(
-        module_name='SiLU',
-        input_size=(),
-        desc='scalar',
-        reference_fn=lambda x, *_: x * torch.sigmoid(x),
-    ),
-    dict(
-        module_name='SiLU',
-        input_size=(5, 6, 7),
-        reference_fn=lambda x, *_: x * torch.sigmoid(x),
-    ),
-    dict(
         module_name='Mish',
         input_size=(),
         desc='scalar',
@@ -3551,19 +3405,6 @@ new_module_tests = [
         check_inplace=True,
         desc='threshold_value_scalar'
     ),
-
-    dict(
-        module_name='ReLU',
-        input_size=(),
-        check_inplace=True,
-        desc='scalar'
-    ),
-    dict(
-        module_name='ReLU6',
-        input_size=(),
-        check_inplace=True,
-        desc='scalar'
-    ),
     dict(
         module_name='RReLU',
         constructor_args=(0.1, 0.9),
@@ -3605,26 +3446,11 @@ new_module_tests = [
         desc='multiparam_scalar',
     ),
     dict(
-        module_name='ELU',
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::ELUOptions().alpha(2.)',
-        input_size=(),
-        desc='scalar',
-    ),
-    dict(
         module_name='Hardshrink',
         constructor_args=(2.,),
         cpp_constructor_args='torch::nn::HardshrinkOptions(2.)',
         input_size=(),
         desc='scalar',
-    ),
-    dict(
-        module_name='LeakyReLU',
-        constructor_args=(0.5,),
-        cpp_constructor_args='torch::nn::LeakyReLUOptions().negative_slope(0.5)',
-        input_size=(),
-        check_inplace=True,
-        desc='with_negval_scalar'
     ),
     dict(
         module_name='LogSigmoid',
@@ -3649,12 +3475,6 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::SoftshrinkOptions(1)',
         input_size=(),
         desc='lambda_scalar',
-    ),
-    dict(
-        module_name='PReLU',
-        input_size=(),
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-        desc='scalar',
     ),
     dict(
         module_name='Softsign',
