@@ -1240,8 +1240,8 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
-            if not self.allow_fallback_kernels:
-                raise not_implemented_error
+            if has_symbolic_sizes or not self.allow_fallback_kernels:
+                raise
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)

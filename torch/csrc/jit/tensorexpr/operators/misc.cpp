@@ -338,7 +338,7 @@ Tensor computeChunk(
         size_t step = buf_info->dims[norm_dim] / chunks;
 
         std::vector<ExprHandle> new_indices;
-        for (int64_t i = 0; i < indices.size(); ++i) {
+        for (int64_t i = 0; i < static_cast<int64_t>(indices.size()); ++i) {
           if (i == norm_dim) {
             new_indices.push_back(
                 indices[i] + ExprHandle(immLike(indices[i], chunkIdx * step)));
@@ -574,7 +574,7 @@ Tensor computeCatWoConditionals(
     std::vector<VarPtr> for_vars(dims.size());
     std::vector<ExprPtr> load_indices(dims.size());
     std::vector<ExprPtr> store_indices(dims.size());
-    for (int64_t i = 0; i < dims.size(); ++i) {
+    for (int64_t i = 0; i < static_cast<int64_t>(dims.size()); ++i) {
       for_vars[i] = alloc<Var>(
           "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i),
           dims[i].dtype());
