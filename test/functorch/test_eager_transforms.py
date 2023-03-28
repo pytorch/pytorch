@@ -2140,6 +2140,16 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all outputs"):
             jacfwd(fn)(x)
 
+    @jacrev_and_jacfwd
+    def test_jac_with_non_tensor_args(self, device, jacapi):
+        def f(t, int_x):
+            return t + int_x
+
+        t = torch.randn(3, 3, device=device)
+
+        actual = jacapi(f)(t, 3)
+        expected = torch.autograd.functional.jacobian(partial(f, int_x=3), t)
+        self.assertEqual(actual, expected)
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
