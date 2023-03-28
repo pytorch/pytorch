@@ -25,6 +25,7 @@ from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
+    CSE,
     CSEVariable,
     DeferredIndentedBuffer,
     ExprPrinter,
@@ -892,6 +893,7 @@ class CppKernel(Kernel):
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = DeferredIndentedBuffer()
         self.reduction_var_map = {}
+        self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.preloads = IndentedBuffer()
         self.poststores = DeferredIndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
@@ -943,7 +945,7 @@ class CppKernel(Kernel):
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
-        tmpvar = self.cse.generate(
+        tmpvar = self.reduction_cse.generate(
             self.loads, f"reduction {name} {cexpr(index)}", write=False
         )
         index = self.rename_indexing(index)
@@ -1236,7 +1238,7 @@ class CppVecKernel(CppKernel):
             self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
             self.reduction_prefix.writeline(vec_reduc_prefix)
 
-        tmpvar = self.cse.generate(
+        tmpvar = self.reduction_cse.generate(
             self.loads, f"reduction {name} {cexpr(index)}", write=False
         )
         tmpvar_vec = f"{tmpvar}_vec"
@@ -1315,29 +1317,31 @@ class CppTile2DKernel(CppVecKernel):
             ...
     """
 
-    def __init__(self, args, num_threads, tiling_factor, outer_tiling_idx):
-        super().__init__(args, num_threads, tiling_factor)
-        self.outer_tiling_idx = outer_tiling_idx
+    def __init__(self, args, num_threads, tiling_factor, tiling_indices):
+        super().__init__(args, num_threads, tiling_factor, tiling_indices[1])
+        self.tiling_indices = tiling_indices
 
     def inner_itervar(self):
-        return sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
+        return sympy.symbols(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
         return self.is_stride1_at(
-            self.itervars[self.outer_tiling_idx], index
-        ) and not self.is_invariant_under(self.itervars[-1], index)
+            self.itervars[self.outer_idx], index
+        ) and not self.is_invariant_under(self.itervars[self.tiling_idx], index)
 
     def gen_transposed_tile_load_store(self, name, var, index, is_store):
         # transposed tile load/store outside the kernel inner loop
         factor = self.tiling_factor
-        new_index = self.scale_index_with_offset(index, factor, itervar_idx=-1)
         new_index = self.scale_index_with_offset(
-            new_index, factor, itervar_idx=self.outer_tiling_idx
+            index, factor, itervar_idx=self.tiling_idx
+        )
+        new_index = self.scale_index_with_offset(
+            new_index, factor, itervar_idx=self.outer_idx
         )
 
         src = f"{var} + {cexpr(new_index)}"
         dst = "__place_holder__"
-        ld_src = f"{cexpr(self.stride_at(self.itervars[-1], index))}"
+        ld_src = f"{cexpr(self.stride_at(self.itervars[self.tiling_idx], index))}"
         ld_dst = f"{factor}"
         if is_store:
             src, dst = dst, src
@@ -1382,7 +1386,7 @@ class CppTile2DKernel(CppVecKernel):
             new_index = self.scale_index_with_offset(
                 expanded_index,
                 self.tiling_factor,
-                itervar_idx=self.outer_tiling_idx,
+                itervar_idx=self.outer_idx,
                 offset=inner,
             )
             return super().load(name, new_index)
@@ -1407,7 +1411,7 @@ class CppTile2DKernel(CppVecKernel):
             new_index = self.scale_index_with_offset(
                 expanded_index,
                 self.tiling_factor,
-                itervar_idx=self.outer_tiling_idx,
+                itervar_idx=self.outer_idx,
                 offset=inner,
             )
             super().store(name, new_index, value, mode)
@@ -1417,6 +1421,16 @@ class CppTile2DKernel(CppVecKernel):
         code.writeline(
             f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++)"
         )
+
+    def set_ranges(self, group, reduction_group):
+        vars = super().set_ranges(group, reduction_group)
+        # do vertical reduction as the tail loop
+        self.outer_idx, self.tiling_idx = (
+            self.tiling_indices
+            if self.tiling_indices[1] < self.reduction_depth
+            else reversed(self.tiling_indices)
+        )
+        return vars
 
 
 class CppVecKernelChecker(CppVecKernel):
@@ -2169,11 +2183,7 @@ class CppKernelProxy(CppKernel):
                     if len(tiling_indices) == 1:
                         # TODO(jgong5): support vec on outer loop
                         return [tiling_factor], tiling_indices
-                    if len(tiling_indices) == 2 and self.reduction_depth == len(
-                        self.itervars
-                    ):
-                        # TODO(jgong5): support tile2d with reduction
-                        assert tiling_indices[1] == len(self.itervars) - 1
+                    if len(tiling_indices) == 2:
                         return [tiling_factor, tiling_factor], tiling_indices
             return [], []
 
@@ -2210,12 +2220,10 @@ class CppKernelProxy(CppKernel):
                 )
                 outer_tail_loop.set_kernel(scalar_kernel)
                 inner_main_loop, inner_tail_loop = outer_main_loop.split_with_tiling(
-                    inner_most_idx - tiling_indices[0], factor=tiling_factors[0]
+                    tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
                 inner_main_loop.set_kernel(
-                    codegen_kernel(
-                        CppTile2DKernel, tiling_factors[0], tiling_indices[0]
-                    )
+                    codegen_kernel(CppTile2DKernel, tiling_factors[0], tiling_indices)
                 )
                 inner_tail_loop.set_kernel(
                     codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])

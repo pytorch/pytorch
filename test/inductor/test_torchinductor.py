@@ -7007,6 +7007,30 @@ if HAS_CPU:
             self.assertTrue(same(fn2(x), opt_fn2(x)))
             assert metrics.generated_cpp_vec_kernel_count == 1
 
+        def test_transpose_vertical_sum_cpu_only(self):
+            def fn(a, b):
+                c = a * b
+                return c.sum(dim=1)
+
+            metrics.reset()
+            x = torch.randn(100, 50, 50)
+            y = torch.randn(100, 50, 50).transpose(1, 2)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            self.assertTrue(same(fn(x, y), opt_fn(x, y)))
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
+        def test_transpose_sum2d_cpu_only(self):
+            def fn(a, b):
+                c = a * b
+                return c.sum()
+
+            metrics.reset()
+            x = torch.randn(50, 50)
+            y = torch.randn(50, 50).transpose(0, 1)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            self.assertTrue(same(fn(x, y), opt_fn(x, y)))
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
