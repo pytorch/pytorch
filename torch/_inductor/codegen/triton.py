@@ -12,6 +12,7 @@ import sympy
 
 import torch
 
+import torch._logging
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
@@ -25,6 +26,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     sympy_symbol,
+    unique,
 )
 from ..virtualized import ops, V
 
@@ -42,6 +44,7 @@ from .common import (
 )
 
 log = logging.getLogger(__name__)
+schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
 def signature_of(arg):
@@ -80,11 +83,7 @@ def config_of(args):
 class TritonPrinter(PythonPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"tl.libdevice.floor({self.paren(self._print(expr.args[0]))})"
-
-    def _print_ceiling(self, expr):
-        assert len(expr.args) == 1
-        return f"tl.libdevice.ceil({self.paren(self._print(expr.args[0]))})"
+        return f"tl.math.floor({self.paren(self._print(expr.args[0]))})"
 
 
 texpr = TritonPrinter().doprint
@@ -153,7 +152,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def libdevice_abs(x):
-        return f"tl.libdevice.abs({x})"
+        return f"tl.math.abs({x})"
 
     @staticmethod
     def exp(x):
@@ -161,15 +160,15 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def libdevice_exp(x):
-        return f"tl.libdevice.exp({x})"
+        return f"tl.math.exp({x})"
 
     @staticmethod
     def exp2(x):
-        return f"tl.libdevice.exp2({x})"
+        return f"tl.math.exp2({x})"
 
     @staticmethod
     def expm1(x):
-        return f"tl.libdevice.expm1({x})"
+        return f"tl.math.expm1({x})"
 
     @staticmethod
     def sqrt(x):
@@ -177,7 +176,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def libdevice_sqrt(x):
-        return f"tl.libdevice.sqrt({x})"
+        return f"tl.math.sqrt({x})"
 
     @staticmethod
     def relu(x):
@@ -201,7 +200,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def libdevice_cos(x):
-        return f"tl.libdevice.cos({x})"
+        return f"tl.math.cos({x})"
 
     @staticmethod
     def sin(x):
@@ -209,7 +208,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def libdevice_sin(x):
-        return f"tl.libdevice.sin({x})"
+        return f"tl.math.sin({x})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -223,67 +222,67 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def lgamma(x):
-        return f"tl.libdevice.lgamma({x})"
+        return f"tl.math.lgamma({x})"
 
     @staticmethod
     def erf(x):
-        return f"tl.libdevice.erf({x})"
+        return f"tl.math.erf({x})"
 
     @staticmethod
     def cosh(x):
-        return f"tl.libdevice.cosh({x})"
+        return f"tl.math.cosh({x})"
 
     @staticmethod
     def sinh(x):
-        return f"tl.libdevice.sinh({x})"
+        return f"tl.math.sinh({x})"
 
     @staticmethod
     def acos(x):
-        return f"tl.libdevice.acos({x})"
+        return f"tl.math.acos({x})"
 
     @staticmethod
     def acosh(x):
-        return f"tl.libdevice.acosh({x})"
+        return f"tl.math.acosh({x})"
 
     @staticmethod
     def asin(x):
-        return f"tl.libdevice.asin({x})"
+        return f"tl.math.asin({x})"
 
     @staticmethod
     def asinh(x):
-        return f"tl.libdevice.asinh({x})"
+        return f"tl.math.asinh({x})"
 
     @staticmethod
     def atan2(x, y):
-        return f"tl.libdevice.atan2({x}, {y})"
+        return f"tl.math.atan2({x}, {y})"
 
     @staticmethod
     def atan(x):
-        return f"tl.libdevice.atan({x})"
+        return f"tl.math.atan({x})"
 
     @staticmethod
     def atanh(x):
-        return f"tl.libdevice.atanh({x})"
+        return f"tl.math.atanh({x})"
 
     @staticmethod
     def copysign(x, y):
-        return f"tl.libdevice.copysign({x}, {y})"
+        return f"tl.math.copysign({x}, {y})"
 
     @staticmethod
     def erfc(x):
-        return f"tl.libdevice.erfc({x})"
+        return f"tl.math.erfc({x})"
 
     @staticmethod
     def hypot(x, y):
-        return f"tl.libdevice.hypot({x}, {y})"
+        return f"tl.math.hypot({x}, {y})"
 
     @staticmethod
     def log10(x):
-        return f"tl.libdevice.log10({x})"
+        return f"tl.math.log10({x})"
 
     @staticmethod
     def nextafter(x, y):
-        return f"tl.libdevice.nextafter({x}, {y})"
+        return f"tl.math.nextafter({x}, {y})"
 
     @staticmethod
     def logical_and(a, b):
@@ -303,19 +302,19 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def rsqrt(x):
-        return f"tl.libdevice.rsqrt({x})"
+        return f"tl.math.rsqrt({x})"
 
     @staticmethod
     def log1p(x):
-        return f"tl.libdevice.log1p({x})"
+        return f"tl.math.log1p({x})"
 
     @staticmethod
     def tan(x):
-        return f"tl.libdevice.tan({x})"
+        return f"tl.math.tan({x})"
 
     @staticmethod
     def tanh(x):
-        return f"tl.libdevice.tanh({x})"
+        return f"tl.math.tanh({x})"
 
     @staticmethod
     def sigmoid(x):
@@ -323,20 +322,20 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def libdevice_sigmoid(x):
-        return f"1/(1 + tl.libdevice.exp(-({x})))"
+        return f"1/(1 + tl.math.exp(-({x})))"
 
     @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
-        return f"tl.libdevice.signbit({x}) if ({x}).dtype is tl.float32 else {x} < 0"
+        return f"tl.math.signbit({x}) if ({x}).dtype is tl.float32 else {x} < 0"
 
     @staticmethod
     def fmod(a, b):
-        return f"tl.libdevice.fmod({a}, {b})"
+        return f"tl.math.fmod({a}, {b})"
 
     @staticmethod
     def pow(a, b):
-        return f"tl.libdevice.pow({a}, {b})"
+        return f"tl.math.pow({a}, {b})"
 
     @staticmethod
     def log(x):
@@ -344,23 +343,23 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def libdevice_log(x):
-        return f"tl.libdevice.log({x})"
+        return f"tl.math.log({x})"
 
     @staticmethod
     def isinf(x):
-        return f"tl.libdevice.isinf({x})"
+        return f"tl.math.isinf({x})"
 
     @staticmethod
     def isnan(x):
-        return f"tl.libdevice.isnan({x})"
+        return f"tl.math.isnan({x})"
 
     @staticmethod
     def round(x):
-        return f"tl.libdevice.nearbyint({x})"
+        return f"tl.math.nearbyint({x})"
 
     @staticmethod
     def floor(x):
-        return f"tl.libdevice.floor({x})"
+        return f"tl.math.floor({x})"
 
     @staticmethod
     def floordiv(a, b):
@@ -373,7 +372,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def trunc(x):
-        return f"tl.libdevice.trunc({x})"
+        return f"tl.math.trunc({x})"
 
     @staticmethod
     def truncdiv(a, b):
@@ -383,7 +382,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def ceil(x):
-        return f"tl.libdevice.ceil({x})"
+        return f"tl.math.ceil({x})"
 
 
 @dataclasses.dataclass
@@ -859,6 +858,23 @@ class TritonKernel(Kernel):
         # if simple replacements didn't get rid of floor/ceil, try full subs
         if len(index.atoms(sympy.floor)) or len(index.atoms(sympy.ceiling)):
             index = index.subs(V.graph.sizevars.precomputed_replacements)
+        # last resort, if no range vars are in the expr, hoist it
+        # TODO instead of trying to blindly find complicated exprs, we should hoist the
+        # inputs/outputs sizes and strides, but at the time indexing is generated
+        # kernel inputs and outputs are not set yet, we'd need a deeper refactor
+        # to do it this way
+
+        if len(index.atoms(sympy.ceiling)):
+            for a in index.atoms(sympy.ceiling):
+                # for nested exprs, atoms yields top level first (?)
+                # so if everything goes fine, lower level replacements will come up empty
+                symbols = a.free_symbols
+                if len(symbols) > 0 and all(
+                    s.name.startswith("s") or s.name.startswith("ps") for s in symbols
+                ):
+                    replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
+                    index = sympy_subs(index, replacements)
+
         index_vars = index.free_symbols
         index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
 
@@ -895,13 +911,17 @@ class TritonKernel(Kernel):
                 have_dense = False
             dense_mask_vars.add(f"{tree.prefix}mask")
 
+        expand_str = None
+
         if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             if copy_shape:
                 index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+                expand_str = f"{copy_shape}.shape"
             else:
                 index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
+                expand_str = self.dense_size_str()
             if isinstance(index, sympy.Integer):
-                return index_str, set(), "None"
+                return index_str, set(), "None", expand_str
             else:
                 mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
@@ -917,7 +937,7 @@ class TritonKernel(Kernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return index_str, mask_vars, mask_str
+        return index_str, mask_vars, mask_str, expand_str
 
     def filter_masks(self, mask_vars):
         for tree in self.range_trees:
@@ -975,7 +995,7 @@ class TritonKernel(Kernel):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
-        index, mask_vars, mask = self.indexing(index)
+        index, mask_vars, mask, expand_str = self.indexing(index)
 
         if "rmask" in mask and not self.persistent_reduction:
             # This eviction policy heuristic is untested.
@@ -998,9 +1018,8 @@ class TritonKernel(Kernel):
             line = var
         else:
             if isinstance(original_index, sympy.Integer):
-                dense_size = self.dense_size_str()
                 line = f"tl.load({var} + ({original_index}))"
-                append_broadcast = dense_size
+                append_broadcast = expand_str
             else:
                 line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
             if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
@@ -1032,7 +1051,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask_vars, mask = self.indexing(index, dense_indexing=True)
+        index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -1128,7 +1147,7 @@ class TritonKernel(Kernel):
             self.suffix.writeline(f"{result_var} = {var_name}")
             result_var.mask_vars = var_name.mask_vars
         self.inside_reduction = False
-        index, mask_vars, mask = self.indexing(index)
+        index, mask_vars, mask, _ = self.indexing(index)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)
@@ -1244,6 +1263,7 @@ class TritonKernel(Kernel):
                     f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
                 )
 
+        ninplace_args = len(unique(self.args.inplace_buffers.values()))
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
             result.writeline("from torch._inductor.utils import get_num_bytes")
@@ -1254,7 +1274,9 @@ class TritonKernel(Kernel):
             result.writeline(
                 "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)[0]"
             )
-            result.writeline("num_gb = get_num_bytes(*args) / 1e9")
+            result.writeline(
+                f"num_gb = get_num_bytes(*args, num_in_out_args={ninplace_args}) / 1e9"
+            )
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
             result.writeline(
                 'print(f"{ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s")'
@@ -1285,7 +1307,7 @@ class TritonKernel(Kernel):
                     import triton.language as tl
                     from torch._inductor.ir import ReductionHint
                     from torch._inductor.ir import TileHint
-                    from torch._inductor.triton_ops.autotune import {heuristics}
+                    from torch._inductor.triton_heuristics import {heuristics}
                     from torch._inductor.utils import instance_descriptor
                 """
             )
@@ -1295,7 +1317,7 @@ class TritonKernel(Kernel):
                         from torch._dynamo.testing import rand_strided
                         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                         import torch
-                        from torch._inductor.triton_ops.autotune import grid
+                        from torch._inductor.triton_heuristics import grid
                     """
                 )
 
@@ -1589,8 +1611,8 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        if dynamo_config.output_code:
-            log.info("schedule: %s", node_schedule)
+        if schedule_log.isEnabledFor(logging.DEBUG):
+            schedule_log.debug(f"Schedule:\n {node_schedule}")
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
