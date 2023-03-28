@@ -20,21 +20,11 @@ from torch.distributed.distributed_c10d import (
     is_initialized,
     new_group,
     ProcessGroup,
-    reduce_scatter,
-<<<<<<< HEAD
-=======
-    ProcessGroup,
->>>>>>> Switch DeviceMesh all_gather and reduce_scatter to funcol.
     ReduceOp,
     scatter,
     Work,
 )
 
-<<<<<<< HEAD
-=======
-import torch.distributed._functional_collectives as funcol
-
->>>>>>> Switch DeviceMesh all_gather and reduce_scatter to funcol.
 # only import numpy typing when type checking
 if TYPE_CHECKING:
     try:
