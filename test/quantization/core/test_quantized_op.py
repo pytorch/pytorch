@@ -6240,7 +6240,7 @@ class TestQuantizedConv(TestCase):
             x = torch.randn((bs, ic, ih, iw))
             qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
             w_packed = torch.ops.quantized.conv_transpose2d_prepack(
-                qw, bias, strides, paddings, output_paddings, dilates, groups
+                qw, bias, strides, paddings, output_paddings, groups, dilates
             )
             torch.ops.quantized.conv_transpose2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
             ih, iw = 5, 4

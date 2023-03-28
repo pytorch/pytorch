@@ -16,7 +16,6 @@ from .utils import (
     get_linear_prepack_op_for_dtype,
     get_new_attr_name_with_prefix,
     get_qconv_prepack_op,
-    get_qconv_transpose_prepack_op,
     graph_module_from_producer_nodes,
 )
 from ..utils import _parent_name
@@ -804,7 +803,7 @@ def _lower_static_weighted_ref_functional(
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
                         prepack_args[i] = (prepack_args[i],)
         elif func_node.target in CONV_TRANSPOSE_FUNCTIONAL_OPS:
-            prepack_op = get_qconv_transpose_prepack_op(func_node.target)  # type: ignore[arg-type]
+            prepack_op = get_qconv_prepack_op(func_node.target)  # type: ignore[arg-type]
             # For conv_transpose1d, the stride, padding, and dilation args may be ints,
             # in which case we need to convert them to tuples
             if func_node.target == F.conv_transpose1d:
