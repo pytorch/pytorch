@@ -738,7 +738,7 @@ def _need_to_materialize_module(
     be ``True``. If either is ``True``, then ``module`` needs to be
     materialized.
     """
-    managed_params = _get_orig_params(module, ignored_params)
+    managed_params = list(_get_orig_params(module, ignored_params))
     is_meta_module = any(param.is_meta for param in managed_params)
     is_torchdistX_deferred_init = (
         not is_meta_module
