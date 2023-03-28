@@ -14,6 +14,12 @@ from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
+def unpack_into_example(item):
+    from .tensor import SymNodeVariable
+    if isinstance(item, SymNodeVariable):
+        return item.sym_num
+    return item.as_python_constant()
+
 class BaseListVariable(VariableTracker):
     @staticmethod
     def cls_for(obj):
@@ -53,7 +59,7 @@ class BaseListVariable(VariableTracker):
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
-        index = arg.as_python_constant()
+        index = unpack_into_example(arg)
         if isinstance(index, slice):
             if self.source is not None:
                 return self.clone(
@@ -67,7 +73,7 @@ class BaseListVariable(VariableTracker):
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 ).add_options(arg, self)
         else:
-            assert isinstance(index, int)
+            assert isinstance(index, (int, torch.SymInt))
             return self.items[index].add_options(arg, self)
 
     def unpack_var_sequence(self, tx):
@@ -414,11 +420,6 @@ class SizeVariable(TupleVariable):
                 *proxy_args_kwargs([self, arg], {}),
             )
             items = self.items[index]
-
-            def _unpack_into_example(item):
-                if isinstance(item, SymNodeVariable):
-                    return item.sym_num
-                return item.as_python_constant()
 
             # Mirror the indexing into example_value for downstream correctness
             proxy.node.meta["example_value"] = parent_proxy.node.meta["example_value"][
