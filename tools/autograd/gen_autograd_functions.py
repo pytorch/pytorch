@@ -420,7 +420,6 @@ UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 def get_infos_with_derivatives_list(
     differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]]
 ) -> List[DifferentiabilityInfo]:
-
     diff_info_list = [
         info
         for diffinfo_dict in differentiability_infos.values()
@@ -469,7 +468,6 @@ def gen_autograd_functions_python(
     differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
-
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     num_shards = 5
     fm.write(

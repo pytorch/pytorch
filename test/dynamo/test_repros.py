@@ -1,5 +1,10 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
+"""
 # Owner(s): ["module: dynamo"]
 import collections
+import contextlib
 import copy
 import inspect
 import itertools
@@ -19,7 +24,6 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 
 import torch._functorch.config
-from torch._dynamo.testing import skip_if_pytest
 
 try:
     from test_minifier import requires_cuda
@@ -525,7 +529,7 @@ class ModelOutput(collections.OrderedDict):
 
     def __getitem__(self, k):
         if isinstance(k, str):
-            inner_dict = {k: v for (k, v) in self.items()}
+            inner_dict = dict(self.items())
             return inner_dict[k]
         else:
             return self.to_tuple()[k]
@@ -1571,7 +1575,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, 10)
 
     def test_sort_out(self):
-
         dtype = torch.float32
         device = "cpu"
 
@@ -1606,7 +1609,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_sigmoid_out(self):
-
         dtype = torch.float32
         device = "cpu"
 
@@ -2239,7 +2241,81 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
 
-    @skip_if_pytest
+    def test_exception_in_dynamo_handling(self):
+        hit_handler = False
+
+        # See https://github.com/pytorch/pytorch/pull/96488
+        @contextlib.contextmanager
+        def ctx():
+            try:
+                yield
+            except RuntimeError:
+                nonlocal hit_handler
+                hit_handler = True
+
+        @torch._dynamo.optimize("eager")
+        def f():
+            with ctx():
+                h()
+
+        def h():
+            raise RuntimeError("boof")
+
+        # Should not error
+        f()
+        self.assertTrue(hit_handler)
+
+    def test_generator_dealloc(self):
+        # See https://github.com/pytorch/pytorch/pull/96488
+        #
+        # NB: yes, [(...)] is intentional, this is a list containing a
+        # generator
+        generator_box = [(x for x in [1, 2, 3])]
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def g(x):
+            return x + 2
+
+        # TODO: This test is pretty delicate.  To test if it's actually doing
+        # anything, rebuild eval_frame.c with '#define TORCHDYNAMO_DEBUG 1'
+        # and then look at the logs for:
+        #
+        # TRACE[_custom_eval_frame:650] begin <genexpr> test_repros.py 2276 -1 0 0
+        # TRACE[_custom_eval_frame:664] throw <genexpr>
+        #
+        # This means we're actually hitting the relevant codepath
+
+        # NB: Make sure we don't actually Dynamo this frame; if we do Dynamo
+        # this frame, Dynamo actually DOES understand list.clear and will
+        # arrange for the generator deallocation to happen when the eval frame
+        # handler is disabled, which will prevent the bug from happening (we
+        # specifically want to trigger the generator deallocation WHILE the
+        # dynamo eval frame handler is active), as that will cause the
+        # generator to become exhausted and trigger the throw_flag == TRUE
+        # case.
+        @torch._dynamo.skip
+        def f(x):
+            generator_box.clear()
+            return g(x)
+
+        self.assertNoUnraisable(
+            lambda: torch._dynamo.optimize(counter)(f)(torch.randn(3))
+        )
+
+        # Make sure the x + 2 is captured (a previous incorrect implementation
+        # of this fix would have disabled the eval frame callback, which means
+        # g wouldn't get traced
+        self.assertEqual(counter.op_count, 1)
+
+    def test_error_return_without_exception_set(self):
+        # https://github.com/pytorch/pytorch/issues/93781
+        @torch.compile
+        def f():
+            _generator_type = type((_ for _ in ()))
+
+        self.assertNoUnraisable(f)
+
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
@@ -2274,19 +2350,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "input sum needs to be 3"):
             opt_fn(*args)
 
-    # TODO (tmanlaibaatar) handle data-dependent fstring in assert statement.
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
-    def test_rewrite_assert_with_fstring_msg(self):
-        def f(x):
-            b = x.sin()
-            assert x[0] == 3, f"First dim need to be {x[0]}"
-            return x.cos() + b
-
-        args = (torch.Tensor([3, 4, 5]),)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
-            exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
-
-    @skip_if_pytest
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
@@ -2300,6 +2363,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
+
+    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
+    def test_rewrite_assert_with_non_string_msg(self):
+        def f(x):
+            b = x.sin()
+            assert x[0] == 2, x.size()
+            return x.cos() + b
+
+        torch._dynamo.utils.counters.clear()
+        args = torch.Tensor([3, 4, 5])
+        opt_f = torch._dynamo.optimize("eager")(f)
+        with self.assertRaisesRegex(AssertionError, "torch.Size"):
+            opt_f(args)
+        self.assertEqual(
+            torch._dynamo.utils.counters["unimplemented"][
+                "assert with non-string message"
+            ],
+            1,
+        )
 
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_noop(self):
@@ -2322,6 +2404,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
+
+    def test_size_typematch(self):
+        def f(x, y):
+            if isinstance(x, torch.Size):
+                return y + 1
+            else:
+                return y + 2
+
+        y = torch.zeros(1)
+        x1 = torch.Size((3,))
+        x2 = (3,)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch._dynamo.optimize(cnt, nopython=True)(f)
+        self.assertTrue(same(f(x1, y), opt_f(x1, y)))
+        self.assertTrue(same(f(x2, y), opt_f(x2, y)))
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", False)
     def test_not_rewrite_assert(self):
@@ -2400,6 +2499,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
+
+    @torch._dynamo.config.patch("specialize_int", False)
+    def test_maybe_multiply_symint(self):
+        # https://github.com/pytorch/pytorch/issues/97346
+        from torch._functorch.aot_autograd import aot_module_simplified
+
+        def my_aot_compiler(gm, example_inputs):
+            def my_compiler(gm, example_inputs):
+                return gm.forward
+
+            # Invoke AOTAutograd
+            return aot_module_simplified(gm, example_inputs, fw_compiler=my_compiler)
+
+        def my_example(t1, t2, d):
+            out = torch.add(t1, t2, alpha=d)
+            return out
+
+        compiled_fn = torch.compile(backend=my_aot_compiler, dynamic=True)(my_example)
+
+        t1 = torch.arange(3, dtype=torch.float32).requires_grad_(True)
+        t2 = torch.arange(3, dtype=torch.float32).requires_grad_(True)
+
+        ra = compiled_fn(t1, t2, 5)
+        self.assertEqual(ra, torch.tensor([0.0, 6.0, 12.0]))
+
+        ra = compiled_fn(t1, t2, 6)
+        self.assertEqual(ra, torch.tensor([0.0, 7.0, 14.0]))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_implicit_guard(self):
