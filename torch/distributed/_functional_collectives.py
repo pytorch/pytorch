@@ -329,7 +329,7 @@ def all_gather_tensor(
     res: torch.Tensor = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
-    if gather_dim > 0:
+    if gather_dim != 0:
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 
@@ -359,7 +359,7 @@ def reduce_scatter_tensor(
     assert (
         self.size(scatter_dim) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
-    if scatter_dim > 0:
+    if scatter_dim != 0:
         tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
         self = torch.cat(tensor_list)
 
