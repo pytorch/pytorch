@@ -1749,9 +1749,7 @@ TEST_F(VulkanAPITest, quantized_upsample_nearest2d) {
   const auto in_vulkan = in_cpu.vulkan();
   const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
       in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
-  const auto upsample_vulkan =
-      at::native::vulkan::ops::quantized_upsample_nearest2d(
-          out_vulkan, {4, 6}, 1, 1);
+  const auto upsample_vulkan = at::upsample_nearest2d(out_vulkan, {4, 6}, 1, 1);
 
   const auto in_cpu2 =
       at::rand({2, 13, 4, 6}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -2028,9 +2026,21 @@ void quantized_binary_op_test_set(const char* op_name) {
   test_quantized_binary_op(
       false, false, op_name, {2, 13, 32, 27}, {2, 13, 32, 27});
   test_quantized_binary_op(
+      false, false, op_name, {7, 15, 6, 1}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      false, false, op_name, {7, 15, 6, 17}, {7, 15, 6, 1}); // broadcasting
+  test_quantized_binary_op(
+      false, false, op_name, {7, 15, 1, 17}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
       false, false, op_name, {7, 15, 6, 17}, {7, 15, 1, 17}); // broadcasting
   test_quantized_binary_op(
-      false, false, op_name, {7, 5, 6, 1}, {7, 5, 6, 17}); // broadcasting
+      false, false, op_name, {1, 1, 6, 17}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      false, false, op_name, {7, 15, 6, 17}, {1, 1, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      false, false, op_name, {1, 15, 6, 17}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      false, false, op_name, {7, 15, 6, 17}, {1, 15, 6, 17}); // broadcasting
 
   // compute params
   test_quantized_binary_op(true, false, op_name, {1, 1, 1, 1}, {1, 1, 1, 1});
@@ -2040,9 +2050,21 @@ void quantized_binary_op_test_set(const char* op_name) {
   test_quantized_binary_op(
       true, false, op_name, {2, 13, 32, 27}, {2, 13, 32, 27});
   test_quantized_binary_op(
+      true, false, op_name, {7, 15, 6, 1}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      true, false, op_name, {7, 15, 6, 17}, {7, 15, 6, 1}); // broadcasting
+  test_quantized_binary_op(
+      true, false, op_name, {7, 15, 1, 17}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
       true, false, op_name, {7, 15, 6, 17}, {7, 15, 1, 17}); // broadcasting
   test_quantized_binary_op(
-      true, false, op_name, {7, 5, 6, 1}, {7, 5, 6, 17}); // broadcasting
+      true, false, op_name, {1, 1, 6, 17}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      true, false, op_name, {7, 15, 6, 17}, {1, 1, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      true, false, op_name, {1, 15, 6, 17}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      true, false, op_name, {7, 15, 6, 17}, {1, 15, 6, 17}); // broadcasting
 
   // random params
   test_quantized_binary_op(false, true, op_name, {1, 1, 1, 1}, {1, 1, 1, 1});
@@ -2052,9 +2074,21 @@ void quantized_binary_op_test_set(const char* op_name) {
   test_quantized_binary_op(
       false, true, op_name, {2, 13, 32, 27}, {2, 13, 32, 27});
   test_quantized_binary_op(
+      false, true, op_name, {7, 15, 6, 1}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      false, true, op_name, {7, 15, 6, 17}, {7, 15, 6, 1}); // broadcasting
+  test_quantized_binary_op(
+      false, true, op_name, {7, 15, 1, 17}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
       false, true, op_name, {7, 15, 6, 17}, {7, 15, 1, 17}); // broadcasting
   test_quantized_binary_op(
-      false, true, op_name, {7, 5, 6, 1}, {7, 5, 6, 17}); // broadcasting
+      false, true, op_name, {1, 1, 6, 17}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      false, true, op_name, {7, 15, 6, 17}, {1, 1, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      false, true, op_name, {1, 15, 6, 17}, {7, 15, 6, 17}); // broadcasting
+  test_quantized_binary_op(
+      false, true, op_name, {7, 15, 6, 17}, {1, 15, 6, 17}); // broadcasting
 
   // random shape and params
   for (int i = 0; i < 10; i += 1) {

@@ -23,13 +23,16 @@ from torch.ao.quantization.backend_config import (
 )
 from torch.ao.quantization.backend_config._qnnpack_pt2e import get_qnnpack_pt2e_backend_config
 from torch.ao.quantization.backend_config._x86_inductor_pt2e import get_x86_inductor_pt2e_backend_config
-from torch.ao.quantization.quantize_fx import prepare_fx, convert_to_reference_fx
+from torch.ao.quantization.backend_config.x86 import get_x86_backend_config
+from torch.ao.quantization.quantize_fx import prepare_fx, convert_to_reference_fx, convert_fx
 from torch.ao.quantization._quantize_pt2e import prepare_pt2e, convert_pt2e
 from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
 import copy
 import itertools
+from torch._inductor.compile_fx import compile_fx
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
@@ -261,6 +264,22 @@ class TestQuantizePT2EX86Inductor(QuantizationTestCase):
                     self.checkGraphModuleNodes(convert_module,
                                                expected_node_occurrence=node_occurrence,
                                                expected_node_list=node_list)
+
+                    # Step1: Ref result in 1.X fx path
+                    backend_config_1_x = get_x86_backend_config()
+                    m_copy = copy.deepcopy(m)
+                    m_prepare_fx = prepare_fx(m_copy, qconfig_mapping, example_inputs, backend_config=backend_config_1_x)
+                    after_prepare_result_fx = m_prepare_fx(*example_inputs)
+                    m_convert_fx = convert_fx(m_prepare_fx, backend_config=backend_config_1_x)
+                    ref_result = m_convert_fx(*example_inputs)
+
+                    # Step2: Start to lowering into Inductor
+                    run = compile_fx(convert_module, example_inputs)
+                    # Inductor first run
+                    inductor_res = run(*example_inputs)
+                    # Inductor second run
+                    inductor_res = run(*example_inputs)
+                    self.assertEqual(ref_result, inductor_res, atol=5e-2, rtol=5e-2)
 
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision

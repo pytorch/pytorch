@@ -16,6 +16,7 @@ def dummy_fn(x):
     return torch.sigmoid(x + math.pi) / 10.0
 
 
+@unittest.skipIf(torch.backends.mps.is_available(), "default to aot_eager")
 class TestInductorConfig(TestCase):
     @classmethod
     def setUpClass(cls):
