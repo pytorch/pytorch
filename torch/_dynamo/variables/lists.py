@@ -21,6 +21,7 @@ def unpack_into_example(item):
         return item.sym_num
     return item.as_python_constant()
 
+
 class BaseListVariable(VariableTracker):
     @staticmethod
     def cls_for(obj):
