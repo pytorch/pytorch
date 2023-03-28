@@ -62,6 +62,7 @@ def create_instruction(name, arg=None, argval=_NotProvided, target=None):
 
     Do not use for LOAD_GLOBAL - use create_load_global instead.
     """
+    assert name != "LOAD_GLOBAL"
     cnt = (arg is not None) + (argval is not _NotProvided) + (target is not None)
     if cnt > 1:
         raise RuntimeError(
@@ -486,18 +487,19 @@ def fix_vars(instructions: List[Instruction], code_options):
     for i in range(len(instructions)):
 
         def should_compute_arg():
-            if instructions[i].arg is None:
-                assert instructions[i].argval is not _NotProvided
-                return True
-            return False
+            # argval is prioritized over arg
+            return instructions[i].argval is not _NotProvided
 
-        if sys.version_info >= (3, 11) and instructions[i].opname == "LOAD_GLOBAL":
+        if instructions[i].opname == "LOAD_GLOBAL":
             # 3.11 LOAD_GLOBAL requires both arg and argval - see create_load_global
             assert instructions[i].arg is not None
             assert instructions[i].argval is not _NotProvided
-            instructions[i].arg = names[instructions[i].argval] << 1 + (
-                instructions[i].arg % 2
-            )
+            if sys.version_info >= (3, 11):
+                instructions[i].arg = (names[instructions[i].argval] << 1) + (
+                    instructions[i].arg % 2
+                )
+            else:
+                instructions[i].arg = names[instructions[i].argval]
         elif instructions[i].opcode in HAS_LOCAL:
             if should_compute_arg():
                 instructions[i].arg = varnames[instructions[i].argval]
