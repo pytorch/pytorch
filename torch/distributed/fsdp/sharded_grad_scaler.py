@@ -36,7 +36,7 @@ class ShardedGradScaler(GradScaler):
     """
     ShardedGradScaler helps perform gradient scaling in a shard aware manner. It extends
     functionality from GradScaler:
-    * Suports Pytorch DDP and FSDP implementations
+    * Supports Pytorch DDP and FSDP implementations
     * Support CPU offloaded tensors (as used in fully sharded data parallel[FSDP])
     * Supports the custom Mixed Precision loss dtype (fp16, bf16) that FSDP returns
     * Sync inf/nan for scaled gradient tensors on any torch.device (where tensors are placed) across
@@ -208,7 +208,7 @@ class ShardedGradScaler(GradScaler):
                         # For scaled fp16 values, there's a good chance coalescing will cause overflow,
                         # so we should check the coalesced _values().
                         if param.grad.dtype is torch.float16:
-                            # coalesce is not suported in torch.float16
+                            # coalesce is not supported in torch.float16
                             param_grad_fp32 = param.grad.type(torch.float32).coalesce()
                             param.grad = param_grad_fp32.type(torch.float16)
                         to_unscale = param.grad._values()

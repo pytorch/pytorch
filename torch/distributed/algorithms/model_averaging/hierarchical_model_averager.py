@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class HierarchicalModelAverager(averagers.ModelAverager):
     r"""
     Runs hierarchical model averaging (`hierarchical SGD <https://arxiv.org/pdf/2010.12998.pdf>`_).
-    Process groups of different sizes are organized in a hierarhicy, and they average parameters
+    Process groups of different sizes are organized in a hierarchy, and they average parameters
     by using different periods concurrently after the warm-up stage.
     This is an extension of :class:`~torch.distributed.algorithms.model_averaging.averagers.PeriodicModelAverager`
     that supports `post-local SGD <https://arxiv.org/abs/1808.07217>`_, which essentially only supports
