@@ -196,7 +196,7 @@ class triton:
     cudagraph_trees = True
 
     # assertions not on the fast path, steady state
-    fast_cudagraph_asserts = False
+    fast_cudagraph_asserts = True
 
     # assertions on the fast path
     slow_cudagraph_asserts = False
