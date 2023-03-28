@@ -4049,7 +4049,7 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
-    def test_linalg_solve_triangular_large_irem(self, device, dtype):
+    def test_linalg_solve_triangular_large(self, device, dtype):
         # Exercises magma and cublas
         magma = (9, 513, 1)
         iterative_cublas = (2, 64, 1)
