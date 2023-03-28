@@ -1071,8 +1071,10 @@ class TestAutogradFunction(TestCase):
                 # NB: the logic to check ctx.save_for_forward happens
                 #     before we reach this!
                 if mark_dirty:
-                    x_t.add_(0)
-                return x_t
+                    ret = x_t.add_(0)
+                else:
+                    ret = x_t.view_as(x_t)
+                return ret
 
         def fn(x):
             return A.apply(x.clone())
@@ -1099,15 +1101,17 @@ class TestAutogradFunction(TestCase):
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 with fwAD.dual_level():
                     A.apply(fwAD.make_dual(a, a_t))
-        elif mark_dirty:
+        else:
             b = A.apply(a)
             if mark_dirty:
                 self.assertTrue(a is b)
-            with fwAD.dual_level():
-                a_dual = fwAD.make_dual(a, a_t)
-                b_dual = A.apply(a_dual)
-            if mark_dirty:
-                self.assertTrue(a_dual is b_dual)
+            if not (mark_dirty and save_for == "vjp" and save_tensors in ("input", "output")):
+                # TODO(soulitzer): https://github.com/pytorch/pytorch/issues/97827
+                with fwAD.dual_level():
+                    a_dual = fwAD.make_dual(a, a_t)
+                    b_dual = A.apply(a_dual)
+                if mark_dirty:
+                    self.assertTrue(a_dual is b_dual)
 
     def test_needs_input_grads(self, device):
         class A(torch.autograd.Function):
