@@ -23,7 +23,7 @@ from torch.distributed._tensor import (
 )
 from torch.distributed._tensor.dispatch import (
     _CURRENT_DECOMPOSITION_TABLE,
-    operator_dispatch
+    operator_dispatch,
 )
 from torch.distributed._tensor.redistribute import (
     _redistribute_with_local_tensor,
@@ -72,10 +72,14 @@ def _dispatch_with_local_tensors(
     op: torch._ops.OpOverload,
     local_args: Tuple[object, ...],
     kwargs: Optional[Dict[str, object]] = None,
-    specs: Optional[Dict[
-        torch.Tensor,
-        Tuple[torch.Size, DeviceMesh, Sequence[Placement], Sequence[Placement]],
-    ]] = None,
+    specs: Optional[
+        Dict[
+            torch.Tensor,
+            Tuple[
+                torch.Size, DeviceMesh, Sequence[Placement], Sequence[Placement]
+            ],
+        ]
+    ] = None,
 ) -> object:
     if kwargs is None:
         kwargs = {}
@@ -154,7 +158,6 @@ def _get_dtensor_dispatch_graph(
             args,
             kwargs,  # kwargs in this set of tests are all constants
             DTensor._propagator,
-            DTensor._custom_dispatch_ops,
         )
         node_to_obj[node] = out
 
@@ -251,7 +254,11 @@ def _convert_output(
 
         traced_dispatch, result_obj = _build_dummy_add_graph(dt, node_to_obj)
 
-        wait = [n for n in traced_dispatch.graph.nodes if n.name == "wait_comm" or n.name == "wait_tensor"]
+        wait = [
+            n
+            for n in traced_dispatch.graph.nodes
+            if n.name == "wait_comm" or n.name == "wait_tensor"
+        ]
         add = [n for n in traced_dispatch.graph.nodes if n.name == "add"]
         assert len(wait) == 1 and len(add) == 1
 
@@ -437,9 +444,16 @@ def _convert_to_distributed(
             )
 
         elif isinstance(node.target, torch._ops.OpOverload):
-            node_replacements[node] = _get_dtensor_dispatch_graph(
-                node, node_to_obj
-            )
+            if not node.target._schema.name[-1] == "_":
+                node_replacements[node] = _get_dtensor_dispatch_graph(
+                    node, node_to_obj
+                )
+            else:
+                # FIXME(@mrshenli, @wanchaol): this prevents DTensor to insert
+                # allreduce for partial DTensor objects.
+                # FIXME: assuming it's inplace on the first arugment
+                node_to_obj[node] = node_to_obj[node.args[0]]
+                logger.info(f"Skipping expanding inplace operator {node.target.name()}")
         elif node.op == OP.OUTPUT:
             if not _allow_partial:
                 # Returns an expanded dummy add node that ensures

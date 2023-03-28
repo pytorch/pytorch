@@ -109,7 +109,7 @@ class ShardingPropagator:
                     output_sharding.schema_suggestions = [op_schema]
             else:
                 # we do auto redistribute on inputs if necessary
-                # to get an eligble input, which we will pick a
+                # to get an eligible input, which we will pick a
                 # schema suggestion base on the redistribute cost.
                 # For now we simply pick the first suggestion.
                 # TODO: implement full auto distribute with a
