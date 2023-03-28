@@ -540,6 +540,7 @@ class WrapperCodeGen(CodeGen):
                         [
                             'path = f"{tempfile.gettempdir()}/compiled_module_profile.json"',
                             "p.export_chrome_trace(path)",
+                            f'print(f"Profiling result for a compiled module of benchmark {get_benchmark_name()}:")',
                             'print(f"Chrome trace for the profile is written to {path}")',
                             "event_list = p.key_averages(group_by_input_shape=True)",
                             'print(event_list.table(sort_by="self_cuda_time_total", row_limit=10))',
