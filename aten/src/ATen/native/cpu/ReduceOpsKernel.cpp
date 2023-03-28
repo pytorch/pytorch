@@ -136,28 +136,17 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
-void mean_kernel_impl(TensorIterator& iter) {
-  //  returns acc_t for all non-complex dtypes and returns T for c10::complex<T>
-  using factor_t = typename c10::scalar_value_type<acc_t>::type;
-  factor_t factor = static_cast<factor_t>(iter.num_output_elements()) / iter.numel();
-  binary_kernel_reduce(
+static void mean_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "mean_cpu", [&] {
+    using acc_t = at::opmath_type<scalar_t>;
+    using factor_t = typename c10::scalar_value_type<acc_t>::type;
+    factor_t factor = static_cast<factor_t>(iter.num_output_elements()) / iter.numel();
+    binary_kernel_reduce(
       iter,
-      MeanOps<scalar_t, acc_t, factor_t, out_t> {factor},
-      acc_t(0)
+      MeanOps<scalar_t, acc_t, factor_t, scalar_t> {factor},
+      scalar_t(0)
     );
-}
-
-static void mean_kernel_cpu(TensorIterator& iter) {
-  if (iter.dtype() == kHalf) {
-    mean_kernel_impl<at::Half, float>(iter);
-  } else if(iter.dtype() == kBFloat16) {
-    mean_kernel_impl<at::BFloat16, float>(iter);
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "mean_cpu", [&]() {
-      mean_kernel_impl<scalar_t>(iter);
-    });
-  }
+  });
 }
 
 static void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt) {
