@@ -1207,6 +1207,16 @@ def main():
         'utils/model_dump/code.js',
         'utils/model_dump/*.mjs',
     ]
+    if get_cmake_cache_vars()['BUILD_NVFUSER']:
+        torch_package_data.extend([
+            'share/cmake/nvfuser/*.cmake',
+            'include/nvfuser/*.h',
+            'include/nvfuser/kernel_db/*.h',
+            'include/nvfuser/multidevice/*.h',
+            'include/nvfuser/ops/*.h',
+            'include/nvfuser/python_frontend/*.h',
+            'include/nvfuser/scheduler/*.h',
+        ])
 
     if get_cmake_cache_vars()['BUILD_CAFFE2']:
         torch_package_data.extend([
