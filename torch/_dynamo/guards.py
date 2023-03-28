@@ -67,9 +67,13 @@ CLOSURE_VARS = collections.OrderedDict(
 def strip_function_call(name):
     """
     "___odict_getitem(a, 1)" => "a"
+    "a.layers[slice(2)][0]._xyz" ==> "a"
+    "getattr(a.layers[slice(2)][0]._abc, '0')" ==> "a"
+    "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
     """
-    m = re.search(r"([a-z0-9_]+)\(([^(),]+)[^()]*\)", name)
-    if m and m.group(1) != "slice":
+    # recursively find valid object name in fuction's first param
+    m = re.search(r"([a-z0-9_]+)\(([A-Za-z_][^),]*)[^()]*", name)
+    if m:
         return strip_function_call(m.group(2))
     return strip_getattr_getitem(name)
 
