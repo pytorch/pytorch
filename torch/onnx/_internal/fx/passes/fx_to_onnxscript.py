@@ -524,7 +524,11 @@ def export_fx_to_onnxscript(
     # to
     #   fx_name_to_onnxscipt_value[fx_tensor_x.name] -> onnx_node_1 -> fx_name_to_onnxscipt_value[fx_tensor_y.name]
     fx_name_to_onnxscipt_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ] = {}
     # node_fixed_shape is only used on op_level_debug purpose.
     for node, node_fixed_shape in zip(

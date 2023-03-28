@@ -37,17 +37,48 @@ def validate_op_between_ort_torch(
     )
     try:
         with evaluator.default_as(evaluator.ort_evaluator):
-            expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
-            # TODO(titaiwang): Expose _convert_tensor_to_numpy and _convert_kwargs_for_onnx?
+            try:
+                expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
+            except IndexError as index_error:
+                # TODO(titaiwang): How to bound indices/dim: INT64
+                warnings.warn(
+                    f"\nPyTorch fails to run on Op {node.target} with error: \n{index_error}.\n"
+                    f"This is possibly raised by incompatible args {torch_args} of "
+                    f"randomnized dim/slices(INT64).\n"
+                )
+                diagnostic = diagnostics.export_context().inflight_diagnostic()
+                diagnostic.with_additional_message(
+                    f"### Validation failed\n"
+                    f"{diagnostics.decorator.format_exception_in_markdown(index_error)}"
+                )
+                diagnostic.level = diagnostics.levels.WARNING
+                return
+
             input_onnx = [
                 onnx_proto_utils._convert_tensor_to_numpy(x) for x in torch_args
             ]
             kwargs_onnx = fx_to_onnxscript.filter_incompatible_and_dtype_convert_kwargs(
                 torch_kwargs
             )
-            ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
+            try:
+                ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
+            except TypeError as type_error:
+                # TODO(titaiwang): trace_only function is not supported by onnxscript
+                # param_schema
+                warnings.warn(
+                    f"\nORT fails to run on Op {node.target} with error: \n{type_error}.\n"
+                    f"If this is a trace_only onnxscript function, the error is possibly"
+                    f"raised by wronly separated parameter schema in onnxscript. args "
+                    f"{input_onnx} and kwargs: {kwargs_onnx}.\n"
+                )
+                diagnostic = diagnostics.export_context().inflight_diagnostic()
+                diagnostic.with_additional_message(
+                    f"### Validation failed\n"
+                    f"{diagnostics.decorator.format_exception_in_markdown(type_error)}"
+                )
+                diagnostic.level = diagnostics.levels.WARNING
+                return
 
-            # TODO: add pytree structure comparison.
             flattened_torch_outputs, _ = _pytree.tree_flatten(expected_outputs)
             flattened_function_outputs, _ = _pytree.tree_flatten(ort_outputs)
 
@@ -135,15 +166,16 @@ def wrap_fx_args_as_torch_args(
 
     # NOTE: This function only supports FakeTensor with concrete shapes
     torch_args: List[_type_utils.Argument] = []
-    for arg in complete_args:
+    for idx, arg in enumerate(complete_args):
         if isinstance(arg, torch.fx.Node):
             fake_tensor = arg.meta["val"]
             if isinstance(fake_tensor, Sequence):
                 for meta_value in fake_tensor:
-                    real_tensor = generate_random_tensors(
-                        meta_value.shape, meta_value.dtype
-                    )
-                    torch_args.append(real_tensor)
+                    if isinstance(fake_tensor, torch.Tensor):
+                        real_tensor = generate_random_tensors(
+                            meta_value.shape, meta_value.dtype
+                        )
+                        torch_args.append(real_tensor)
             elif isinstance(fake_tensor, torch.Tensor):
                 real_tensor = generate_random_tensors(
                     fake_tensor.shape, fake_tensor.dtype
