@@ -3205,7 +3205,11 @@ def smooth_l1_loss(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-    return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
+
+    if beta == 0.0:
+        return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+    else:
+        return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
 
 
 def huber_loss(
@@ -4846,7 +4850,7 @@ def _in_projection(
 
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention, r"""
-scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False) -> Tensor:
+scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> Tensor:
 
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
@@ -4855,9 +4859,10 @@ greater than 0.0 is specified.
 .. code-block:: python
 
     # Efficient implementation equivalent to the following:
+    scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
     attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
     attn_mask = attn_mask.masked_fill(not attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
-    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))) + attn_mask, dim=-1)
+    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p)
     return attn_weight @ V
 
@@ -4909,6 +4914,8 @@ Args:
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
     is_causal (bool): If true, assumes causal attention masking and errors if both attn_mask and is_causal
         are set.
+    scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
+        to :math:`\frac{1}{\sqrt{E}}`.
 
 
 Returns:
@@ -5063,11 +5070,21 @@ def multi_head_attention_forward(
             be ignored by the attention. This is an binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
+            Default: `True`
+            Note: `needs_weight` defaults to `True`, but should be set to `False`
+            For best performance when attention weights are not nedeeded.
+            *Setting needs_weights to `True`
+            leads to a significant performance degradation.*
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
         is_causal: If specified, applies a causal mask as attention mask, and ignores
             attn_mask for computing scaled dot product attention.
             Default: ``False``.
+            .. warning::
+                is_causal is provides a hint that the attn_mask is the
+                causal mask.Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
@@ -5167,8 +5184,33 @@ def multi_head_attention_forward(
         target_type=query.dtype
     )
 
-    if is_causal:
+    if is_causal and attn_mask is None:
+        raise RuntimeError(
+            "Need attn_mask if specifying the is_causal hint. "
+            "You may use the Transformer module method "
+            "`generate_square_subsequent_mask` to create this mask."
+        )
+
+    if is_causal and key_padding_mask is None and not need_weights:
+        # when we have a kpm or need weights, we need attn_mask
+        # Otherwise, we use the is_causal hint go as is_causal
+        # indicator to SDPA.
         attn_mask = None
+    else:
+        attn_mask = _canonical_mask(
+            mask=attn_mask,
+            mask_name="attn_mask",
+            other_type=None,
+            other_name="",
+            target_type=query.dtype,
+            check_other=False,
+        )
+
+        if key_padding_mask is not None:
+            # We have the attn_mask, and use that to merge kpm into it.
+            # Turn off use of is_causal hint, as the merged mask is no
+            # longer causal.
+            is_causal = False
 
     assert embed_dim == embed_dim_to_check, \
         f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
@@ -5202,15 +5244,6 @@ def multi_head_attention_forward(
         q, k, v = _in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v)
 
     # prep attention mask
-
-    attn_mask = _canonical_mask(
-        mask=attn_mask,
-        mask_name="attn_mask",
-        other_type=None,
-        other_name="",
-        target_type=q.dtype,
-        check_other=False,
-    )
 
     if attn_mask is not None:
         # ensure attn_mask's dim is 3
@@ -5298,6 +5331,9 @@ def multi_head_attention_forward(
     if need_weights:
         B, Nt, E = q.shape
         q_scaled = q / math.sqrt(E)
+
+        assert not (is_causal and attn_mask is None), "FIXME: is_causal not implemented for need_weights"
+
         if attn_mask is not None:
             attn_output_weights = torch.baddbmm(attn_mask, q_scaled, k.transpose(-2, -1))
         else:

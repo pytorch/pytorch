@@ -46,6 +46,7 @@ from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_common_passes import TestCommonPass  # noqa: F401
 from fx.test_cse_pass import TestCSEPass  # noqa: F401
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
+from fx.test_verifier import VerifierTest  # noqa: F401
 
 from fx.test_gradual_type import AnnotationsTest  # noqa: F401
 from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
@@ -321,7 +322,7 @@ class TestFX(JitTestCase):
         def f(x, y):
             x = control_flow.cond(x[0] == 0, true, false, [x, y])
 
-        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace PyOperators"):
+        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace HigherOrderOperators"):
             _ = symbolic_trace(f)
 
     def test_disallow_override(self):

@@ -35,7 +35,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'flake8==3.8.2',
     'flake8-bugbear==20.1.4',
-    'flake8-comprehensions==3.3.0',
+    'flake8-comprehensions==3.11.1',
     'flake8-executable==2.0.4',
     'flake8-logging-format==0.9.0',
     'flake8-pyi==20.5.0',
@@ -49,6 +49,8 @@ init_command = [
 code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
+    'aten/src/ATen/mps/**/*.mm',
+    'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
     'c10/**/*.h',
@@ -677,7 +679,6 @@ exclude_patterns = [
     'cmake/Modules_CUDA_fix/**',
     'cmake/Caffe2Config.cmake.in',
     'aten/src/ATen/ATenConfig.cmake.in',
-    'cmake/Caffe2ConfigVersion.cmake.in',
     'cmake/TorchConfig.cmake.in',
     'cmake/TorchConfigVersion.cmake.in',
     'cmake/cmake_uninstall.cmake.i',
@@ -825,6 +826,8 @@ init_command = [
 [[linter]]
 code = 'UFMT'
 include_patterns = [
+    '.github/**/*.py',
+    'test/run_test.py',
     'test/onnx/**/*.py',
     'test/test_dynamo_cudagraphs.py',
     'tools/**/*.py',
@@ -860,6 +863,8 @@ include_patterns = [
     'test/test_value_ranges.py',
     'torch/utils/_sympy/interp.py',
     'torch/utils/_sympy/reference.py',
+    'torch/_logging/**/*.py',
+    'torch/nn/parallel/distributed.py',
 ]
 command = [
     'python3',
@@ -876,7 +881,7 @@ init_command = [
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
-    'black==22.3.0',
+    'black==23.1.0',
     'ufmt==1.3.3',
     'usort==1.0.2',
 ]
@@ -920,3 +925,11 @@ init_command = [
     '--output-name=bazel',
 ]
 is_formatter = true
+
+[[linter]]
+code = 'LINTRUNNER_VERSION'
+include_patterns = ['**']
+command = [
+    'python3',
+    'tools/linter/adapters/lintrunner_version_linter.py'
+]
