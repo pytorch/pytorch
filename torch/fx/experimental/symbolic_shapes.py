@@ -1436,8 +1436,8 @@ class ShapeEnv:
         ex: torch.Tensor,
         source: Source,
         *,
-        dynamic_dims: Optional[DimList[DimDynamic]]=None,
-        constraint_dims: Optional[DimList[DimConstraint]]=None,
+        dynamic_dims: Optional[DimList[DimDynamic]] = None,
+        constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
@@ -1548,6 +1548,8 @@ class ShapeEnv:
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
+        *,
+        is_size: bool = True,
     ) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
@@ -1561,18 +1563,14 @@ class ShapeEnv:
         elif dynamic_dim is DimDynamic.DUCK:
             # duck_shape can be used to globally turn off duck shaping, even
             # if it was requested
+            assert is_size
             duck = self.duck_shape
         elif dynamic_dim is DimDynamic.DYNAMIC:
             duck = False
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
-        if val < 0:
-            from torch._dynamo.source import NegateSource
-            assert constraint_dim is None, "constraints on negative unspec ints NYI"
-            return -self.create_symbol(-val, NegateSource(source), dynamic_dim, constraint_dim)
-
-        if val in (0, 1) and self.specialize_zero_one:
+        if is_size and val in (0, 1) and self.specialize_zero_one:
             r = self.val_to_var[val]
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
@@ -1586,10 +1584,14 @@ class ShapeEnv:
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
+                assert is_size
                 self.val_to_var[val] = sympy_expr
 
-            # Apply default range, which assumes not zero-one
-            self.var_to_range[sympy_expr] = self._default_value_range()
+            # For size-y symbols, apply default range, which assumes not zero-one
+            if is_size:
+                self.var_to_range[sympy_expr] = self._default_value_range()
+            else:
+                self.var_to_range[sympy_expr] = ValueRanges.unknown()
 
             # Small performance optimization: if we have a min-max constraint,
             # we can proactively narrow to that range
@@ -1605,6 +1607,7 @@ class ShapeEnv:
         else:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
+            assert is_size
             r = self.val_to_var[val]
 
         if isinstance(r, sympy.Symbol):

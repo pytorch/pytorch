@@ -47,7 +47,6 @@ from ..utils import (
     odict_values,
     preserve_rng_state,
     tensor_always_has_static_shape,
-    tensor_static_reason_to_message,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -796,39 +795,21 @@ class VariableBuilder:
             # take unspecialized floats and use them in sizevar computation
             if (
                 config.dynamic_shapes
+                and not torch._dynamo.config.specialize_int
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
             ):
-                if value < 0 or torch._dynamo.config.specialize_int:
-                    # Negative values don't create_symbol correctly,
-                    # so make sure we do a constant in this case.
-                    #
-                    # Also, if specialize_int is False, also return
-                    # a constant (but this should have been handled
-                    # in the caller, TBH)
-                    return ConstantVariable(
-                        value=value,
-                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
-                    )
-
                 shape_env = self.tx.output.shape_env
 
-                # TODO: This should be dynamic, as we in general do not
-                # know if bare integers are actually going to be sizevars
-                # and it is inappropriate to eagerly duck size them with
-                # real sizevars
-                dynamic_dim = DimDynamic.DUCK
-
                 wrapped_value = shape_env.create_symintnode(
-                    # TODO: This is wrong wrong wrong, create_symbol will
-                    # generate something that is non-negative, but this is
-                    # not a sound assumption to make.
-                    # Not fixing as this was a preexisting condition.
                     shape_env.create_symbol(
                         value,
                         source=self.source,
-                        dynamic_dim=dynamic_dim,
+                        dynamic_dim=DimDynamic.DYNAMIC,
                         constraint_dim=None,
+                        # We don't necessarily know if this is a size or not,
+                        # so let it be unbounded to start
+                        is_size=False,
                     ),
                     hint=value,
                 )
@@ -1104,8 +1085,6 @@ class TrackedFake:
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    from torch.fx.experimental.symbolic_shapes import DimConstraint
-
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):

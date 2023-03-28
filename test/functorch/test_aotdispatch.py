@@ -50,7 +50,7 @@ from common_utils import (
 )
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, GuardOnDataDependentSymNode, DimDynamic
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, GuardOnDataDependentSymNode
 
 USE_TORCHVISION = False
 try:
