@@ -1480,8 +1480,9 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    @slow()
     def test_large_tensor_reduction(self):
-        if not _has_sufficient_memory(self.device, 6 * 1024**3):  # 6 GiB
+        if not _has_sufficient_memory(self.device, 4.5 * 1024**3):  # 4.5 GiB
             raise unittest.SkipTest("insufficient memory")
 
         # Test 64-bit indexing works correctly
@@ -1495,7 +1496,7 @@ class CommonTemplate:
         compiled_fn = torch._dynamo.optimize()(fn)
         actual = compiled_fn(t)
         expect = torch.tensor(2, dtype=torch.int8, device=self.device)
-        self.assertEqual(expect, actual)
+        self.assertEqual(actual, expect)
 
     def test_softmax(self):
         def fn(a, b):

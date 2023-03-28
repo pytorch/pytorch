@@ -1869,7 +1869,6 @@ class MutationLayout(Layout):
         return self.real_layout().storage_size()
 
     def real_layout(self):
-
         def unwrap_views(target):
             if isinstance(target, MutationLayout):
                 return unwrap_views(target.target)
