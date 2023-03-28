@@ -38,40 +38,66 @@ class Model(nn.Module):
 
 # compare different dtypes
 def compare_dtype(m, k, n, batch_size, dtype):
+    weight = torch.ones(m, k, dtype=dtype).cuda()
+    # input_tensor = torch.ones(1, n, k, dtype=dtype).cuda()
+    input_tensor = torch.randint(2, (1, n, k), dtype=dtype).cuda()
+    print("input")
+    print(input_tensor)
+    bias = torch.zeros(n, dtype=dtype).cuda()
 
-    print(dtype)
+    def random_mask_choice(i=None):
+        import random
+        choices = [
+            [1, 1, 0, 0],
+            [1, 0, 1, 0],
+            [1, 0, 0, 1],
+            [0, 1, 1, 0],
+            [0, 1, 0, 1],
+            [0, 0, 1, 1]
+        ]
+        if i is None:
+            i = random.randint(0, len(choices) - 1)
+        return choices[i]
 
-    # model = Model(m, k).eval().type(dtype)
-    weight = torch.ones(m, k, dtype=dtype)
-    input = torch.ones(1, n, k, dtype=dtype)
-    bias = torch.zeros(m, n, dtype=dtype)
+    mask_entries = []
+    for i in range(m * (k // 4)):
+        mask_entries += random_mask_choice()
+    mask = torch.tensor(mask_entries, dtype=dtype).view(m, k).contiguous()
+    mask = mask.cuda()
 
-    res = weight.matmul(input.mT).mT + bias
-    print(res.shape)
+    weight = weight * mask
+    print("weight")
+    print(weight)
 
-    weight.cuda()
-    input.cuda()
-    bias.cuda()
-
+    res = torch.matmul(weight.float(), input_tensor.mT.float()) + bias.float()
     num_bytes = weight.nelement() * weight.element_size()
-    print(num_bytes)
     compressed_size = num_bytes * 10 // 16 
-    print("compresseds", compressed_size)
     weight_compressed = torch.empty((compressed_size // weight.element_size(), ), 
                                     dtype=weight.dtype, 
                                     device=device)
-    print(weight_compressed.nelement())
-
     cslt = torch.classes.cusparselt.CusparseLtLinear(weight_compressed,
                                                      bias)
-
     cslt.set_compressed(weight)
-    print(cslt.masked_mm(input.mT).mT)
 
-    latency = benchmark.Timer(
-        stmt="model(input_tensor)",
-        globals={"input_tensor": input_tensor, "model": model}
-    ).blocked_autorange()
+    print("W_c")
+    print(weight_compressed)
+
+    s_res = cslt.masked_mm(input_tensor.mT)
+
+    print("s_res")
+    print(s_res.float())
+
+    print("res")
+    print(res)
+
+    assert torch.allclose(
+        s_res.float(), res, rtol=1e-3, atol=1e-3
+    )
+
+    # latency = benchmark.Timer(
+    #     stmt="model(input_tensor)",
+    #     globals={"input_tensor": input_tensor, "model": model}
+    # ).blocked_autorange()
 
     return {
         "m": m,
@@ -79,7 +105,7 @@ def compare_dtype(m, k, n, batch_size, dtype):
         "n": n,
         "eval_batch_size": batch_size,
         "dtype": str(dtype),
-        "latency (ms)": latency.median * 1000,
+        # "latency (ms)": latency.median * 1000,
     }
 
 def compare_memory(m, k, n, batch_size):
@@ -400,10 +426,10 @@ if __name__ == "__main__":
         results = [compare_memory(4096, 4096, 4096, 1)]
    
     elif args.mode == "int8-fp16-linear":
-        dtypes = [torch.int8, torch.float32, torch.float16]
+        dtypes = [torch.int8]
         batch_sizes = [4]
         results = (
-            compare_dtype(1024, 1024, 1024, batch_size, dtype) 
+            compare_dtype(64, 128, 64, batch_size, dtype) 
             for batch_size, dtype in tqdm(product(batch_sizes, dtypes), total=len(dtypes)*len(batch_sizes))
         )
 

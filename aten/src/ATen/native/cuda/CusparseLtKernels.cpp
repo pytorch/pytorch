@@ -69,7 +69,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   CusparseLtLinear(const at::Tensor& weight_compressed,
                    const at::Tensor& bias)
   : weight_compressed{weight_compressed},
-    dBias{nullptr},
+    dBias{bias.data_ptr()},
     pruning_algo{CUSPARSELT_PRUNE_SPMMA_STRIP}
   {
     // CUDA VERSION CHECK
@@ -205,6 +205,8 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
   // create tensor
   auto res = input.new_empty({input.size(0), num_A_rows, input.size(2)});
 
+  std::cout << res.device() << std::endl;
+
   int num_batches = (int)input.size(0);
   int64_t k = input.size(1);
   int64_t n = input.size(2);
@@ -315,14 +317,14 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       compute_type) )
 
   // SET BIAS POINTER
-  //--------------------------------------------------------------------------
-  // CHECK_CUSPARSE(
-  //   cusparseLtMatmulDescSetAttribute(
-  //     &handle,
-  //     &matmul,
-  //     CUSPARSELT_MATMUL_BIAS_POINTER,
-  //     &dBias,
-  //     sizeof(dBias)) )
+  // --------------------------------------------------------------------------
+  CHECK_CUSPARSE(
+    cusparseLtMatmulDescSetAttribute(
+      &handle,
+      &matmul,
+      CUSPARSELT_MATMUL_BIAS_POINTER,
+      &dBias,
+      sizeof(dBias)) )
 
   
   CHECK_CUSPARSE(

@@ -1,0 +1,2 @@
+,m,k,n,eval_batch_size,dtype
+0,64,128,64,4,torch.int8
