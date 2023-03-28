@@ -154,7 +154,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
       uids.insert(uids.end(), {'b', 'c', 'd'});
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
-      .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
+      .setWorkspacePointer(workspace_size ? workspace_ptr.mutable_get() : nullptr)
       .setDataPointers(uids.size(), data_ptrs.data())
       .setUids(uids.size(), uids.data())
       .build();
