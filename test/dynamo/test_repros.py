@@ -2514,6 +2514,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f(torch.randn(3))
 
+        del lib
+
         self.assertEqual(counter.op_count, 2)
         self.assertEqual(counter.frame_count, 2)
 
