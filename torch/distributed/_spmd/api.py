@@ -39,7 +39,9 @@ class SPMD(nn.Module):
         self._compiled_m: Optional[nn.Module] = None
         self._dist_graph = DistributedGraph(orig_module=module)
 
-    def forward(self, *args: Tuple[object], **kwargs: Dict[str, object]) -> object:
+    def forward(
+        self, *args: Tuple[object], **kwargs: Dict[str, object]
+    ) -> object:
         if self._compiled_m is None:
             self._compiled_m = distribute(
                 self._dist_graph,

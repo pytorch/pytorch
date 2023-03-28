@@ -300,6 +300,10 @@ def _init_core_state(
         sharding_strategy = ShardingStrategy.NO_SHARD
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
+    if mixed_precision is not None:
+        torch._C._log_api_usage_once(
+            f"torch.distributed.fsdp.mixed_precision.{str(state.mixed_precision)}"
+        )
     state.cpu_offload = cpu_offload or CPUOffload()
     state.limit_all_gathers = limit_all_gathers
     state._use_orig_params = use_orig_params
