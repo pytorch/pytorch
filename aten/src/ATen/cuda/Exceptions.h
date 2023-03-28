@@ -13,7 +13,7 @@
 #include <c10/cuda/CUDAException.h>
 
 #ifdef USE_ROCM
-#include <hipblas.h>
+#include <hipblas/hipblas.h>
 #endif
 
 namespace c10 {

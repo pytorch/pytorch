@@ -10,7 +10,7 @@
 
 
 #ifdef USE_ROCM
-#include <hipblas.h>
+#include <hipblas/hipblas.h>
 #endif
 
 

@@ -17,8 +17,8 @@
 #include <ATen/OpMathType.h>
 
 #ifdef USE_ROCM
-#include <hipblas.h>
-#include <hipsolver.h>
+#include <hipblas/hipblas.h>
+#include <hipsolver/hipsolver.h>
 #endif
 
 
