@@ -165,7 +165,7 @@ void PerfProfiler::Enable() {
   start_values_.emplace(events_.size(), 0);
 
   auto& sv = start_values_.top();
-  for (int i = 0; i < events_.size(); ++i) {
+  for (unsigned i = 0; i < events_.size(); ++i) {
     sv[i] = events_[i].ReadCounter();
   }
   StartCounting();
@@ -182,7 +182,7 @@ void PerfProfiler::Disable(perf_counters_t& vals) {
   /* Always connecting this disable event to the last enable event i.e. using
    * whatever is on the top of the start counter value stack. */
   perf_counters_t& sv = start_values_.top();
-  for (int i = 0; i < events_.size(); ++i) {
+  for (unsigned i = 0; i < events_.size(); ++i) {
     vals[i] = CalcDelta(sv[i], events_[i].ReadCounter());
   }
   start_values_.pop();

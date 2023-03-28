@@ -1,5 +1,4 @@
 #pragma once
-
 #include <ATen/core/ivalue.h>
 #include <ATen/core/symbol.h>
 #include <c10/core/CPUAllocator.h>
@@ -567,8 +566,8 @@ class TORCH_API BlockRunner {
   void benchmark(
       const std::vector<std::vector<c10::IValue>>& args_list,
       const std::vector<KeywordArgs>& kwargs_list,
-      const int warmup_runs,
-      const int main_runs,
+      const uint32_t warmup_runs,
+      const uint32_t main_runs,
       bool print_per_node_time = false,
       bool generate_ai_pep_output = false);
 
@@ -592,8 +591,8 @@ class TORCH_API BlockRunner {
   IndividualMetrics benchmark_individual_ops(
       const std::vector<std::vector<c10::IValue>>& args_list,
       const std::vector<KeywordArgs>& kwargs_list,
-      const int warmup_runs,
-      const int main_runs);
+      const uint32_t warmup_runs,
+      const uint32_t main_runs);
 
   // Input is readwrite
   IValue& Input(uint32_t i) {
@@ -704,9 +703,7 @@ class TORCH_API BlockRunner {
 
   // helper method for copying input args/kwargs into inputs_
   template <typename IValueList>
-  void set_inputs(
-      IValueList&& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
+  void set_inputs(IValueList&& args, const KeywordArgs& kwargs);
 
   // Set Input(idx) to args[idx]. Invoked by set_inputs. Copies or moves
   // depending on overload.
@@ -737,8 +734,8 @@ class TORCH_API BlockRunner {
   float benchmark_model(
       const std::vector<std::vector<c10::IValue>>& args_list,
       const std::vector<KeywordArgs>& kwargs_list,
-      const int warmup_runs,
-      const int main_runs);
+      const uint32_t warmup_runs,
+      const uint32_t main_runs);
 
   void display_nodes(
       const std::vector<c10::IValue>& args,
@@ -1073,8 +1070,8 @@ class TORCH_API StaticRuntime {
   void benchmark(
       const std::vector<std::vector<c10::IValue>>& args_list,
       const std::vector<KeywordArgs>& kwargs_list,
-      const int warmup_runs,
-      const int main_runs,
+      const uint32_t warmup_runs,
+      const uint32_t main_runs,
       bool print_per_node_time = false,
       bool generate_ai_pep_output = false) {
     block_->benchmark(
@@ -1125,7 +1122,7 @@ class TORCH_API StaticRuntime {
     // NOLINTNEXTLINE(modernize-avoid-c-arrays)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
     std::unique_ptr<IValue[]> array_ = nullptr;
-    size_t size_;
+    size_t size_ = 0;
   };
 
   std::unique_ptr<BlockRunner> block_;

@@ -197,7 +197,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     The caching allocator can be configured via ENV to round memory allocations in order
     to reduce fragmentation. Sometimes the overhead from rounding can be higher than
     the fragmentation it helps reduce. The following stat can be used to check if
-    rounding adds too much overhed:
+    rounding adds too much overhead:
 
     - ``"requested_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
       memory requested by client code, compare this with allocated_bytes to check if
@@ -600,7 +600,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     return "\n".join(lines)
 
 def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
-    r"""Returns the global free and total GPU memory occupied for a given
+    r"""Returns the global free and total GPU memory for a given
     device using cudaMemGetInfo.
 
     Args:
