@@ -1,6 +1,8 @@
 import collections
+from collections import defaultdict
 import contextlib
 import functools
+import dataclasses
 import itertools
 import logging
 import math
@@ -701,6 +703,11 @@ def get_benchmark_name():
         if arg.startswith("--only="):
             return arg[len("--only=") :]
 
+_kernel_category_choices = [
+    "pointwise",
+    "reduction",
+    "persistent_reduction",
+]
 
 def get_kernel_category(kernel_mod):
     """
@@ -713,12 +720,18 @@ def get_kernel_category(kernel_mod):
     Currently we simply decide the cateory depending on what decorator is imported
     by the kernel.
     """
-    choices = [
-        "pointwise",
-        "reduction",
-        "persistent_reduction",
-    ]
-    choices = [ch for ch in choices if ch in kernel_mod.__dict__]
+    choices = [ch for ch in _kernel_category_choices if ch in kernel_mod.__dict__]
+    if len(choices) == 1:
+        return choices[0]
+    else:
+        return "unknown"
+
+def get_kernel_category_by_source_code(src_code):
+    """
+    Similar to get_kernel_category but use the source code. Call this API
+    if we have not compile the src_code to module yet.
+    """
+    choices = [ch for ch in _kernel_category_choices if f"@{ch}" in src_code]
     if len(choices) == 1:
         return choices[0]
     else:
@@ -826,9 +839,16 @@ def maybe_profile(should_profile, *args, **kwargs):
         yield
 
 
+@dataclasses.dataclass
+class ProfileEvent:
+    category: str
+    key: str
+    self_cuda_time_ms: float
+    # the benchmark is run multiple times and we average the count across all the
+    # runs. It should be an integer but define a float just in case.
+    count: float
+
 def parse_profile_event_list(event_list, wall_time_ms, nruns):
-    total_cuda_ms = 0
-    total_triton_ms = 0
 
     def get_self_cuda_time(ev):
         """
@@ -836,16 +856,64 @@ def parse_profile_event_list(event_list, wall_time_ms, nruns):
         """
         return ev.self_cuda_time_total / 1000 / nruns
 
+    all_events = defaultdict(list)
+
+    def add_event(ev, category):
+        profile_ev = ProfileEvent(
+            category=category,
+            key=ev.key,
+            self_cuda_time_ms=get_self_cuda_time(ev),
+            count=ev.count / nruns,  # average across all runs
+        )
+        all_events[category].append(profile_ev)
+        
     for ev in event_list:
         assert not ev.is_legacy, "Don't support the legacy profiler"
+        if ev.device_type == DeviceType.CPU:
+            # ignore the event on CPU side
+            continue
+
+        category = "unknown"
         if ev.key.startswith("triton_"):
-            assert ev.device_type == DeviceType.CUDA
-            print(f"{ev.key} {get_self_cuda_time(ev):.3f} ms")
+            if ev.key.startswith("triton_poi"):
+                category = "triton_pointwise"
+            elif ev.key.startswith("triton_red"):
+                category = "triton_reduction"
+            elif ev.key.startswith("triton_per"):
+                category = "triton_persistent_reduction"
+            else:
+                category = "triton_unknown"
 
-            total_triton_ms += get_self_cuda_time(ev)
+        add_event(ev, category)
 
-        if ev.device_type == DeviceType.CUDA:
-            total_cuda_ms += get_self_cuda_time(ev)
+    def report_category(category, profile_events):
+        from tabulate import tabulate
 
-    print(f"total cuda time: {total_cuda_ms:.3f} ms, total triton time {total_triton_ms:.3f} ms")
-    print(f"wall time {wall_time_ms:.3f} ms")
+        profile_events.sort(key=lambda ev: ev.self_cuda_time_ms, reverse=True)
+
+        rows = []
+        total_time = 0.0
+        print(f"\n  == {category} category kernels == ")
+        for ev in profile_events:
+            total_time += ev.self_cuda_time_ms
+            percent = f"{ev.self_cuda_time_ms / wall_time_ms * 100:.2f}%"
+            rows.append([ev.key[:30], ev.self_cuda_time_ms, ev.count, percent])
+        rows.append(["Total", total_time, "", f"{total_time / wall_time_ms * 100:.2f}%"])
+        print(tabulate(rows, headers=["Kernel", "Self CUDA TIME (ms)", "Count", "Percent"]))
+        return total_time
+        
+    def report():
+        category_list = ["triton_pointwise", "triton_reduction", "triton_persistent_reduction", "unknown"]
+        assert set(all_events.keys()).issubset(set(category_list))
+
+        per_category_wall_time = {}
+        total_cuda_ms = 0.0
+        for category in category_list:
+            if category in all_events:
+                _time = report_category(category, all_events[category])
+                per_category_wall_time[category] = _time
+                total_cuda_ms += _time
+
+        print(f"\nPercent of time when GPU is busy: {total_cuda_ms / wall_time_ms * 100:.2f}%")
+
+    report()
