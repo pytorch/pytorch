@@ -560,7 +560,7 @@ def clone_input(x):
 
 
 def clone_inputs(example_inputs):
-    if isinstance(example_inputs, (dict, UserDict)):
+    if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
             assert isinstance(value, torch.Tensor)
