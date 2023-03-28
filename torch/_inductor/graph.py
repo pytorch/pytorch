@@ -61,8 +61,8 @@ def supported_dtype_of_cpp_wrapper(dtype):
         torch.int8,
         torch.uint8,
         torch.bool,
+        torch.bfloat16,
         # torch.float16, # TODO: implement this
-        # torch.bfloat16, # TODO: implement this
     }
     return dtype in supported_dtype
 
@@ -156,6 +156,10 @@ class GraphLowering(torch.fx.Interpreter):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
             log.info(f"Using FallbackKernel: {name}")
+
+    def add_device_idx(self, idx: Optional[int]):
+        if idx is not None:
+            self.device_idxs.add(idx)
 
     @property
     def fake_mode(self):
@@ -322,8 +326,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.device_types.add(example.device.type)
-        if example.device.type == "cuda":
-            self.device_idxs.add(example.device.index)
+        self.add_device_idx(example.device.index)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -483,7 +486,7 @@ class GraphLowering(torch.fx.Interpreter):
                         # Currently, it's not very clear why this is helpful.
                         # The general idea here is that even though a node may
                         # have FlexibleLayout, we still often *treat* it as if
-                        # it was contiguous. This appears to sometime result in
+                        # it was contiguous. This appears to sometimes result in
                         # suboptimal behavior.
                         #
                         # When we do a better job selecting layout, we should
@@ -492,6 +495,7 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
+                            torch.ops.aten._int_mm.default,
                         ]
                         if torch._C.has_mkldnn:
                             need_fixed_layout += [
@@ -518,7 +522,7 @@ class GraphLowering(torch.fx.Interpreter):
             # Realize if the IRNode already has accumulated lots of reads
             if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
                 # Prevent excessive accumulation in a computed buffer, when
-                # there are multiple branches meach with small number of memory
+                # there are multiple branches each with small number of memory
                 # reads, but they converge to a user.
                 result.realize_hint()
 
@@ -619,8 +623,6 @@ class GraphLowering(torch.fx.Interpreter):
         from .codecache import PyCodeCache
 
         code, linemap = self.codegen()
-        if config.debug:
-            print(code)
 
         mod = PyCodeCache.load(code, linemap=linemap)
         for name, value in self.constants.items():

@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy
+from torch.distributed.fsdp.flat_param import _FLAT_PARAM_PADDING
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -146,7 +147,17 @@ class TestFSDPIgnoredModules(FSDPTest):
         with FSDP.summon_full_params(wrapped_model):
             flat_param = wrapped_model.params[0]
             flat_param_numel = flat_param.numel()
-            self.assertEqual(flat_param_numel, nonignored_numel)
+            if use_orig_params:
+                # Subtract the numel contributed from alignment padding
+                padding_numel = sum(
+                    numel
+                    for (numel, pi) in zip(
+                        flat_param._wp_numels, flat_param._wp_param_infos
+                    )
+                    if pi is _FLAT_PARAM_PADDING
+                )
+                flat_param_numel -= padding_numel
+                self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
         self._train_model(wrapped_model, optim, 3)
@@ -185,6 +196,17 @@ class TestFSDPIgnoredModules(FSDPTest):
         with FSDP.summon_full_params(wrapped_model):
             flat_param = wrapped_model.params[0]
             flat_param_numel = flat_param.numel()
+            if use_orig_params:
+                # Subtract the numel contributed from alignment padding
+                padding_numel = sum(
+                    numel
+                    for (numel, pi) in zip(
+                        flat_param._wp_numels, flat_param._wp_param_infos
+                    )
+                    if pi is _FLAT_PARAM_PADDING
+                )
+                flat_param_numel -= padding_numel
+                self.assertEqual(flat_param_numel, nonignored_numel)
             self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
