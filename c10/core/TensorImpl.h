@@ -1507,7 +1507,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * check has_storage() and storage_initialized().
    */
   template <typename T>
-  inline T* data_ptr_impl() const {
+  inline T* mutable_data_ptr_impl() {
     TORCH_CHECK(
         has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");

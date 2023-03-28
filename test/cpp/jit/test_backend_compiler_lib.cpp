@@ -59,7 +59,7 @@ std::vector<std::tuple<std::string, int64_t>> parseMethodHandle(
 }
 
 float* float_data_ptr(const at::Tensor& t) {
-  return t.unsafeGetTensorImpl()->data_ptr_impl<float>();
+  return t.data_ptr<float>();
 }
 } // namespace
 
