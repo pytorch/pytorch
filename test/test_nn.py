@@ -9179,6 +9179,18 @@ class TestNNDeviceType(NNTestCase):
         gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
         gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
+        # Grad check for small scale factors such that one of the output sizes equals corresponding input size
+        # or output_size == 2 * input_size, given that output_size = int(input_size * scale_factor)
+        # https://github.com/pytorch/pytorch/issues/97135
+        for scale_factor in [1.25, 2.1]:
+            t = torch.rand(1, 3, 2, 4, requires_grad=True, device=device)
+            if torch.device(device).type == 'cuda':
+                self.assertEqual(
+                    F.interpolate(t, scale_factor=scale_factor, mode=mode),
+                    F.interpolate(t.cpu(), scale_factor=scale_factor, mode=mode)
+                )
+            torch.autograd.gradcheck(lambda x: F.interpolate(x, scale_factor=scale_factor, mode=mode), t)
+
         # Assert that cpu and cuda handle channels_last memory format in the same way
         # https://github.com/pytorch/pytorch/issues/54590
         if torch.device(device).type == 'cuda':

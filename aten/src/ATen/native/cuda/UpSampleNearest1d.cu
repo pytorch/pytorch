@@ -25,11 +25,11 @@ namespace {
 
 // Define a typedef to dispatch to nearest_neighbor_compute_source_index or
 // nearest_neighbor_exact_compute_source_index
-typedef int (*nn_compute_source_index_fn_t)(const float, int, int);
+typedef int (*nn_compute_source_index_fn_t)(const float, int, int, int);
 
 // Define a typedef to dispatch to nearest_neighbor_bw_compute_source_index or
 // nearest_neighbor_exact_bw_compute_source_index
-typedef int (*nn_bw_compute_source_index_fn_t)(const float, int, int);
+typedef int (*nn_bw_compute_source_index_fn_t)(const float, int, int, int);
 
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
@@ -50,7 +50,7 @@ __global__ void upsample_nearest1d_out_frame(
   int c = (dst_idx / dst_dim_w) % dim_c;
 
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = nn_compute_source_index_fn(scale_factor, dst_x, src_dim_w);
+  int src_x = nn_compute_source_index_fn(scale_factor, dst_x, src_dim_w, dst_dim_w);
 
   int src_idx = c * src_dim_w + src_x;
   int src_stride = dim_c * src_dim_w;
@@ -85,8 +85,8 @@ __global__ void upsample_nearest1d_backward_out_frame(
   int dst_x = dst_idx % dst_dim_w;
   // note that we do not want to clamp src_x to src_dim_w, since we might
   // intentionally want to skip in case of scale_factor < 1.0
-  int src_x = nn_bw_compute_source_index_fn(scale_factor, dst_x, src_dim_w);
-  int src_x_up = nn_bw_compute_source_index_fn(scale_factor, dst_x+1, src_dim_w);
+  int src_x = nn_bw_compute_source_index_fn(scale_factor, dst_x, src_dim_w, dst_dim_w);
+  int src_x_up = nn_bw_compute_source_index_fn(scale_factor, dst_x+1, src_dim_w, dst_dim_w);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;

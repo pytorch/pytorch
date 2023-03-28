@@ -29,11 +29,11 @@ namespace {
 
 // Define a typedef to dispatch to nearest_neighbor_compute_source_index or
 // nearest_neighbor_exact_compute_source_index
-typedef int (*nn_compute_source_index_fn_t)(const float, int, int);
+typedef int (*nn_compute_source_index_fn_t)(const float, int, int, int);
 
 // Define a typedef to dispatch to nearest_neighbor_bw_compute_source_index or
 // nearest_neighbor_exact_bw_compute_source_index
-typedef int (*nn_bw_compute_source_index_fn_t)(const float, int, int);
+typedef int (*nn_bw_compute_source_index_fn_t)(const float, int, int, int);
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename scalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
@@ -58,12 +58,8 @@ __global__ void upsample_nearest2d_out_frame(
 
   int nc_stride = blockDim.z * gridDim.z;
 
-  const size_t h1 = height1 == height2
-      ? h2
-      : nn_compute_source_index_fn(height_scale, h2, height1);
-  const size_t w1 = width1 == width2
-      ? w2
-      : nn_compute_source_index_fn(width_scale, w2, width1);
+  const size_t h1 = nn_compute_source_index_fn(height_scale, h2, height1, height2);
+  const size_t w1 = nn_compute_source_index_fn(width_scale, w2, width1, width2);
 
   size_t src_index = (nc_iter * height1 + h1) * width1 + w1;
   size_t src_index_stride = nc_stride * width1 * height1;
@@ -101,8 +97,8 @@ __global__ void upsample_nearest2d_nhwc_out_frame(
     const auto h2 = (index / channels / width2) % height2;
     const auto n = index / channels / width2 / height2;
 
-    const size_t h1 = height1 == height2 ? h2 : nn_compute_source_index_fn(height_scale, h2, height1);
-    const size_t w1 = width1 == width2 ? w2 : nn_compute_source_index_fn(width_scale, w2, width1);
+    const size_t h1 = nn_compute_source_index_fn(height_scale, h2, height1, height2);
+    const size_t w1 = nn_compute_source_index_fn(width_scale, w2, width1, width2);
 
     odata[index] = idata[idx_cl(n, h1, w1, c, height1, width1, channels)];
   }
@@ -134,18 +130,18 @@ __global__ void upsample_nearest2d_backward_out_frame(
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   // note that we do not want to clamp src_y to src_dim_y, since we might
   // intentionally want to skip in case of scale_factor < 1.0
-  int src_y =
-      nn_bw_compute_source_index_fn(height_scale, dst_y, src_dim_h);
+  int src_y = nn_bw_compute_source_index_fn(
+      height_scale, dst_y, src_dim_h, dst_dim_h);
   int src_y_up = nn_bw_compute_source_index_fn(
-      height_scale, dst_y + 1, src_dim_h);
+      height_scale, dst_y + 1, src_dim_h, dst_dim_h);
 
   int dst_x = dst_idx % dst_dim_w;
   // note that we do not want to clamp src_x to src_dim_w, since we might
   // intentionally want to skip in case of scale_factor < 1.0
-  int src_x =
-      nn_bw_compute_source_index_fn(width_scale, dst_x, src_dim_w);
+  int src_x = nn_bw_compute_source_index_fn(
+      width_scale, dst_x, src_dim_w, dst_dim_w);
   int src_x_up = nn_bw_compute_source_index_fn(
-      width_scale, dst_x + 1, src_dim_w);
+      width_scale, dst_x + 1, src_dim_w, dst_dim_w);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -186,11 +182,11 @@ __global__ void upsample_nearest2d_backward_nhwc_out_frame(
     const int h2 = (index / channels / width2) % height2;
     const int n = index / channels / width2 / height2;
 
-    int h1 = nn_bw_compute_source_index_fn(height_scale, h2, height1);
-    int h1_up = nn_bw_compute_source_index_fn(height_scale, h2 + 1, height1);
+    int h1 = nn_bw_compute_source_index_fn(height_scale, h2, height1, height2);
+    int h1_up = nn_bw_compute_source_index_fn(height_scale, h2 + 1, height1, height2);
 
-    int w1 = nn_bw_compute_source_index_fn(width_scale, w2, width1);
-    int w1_up = nn_bw_compute_source_index_fn(width_scale, w2 + 1, width1);
+    int w1 = nn_bw_compute_source_index_fn(width_scale, w2, width1, width2);
+    int w1_up = nn_bw_compute_source_index_fn(width_scale, w2 + 1, width1, width2);
 
     accscalar_t grad = 0;
     for (int ih = h1; ih < h1_up; ih++) {
@@ -310,7 +306,6 @@ static void upsample_nearest2d_out_cuda_template(
 
           auto idata = input.data_ptr<scalar_t>();
           auto odata = output_c.data_ptr<scalar_t>();
-
           upsample_nearest2d_out_frame<scalar_t, nn_compute_source_index_fn>
               <<<grid, block, 0, stream>>>(
                   idata,
