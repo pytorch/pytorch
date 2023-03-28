@@ -1206,7 +1206,8 @@ def get_fake_value(node, tx):
             unimplemented(
                 f"unsupported operator: {cause.func} (see "
                 "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
-                " for how to fix)")
+                " for how to fix)"
+            )
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
