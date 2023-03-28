@@ -18,6 +18,7 @@ from typing import List
 
 import numpy as np
 import torch
+import torch.library
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -38,6 +39,11 @@ from torch.nn import functional as F
 
 
 _orig_module_call = torch.nn.Module.__call__
+
+# Custom operator that only supports CPU
+lib = torch.library.Library("test_sample", "DEF")
+lib.define("foo(Tensor self) -> Tensor")
+lib.impl("foo", torch.sin, "CPU")
 
 
 def is_fx_tracing_test() -> bool:
@@ -2528,11 +2534,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ra, torch.tensor([0.0, 7.0, 14.0]))
 
     def test_graph_break_unsupported_fake(self):
-        # Custom operator that only supports CPU
-        lib = torch.library.Library("test_sample", "DEF")
-        lib.define("foo(Tensor self) -> Tensor")
-        lib.impl("foo", torch.sin, "CPU")
-
         counter = torch._dynamo.testing.CompileCounter()
 
         @torch._dynamo.optimize(counter, dynamic=True)
@@ -2540,8 +2541,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.ops.test_sample.foo(x + 1) + 1
 
         f(torch.randn(3))
-
-        del lib
 
         self.assertEqual(counter.op_count, 2)
         self.assertEqual(counter.frame_count, 2)
