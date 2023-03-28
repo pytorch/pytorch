@@ -760,6 +760,7 @@ def run_functionalized_fw_and_collect_metadata(
                 and o._base is not None
                 and o.requires_grad
                 and o._base.requires_grad
+                and config.use_intermediate_base
             ):
                 # First, check if o's ._base is an existing output
                 maybe_existing_out_idx = out_tensor_ids.get(id(o._base), None)

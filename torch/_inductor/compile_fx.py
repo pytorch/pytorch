@@ -559,7 +559,9 @@ def compile_fx(
                 graph_id=graph_id,
             )
 
-    with overrides.patch_functions():
+    with overrides.patch_functions(), functorch.compile.config.patch(
+        use_intermediate_base=False
+    ):
         if decompositions is None:
             decompositions = select_decomp_table()
         # TODO: can add logging before/after the call to create_aot_dispatcher_function

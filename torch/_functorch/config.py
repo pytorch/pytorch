@@ -15,6 +15,10 @@ use_functionalize = True
 
 use_fake_tensor = True
 
+# inductor sets this to False as a temporary hack until a better solution comes, see:
+# https://github.com/pytorch/pytorch/issues/97691
+use_intermediate_base = True
+
 # can be useful for debugging if we are incorrectly creating meta fake tensors
 fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
 
