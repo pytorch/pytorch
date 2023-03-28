@@ -2735,6 +2735,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
+    
+    def test_batch_encoding_clone_inputs(self):
+        from collections import UserDict
+
+        class BatchEncoding(UserDict):
+            """
+            Copied from test_tokenization
+            """
+
+            def __init__(
+                self,
+                data,
+            ):
+                super().__init__(data)
+
+            def __getattr__(self, item: str):
+                try:
+                    return self.data[item]
+                except KeyError as e:
+                    raise AttributeError from e
+
+        encoding = BatchEncoding({"key": torch.rand((1, 4))})
+        cloned_encoding = torch._dynamo.utils.clone_inputs(encoding)
+        self.assertTrue(dict(encoding) == cloned_encoding)
 
     def test_iadd_graph_break(self):
         def fn(x):

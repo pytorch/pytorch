@@ -21,6 +21,7 @@ import time
 import types
 import typing
 import weakref
+from collections import UserDict
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, Tuple, Union
