@@ -33,10 +33,13 @@ from .exc import (
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import (
     FALLBACK_ALLOW_LIST,
+    fallback_handler,
+    fallback_node_due_to_unsupported_type,
     layout_constraints,
     lowerings,
     make_fallback,
     needs_realized_inputs,
+    unsupported_output_tensor,
 )
 from .sizevars import SizeVarAllocator
 from .utils import (
@@ -117,6 +120,7 @@ class GraphLowering(torch.fx.Interpreter):
         num_static_inputs=None,
         graph_id=None,
         aot_mode=False,
+        cpp_wrapper=False,
     ):
         super().__init__(gm)
         self.extra_traceback = False  # we do our own error wrapping
@@ -146,7 +150,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
-        self._can_use_cpp_wrapper = config.cpp_wrapper
+        self.cpp_wrapper = cpp_wrapper
         self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.scheduler = None
@@ -221,8 +225,9 @@ class GraphLowering(torch.fx.Interpreter):
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
-        self._can_use_cpp_wrapper = False
-        log.debug("Set _can_use_cpp_wrapper to False due to %s", cond)
+        self.cpp_wrapper = False
+        assert not self.aot_mode, "AOT compilation failed"
+        log.debug("Set cpp_wrapper to False due to %s", cond)
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
@@ -230,7 +235,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
-        if config.cpp_wrapper:
+        if self.cpp_wrapper:
             self.check_buffer_for_cpp_wrapper(buffer)
 
         name = f"buf{len(self.buffers)}"
@@ -371,6 +376,10 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
+
+        if unsupported_output_tensor(value):
+            return self.add_tensor_constant(value)
+
         with no_dispatch():
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
@@ -438,8 +447,11 @@ class GraphLowering(torch.fx.Interpreter):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
         with ir.IRNode.current_origins(origins):
-            if n.op == "call_function" and n.target in layout_constraints:
-                args, kwargs = self.fetch_args_kwargs_from_env(n)
+            if n.op == "call_function" and fallback_node_due_to_unsupported_type(n):
+                result = fallback_handler(n.target, add_to_fallback_set=False)(
+                    *args, **kwargs
+                )
+            elif n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
             elif is_magic_method(n.target):
@@ -528,6 +540,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         return result
 
+    def check_cpp_codegen_disabled(self):
+        if config.disable_cpp_codegen:
+            self.disable_cpp_wrapper("cpp codegen disabled")
+
     def check_platform(self):
         if sys.platform != "linux":
             self.disable_cpp_wrapper("platform not linux")
@@ -549,21 +565,22 @@ class GraphLowering(torch.fx.Interpreter):
             self.disable_cpp_wrapper("Constants")
 
     def check_cpp_wrapper(self):
+        self.check_cpp_codegen_disabled()
         self.check_platform()
         self.check_device_for_cpp_buffer()
         self.check_input_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
-        if config.cpp_wrapper:
+        if self.aot_mode:
             self.check_cpp_wrapper()
-            if self._can_use_cpp_wrapper:
-                self.wrapper_code = (
-                    CppAotWrapperCodeGen() if self.aot_mode else CppWrapperCodeGen()
-                )
+            self.wrapper_code = CppAotWrapperCodeGen()
+            return
+        elif self.cpp_wrapper:
+            self.check_cpp_wrapper()
+            if self.cpp_wrapper:
+                self.wrapper_code = CppWrapperCodeGen()
                 return
-            else:
-                assert not self.aot_mode, "Model does not support AOT compilation"
         self.wrapper_code = WrapperCodeGen()
 
     def codegen(self):
@@ -640,7 +657,7 @@ class GraphLowering(torch.fx.Interpreter):
         if self.aot_mode:
             from .codecache import AotCodeCache
 
-            code = self.codegen()
+            code, linemap = self.codegen()
             if config.debug:
                 print(code)
 
