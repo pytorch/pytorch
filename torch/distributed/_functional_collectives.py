@@ -304,7 +304,9 @@ def reduce_scatter_tensor(
     assert (
         self.size(0) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
-    tensor = torch._C._dist.reduce_scatter_tensor(self, reduceOp, scatter_dim, tag, rankset, group_size)  # type: ignore[attr-defined]
+    tensor = torch._C._dist.reduce_scatter_tensor(  # type: ignore[attr-defined]
+        self, reduceOp, scatter_dim, tag, rankset, group_size
+    )
     res = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     return res

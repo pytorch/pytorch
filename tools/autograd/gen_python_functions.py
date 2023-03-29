@@ -238,6 +238,7 @@ def is_py_sparse_function(f: NativeFunction) -> bool:
 def is_py_special_function(f: NativeFunction) -> bool:
     return f.python_module == "special"
 
+
 def is_py_dist_function(f: NativeFunction) -> bool:
     return f.python_module == "dist"
 
