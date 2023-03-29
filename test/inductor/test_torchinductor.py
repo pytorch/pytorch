@@ -5804,7 +5804,7 @@ class CommonTemplate:
             return head(out)
 
         enc_out = torch.rand(1, 512, 256)
-        dec_inputs = [torch.randint(0, 512, (1, i), dtype=torch.long) for i in range(8)]
+        dec_inputs = [torch.randint(0, 512, (1, i+1), dtype=torch.long) for i in range(8)]
         for dec_inp in dec_inputs:
             self.common(
                 fn,
