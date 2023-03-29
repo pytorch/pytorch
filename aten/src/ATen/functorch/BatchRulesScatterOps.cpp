@@ -859,6 +859,7 @@ Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t di
 Tensor index_select_decomp(const Tensor &self, int64_t dim, const Tensor &index)
 {
   Tensor index_ = index;
+  dim = maybe_wrap_dim(dim, self.dim());
   if (self.dim() > index.dim()) {
     index_ = get_expanded_index(index, self.sizes(), dim);
   }
