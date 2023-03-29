@@ -118,7 +118,7 @@ def _location_from_fx_stack_trace(
 @_beartype.beartype
 def _retrieve_or_adapt_input_to_graph_set(
     fx_node_arg: _type_utils.Argument,
-    fx_name_to_onnxscipt_value: Dict[
+    fx_name_to_onnxscript_value: Dict[
         str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
@@ -134,9 +134,9 @@ def _retrieve_or_adapt_input_to_graph_set(
         # 1. fx_node_arg is a torch.fx.Node, which means
         #    fx_node_arg stands for the output of that torch.fx.Node.
         # 2. fx_node_arg (variable in torch.fx.Graph) is be mapped to
-        #    torch.jit.Value, fx_name_to_onnxscipt_value[fx_node_arg.name],
+        #    torch.jit.Value, fx_name_to_onnxscript_value[fx_node_arg.name],
         #    in TorchScript graph.
-        return fx_name_to_onnxscipt_value[onnx_tensor.name]
+        return fx_name_to_onnxscript_value[onnx_tensor.name]
     if isinstance(onnx_tensor, (tuple, list)) and any(
         isinstance(node, torch.fx.Node) and isinstance(node.meta["val"], torch.SymInt)
         for node in onnx_tensor
@@ -150,7 +150,7 @@ def _retrieve_or_adapt_input_to_graph_set(
             if isinstance(tensor, torch.fx.Node) and isinstance(
                 tensor.meta["val"], torch.SymInt
             ):
-                sequence_elements.append(fx_name_to_onnxscipt_value[tensor.name])
+                sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
             else:
                 sequence_elements.append(tensor)
         # Concat all the elements in the sequence.
@@ -170,7 +170,7 @@ def _retrieve_or_adapt_input_to_graph_set(
     ):
         sequence_elements: List[Union[torch.Value, Tuple[torch._C.Value, ...]]] = []  # type: ignore[no-redef]
         for tensor in onnx_tensor:
-            sequence_elements.append(fx_name_to_onnxscipt_value[tensor.name])
+            sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):
         onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
@@ -291,7 +291,7 @@ def _separate_input_attributes_from_arguments(
 def _wrap_fx_args_as_onnxscript_args(
     complete_args: List[_type_utils.Argument],
     complete_kwargs: Dict[str, _type_utils.Argument],
-    fx_name_to_onnxscipt_value: Dict[
+    fx_name_to_onnxscript_value: Dict[
         str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
@@ -299,7 +299,7 @@ def _wrap_fx_args_as_onnxscript_args(
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
     onnxscript_args = tuple(
-        _retrieve_or_adapt_input_to_graph_set(arg, fx_name_to_onnxscipt_value, tracer)
+        _retrieve_or_adapt_input_to_graph_set(arg, fx_name_to_onnxscript_value, tracer)
         for arg in complete_args
     )
     onnxscript_kwargs = filter_incompatible_and_dtype_convert_kwargs(complete_kwargs)
@@ -316,7 +316,7 @@ def _wrap_fx_args_as_onnxscript_args(
 def _export_fx_node_to_onnxscript(
     node: torch.fx.Node,
     onnxscript_graph: graph_building.TorchScriptGraph,
-    fx_name_to_onnxscipt_value: Dict[
+    fx_name_to_onnxscript_value: Dict[
         str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
@@ -358,13 +358,13 @@ def _export_fx_node_to_onnxscript(
         assert isinstance(output, graph_building.TorchScriptTensor)
         assert isinstance(output, onnxscript.tensor.Tensor)
 
-        fx_name_to_onnxscipt_value[node.name] = output
+        fx_name_to_onnxscript_value[node.name] = output
     elif node.op == "call_function":
         # aten ops and other stateless functions.
         if node.target == operator.getitem and isinstance(
-            fx_name_to_onnxscipt_value[node.args[0].name], tuple  # type: ignore[union-attr]
+            fx_name_to_onnxscript_value[node.args[0].name], tuple  # type: ignore[union-attr]
         ):
-            onnx_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]  # type: ignore[union-attr]
+            onnx_tensor_tuple = fx_name_to_onnxscript_value[node.args[0].name]  # type: ignore[union-attr]
             index = node.args[1]
             output = onnx_tensor_tuple[index]  # type: ignore[index]
             assert (
@@ -374,7 +374,7 @@ def _export_fx_node_to_onnxscript(
                 output
             )
 
-            fx_name_to_onnxscipt_value[node.name] = output
+            fx_name_to_onnxscript_value[node.name] = output
             return
         if node.target == operator.getitem:
             # __getitem__ on Tensor or Sequence of tensors. Not tuple.
@@ -431,7 +431,7 @@ def _export_fx_node_to_onnxscript(
         # torch_args and torch_kwargs are for op-level validation
         complete_args, complete_kwargs = _separate_input_attributes_from_arguments(node)
         (onnx_args, onnx_kwargs) = _wrap_fx_args_as_onnxscript_args(
-            complete_args, complete_kwargs, fx_name_to_onnxscipt_value, tracer
+            complete_args, complete_kwargs, fx_name_to_onnxscript_value, tracer
         )
         with evaluator.default_as(tracer):
             output: Union[  # type: ignore[no-redef]
@@ -465,10 +465,10 @@ def _export_fx_node_to_onnxscript(
             op_validation.validate_op_between_ort_torch(
                 node_with_fixed_shape, symbolic_fn, torch_args, torch_kwargs
             )
-        fx_name_to_onnxscipt_value[node.name] = output
+        fx_name_to_onnxscript_value[node.name] = output
     elif node.op == "output":
         if isinstance(node.args[0], torch.fx.Node):
-            onnx_tensor_or_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]
+            onnx_tensor_or_tensor_tuple = fx_name_to_onnxscript_value[node.args[0].name]
             onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
         else:
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
@@ -478,7 +478,7 @@ def _export_fx_node_to_onnxscript(
                 assert isinstance(
                     arg, torch.fx.Node
                 ), f"arg must be a torch.fx.Node, not {type(arg)}"
-                onnx_tensor_or_tensor_tuple = fx_name_to_onnxscipt_value[arg.name]
+                onnx_tensor_or_tensor_tuple = fx_name_to_onnxscript_value[arg.name]
                 onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
     elif node.op == "call_method":
         # TODO(wechi): Support call_method.
@@ -504,7 +504,7 @@ def _export_fx_node_to_onnxscript(
 
         assert isinstance(input_, graph_building.TorchScriptTensor)
         assert isinstance(input_, onnxscript.tensor.Tensor)
-        fx_name_to_onnxscipt_value[node.name] = input_
+        fx_name_to_onnxscript_value[node.name] = input_
         # FIXME: Refactor logic getting 'current_attr'.
         assert isinstance(current_attr, torch.Tensor)
     else:
@@ -523,11 +523,11 @@ def export_fx_to_onnxscript(
     # In the following loop, a TorchScript graph is created to
     # represent the input FX graph with ONNX symbols (e.g., onnx::add).
     # To connect the values to nodes in the TorchScript graph, we maintian
-    # fx_name_to_onnxscipt_value. Basically, we want to translate
+    # fx_name_to_onnxscript_value. Basically, we want to translate
     #   fx_tensor_x (type: torch.fx.Node) -> fx_node_1 -> fx_tensor_y (type: torch.fx.Node)
     # to
-    #   fx_name_to_onnxscipt_value[fx_tensor_x.name] -> onnx_node_1 -> fx_name_to_onnxscipt_value[fx_tensor_y.name]
-    fx_name_to_onnxscipt_value: Dict[
+    #   fx_name_to_onnxscript_value[fx_tensor_x.name] -> onnx_node_1 -> fx_name_to_onnxscript_value[fx_tensor_y.name]
+    fx_name_to_onnxscript_value: Dict[
         str,
         Union[
             graph_building.TorchScriptTensor,
@@ -541,7 +541,7 @@ def export_fx_to_onnxscript(
         _export_fx_node_to_onnxscript(
             node,
             onnxscript_graph,
-            fx_name_to_onnxscipt_value,
+            fx_name_to_onnxscript_value,
             tracer,
             fx_module_with_metadata,
             export_options,
