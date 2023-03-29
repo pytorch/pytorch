@@ -280,6 +280,7 @@ class MetaConverter:
                     # numel = sizes.prod(dim=1).sum(dim=0)
 
                     import sys
+
                     from torch.fx.experimental.symbolic_shapes import constrain_range
 
                     buffer_size = shape_env.create_unbacked_symint()
