@@ -9205,21 +9205,20 @@ class TestAdvancedIndexing(TestCaseMPS):
         # FIXME: use supported_dtypes once uint8 is fixed
         [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16]]
 
-    # FIXME: conditional indexing not working
-    # def test_boolean_array_indexing_1(self):
-    #     def helper(dtype):
-    #         x_cpu = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]], dtype=dtype)
-    #         x_mps = x_cpu.detach().clone().to("mps")
+    def test_boolean_array_indexing(self):
+        def helper(dtype):
+            x_cpu = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]], dtype=dtype)
+            x_mps = x_cpu.detach().clone().to("mps")
 
-    #         res_cpu = x_cpu[x_cpu > 5]
-    #         res_mps = x_mps[x_mps > 5]
+            res_cpu = x_cpu[x_cpu > 5]
+            res_mps = x_mps[x_mps > 5]
 
-    #         print(res_cpu)
-    #         print(res_mps)
-
-    #         self.assertEqual(res_cpu, res_mps, str(dtype))
-    #     [helper(dtype) for dtype in self.supported_dtypes]
-
+            self.assertEqual(res_cpu, res_mps, str(dtype))
+        for dtype in self.supported_dtypes:
+            # MPS support binary op with uint8 natively starting from macOS 13.0
+            if product_version < 13.0 and dtype == torch.uint8:
+                continue
+            helper(dtype)
 
     def test_advanced_indexing_3D_get(self):
         def helper(x_cpu):
