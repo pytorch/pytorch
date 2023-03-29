@@ -4,7 +4,7 @@ import unittest
 
 import torch._dynamo
 from torch._inductor import config
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from torch.testing._internal.common_utils import IS_MACOS, TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 try:
@@ -66,5 +66,5 @@ for name in [
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU and not torch.backends.mps.is_available():
+    if HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS:
         run_tests(needs="filelock")
