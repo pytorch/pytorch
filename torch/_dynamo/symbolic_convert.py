@@ -16,6 +16,7 @@ import weakref
 from collections.abc import Sized
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
+import torch._logging
 
 import torch
 import torch._logging
@@ -1770,10 +1771,13 @@ class InstructionTranslator(InstructionTranslatorBase):
         compiler_fn,
         one_graph,
         export,
+        export_constraints,
         mutated_closure_cell_contents: Set[str],
     ):
         super().__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn, self, export),
+            output=OutputGraph(
+                f_globals, code_options, compiler_fn, self, export, export_constraints
+            ),
             instructions=instructions,
             f_locals=f_locals,
             f_globals=f_globals,
