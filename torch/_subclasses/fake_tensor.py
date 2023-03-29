@@ -71,6 +71,11 @@ class DataDependentOutputException(RuntimeError):
     func: OpOverload
 
 
+@dataclass
+class UnsupportedOperatorException(RuntimeError):
+    func: OpOverload
+
+
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
     aten._nested_tensor_from_tensor_list.default,
@@ -1105,7 +1110,13 @@ class FakeTensorMode(TorchDispatchMode):
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
         ):
-            out = func(*args, **kwargs)
+            assert all(
+                t.constant is not None for t in flat_arg_fake_tensors
+            ), "f{func} should not have fake inputs without constants"
+            const_args, const_kwargs = pytree.tree_map_only(
+                FakeTensor, lambda t: t.constant, (args, kwargs)
+            )
+            out = func(*const_args, **const_kwargs)
             if self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
                 # compute here
@@ -1131,6 +1142,7 @@ class FakeTensorMode(TorchDispatchMode):
             assert (
                 len(kwargs) == 0 and len(args) == 1 and type(args[0]) is torch.Tensor
             ), f"{args} {kwargs}"
+
             return converter(self, args[0])
 
         args, kwargs = self.validate_and_convert_non_fake_tensors(
@@ -1241,7 +1253,7 @@ class FakeTensorMode(TorchDispatchMode):
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not self.allow_fallback_kernels:
-                raise
+                raise UnsupportedOperatorException(func)
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)

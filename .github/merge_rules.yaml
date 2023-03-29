@@ -85,7 +85,7 @@
   - EasyCLA
   - Lint
   - pull / linux-bionic-py3_8-clang8-xla / build
-  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.2xlarge)
+  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.4xlarge)
 
 - name: Documentation
   patterns:
