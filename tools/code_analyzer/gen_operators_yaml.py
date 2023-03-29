@@ -340,7 +340,7 @@ def fill_output(output: Dict[str, object], options: object):
 
     # START STATIC BUILD OPS
     static_root_ops_bucket = {}
-    for op_name in static_root_ops:
+    for _op_name in static_root_ops:
         op = SelectiveBuildOperator.from_yaml_dict(
             op_name,
             {

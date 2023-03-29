@@ -1585,7 +1585,7 @@ class TritonScheduling:
             current_loop_writes.clear()
             is_current_reductions.clear()
 
-        for index, node in enumerate(nodes):
+        for _index, node in enumerate(nodes):
             if node in done:
                 continue
             done.add(node)

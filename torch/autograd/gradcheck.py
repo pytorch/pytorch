@@ -998,7 +998,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 tensor_indices.add(i)
             dual_inputs.append(inp)
 
-        for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
+        for _i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
             fw_grad.copy_(u.view_as(fw_grad))
 
         for idx, inp in enumerate(inputs):

@@ -1684,7 +1684,7 @@ class FlatParamHandle:
                 param.grad.data = view
             else:
                 param.grad = view
-        for i, (
+        for _i, (
             param_name,
             module,
             module_name,
