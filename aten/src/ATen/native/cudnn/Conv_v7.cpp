@@ -376,7 +376,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
           args.wdesc.desc(), args.weight.data_ptr(),
           args.odesc.desc(), args.output.data_ptr(),
           args.cdesc.desc(),
-          args.idesc.desc(), args.input.data_ptr(),
+          args.idesc.desc(), args.input.mutable_data_ptr(),
           num_algos,
           &perf_count,
           perf_results.get(),

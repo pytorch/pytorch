@@ -910,8 +910,8 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       for (const auto i : c10::irange(numel)) {
           auto self_i = index_data[i];
           TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-          auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
           auto self_data = static_cast<char*>(selfSlice.mutable_data_ptr()) + self_i * self_stride_bytes;
+          auto source_data = static_cast<char*>(sourceSlice.mutable_data_ptr()) + i * source_stride_bytes;
           iter.unsafe_replace_operand(0, self_data);
           iter.unsafe_replace_operand(1, self_data);
           iter.unsafe_replace_operand(2, source_data);
@@ -1008,8 +1008,8 @@ void index_reduce_func_impl(
       for (const auto i : c10::irange(numel)) {
         auto self_i = index_data[i];
         TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-        auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
         auto self_data = static_cast<char*>(selfSlice.mutable_data_ptr()) + self_i * self_stride_bytes;
+        auto source_data = static_cast<char*>(sourceSlice.mutable_data_ptr()) + i * source_stride_bytes;
         iter.unsafe_replace_operand(0, self_data);
         iter.unsafe_replace_operand(1, self_data);
         iter.unsafe_replace_operand(2, source_data);
@@ -1233,8 +1233,8 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
 
     auto selfSlice = self.select(dim, 0);
     auto resultSlice = result.select(dim, 0);
-    auto resultSlice_data = resultSlice.data_ptr();
     auto selfSlice_data = selfSlice.mutable_data_ptr();
+    auto resultSlice_data = resultSlice.mutable_data_ptr();
     auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
     auto self_dim_size = self.size(dim);
@@ -1684,7 +1684,7 @@ TORCH_IMPL_FUNC(scatter_add)
         {mut_out_contig.dim()},
         TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
       std::memcpy(
-        coord_strides.data_ptr(),
+        coord_strides.mutable_data_ptr(),
         mut_out_contig_strides.data(),
         coord_strides.nbytes());
       coord_strides = coord_strides.to(mut_out_contig.device());

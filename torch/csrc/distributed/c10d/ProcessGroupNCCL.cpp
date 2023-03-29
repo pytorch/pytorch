@@ -1812,7 +1812,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
         return ncclBcast(
-            input.data_ptr(),
+            input.mutable_data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
             root,

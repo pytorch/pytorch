@@ -15,7 +15,7 @@ namespace utils {
 
 struct StridedData {
   StridedData(const Tensor& tensor)
-      : data(tensor.data_ptr()),
+      : data(tensor.mutable_data_ptr()),
         strides(tensor.strides()),
         elementSize(tensor.element_size()) {}
 

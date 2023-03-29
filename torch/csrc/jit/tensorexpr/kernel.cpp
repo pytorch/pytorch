@@ -615,7 +615,7 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
           "conv2d_bias_opt_" + sanitizeName(v->debugName()),
           ExprHandleVectorToExprVector(biasShape),
           dtype);
-      constants_.push_back({buf, bias_tensor.data_ptr()});
+      constants_.push_back({buf, bias_tensor.mutable_data_ptr()});
       argInputs[2] = BufHandle(buf);
     }
   } else {
@@ -1453,7 +1453,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
     unpacked_constant_tensors_.push_back(const_tensor);
   }
 
-  constants_.push_back({buf, const_tensor.data_ptr()});
+  constants_.push_back({buf, const_tensor.mutable_data_ptr()});
   bufs_[v] = buf;
 }
 
@@ -2083,7 +2083,7 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
       int_inputs[i] = inp.toInt();
       args.emplace_back(&int_inputs[i]);
     } else if (inp.isTensor()) {
-      args.emplace_back(inp.toTensor().data_ptr());
+      args.emplace_back(inp.toTensor().mutable_data_ptr());
     } else {
       TORCH_INTERNAL_ASSERT(
           false, "Unhandled input type while calling TensorExprKernel");
@@ -2113,7 +2113,7 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
       // This has only been tested on CPUs.
       // TODO: Test on GPUs.
       out.resize_(static_sizes[i]);
-      args.emplace_back(out.data_ptr());
+      args.emplace_back(out.mutable_data_ptr());
     }
   } else {
     for (auto i : c10::irange(nOutputs_)) {
