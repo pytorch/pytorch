@@ -27,7 +27,7 @@ from torch.distributed.distributed_c10d import (
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._functional_collectives as funcol
 
-# only import numpy when type checking
+# only import numpy typing when type checking
 if TYPE_CHECKING:
     try:
         from numpy.typing import ArrayLike
