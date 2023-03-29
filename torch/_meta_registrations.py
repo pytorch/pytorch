@@ -55,6 +55,26 @@ def meta_fft_c2c(self, dim, normalization, forward):
     assert self.dtype.is_complex
     return self.new_empty(self.size())
 
+@register_meta(aten.segment_reduce.default)
+@out_wrapper()
+def meta_segment_reduce(data, reduce, *, lengths=None, indices=None, offsets=None, axis=0, unsafe=False, initial=None):
+    output_shape = list(data.size())
+    if offsets is not None:
+        axis = offsets.dim() - 1
+        segment_count = offsets.size(axis) - 1
+        output_shape[axis] = segment_count
+        return data.new_empty(output_shape)
+
+    axis = lengths.dim()
+    segment_count = lengths.size(axis)
+    output_shape[axis] = segment_count
+    return data.new_empty(output_shape)
+
+
+@register_meta(aten._segment_reduce_backward.default)
+def meta_segment_reduce_backward(grad, output, data, reduce, lengths=None, offsets=None, axis=0, initial=None):
+    return grad.new_empty(data.size())
+
 
 @register_meta([aten._fft_r2c.default, aten._fft_r2c.out])
 @out_wrapper()
