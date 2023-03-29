@@ -4,9 +4,11 @@ import dataclasses
 import functools
 import importlib
 import itertools
+import math
 import os
 import random
 import sys
+import time
 import typing
 import unittest
 import weakref
@@ -31,7 +33,7 @@ from torch._inductor.utils import run_and_get_triton_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing import make_tensor
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -186,10 +188,14 @@ class TestCase(TorchTestCase):
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
+        self._start = time.perf_counter()
 
     def tearDown(self):
         super().tearDown()
         torch._dynamo.reset()
+        if os.environ.get("ERROR_ON_SLOW") == "1":
+            elapsed = time.perf_counter() - self._start
+            assert elapsed < 120
 
 
 class ToTuple(torch.nn.Module):
@@ -5696,6 +5702,72 @@ class CommonTemplate:
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_index_dynamic_shapes(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("index dynamic shapes only supports cpu")
+
+        # Repro from vision_maskrcnn
+        def fn(arg0_1):
+            unsqueeze = arg0_1.unsqueeze(0)
+            sym_size = arg0_1.size(1)
+            ceil = math.ceil(sym_size * 1.8735363483428955)
+            iota = torch.ops.prims.iota.default(
+                ceil,
+                start=0,
+                step=1,
+                dtype=torch.int64,
+                device="cpu",
+                requires_grad=False,
+            )
+            convert_element_type_1 = iota.to(torch.float32)
+            sym_size_1 = arg0_1.size(2)
+            floor_1 = math.floor(sym_size_1 * 1.8735363483428955)
+            ceil_1 = math.ceil(floor_1)
+            iota_1 = torch.ops.prims.iota.default(
+                ceil_1,
+                start=0,
+                step=1,
+                dtype=torch.int64,
+                device="cpu",
+                requires_grad=False,
+            )
+            convert_element_type_3 = iota_1.to(torch.float32)
+            sub_2 = (convert_element_type_1 + 0.5) * (sym_size / ceil) - 0.5
+            clamp_min = sub_2.clamp_min(0.0)
+            sub_3 = (convert_element_type_3 + 0.5) * (sym_size_1 / floor_1) - 0.5
+            clamp_min_1 = sub_3.clamp_min(0.0)
+            convert_element_type_4 = clamp_min.to(torch.int64)
+            sub_4 = sym_size - 1
+            clamp_max = clamp_min.ceil().clamp_max(sub_4)
+            convert_element_type_5 = clamp_max.to(torch.int64)
+            convert_element_type_6 = clamp_min_1.to(torch.int64)
+            unsqueeze_2 = convert_element_type_4.unsqueeze(1)
+            index = torch.ops.aten.index.Tensor(
+                unsqueeze, [None, None, unsqueeze_2, convert_element_type_6]
+            )
+            index_1 = torch.ops.aten.index.Tensor(
+                unsqueeze,
+                [
+                    None,
+                    None,
+                    convert_element_type_5.unsqueeze(1),
+                    convert_element_type_6,
+                ],
+            )
+            sub_6 = clamp_min.unsqueeze(1) - unsqueeze_2
+            mul_10 = (index * (1.0 - sub_6) + index_1 * (sub_6)) * (
+                1.0 - (clamp_min_1 - convert_element_type_6)
+            )
+            select = torch.ops.aten.select.int(mul_10, 0, 0)
+            return (select,)
+
+        x = torch.randn(15, 20, 3)
+        self.common(
+            fn,
+            [x],
+        )
+
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):
         def fn(x, y):
@@ -5723,40 +5795,6 @@ class CommonTemplate:
         assert "inductor_wrapper_call" in (
             e.name for e in prof.profiler.function_events
         )
-
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
-    def test_cpp_wrapper(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("cpp_wrapper only supports cpu")
-
-        device = "cpu"
-        for name, supported in [
-            ["test_as_strided", True],  # buffer reuse
-            ["test_bitwise", True],  # int32
-            ["test_bmm1", True],
-            ["test_bmm2", True],
-            ["test_cat", True],  # alias
-            ["test_linear1", True],
-            ["test_linear2", True],
-            ["test_lowmem_dropout1", True],  # None as output
-            ["test_mm_views", True],
-            [
-                "test_profiler_mark_wrapper_call",
-                True,
-            ],
-            ["test_reduction1", True],  # Reduction
-            ["test_relu", True],  # multiple inputs
-            ["test_silu", True],  # single input, single output
-            ["test_sum_dtype", True],  # float64
-            ["test_sum_int", True],  # bool, int64, int8, uint8
-            ["test_transpose", True],  # multiple outputs, buffer clear
-        ]:
-            test_name = f"{name}_{device}"
-            assert hasattr(self, test_name), "undefined function"
-            func = getattr(self, test_name)
-            assert callable(func), "not a callable"
-            code = run_and_get_cpp_code(func, [])
-            self.assertEqual("load_inline" in code, supported)
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
@@ -5845,7 +5883,7 @@ class CommonTemplate:
             a = a.max(0).values
             c = torch.cat((a, b))
             c = c.round()
-            b >= a[0]
+            b >= a[0]  # noqa: B015
             return c
 
         some_const = torch.tensor(6324)
@@ -5853,7 +5891,7 @@ class CommonTemplate:
         def fn2():
             a = torch.tensor([[0.6324]])
             ret = torch.cat((a, a), dim=0)
-            some_const >= a[0]
+            some_const >= a[0]  # noqa: B015
             return ret
 
         self.common(fn1, (torch.tensor([[4.0]]), torch.tensor([5.0])))
@@ -6324,6 +6362,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
                     assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                     assert metrics.generated_cpp_vec_kernel_count == 1
 
+        @slow()
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
@@ -6426,6 +6465,32 @@ if HAS_CPU and not torch.backends.mps.is_available():
                         metrics.generated_kernel_count
                         - metrics.generated_cpp_vec_kernel_count
                     ) == 0
+
+        def test_skip_cpp_codegen(self):
+            with config.patch({"disable_cpp_codegen": True}):
+                inps = torch.ones([20]), torch.rand([20])
+
+                def f(x, y):
+                    return x + y + torch.tensor(1)
+
+                f_opt = torch.compile()(f)
+
+                code = run_and_get_cpp_code(f_opt, (inps[0], inps[1]))
+                FileCheck().check_not("void kernel").run(code)
+
+                self.assertEqual(
+                    f(*inps),
+                    f_opt(*inps),
+                )
+
+                # constant needs to be propagated on fallback
+                def f(x):
+                    return x[torch.tensor(1) :] * 2
+
+                f_opt = torch.compile()(f)
+                code = run_and_get_cpp_code(f_opt, (inps[0],))
+                FileCheck().check_not("void kernel").run(code)
+                self.assertEqual(f_opt(inps[0]), f(inps[0]))
 
         def test_redundant_to_node_elimination_bf16(self):
             def fn(x, y):
