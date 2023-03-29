@@ -2,10 +2,7 @@ name: inductor-A100-perf-nightly
 
 on:
   schedule:
-    - cron: 45 1,7,13,19 * * *
-  push:
-    tags:
-      - ciflow/inductor-perf-test-nightly/*
+    - cron: 45 1,13 * * *
   workflow_dispatch:
 
 concurrency:
@@ -22,14 +19,18 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf", shard: 1, num_shards: 2, runner: "linux.gcp.a100.large" },
-          { config: "inductor_huggingface_perf", shard: 2, num_shards: 2, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 1, num_shards: 4, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 2, num_shards: 4, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 3, num_shards: 4, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 4, num_shards: 4, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf", shard: 1, num_shards: 2, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf", shard: 2, num_shards: 2, runner: "linux.gcp.a100.large" },
+          { config: "inductor_huggingface_perf", shard: 1, num_shards: 3, runner: "linux.gcp.a100.large" },
+          { config: "inductor_huggingface_perf", shard: 2, num_shards: 3, runner: "linux.gcp.a100.large" },
+          { config: "inductor_huggingface_perf", shard: 3, num_shards: 3, runner: "linux.gcp.a100.large" },
+          { config: "inductor_timm_perf", shard: 1, num_shards: 6, runner: "linux.gcp.a100.large" },
+          { config: "inductor_timm_perf", shard: 2, num_shards: 6, runner: "linux.gcp.a100.large" },
+          { config: "inductor_timm_perf", shard: 3, num_shards: 6, runner: "linux.gcp.a100.large" },
+          { config: "inductor_timm_perf", shard: 4, num_shards: 6, runner: "linux.gcp.a100.large" },
+          { config: "inductor_timm_perf", shard: 5, num_shards: 6, runner: "linux.gcp.a100.large" },
+          { config: "inductor_timm_perf", shard: 6, num_shards: 6, runner: "linux.gcp.a100.large" },
+          { config: "inductor_torchbench_perf", shard: 1, num_shards: 3, runner: "linux.gcp.a100.large" },
+          { config: "inductor_torchbench_perf", shard: 2, num_shards: 3, runner: "linux.gcp.a100.large" },
+          { config: "inductor_torchbench_perf", shard: 3, num_shards: 3, runner: "linux.gcp.a100.large" },
         ]}
 
   linux-bionic-cuda11_8-py3_10-gcc7-inductor-test:
@@ -41,4 +42,4 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
-      timeout-minutes: 300
+      timeout-minutes: 720

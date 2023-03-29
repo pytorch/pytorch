@@ -4,6 +4,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <c10/util/ssize.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
@@ -296,7 +297,7 @@ class ConcatExpander {
     auto cat_dim_value = maybe_cat_dim.value();
     auto cat_dim = node->input(1);
 
-    // Set the insertion point to the curent `cat` node.
+    // Set the insertion point to the current `cat` node.
     WithInsertPoint guard(node);
     auto none = graph_->insertConstant(IValue());
     auto one = graph_->insertConstant(1);
@@ -504,7 +505,8 @@ size_t determineUsageIdx(Value* value, Node* user) {
   const auto idx =
       std::find(user->inputs().begin(), user->inputs().end(), value) -
       user->inputs().begin();
-  TORCH_CHECK(idx != static_cast<decltype(idx)>(user->inputs().size()));
+  using c10::ssize;
+  TORCH_CHECK(idx != ssize(user->inputs()));
   return idx;
 }
 
