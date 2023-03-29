@@ -1398,12 +1398,12 @@ class View(BaseView):
 
         while stack_old:
             size_old = stack_old.pop()
-            assert size_old == 1
+            V.graph.sizevars.guard_equals(size_old, 1)
             view_expr.append(sympy.Integer(0))
 
         while stack_new:
             var, size_new = stack_new.pop()
-            assert size_new == 1
+            V.graph.sizevars.guard_equals(size_new, 1)
 
         view_expr = list(reversed(view_expr))
         assert len(view_expr) == len(old_size)
@@ -2509,8 +2509,14 @@ class ExternKernel(InputsKernel):
         # TODO(jansel): replace this with dynamic shape formulas
         example_args = []
 
+        # We need to retain the constant values of fake tensors that we originally
+        # propagated the graph with, because for some operators running without a
+        # constant would trigger an error / DataDependentException
         for x in tensor_args:
-            example_args.append(ir_node_to_tensor(x, guard_shape=True))
+            if x.get_name() in V.graph.constants:
+                example_args.append(V.graph.constants[x.get_name()])
+            else:
+                example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
@@ -3679,18 +3685,20 @@ class StorageBox(MutableBox):
 
 
 class InterpreterShim(torch.fx.Interpreter):
+    @staticmethod
+    @functools.lru_cache(None)
+    def _dummy_gm():
+        return torch.fx.symbolic_trace(identity)
+
     def __init__(self, graph, submodules):
-        """
-        We don't call super() here to avoid constructing a
-        GraphModule which is very expensive (it does codegen).
-        """
+        # call super() with a placeholder to avoid constructing a
+        # GraphModule which is very expensive (it does codegen).
+        super().__init__(self._dummy_gm(), garbage_collect_values=False)
         self.module = self
         self.graph = graph
         self.submodules = submodules
-        self.garbage_collect_values = False
-        self.env = {}
+        self.extra_traceback = False
         self.fetch_attr = submodules.__getitem__
-        self.name = "InterpreterShim"
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
