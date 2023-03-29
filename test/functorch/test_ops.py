@@ -1128,7 +1128,7 @@ class TestOperators(TestCase):
                 args = tuple(arg_values) + tuple(kwarg_values)
                 fn, args = get_jvp_variant_primals_tangents(op, sample)
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
-                for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
+                for _loop_out, _batched_out in get_fallback_and_vmap_exhaustive(
                         fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training, compute_loop_out=False):
                     pass
         check_vmap_fallback(self, test, op, dry_run=False)
@@ -1233,12 +1233,12 @@ class TestOperators(TestCase):
                 cotangents = get_sample_cotangents(op, sample)
                 fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
                 is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
-                for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
+                for _loop_out, _batched_out in get_fallback_and_vmap_exhaustive(
                         fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training, compute_loop_out=False):
                     pass
                 for a_op in op.aliases:
                     fn, args = get_vjp_fn_and_args_with_cotangents(a_op, sample, cotangents)
-                    for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
+                    for _loop_out, _batched_out in get_fallback_and_vmap_exhaustive(
                             fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training, compute_loop_out=False):
                         pass
 
@@ -1657,7 +1657,7 @@ class TestOperators(TestCase):
         for shape in shapes:
             input_options = self._make_extremal_inputs(shape, device)
             target_options = self._make_extremal_inputs(shape, device)
-            for input, target, kwargs in self._arg_and_kwarg_options((input_options, target_options), kwargs_options):
+            for input, target, _kwargs in self._arg_and_kwarg_options((input_options, target_options), kwargs_options):
                 result = torch.nn.functional.l1_loss(input, target)
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.l1_loss, (cotangents, input, target))
@@ -1669,7 +1669,7 @@ class TestOperators(TestCase):
         for shape in shapes:
             input_options = self._make_extremal_inputs(shape, device)
             target_options = self._make_extremal_inputs(shape, device)
-            for input, target, kwargs in self._arg_and_kwarg_options((input_options, target_options), kwargs_options):
+            for input, target, _kwargs in self._arg_and_kwarg_options((input_options, target_options), kwargs_options):
                 result = torch.nn.functional.mse_loss(input, target)
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.mse_loss, (cotangents, input, target))
@@ -1680,7 +1680,7 @@ class TestOperators(TestCase):
         kwargs_options = ({'dim': 1}, {})
         for shape in shapes:
             input_options = self._make_extremal_inputs(shape, device)
-            for input, kwargs in self._arg_and_kwarg_options((input_options,), kwargs_options):
+            for input, _kwargs in self._arg_and_kwarg_options((input_options,), kwargs_options):
                 result = torch.nn.functional.softmax(input)
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.softmax, (cotangents, input))
@@ -1692,7 +1692,7 @@ class TestOperators(TestCase):
         kwargs_options = ({'dim': 1}, {})
         for shape in shapes:
             input_options = self._make_extremal_inputs(shape, device)
-            for input, kwargs in self._arg_and_kwarg_options((input_options,), kwargs_options):
+            for input, _kwargs in self._arg_and_kwarg_options((input_options,), kwargs_options):
                 result = torch.nn.functional.log_softmax(input)
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.log_softmax, (cotangents, input))

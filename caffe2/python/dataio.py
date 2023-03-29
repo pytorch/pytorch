@@ -546,7 +546,7 @@ class CompositeReader(Reader):
         fields = []
         stop_blobs = []
         all_sub_read_nets = []
-        for name, reader in zip(self._names, self._readers):
+        for _name, reader in zip(self._names, self._readers):
             sub_read_nets, should_stop, record = reader.read_record_ex(
                 local_init_net, local_finish_net)
             stop_blobs.append(should_stop)

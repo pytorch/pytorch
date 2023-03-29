@@ -609,7 +609,7 @@ def Benchmark(model_gen, arg):
 
     workspace.RunNetOnce(model.param_init_net)
     workspace.CreateNet(model.net)
-    for i in range(arg.warmup_iterations):
+    for _i in range(arg.warmup_iterations):
         workspace.RunNet(model.net.Proto().name)
 
     plan = core.Plan("plan")

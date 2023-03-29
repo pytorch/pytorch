@@ -101,7 +101,7 @@ class ConcatBenchmark(op_bench_c2.Caffe2BenchmarkBase):
         if type(sizes) == list and N == -1:
             gen_sizes = sizes
         else:
-            for i in range(N):
+            for _i in range(N):
                 gen_sizes.append([old_size() if callable(old_size) else old_size for old_size in sizes])
 
         for s in gen_sizes:

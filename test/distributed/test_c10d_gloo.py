@@ -1880,7 +1880,7 @@ class DistributedDataParallelTest(
         map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
         ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
 
-        for model in [ddp_withload, model_withload]:
+        for _model in [ddp_withload, model_withload]:
             for p in ddp_withload.parameters():
                 with torch.no_grad():
                     p.zero_()

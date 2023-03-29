@@ -193,7 +193,7 @@ def run_benchmarks(benchmarks, sizes):
                     for _ in range(10):
                         cg.call([tA, tB, tX])
                     start = time.time()
-                    for it in range(iters):
+                    for _it in range(iters):
                         cg.call([tA, tB, tX])
                     time1 = time.time() - start
 
@@ -203,7 +203,7 @@ def run_benchmarks(benchmarks, sizes):
                     for _ in range(10):
                         tR = fn()
                     start = time.time()
-                    for it in range(iters):
+                    for _it in range(iters):
                         tR = fn()
                     time2 = time.time() - start
 
@@ -225,7 +225,7 @@ def dump_plot(df, sizes):
     keys = []
     vals = []
     indexed = df[df['N'] == df['M']]
-    for index, row in indexed.iterrows():
+    for _index, row in indexed.iterrows():
         keys.append(row['name'])
         vals.append(row['ratio'])
 

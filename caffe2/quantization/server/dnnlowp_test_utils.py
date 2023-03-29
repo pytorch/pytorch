@@ -417,7 +417,7 @@ def run_conv_or_fc(
 
     if init_net:
         test_case.ws.run(init_net)
-    for i in range(1 if engine == "" else 2):
+    for _i in range(1 if engine == "" else 2):
         test_case.ws.run(net)
         Y = test_case.ws.blobs["Y"].fetch()
         if order:
@@ -442,7 +442,7 @@ def run_conv_or_fc(
         if init_net:
             workspace.RunNetOnce(init_net)
         workspace.CreateNet(net)
-        for i in range(2):
+        for _i in range(2):
             workspace.RunNet(net)
             Y = workspace.FetchBlob("Y")
             if order:

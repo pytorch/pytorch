@@ -26,7 +26,7 @@ os.system("git checkout caffe2/distributed/.")
 os.system("git checkout caffe2/experiments/.")
 os.system("git checkout caffe2/python/.")
 
-for root, dirs, files in os.walk("."):
+for root, _dirs, files in os.walk("."):
     for file in files:
         if (file.endswith(".py") and not file.endswith("_test.py") and not file.endswith("__.py")):
             filepath = os.path.join(root, file)

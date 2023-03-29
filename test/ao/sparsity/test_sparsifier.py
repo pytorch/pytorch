@@ -99,7 +99,7 @@ class TestBaseSparsifier(TestCase):
         sparsifier0.prepare(model0, [{'tensor_fqn': 'linear.weight'}])
         mask = model0.linear.parametrizations['weight'][0].mask
         mask.data = torch.arange(mask.shape[0] * mask.shape[1]).reshape(mask.shape)
-        for step in range(step_count):
+        for _step in range(step_count):
             sparsifier0.step()
         state_dict = sparsifier0.state_dict()
 

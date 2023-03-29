@@ -26,7 +26,7 @@ class TextFileReader(Reader):
             batch_size : Number of rows to read at a time.
         """
         assert isinstance(schema, Struct), 'Schema must be a schema.Struct'
-        for name, child in schema.get_children():
+        for _name, child in schema.get_children():
             assert isinstance(child, Scalar), (
                 'Only scalar fields are supported in TextFileReader.')
         field_types = [

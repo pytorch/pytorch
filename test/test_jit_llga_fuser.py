@@ -44,7 +44,7 @@ LLGA_FUSION_GROUP = 'prim::oneDNNFusionGroup'
 LLGA_NOT_ENABLED = not torch._C.has_mkldnn or IS_WINDOWS or IS_MACOS
 
 def warmup_forward(f, *args, profiling_count=3):
-    for i in range(profiling_count):
+    for _i in range(profiling_count):
         results = f(*args)
 
     return results
@@ -507,7 +507,7 @@ class TestFusionPattern(JitLlgaTestCase):
                 x = torch.clamp(x, max=2)
                 return x
 
-        for inplace in [False, True]:
+        for _inplace in [False, True]:
             for memory_format in [torch.contiguous_format, torch.channels_last]:
                 x = torch.rand(1, 32, 28, 28).to(memory_format=memory_format)
                 m = M()

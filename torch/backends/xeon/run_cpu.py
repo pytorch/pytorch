@@ -675,7 +675,7 @@ def main(args):
 
     launcher = _Launcher()
     launcher.launch(args)
-    for x in sorted(set(os.environ.keys()) - env_before):
+    for _x in sorted(set(os.environ.keys()) - env_before):
         logger.debug("{x}={os.environ[x]}")
 
 if __name__ == "__main__":

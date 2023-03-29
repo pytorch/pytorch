@@ -736,7 +736,7 @@ class CUDAGraphNode:
         self.expected_dead_indices_after_graph = delta
 
         assert len(self.outputs_weakrefs) == 0
-        for i, o in enumerate(outputs):
+        for _i, o in enumerate(outputs):
             self.output_is_alias_of_static_inputs.append(
                 o is not None
                 and o.untyped_storage().data_ptr() in self.static_input_storage_ptrs

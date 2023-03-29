@@ -362,7 +362,7 @@ def gen_foreach_derivativeinfo(
         return None
 
     map_refarg2foreacharg, map_name2arg = {}, {}
-    for i, (arg, ref_arg) in enumerate(
+    for _i, (arg, ref_arg) in enumerate(
         zip(
             foreach_function.func.arguments.flat_non_out,
             function_schema.arguments.flat_non_out,
@@ -373,7 +373,7 @@ def gen_foreach_derivativeinfo(
 
     all_saved_inputs, all_saved_outputs, all_var_names = [], [], []
     modified_derivative_formulas = []
-    for i, derivative in enumerate(ref_diff_info.derivatives):
+    for _i, derivative in enumerate(ref_diff_info.derivatives):
         modified_formula = derivative.formula.replace("grad", "grads[i]").replace(
             "result", "result[i]"
         )

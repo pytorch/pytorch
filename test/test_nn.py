@@ -1211,7 +1211,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         def check():
             self.assertEqual(len(parameter_dict), len(parameters))
-            for i, (k1, (k2, m2)) in enumerate(zip(parameters, parameter_dict.named_parameters())):
+            for _i, (k1, (k2, m2)) in enumerate(zip(parameters, parameter_dict.named_parameters())):
                 self.assertEqual(k1, k2)
                 self.assertIs(parameters[k1], m2)
             for k1, k2 in zip(parameters, parameter_dict):
@@ -3033,7 +3033,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                                batch_first=batch_first)
 
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for _idx, p in enumerate(model.parameters()):
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape
@@ -3182,7 +3182,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                                activation, batch_first=batch_first)
 
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for _idx, p in enumerate(model.parameters()):
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape
@@ -3259,7 +3259,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
             with torch.no_grad():
                 # set constant weights of the model
-                for idx, p in enumerate(layer.parameters()):
+                for _idx, p in enumerate(layer.parameters()):
                     x = p.data
                     sz = x.view(-1).size(0)
                     shape = x.shape
@@ -8588,7 +8588,7 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
     def test_Transformer_empty(self, device):
-        for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
+        for _batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
             transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12).to(device)
             src = torch.rand(*src_shape, requires_grad=True, device=device)
             tgt = torch.rand(*tgt_shape, requires_grad=True, device=device)
@@ -11873,7 +11873,7 @@ class TestNNDeviceType(NNTestCase):
                 model = model.eval()
 
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for _idx, p in enumerate(model.parameters()):
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape
@@ -12085,7 +12085,7 @@ class TestNNDeviceType(NNTestCase):
                 model = model.eval()
 
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for _idx, p in enumerate(model.parameters()):
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape

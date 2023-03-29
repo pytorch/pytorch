@@ -572,7 +572,7 @@ class TestLoadSave(TestLoadSaveBase):
         self.load_and_check_blobs(blobs, [tmp_file])
 
         blob_chunks = self._read_chunk_info(Path(tmp_file))
-        for blob_name, chunks in blob_chunks.items():
+        for _blob_name, chunks in blob_chunks.items():
             self.assertEqual(len(chunks), expected_num_chunks)
 
     def testSaveWithChunkSize(self) -> None:
@@ -688,7 +688,7 @@ class TestLoadSave(TestLoadSaveBase):
         self.load_and_check_blobs(blobs, [tmp_file])
 
         blob_chunks = self._read_chunk_info(Path(tmp_file))
-        for blob_name, chunks in blob_chunks.items():
+        for _blob_name, chunks in blob_chunks.items():
             self.assertEqual(len(chunks), expected_num_chunks)
 
     def testSaveFloatToBfloat16(self) -> None:

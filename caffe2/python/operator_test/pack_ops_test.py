@@ -117,7 +117,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
                 return data
             output = None
             start = 0
-            for i, length in enumerate(lengths):
+            for _i, length in enumerate(lengths):
                 new_len = max_length if length > max_length else length
                 chunk = data[start: start + new_len]
                 if output is None:

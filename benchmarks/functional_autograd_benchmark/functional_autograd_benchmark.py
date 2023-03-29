@@ -211,7 +211,7 @@ def run_model(model_getter: GetterType, args: Any, task: str, run_once_fn: Calla
     run_once_fn(model, inp, task, v, maybe_check_consistency=True)
 
     elapsed = []
-    for it in range(args.num_iters):
+    for _it in range(args.num_iters):
         do_sync()
         start = time.time()
         run_once_fn(model, inp, task, v)

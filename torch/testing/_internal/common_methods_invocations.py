@@ -679,7 +679,7 @@ def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
         lhs = make_arg(shape_lhs)
 
         args = []
-        for i in range(num_inputs - 1):
+        for _i in range(num_inputs - 1):
             args.append(make_arg(shape_rhs))
         broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
 

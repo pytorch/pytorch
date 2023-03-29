@@ -66,7 +66,7 @@ class TestCounterOps(TestCase):
             workspace.RunOperatorOnce(core.CreateOperator(
                 'Save', ['serialized_c'], [], absolute_path=1,
                 db_type='minidb', db=tmp.name))
-            for i in range(10):
+            for _i in range(10):
                 workspace.RunOperatorOnce(core.CreateOperator(
                     'CountDown', ['serialized_c'], ['t8']))
             workspace.RunOperatorOnce(core.CreateOperator(

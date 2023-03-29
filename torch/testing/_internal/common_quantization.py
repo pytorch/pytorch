@@ -115,7 +115,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     train_loss, correct, total = 0, 0, 0
-    for i in range(10):
+    for _i in range(10):
         model.train()
 
         for data, target in train_data:
@@ -2113,7 +2113,7 @@ class ModelWithSequentialFusion(nn.Module):
         self.conv1 = nn.Conv2d(3, 3, 1)
         self.relu1 = nn.ReLU(inplace=False)
         layers = []
-        for i in range(3):
+        for _i in range(3):
             layers.append(ConvBNReLU())
         self.features = nn.Sequential(*layers)
         head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]

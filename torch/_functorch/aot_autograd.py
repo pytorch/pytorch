@@ -685,7 +685,7 @@ def run_functionalized_fw_and_collect_metadata(
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
-        for (i, (arg, f_arg)) in enumerate(zip(flat_args, flat_f_args)):
+        for (_i, (arg, f_arg)) in enumerate(zip(flat_args, flat_f_args)):
             if not isinstance(arg, Tensor):
                 new_arg = arg
             else:
@@ -970,7 +970,7 @@ def fn_prepped_for_autograd(
         # This is annoying: our joint function needs to be aware of functionalization
         # (syncing mutated inputs before calling autograd.grad())
         # In theory, we could make the autograd engine do this automatically, although that probably isn't any cleaner.
-        for i, arg in enumerate(args_maybe_cloned):
+        for _i, arg in enumerate(args_maybe_cloned):
             if not isinstance(arg, Tensor):
                 continue
             torch._sync(arg)
@@ -1541,7 +1541,7 @@ def remove_dupe_metadata(
     # Easy invariant: the first argument should never be a dupe (it will be kept)
     assert len(keep_arg_mask) > 0 and keep_arg_mask[0]
     dupe_to_dedup_idx = [0]
-    for i, b in enumerate(keep_arg_mask[1:]):
+    for _i, b in enumerate(keep_arg_mask[1:]):
         if b:
             dupe_to_dedup_idx.append(dupe_to_dedup_idx[-1] + 1)
         else:
@@ -3011,7 +3011,7 @@ def aot_module_simplified(
 
     if hasattr(mod, "graph"):
         # Non dynamo entrypoints can get to here...
-        for i, node in enumerate(mod.graph.nodes):
+        for _i, node in enumerate(mod.graph.nodes):
             if node.op == "placeholder":
                 if hasattr(node, "_dynamo_source"):
                     # ... but not here!

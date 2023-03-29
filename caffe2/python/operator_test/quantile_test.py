@@ -47,7 +47,7 @@ class TestQuantile(hu.HypothesisTestCase):
     def test_quantile_1(self):
         inputs = []
         num_tensors = 5
-        for i in range(num_tensors):
+        for _i in range(num_tensors):
             dim = np.random.randint(5, 100)
             inputs.append(np.random.rand(dim))
         self._test_quantile(inputs=inputs, quantile=0.2, abs=1, tol=1e-4)
@@ -55,7 +55,7 @@ class TestQuantile(hu.HypothesisTestCase):
     def test_quantile_2(self):
         inputs = []
         num_tensors = 5
-        for i in range(num_tensors):
+        for _i in range(num_tensors):
             dim = np.random.randint(5, 100)
             inputs.append(np.random.rand(dim))
         self._test_quantile(inputs=inputs, quantile=1e-6, abs=0, tol=1e-3)
@@ -63,7 +63,7 @@ class TestQuantile(hu.HypothesisTestCase):
     def test_quantile_3(self):
         inputs = []
         num_tensors = 5
-        for i in range(num_tensors):
+        for _i in range(num_tensors):
             dim1 = np.random.randint(5, 100)
             dim2 = np.random.randint(5, 100)
             inputs.append(np.random.rand(dim1, dim2))
@@ -72,7 +72,7 @@ class TestQuantile(hu.HypothesisTestCase):
     def test_quantile_4(self):
         inputs = []
         num_tensors = 5
-        for i in range(num_tensors):
+        for _i in range(num_tensors):
             dim1 = np.random.randint(5, 100)
             dim2 = np.random.randint(5, 100)
             inputs.append(np.random.rand(dim1, dim2))

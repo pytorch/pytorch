@@ -482,7 +482,7 @@ class IterGraph(fx.Graph):
                 self.node_add_user(step_node, optim_node)
 
     def defunctionalize_optim(self) -> None:
-        for i, node in enumerate(reversed(self.nodes)):
+        for _i, node in enumerate(reversed(self.nodes)):
             if node.name.startswith("output"):
                 output_node = node
             elif node.name.startswith(

@@ -27,7 +27,7 @@ class CheckpointTest(test_util.TestCase):
                        db=os.path.join(temp_root, "test_checkpoint_at_%05d"),
                        db_type="leveldb", every=10, absolute_path=True)
         self.assertTrue(workspace.CreateNet(net))
-        for i in range(100):
+        for _i in range(100):
             self.assertTrue(workspace.RunNet("test_checkpoint"))
         for i in range(1, 10):
             # Print statements are only for debugging purposes.

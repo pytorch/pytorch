@@ -264,7 +264,7 @@ def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     res = list_input[0]
     for t in list_input:
         res += t
-    for k, v in dict_input.items():
+    for _k, v in dict_input.items():
         res += v
     complex_tensors = tensor_class_input.tensors
     return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
@@ -1562,7 +1562,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_future_wait_twice(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         futs = []
-        for i in range(20):
+        for _i in range(20):
             futs.append(rpc.rpc_async(dst, raise_func))
 
         with self.assertRaisesRegex(ValueError, "Expected error"):
@@ -2842,7 +2842,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         ret_rref = rref_forward_chain(dst_rank, self.world_size, rref, ttl)
 
-        for i in range(ttl):
+        for _i in range(ttl):
             self.assertEqual(len(ret_rref), 1)
             ret_rref = ret_rref[0].to_here()
 

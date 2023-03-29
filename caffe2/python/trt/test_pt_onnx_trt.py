@@ -95,7 +95,7 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
             h_input, d_input, h_output, d_output, stream = allocate_buffers(engine)
             with engine.create_execution_context() as context:
                 err_count = 0
-                for index, f in enumerate(self.image_files):
+                for _index, f in enumerate(self.image_files):
                     test_case = load_normalized_test_case(input_shape, f,\
                         h_input, normalization_hint)
                     cuda.memcpy_htod_async(d_input, h_input, stream)

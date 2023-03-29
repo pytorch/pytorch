@@ -44,7 +44,7 @@ class TestThroughputBenchmark(TestCase):
 
         inputs = []
 
-        for i in range(NUM_INPUTS):
+        for _i in range(NUM_INPUTS):
             inputs.append([torch.randn(B, D_in), torch.randn(B, D_in)])
         bench = ThroughputBenchmark(module)
 

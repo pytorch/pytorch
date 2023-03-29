@@ -149,7 +149,7 @@ def Prune2Sparse(cur, id2node, name2id, ops, model):
         transFCRelu(cur, id2node, name2id, ops, model)
 
     cur.visited = True
-    for name, n in cur.ops.iteritems():
+    for _name, n in cur.ops.iteritems():
         Prune2Sparse(n, id2node, name2id, ops, model)
 
 

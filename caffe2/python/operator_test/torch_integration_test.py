@@ -640,9 +640,9 @@ class TorchIntegration(hu.HypothesisTestCase):
         batch_size = len(roi_counts)
         im_dims = np.random.randint(100, 600, batch_size)
         rpn_rois_and_scores = []
-        for i in range(5):
+        for _i in range(5):
             rpn_rois_and_scores.append(torch.tensor(generate_rois(roi_counts, im_dims)))
-        for i in range(5):
+        for _i in range(5):
             rpn_rois_and_scores.append(torch.rand(sum(roi_counts)))
 
         rois = torch.ops._caffe2.CollectRpnProposals(
