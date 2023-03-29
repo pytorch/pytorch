@@ -39,7 +39,7 @@ def get_comm_block_nodes(
     wait_node: fx.Node, comm_type: CommType
 ) -> Tuple[int, List[fx.Node]]:
     """
-    Given a wait_comm node, find out all the nodes belong to this communcation.
+    Given a wait_comm node, find out all the nodes belong to this communication.
 
     Args:
         wait_node(fx.Node): The target wait_comm node.
@@ -76,7 +76,9 @@ def get_comm_block_nodes(
     return comm_idx, node_list
 
 
-def get_node_tensor_metadata(node: fx.Node, is_required: bool = True) -> TensorMetadata:
+def get_node_tensor_metadata(
+    node: fx.Node, is_required: bool = True
+) -> TensorMetadata:
     metadata = node.meta.get("tensor_meta", None)
     if is_required and metadata is None:
         raise RuntimeError(
