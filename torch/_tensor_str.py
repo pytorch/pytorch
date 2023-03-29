@@ -527,11 +527,20 @@ def _str_intern(inp, *, tensor_contents=None):
             def indented_str(s, indent):
                 return "\n".join(f"  {line}" for line in s.split("\n"))
 
-            strs = ",\n".join(
-                indented_str(str(t), indent + 1)
-                for t in torch.ops.aten.unbind.int(self, 0)
-            )
-            tensor_str = f"[\n{strs}\n]"
+            if self.is_meta:
+                nt_sizes = self._nested_tensor_size()
+                suffixes.append("num_components=" + str(nt_sizes.shape[0]))
+                suffixes.append("dim=" + str(nt_sizes.shape[1] + 1))
+                if self.dtype != torch.get_default_dtype():
+                    suffixes.append("dtype=" + str(self.dtype))
+                if not custom_contents_provided:
+                    tensor_str = "..."
+            else:
+                strs = ",\n".join(
+                    indented_str(str(t), indent + 1)
+                    for t in torch.ops.aten.unbind.int(self, 0)
+                )
+                tensor_str = f"[\n{strs}\n]"
     elif torch._is_functional_tensor(self):
         prefix = "_to_functional_tensor("
         tensor_str = repr(torch._from_functional_tensor(self))

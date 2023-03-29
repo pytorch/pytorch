@@ -1547,18 +1547,19 @@ class ShapeEnv:
                 track_symint(source, t)
                 continue
             assert isinstance(t, torch.Tensor)
-            for i, ss in enumerate(t.size()):
-                property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
-                track_symint(property_source, ss)
-                if _is_dim_dynamic(t, i):
-                    # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
-                    # constrained to an integer.
-                    if _is_int(ss):
-                        raise RuntimeError(f"Attempting to constrain dim {i} for {source}, which violates user's mark_dynamic")
-                    dynamic_sources.append(property_source)
-            for i, ss in enumerate(t.stride()):
-                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
-            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
+            if not t.is_nested:
+                for i, ss in enumerate(t.size()):
+                    property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
+                    track_symint(property_source, ss)
+                    if _is_dim_dynamic(t, i):
+                        # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
+                        # constrained to an integer.
+                        if _is_int(ss):
+                            raise RuntimeError(f"Attempting to constrain dim {i} for {source}, which violates user's mark_dynamic")
+                        dynamic_sources.append(property_source)
+                for i, ss in enumerate(t.stride()):
+                    track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
+                track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),

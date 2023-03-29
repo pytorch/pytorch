@@ -22,13 +22,17 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       const caffe2::TypeMeta data_type,
       at::Tensor nested_sizes,
       at::Tensor nested_strides,
-      at::Tensor storage_offsets);
+      at::Tensor storage_offsets,
+      const bool validate_metadata = true,
+      const c10::optional<int64_t> dim = c10::nullopt);
 
   explicit NestedTensorImpl(
       at::Tensor buffer,
       at::Tensor nested_sizes,
       at::Tensor nested_strides,
-      at::Tensor storage_offsets);
+      at::Tensor storage_offsets,
+      const bool validate_metadata = true,
+      const c10::optional<int64_t> dim = c10::nullopt);
   // assume contiguous, `nested_strides` and `offsets`
   // can be infered from `nested_sizes`
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_sizes);
@@ -57,13 +61,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // Returns nullopt if the ith dimension is irregular. The ith dimension
   // of a NestedTensor is regular if the unbound tensors match in
   // size at the (i-1)th dimension.
-  c10::optional<int64_t> opt_size(int64_t d) const {
-    d = at::maybe_wrap_dim(d, dim(), false);
-    if (opt_sizes_[d] == -1) {
-      return c10::nullopt;
-    }
-    return opt_sizes_[d];
-  }
+  c10::optional<int64_t> opt_size(int64_t d) const;
 
   int64_t size(int64_t d) const {
     c10::optional<int64_t> optional_size = this->opt_size(d);
@@ -98,10 +96,15 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
    */
   at::Tensor get_unsafe_storage_as_tensor() const {
     auto buffer_key_set_ = generate_buffer_key_set();
-    const auto buffer_size = get_buffer_size();
     auto buffer_tensor_impl = c10::make_intrusive<TensorImpl>(
         c10::TensorImpl::VIEW, Storage(storage_), buffer_key_set_, data_type_);
-    buffer_tensor_impl->set_sizes_contiguous(c10::makeArrayRef(buffer_size));
+    if (C10_UNLIKELY(this->is_meta())) {
+      buffer_tensor_impl->set_sizes_and_strides(
+          {c10::SymInt(0)}, {c10::SymInt(1)}, c10::nullopt);
+    } else {
+      const auto buffer_size = get_buffer_size();
+      buffer_tensor_impl->set_sizes_contiguous(c10::makeArrayRef(buffer_size));
+    }
     return Tensor(buffer_tensor_impl);
   }
 
@@ -150,7 +153,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
  private:
   // Must be called after any changes to our dim() to sync the state
   // to TensorImpl.
-  void refresh_dim();
+  void refresh_dim(const c10::optional<int64_t> dim_);
 
   const at::Tensor nested_sizes_, nested_strides_;
   // The starting positions of the underlying tensors in contiguous buffer
@@ -167,9 +170,10 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   //    && nesting in ascending order
   const at::Tensor storage_offsets_;
   // NOTE: -1 here means the size is missing
+  // Optional to allow it to be computed lazily from nested
   // TODO: maybe we can remove this metadata since
   //       we can compute it from `nested_sizes_`
-  std::vector<int64_t> opt_sizes_;
+  c10::optional<std::vector<int64_t>> opt_sizes_;
 
   template <typename VariableVersion>
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
@@ -220,6 +224,10 @@ inline NestedTensorImpl* get_nested_tensor_impl(const at::Tensor& tensor) {
 }
 
 inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
+  if (nt->is_meta()) {
+    // Simplify a lot of checks by claiming contiguous for meta tensors.
+    return true;
+  }
   int64_t ntensors = nt->size(0);
   if (ntensors == 0) {
     return true;

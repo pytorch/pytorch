@@ -248,12 +248,52 @@ class MetaConverter:
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
                 elif t.is_nested:
-                    assert shape_env is None, "symbolic on nested NYI"
+                    assert (
+                        shape_env is not None
+                    ), "Dynamic shapes must be enabled for nested tensors"
                     is_leaf = safe_is_leaf(t)
-                    # TODO: This will have to change to handle the symbolic case.
-                    # In particular, we'll need to use a NT constructor that allows
-                    # us to pass the correct symbolic metadata.
-                    r = callback(lambda: torch.empty_like(t, device="meta"))
+
+                    # TODO: Fix the source for the metadata
+
+                    sizes = t._nested_tensor_size()
+                    sizes = self.meta_tensor(
+                        sizes, shape_env=shape_env, callback=callback, source=source
+                    )
+
+                    strides = t._nested_tensor_strides()
+                    strides = self.meta_tensor(
+                        strides, shape_env=shape_env, callback=callback, source=source
+                    )
+
+                    offsets = t._nested_tensor_storage_offsets()
+                    offsets = self.meta_tensor(
+                        offsets, shape_env=shape_env, callback=callback, source=source
+                    )
+
+                    # TODO: Figure out if it matters that the same symbolic var could be used
+                    # for both the batch size and rank of components?
+
+                    # TODO: Figure out if we care that the buffer size is derived from the
+                    # symbolic sizes of the metadata?
+                    # product over sizes[1]
+                    # sum over sizes[0]
+                    # numel = sizes.prod(dim=1).sum(dim=0)
+
+                    import sys
+                    from torch.fx.experimental.symbolic_shapes import constrain_range
+
+                    buffer_size = shape_env.create_unbacked_symint()
+                    constrain_range(buffer_size, min=2, max=sys.maxsize - 1)
+                    buffer = callback(
+                        lambda: torch.empty(buffer_size, device="meta", dtype=t.dtype)
+                    )
+
+                    r = callback(
+                        lambda: torch._nested_from_buffer_unchecked(
+                            buffer, sizes, strides, offsets, t.dim()
+                        )
+                    )
+
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = True

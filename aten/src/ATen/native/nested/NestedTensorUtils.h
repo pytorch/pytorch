@@ -312,14 +312,6 @@ inline Tensor wrap_tensor_node(
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
           pin_memory);
   if (tensor_node.degree() == 0) {
-    // Temporarily disable meta if needed to ensure sizes are built as real tensors.
-    // TODO: This is a hack and should be removed once we have a proper solution for
-    // selectively disabling meta. Most likely, this will come in the form of more
-    // aggressive constant propagation for fake tensors.
-    auto disable_meta_keyset = c10::impl::tls_local_dispatch_key_set();
-    disable_meta_keyset.included_ = disable_meta_keyset.included_.remove_backend(
-      c10::BackendComponent::MetaBit);
-    c10::impl::ForceDispatchKeyGuard disable_meta_guard(disable_meta_keyset);
     return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
   }
 
@@ -396,15 +388,6 @@ inline Tensor wrap_tensor_node(
     }
     options = flat_tensors[0].options().merge_in(options_);
     nt_buffer = at::cat(flat_tensors);
-
-    // Temporarily disable meta if needed to ensure sizes are built as real tensors.
-    // TODO: This is a hack and should be removed once we have a proper solution for
-    // selectively disabling meta. Most likely, this will come in the form of more
-    // aggressive constant propagation for fake tensors.
-    auto disable_meta_keyset = c10::impl::tls_local_dispatch_key_set();
-    disable_meta_keyset.included_ = disable_meta_keyset.included_.remove_backend(
-      c10::BackendComponent::MetaBit);
-    c10::impl::ForceDispatchKeyGuard disable_meta_guard(disable_meta_keyset);
     nt_sizes = at::native::stack(sizes);
   }
 

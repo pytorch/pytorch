@@ -504,6 +504,7 @@
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_add_Tensor
+    NestedTensorMeta: NestedTensor_add_Tensor_meta
   tags: [core, pointwise]
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
@@ -5197,6 +5198,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
+    NestedTensorCPU, NestedTensorCUDA: split_with_sizes_nested
 
 - func: hsplit.int(Tensor(a -> *) self, int sections) -> Tensor(a)[]
   variants: function, method
@@ -5807,6 +5809,13 @@
   dispatch:
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
+
+# Version that does not validate metadata
+- func: _nested_from_buffer_unchecked(Tensor self, Tensor nested_size, Tensor nested_strides, Tensor offsets, int dim) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: _nested_from_buffer_unchecked
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:

@@ -945,14 +945,6 @@ class FakeTensor(torch.Tensor):
             else:
                 return args[0].fake_device
 
-        # Need to avoid fake-ifying the NT metadata tensors.
-        if func in [
-            torch.ops.aten._nested_tensor_size.default,
-            torch.ops.aten._nested_tensor_strides.default,
-        ]:
-            with no_dispatch():
-                return func(*args, **kwargs)
-
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
         # because the next dispatch after a fake mode will attempt to use

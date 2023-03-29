@@ -48,7 +48,7 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
+troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
@@ -933,6 +933,11 @@ def same(
         else:
             if not exact_dtype:
                 ref = ref.to(res.dtype)
+
+            if ref.is_nested and res.is_nested:
+                return same(ref.unbind(), res.unbind())
+            elif ref.is_nested or res.is_nested:
+                return False
 
             # First try usual allclose
             if torch.allclose(ref, res, atol=tol, rtol=tol, equal_nan=equal_nan):
