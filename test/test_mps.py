@@ -6516,7 +6516,9 @@ class TestNLLLoss(TestCaseMPS):
 
             self.assertEqual(idx_result, idx_result_cpu)
 
-        helper(22, 0, [])
+        helper(22, 0, [0])
+        with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
+            helper(22, 0, [])
 
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
