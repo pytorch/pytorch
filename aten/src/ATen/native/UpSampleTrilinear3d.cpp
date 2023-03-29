@@ -103,8 +103,9 @@ Tensor upsample_trilinear3d(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+    c10::optional<ArrayRef<double>> scale_factors,
+    bool round_with_scale_factor) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors, round_with_scale_factor);
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
