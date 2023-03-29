@@ -24,6 +24,7 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 
 import torch._functorch.config
+import torch.library
 
 try:
     from test_minifier import requires_cuda
@@ -38,6 +39,11 @@ from torch.nn import functional as F
 
 
 _orig_module_call = torch.nn.Module.__call__
+
+# Custom operator that only supports CPU
+lib = torch.library.Library("test_sample", "DEF")
+lib.define("foo(Tensor self) -> Tensor")
+lib.impl("foo", torch.sin, "CPU")
 
 
 def is_fx_tracing_test() -> bool:
@@ -933,11 +939,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # idx should be 1 -> slicing off [1:] of 8 elem tensor
         self.assertEqual(list(out.shape), [7])
 
-        expected_ops = ifdyn(5, 4)
-        expected_frame = ifdyn(1, 2)
-
-        self.assertEqual(expected_ops, expected_ops)
-        self.assertEqual(expected_frame, expected_frame)
+        self.assertEqual(counter.op_count, 2)
+        self.assertEqual(counter.frame_count, 1)
 
         self.assertEqual(list(opt_fn(torch.tensor([4])).shape), [4])
 
@@ -2526,6 +2529,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         ra = compiled_fn(t1, t2, 6)
         self.assertEqual(ra, torch.tensor([0.0, 7.0, 14.0]))
+
+    def test_graph_break_unsupported_fake(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(counter, dynamic=True)
+        def f(x):
+            return torch.ops.test_sample.foo(x + 1) + 1
+
+        f(torch.randn(3))
+
+        self.assertEqual(counter.op_count, 2)
+        self.assertEqual(counter.frame_count, 2)
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_implicit_guard(self):

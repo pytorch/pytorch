@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <ATen/core/ivalue.h>

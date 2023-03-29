@@ -555,12 +555,10 @@ class TestFlattenParams(FSDPTest):
         on rank and world size.
         """
         flat_param = handle.flat_param
-        (
-            flat_param._shard_param_offsets,
-            flat_param._shard_param_indices,
-        ) = handle._get_shard_metadata(start, end)
+        flat_param._shard_param_infos = handle._get_shard_metadata(start, end)
+        shard_metadata = handle.shard_metadata()
         self.assertEqual(
-            handle.shard_metadata(),
+            shard_metadata,
             expected,
             msg=f"{handle.shard_metadata()}, {expected}",
         )
