@@ -8,6 +8,7 @@ from typing import (
     Dict,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Type,
     Union,
@@ -229,24 +230,9 @@ def _functionalize_and_reinplace_foreach_ops(
             continue
 
         flat_args, spec = pytree.tree_flatten(node.args)
-        updated_args = [inplace_updated.get(a) or a for a in flat_args]
-        new_args = pytree.tree_unflatten(updated_args, spec)
-
-        # If we got new arg, it means this node consumes inplace results.
-        # Replace this node with a new one that uses functionalized outputs.
-        if new_args != node.args:
-            with gm.graph.inserting_after(node):
-                new_node = gm.graph.create_node(
-                    node.op,
-                    node.target,
-                    new_args,
-                    node.kwargs,
-                    node.name,
-                    node.type,
-                )
-                node.replace_all_uses_with(new_node)
-            gm.graph.erase_node(node)
-            continue
+        updated_args = [inplace_updated.get(a, a) for a in flat_args]
+        # set node args to potentially updated ones
+        node.args = pytree.tree_unflatten(updated_args, spec)
 
         # Only functionalize aten._foreach_* ops.
         if node.op == OP.CALL_FUNCTION and node.target in FOREACH_OP_MAP:
@@ -259,16 +245,16 @@ def _functionalize_and_reinplace_foreach_ops(
                     args=node.args,
                     kwargs=node.kwargs,
                 )
-                getitems: Dict[fx.Node, fx.Node] = {}
-                # need another inserting_after, otherwise new ones are always
-                # inserted immediately after ``node``
-                with gm.graph.inserting_after(new_node):
-                    # use getitem to retrieve individual tensors
-                    for i, a in enumerate(node.args[0]):
-                        getitems[a] = gm.graph.call_function(
-                            getitem, args=(new_node, i)
-                        )
-                skip_nodes.add(new_node)
+            skip_nodes.add(new_node)
+            getitems: Dict[fx.Node, fx.Node] = {}
+            # need another inserting_after, otherwise new ones are always
+            # inserted immediately after ``node``
+            with gm.graph.inserting_after(new_node):
+                # use getitem to retrieve individual tensors
+                for i, a in enumerate(node.args[0]):
+                    getitems[a] = gm.graph.call_function(
+                        getitem, args=(new_node, i)
+                    )
 
             # Copy output of place foreach results back to its first arguments,
             # so that the graph will still update parameter inplace.
