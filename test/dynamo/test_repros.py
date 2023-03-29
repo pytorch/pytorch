@@ -2735,7 +2735,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
-    
+
     def test_batch_encoding_clone_inputs(self):
 
         class BatchEncoding(dict):
