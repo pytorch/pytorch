@@ -36,6 +36,7 @@ from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
@@ -4529,6 +4530,22 @@ class CommonTemplate:
                 True,
             ),
         )
+
+    def test_index_put_deterministic_fallback(self):
+        with DeterministicGuard(True):
+
+            def fn(a, b, c):
+                return torch.index_put(a, [b], c, True)
+
+            self.common(
+                fn,
+                [
+                    torch.randn([100, 32]),
+                    torch.randint(0, 100, size=[600], dtype=torch.int64),
+                    torch.randn([600, 32]),
+                ],
+                check_lowp=False,
+            )
 
     def test_index_put_index(self):
         def fn(ind, x, src):
