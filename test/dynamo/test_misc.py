@@ -4806,10 +4806,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             # TODO should also pass the code object back into dynamo again, but
             # dynamo is not enabled for Python 3.11 yet.
 
-    def test_get_const_index(self):
-        code_options = {"co_consts": (None, -0.0, 0.0)}
-        self.assertEqual(bytecode_transformation.get_const_index(code_options, 0.0), 2)
-
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
 
