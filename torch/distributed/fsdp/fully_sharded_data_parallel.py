@@ -318,6 +318,24 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             prevent too many in-flight all-gathers. This ``bool`` only affects
             the sharded strategies that schedule all-gathers. Enabling this can
             help lower the number of CUDA malloc retries.
+        use_orig_params (bool): Setting this to ``True`` has FSDP use
+            ``module`` 's original parameters. FSDP exposes those original
+            parameters to the user via :meth:`nn.Module.named_parameters`
+            instead of FSDP's internal :class:`FlatParameter` s. This means
+            that the optimizer step runs on the original parameters, enabling
+            per-original-parameter hyperparameters. FSDP preserves the original
+            parameter variables and manipulates their data between unsharded
+            and sharded forms, where they are always views into the underlying
+            unsharded or sharded :class:`FlatParameter`, respectively. With the
+            current algorithm, the sharded form is always 1D, losing the
+            original tensor structure. An original parameter may have all,
+            some, or none of its data present for a given rank. In the none
+            case, its data will be like a size-0 empty tensor. Users should not
+            author programs relying on what data is present for a given
+            original parameter in its sharded form. ``True`` is required to
+            use ``torch.compile()``. Setting this to ``False`` exposes FSDP's
+            internal :class:`FlatParameter` s to the user via
+            :meth:`nn.Module.named_parameters`. (Default: ``False``)
         ignored_parameters (Optional[Iterable[torch.nn.Parameter]]): Ignored
             parameters will not be managed by this FSDP instance,
             that means these parameters will not be flattened and sharded by FSDP,
@@ -535,7 +553,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     def _low_precision_hook_enabled(self) -> bool:
         """
-        Wether a low precision hook is registered or not.
+        Whether a low precision hook is registered or not.
         """
         return (
             self._communication_hook is not None
@@ -649,7 +667,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
             submodule._state_dict_type = state_dict_type
             submodule._state_dict_config = state_dict_config
-            submodule._optimstate_dict_config = optim_state_dict_config
+            submodule._optim_state_dict_config = optim_state_dict_config
 
         return StateDictSettings(
             prev_state_dict_type, prev_state_dict_config, prev_optim_state_dict_config
@@ -827,7 +845,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """
         This deregisters the original parameters and exposes the
         :class:`FlatParameter` s. If a :class:`FlatParameter` is sharded, then
-        this refreshes the sharded views before exiting. This method shouuld
+        this refreshes the sharded views before exiting. This method should
         only be called when using the original parameters.
         """
         _p_assert(
@@ -1732,7 +1750,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> save_a_checkpoint(state_dict, optim_state_dict)
             >>> # Load a checkpoint
             >>> model, optim = ...
-            >>> state_dict, optim_state_dict = load_a_checkponit()
+            >>> state_dict, optim_state_dict = load_a_checkpoint()
             >>> FSDP.set_state_dict_type(
             >>>     model,
             >>>     StateDictType.FULL_STATE_DICT,
@@ -1786,7 +1804,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """
         This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionaility is identical to ``:meth:optim_state_dict`` except
+        The functionality is identical to ``:meth:optim_state_dict`` except
         for the different arguments.
 
         Args:
@@ -1795,7 +1813,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 were passed into the optimizer ``optim``.
             optim (torch.optim.Optimizer): Optimizer for ``model`` 's
                 parameters.
-            optim (Dict[str, Any]: the optim_state_dict to be coverted. The value
+            optim (Dict[str, Any]: the optim_state_dict to be converted. The value
                is typically returned by ``NamedOptimizer.state_dict()``.
             group (dist.ProcessGroup): Model's process group across which parameters
                 are sharded or ``None`` if using the default process group. (
@@ -1856,7 +1874,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> save_a_checkpoint(state_dict, optim_state_dict)
             >>> # Load a checkpoint
             >>> model, optim = ...
-            >>> state_dict, optim_state_dict = load_a_checkponit()
+            >>> state_dict, optim_state_dict = load_a_checkpoint()
             >>> FSDP.set_state_dict_type(
             >>>     model,
             >>>     StateDictType.FULL_STATE_DICT,
@@ -1913,7 +1931,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """
         This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionaility is identical to ``:meth:optim_state_dict_to_load``
+        The functionality is identical to ``:meth:optim_state_dict_to_load``
         except for the different arguments.
 
         Args:

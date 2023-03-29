@@ -23,10 +23,13 @@ def _frame_fmt(f, full_filename=False):
 def _frame_filter(name, filename):
     omit_functions = [
         "unwind::unwind",
-        "StackContext::gather",
-        "StackContext::_gather",
+        "CapturedTraceback::gather",
+        "gather_with_cpp",
         "_start",
-        "__libc_start_main"
+        "__libc_start_main",
+        "PyEval_",
+        "PyObject_",
+        "PyFunction_",
     ]
     omit_filenames = [
         "core/boxing",
@@ -52,6 +55,15 @@ def _frames_fmt(frames, full_filename=False, reverse=False):
     if reverse:
         frames = reversed(frames)
     return [_frame_fmt(f, full_filename) for f in frames if _frame_filter(f['name'], f['filename'])]
+
+def _block_extra(b):
+    if 'history' in b:
+        frames = b['history'][0].get('frames', [])
+        real_size = b['history'][0]['real_size']
+    else:
+        real_size = b.get('requested_size', b['size'])
+        frames = []
+    return frames, real_size
 
 def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
@@ -479,6 +491,19 @@ def trace_plot(data, device=None, plot_segments=False):
                 idx = add_element(e['addr'], e['size'], e.get('frames', []), extra=('alloc not recorded, stack trace for free:',))
                 w.initially_allocated(idx)
             w.free(idx)
+
+    for seg in data['segments']:
+        if seg['device'] != device:
+            continue
+        addr = seg['address']
+        for b in seg['blocks']:
+            if b['state'] == 'active_allocated' and addr not in addr_to_alloc:
+                frames, real_size = _block_extra(b)
+                extra = () if frames else ('<block was allocated before _record_history was enabled>',)
+                elemid = add_element(addr, real_size, frames, extra=extra)
+                w.initially_allocated(elemid)
+            addr += b['size']
+
     return w.to_html()
 
 def profile_plot(profile, device=None):
@@ -972,12 +997,7 @@ def segment_plot(data: Any, device=None):
         addr = seg['address']
         for b in seg['blocks']:
             if b['state'] in ('active_pending_free', 'active_allocated'):
-                if 'history' in b:
-                    frames = b['history'][0].get('frames', [])
-                    real_size = b['history'][0]['real_size']
-                else:
-                    real_size = b['size']
-                    frames = []
+                frames, real_size = _block_extra(b)
                 blocks['addr'].append(addr)
                 blocks['size'].append(b['size'])
                 blocks['real_size'].append(real_size)
@@ -1359,7 +1379,7 @@ function MemoryView(outer, stack_info, trace_data, events) {
             .append('rect')
             .attr('x', (x) => xScale(x.segment.offset + (x.addr - x.segment.addr)))
             .attr('y', (x) => yScale(x.segment.row))
-            .attr('width', (x) => xScale(x.real_size > padding/4 ? x.real_size - padding/4 : x.real_size))
+            .attr('width', (x) => xScale(x.real_size))
             .attr('height', yScale(4/5))
             .attr('fill', (x, i) => x.free_requested ? 'red' : schemeTableau10[Math.abs(hashCode(x.addr)) % schemeTableau10.length])
 

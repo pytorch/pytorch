@@ -582,6 +582,19 @@ class TestTransformers(NNTestCase):
             transformer_decoder(inputs, input_seq_len, memory)
 
 
+    def test_encoder_is_causal(self):
+
+        d_model = 3
+        layer = torch.nn.TransformerEncoderLayer(d_model, 1, 6, batch_first=True)
+        layer.eval()
+        x = torch.randn(1, 5, d_model)
+        unmasked_output = layer(x)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(x.size(1))
+        is_causal_output = layer(x, src_mask=mask, is_causal=True)
+        masked_output = layer(x, src_mask=mask)
+
+        self.assertEqual(masked_output, is_causal_output)
+
 
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -838,8 +851,11 @@ class TestTransformers(NNTestCase):
         encoder.train()
         optimizer.zero_grad()
         inputs = torch.randn(S, L, E).to(device)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            inputs.size(1), device=device
+        )
 
-        outputs = encoder(inputs, is_causal=True)
+        outputs = encoder(inputs, mask=mask, is_causal=True)
 
         loss = criterion(outputs[:, 0:2, :], inputs[:, 0:2, :])
         loss.backward()
@@ -848,12 +864,16 @@ class TestTransformers(NNTestCase):
         # inference with is_causal
         t_qvk = torch.randn((S, L, E), device=device, dtype=torch.float32)
         mha = nn.MultiheadAttention(E, H).to(device)
-        attn_out, _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            S, device=device
+        )
 
-        # Can't give both attn_mask AND is_causal
+        attn_out, _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=mask, is_causal=True)
+
+        # Can't give only is_causal
         attn_mask = torch.randint(0, 2, size=(L, L), device=device, dtype=torch.bool)
-        with self.assertRaisesRegex(AssertionError, "Only allow causal mask or attn_mask"):
-            _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=attn_mask, is_causal=True)
+        with self.assertRaises(RuntimeError):
+            _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
 
         # # Passing a causal mask sets is_causal to 1
         causal_mask = torch.triu(
@@ -878,6 +898,9 @@ class TestTransformers(NNTestCase):
         mha.in_proj_weight = Parameter(torch.ones((E * 3, E), device=device))
         mha.out_proj.weight = Parameter(torch.ones((E, E), device=device))
         expected = torch.ones(size=(S, L, E)).to(device) * 16
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            qkv.size(1), device=device
+        )
 
         for kernel in kernels:
             with torch.backends.cuda.sdp_kernel(
@@ -885,14 +908,17 @@ class TestTransformers(NNTestCase):
                 enable_flash=(kernel == 'flash'),
                 enable_mem_efficient=(kernel == 'meff')
             ):
-                actual, _ = mha(qkv, qkv, qkv, need_weights=False, is_causal=True)
+                actual, _ = mha(qkv, qkv, qkv, attn_mask=mask, need_weights=False, is_causal=True)
                 self.assertTrue(torch.equal(actual, expected))
 
                 if kernel != 'math':
                     # fails with embedding size not multiple of 4
                     with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                         qkv_f, mha_f = ones_tensor(S, L, 2), nn.MultiheadAttention(2, H).to(device)
-                        _ = mha_f(qkv_f, qkv_f, qkv_f, need_weights=False, is_causal=True)
+                        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+                            qkv_f.size(1), device=device
+                        )
+                        _ = mha_f(qkv_f, qkv_f, qkv_f, attn_mask=mask, need_weights=False, is_causal=True)
                         torch.cuda.synchronize()
 
     @unittest.skipIf(

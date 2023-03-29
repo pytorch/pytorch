@@ -3583,7 +3583,15 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
     dims = tuple(d for d in dims if a.shape[d] == 1)
-    return prims.squeeze(a, dims) if dims else prims.view_of(a)
+    if len(dims) == 0:
+        return prims.view_of(a)
+    if len(dims) == 1:
+        return prims.squeeze(a, dims)
+    dims_list = list(dims)
+    dims_list = sorted(dims_list, reverse=True)
+    for i in dims_list:
+        a = squeeze(a, i)
+    return a
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
@@ -4278,8 +4286,6 @@ def empty_like(
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
-
-    strides: Tuple[int, ...]
 
     if memory_format != torch.preserve_format:
         return torch.empty(
