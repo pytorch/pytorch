@@ -117,16 +117,25 @@ def _zeros_like(x):
     # from torch.zeros_like behaviour that returns a sparse tensor
     # with zero nnz.
     #
+    # _get_values(_zeros_like(x)) is a strided contiguous tensor.
+    #
     # If x is list or tuple then apply _zeros_like to x items.
     if isinstance(x, (tuple, list)):
         return type(x)(map(_zeros_like, x))
-    if _is_sparse_any_tensor(x):
-        z = x.clone().detach()
-        if x.layout is torch.sparse_coo:
-            z._values().zero_()
+    if x.layout is torch.sparse_coo:
+        y = x.detach().coalesce()
+        values = torch.zeros_like(y._values(), memory_format=torch.legacy_contiguous_format)
+        return torch.sparse_coo_tensor(y._indices().clone(), values, x.shape)
+    elif _is_sparse_compressed_tensor(x):
+        y = x.detach()
+        if y.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            compressed_indices, plain_indices = y.crow_indices(), y.col_indices()
         else:
-            z.values().zero_()
-        return z
+            compressed_indices, plain_indices = y.ccol_indices(), y.row_indices()
+        values = torch.zeros_like(y.values(), memory_format=torch.legacy_contiguous_format)
+        return torch.sparse_compressed_tensor(compressed_indices.clone(), plain_indices.clone(), values, y.shape, layout=x.layout)
+    elif _is_sparse_any_tensor(x):
+        raise NotImplementedError(x.layout)
     return torch.zeros_like(x, memory_format=torch.legacy_contiguous_format)
 
 
