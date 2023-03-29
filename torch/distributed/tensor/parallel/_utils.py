@@ -58,7 +58,7 @@ def _prepare_input_validate(
                 raise RuntimeError("device_mesh is not passed nor can be inferred")
         if device_mesh.ndim != 1:
             raise RuntimeError(
-                f"device_mesh has dims {device_mesh.ndim} but expcted to be 1"
+                f"device_mesh has dims {device_mesh.ndim} but expected to be 1"
                 " for input."
             )
         return _prepare_input_func(*args, **kwargs)
@@ -107,7 +107,7 @@ def _prepare_output_validate(
             device_mesh = args[1]
 
         assert device_mesh.ndim == 1, (
-            f"device_mesh has dims {device_mesh.ndim} but expcted to be 1 for"
+            f"device_mesh has dims {device_mesh.ndim} but expected to be 1 for"
             " output."
         )
         return _prepare_output_func(*args, **kwargs)
