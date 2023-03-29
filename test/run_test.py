@@ -2,7 +2,6 @@
 
 import argparse
 import copy
-import functools
 import glob
 import json
 import os
@@ -457,20 +456,9 @@ def run_test(
     return ret_code
 
 
-def test_cuda_primary_ctx(test_module, test_directory, options):
+def get_run_test_with_subprocess_fn(test_module, test_directory, options):
     return run_test(
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
-    )
-
-
-run_test_with_subprocess = functools.partial(
-    run_test, extra_unittest_args=["--subprocess"]
-)
-
-
-def get_run_test_with_subprocess_fn():
-    return lambda test_module, test_directory, options: run_test_with_subprocess(
-        test_module, test_directory, options
     )
 
 
@@ -878,7 +866,7 @@ def run_test_ops(test_module, test_directory, options):
 
 
 CUSTOM_HANDLERS = {
-    "test_cuda_primary_ctx": test_cuda_primary_ctx,
+    "test_cuda_primary_ctx": get_run_test_with_subprocess_fn(),
     "test_cuda_nvml_based_avail": get_run_test_with_subprocess_fn(),
     "test_cuda_trace": get_run_test_with_subprocess_fn(),
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
