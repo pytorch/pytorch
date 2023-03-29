@@ -514,6 +514,8 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             configs.extend([
                 # improve 1.832x for https://gist.github.com/shunting314/69b5055193148ade349ac7e58c85d2d9 
                 Config({"XBLOCK": 256}, num_warps=8, num_stages=1),
+                # improve 1.031x for https://gist.github.com/shunting314/339dd078cb9711536e4539dbb50b9032
+                Config({"XBLOCK": 512}, num_warps=2, num_stages=1),
             ])
         return cached_autotune(configs, meta=meta, filename=filename)
     if len(size_hints) == 2:
