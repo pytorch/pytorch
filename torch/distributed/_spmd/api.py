@@ -225,9 +225,9 @@ def _enable_compile():
 class _CompiledResult:
     gm: fx.GraphModule
     mod: nn.Module
-    opt: torch.optim.Optimizer
+    opt: Optional[torch.optim.Optimizer]
     named_states: Dict[str, torch.Tensor]
-    params_and_buffers: List[torch.Tensor]
+    params_and_buffers: Dict[str, torch.Tensor]
 
 
 def _compile(
@@ -325,6 +325,8 @@ def _compile(
     return _CompiledResult(gm, mod, opt, named_states, params_and_buffers)
 
 
+# Note that the Python convention of __dict__ requires the key to be str.
+# TODO: ensure the key is unique.
 COMPILED_OBJECT_KEY = "_compiled_obj"
 
 
