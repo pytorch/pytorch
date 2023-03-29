@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
-from typing import List, Optional, Union
+from typing import List, Optional, Union, TYPE_CHECKING
 
 import torch
 from torch.distributed.distributed_c10d import (
@@ -27,11 +27,13 @@ from torch.distributed.distributed_c10d import (
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._functional_collectives as funcol
 
-try:
-    from numpy.typing import ArrayLike
-    NDArrayType = ArrayLike
-except ImportError:
-    NDArrayType = "ArrayLike"
+# only import numpy when type checking
+if TYPE_CHECKING:
+    try:
+        from numpy.typing import ArrayLike
+        NDArrayType = ArrayLike
+    except ImportError:
+        NDArrayType = "ArrayLike"
 
 
 _global_device_mesh: Optional["DeviceMesh"] = None
