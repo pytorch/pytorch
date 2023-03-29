@@ -297,14 +297,11 @@ def align_inputs(model, inputs, static_input_idxs=()):
         out = model(new_inputs)
 
         snapshot = torch.cuda.memory._snapshot()
-        deallocs = set()
-        trace = (snapshot['device_traces'][0])
+        trace = snapshot['device_traces'][0]
         deallocs = set()
 
-        events = []
         for event in trace:
             if event["action"] in ("free_completed", "free_requested", "segment_free"):
-                events.append(event)
                 deallocs.add(event["addr"])
 
         assert not static_input_data_ptrs & deallocs, f"Static input data ptrs should not be deallocating {static_input_data_ptrs & deallocs}"
