@@ -129,6 +129,7 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
+    INDUCTOR_BENCH_SUITES=yes
     ;;
   pytorch-linux-focal-py3-clang7-asan)
     ANACONDA_PYTHON_VERSION=3.9
@@ -342,6 +343,7 @@ docker build \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "ONNX=${ONNX}" \
+       --build-arg "INDUCTOR_BENCH_SUITES={INDUCTOR_BENCH_SUITES}"\
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
