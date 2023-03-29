@@ -1512,7 +1512,11 @@ class CommonTemplate:
         t1[-1, -1] = 2
         t2[-1, -1] = 2
 
-        self.common(fn, (t1, t2), reference_in_float=False)
+        # self.common OOMs here because it copies inputs to check for mutations
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(t1, t2)
+        expect = torch.tensor(4, dtype=torch.int8, device=self.device)
+        self.assertEqual(actual, expect)
 
     def test_large_pointwise(self):
         if not _has_sufficient_memory(self.device, 2**32):
@@ -1530,6 +1534,40 @@ class CommonTemplate:
         if torch.device(self.device).type == "cuda":
             torch.cuda.empty_cache()
         self.assertTrue((actual == 2).all())
+
+    def test_large_offset_pointwise(self):
+        # Test 64-bit indexing is used when input views a tensor that can be
+        # indexed with 32-bit strides but the storage offset pushes it over
+        # INT_MAX
+        if not _has_sufficient_memory(self.device, 2**32):
+            raise unittest.SkipTest("insufficient memory")
+
+        def fn(a):
+            return a + 4
+
+        t = torch.ones(2**31, dtype=torch.int8, device=self.device)
+        t[2**30 :] = 0
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(t[2**30 :])
+        self.assertTrue((actual == 4).all())
+
+    def test_large_strided_reduction(self):
+        # Test 64-bit indexing is used when input numel is less than INT_MAX
+        # but stride calculations go above INT_MAX
+        if not _has_sufficient_memory(self.device, 2**31):
+            raise unittest.SkipTest("insufficient memory")
+
+        def fn(a):
+            return torch.max(a)
+
+        storage = torch.ones(2**31, dtype=torch.int8, device=self.device)
+        view = storage[::32]
+        view[-1] = 2
+
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(view)
+        expect = torch.tensor(2, dtype=torch.int8, device=self.device)
+        self.assertEqual(actual, expect)
 
     def test_softmax(self):
         def fn(a, b):
