@@ -4287,8 +4287,6 @@ def empty_like(
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
-    strides: Tuple[int, ...]
-
     if memory_format != torch.preserve_format:
         return torch.empty(
             a.shape,
