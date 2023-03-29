@@ -1056,7 +1056,7 @@ def _get_param_id_to_param_from_optim_input(
     # Assume the standard case of passing `model.parameters()` to the optimizer
     # if `optim_input` is not specified
     if optim_input is None:
-        return {pid: param for pid, param in enumerate(model.parameters())}
+        return dict(enumerate(model.parameters()))
     try:
         params = cast(List[nn.Parameter], list(optim_input))
     except TypeError as e:
@@ -1076,7 +1076,7 @@ def _get_param_id_to_param_from_optim_input(
     if not all_tensors and not all_dicts:
         raise TypeError("Optimizer input should be an iterable of Tensors or dicts")
     if all_tensors:
-        return {pid: param for pid, param in enumerate(params)}
+        return dict(enumerate(params))
     assert all_dicts
     param_id_to_param: List[nn.Parameter] = []
     for param_group in params:
@@ -1089,7 +1089,7 @@ def _get_param_id_to_param_from_optim_input(
             # Implicitly map `flat_param_id` (current length of the list) to
             # `param`
             param_id_to_param.append(param)
-    return {pid: param for pid, param in enumerate(param_id_to_param)}
+    return dict(enumerate(param_id_to_param))
 
 
 def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
@@ -1149,7 +1149,12 @@ def _get_param_key_to_param(
                     # use_orig_params case
                     assert len(param_to_fqns[param]) == 1
                     key = param_to_fqns[param][0]
-                key = clean_fqn_to_curr_fqn[key]
+                try:
+                    key = clean_fqn_to_curr_fqn[key]
+                except KeyError as e:
+                    raise KeyError(
+                        f"Can't find {key} from {list(clean_fqn_to_curr_fqn.keys())}."
+                    ) from e
                 param_key_to_param[key] = param
         else:
             for param in param_group["params"]:
@@ -1534,7 +1539,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         for idx, local_fqn in enumerate(flat_param._fqns):
             fqn = clean_tensor_name(prefix + local_fqn)
             if fqn in fqn_to_param_info:
-                assert fqn_to_param_info[fqn].flat_param == flat_param
+                assert fqn_to_param_info[fqn].flat_param is flat_param, fqn
             fqn_to_param_info[fqn] = fsdp_param_info
             fsdp_param_info.param_indices[fqn] = idx
 

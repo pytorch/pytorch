@@ -358,6 +358,9 @@ void upsample_avx_bilinear_uint8(
   }
 
   at::Tensor buffer_horiz, buffer_vert;
+  // Minor optimization: we can avoid allocating an extra buffer if we're performing
+  // horizontal-only or vertical-only interpolation, and if the tensor doesn't
+  // need unpacking
   if (need_horizontal && !(needs_unpacking && !need_vertical)) {
     auto c = (needs_unpacking) ? num_channels : 4;
     buffer_horiz = at::empty({c, yin, xout}, input.options());
@@ -367,10 +370,6 @@ void upsample_avx_bilinear_uint8(
     buffer_vert = at::empty({c, yout, xout}, input.options());
   }
 
-  // TODO: The unpack / pack operations create a copy of the original input and
-  // output tensor. There should be a way to avoid these copies by instead
-  // modifying the low-level kernels. Or maybe at least avoid copying the entire
-  // tensors and just copy part of them (line by line).
   for (const auto i : c10::irange(batch_size)) {
 
     at::Tensor unpacked_input = (needs_unpacking) ? input[i] : unpack_rgb(input[i]);
@@ -467,7 +466,7 @@ void ImagingResampleHorizontalConvolution8u4x(
   const auto mask_low = (num_channels == 3) ? mask_low_c3 : mask_low_c4;
   const auto mask_high = (num_channels == 3) ? mask_high_c3 : mask_high_c4;
 
-  const auto stride = num_channels * 1;  // num channels * sizeof(uint8)
+  const auto stride = num_channels * sizeof(uint8_t);
 
   TORCH_INTERNAL_ASSERT(stride == 3 || stride == 4);
 
@@ -787,7 +786,7 @@ void ImagingResampleHorizontalConvolution8u(
   // ids_min is the input offset index corresponding to out_x
   // ids_size is the interpolation size for out_x
 
-  const auto stride = num_channels * 1;  // num channels * sizeof(uint8)
+  const auto stride = num_channels * sizeof(uint8_t);
   const auto zero = _mm_setzero_si128();
 
   TORCH_INTERNAL_ASSERT(stride == 3 || stride == 4);
@@ -1064,7 +1063,7 @@ void ImagingResampleVerticalConvolution8u(
   // xsize = output width, also equals to input width
   // ids_size = interpolation size
   // ids_min = input y start index
-  const auto stride = num_channels * 1;  // num channels * sizeof(uint8)
+  const auto stride = num_channels * sizeof(uint8_t);
 
   TORCH_INTERNAL_ASSERT(stride == 3 || stride == 4);
 
