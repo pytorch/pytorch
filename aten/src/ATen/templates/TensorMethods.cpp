@@ -4,7 +4,7 @@
 namespace at {
 
 template <typename T>
-const T* TensorBase::data_ptr() const {
+T* TensorBase::data_ptr() const {
   return mutable_data_ptr<T>();
 }
 
