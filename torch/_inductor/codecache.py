@@ -739,7 +739,7 @@ class CppWrapperCodeCache:
                 spec.loader.exec_module(mod)
                 log.debug("Cpp wrapper done loading %s", filepath)
             cls.cache[key] = mod
-        
+
         return cls.cache[key]
 
 
