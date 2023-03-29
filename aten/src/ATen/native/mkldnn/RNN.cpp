@@ -226,7 +226,7 @@ static inline ideep::tensor get_mkldnn_tensor(
           tensor.scalar_type() == at::ScalarType::BFloat16 ||
           tensor.scalar_type() == at::ScalarType::Half,
       "get_mkldnn_tensor expects float or bfloat16 tensor input");
-  return {desc, tensor.data_ptr()};
+  return {desc, tensor.mutable_data_ptr()};
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,

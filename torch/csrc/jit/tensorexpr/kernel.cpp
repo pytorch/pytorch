@@ -2117,7 +2117,7 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
     }
   } else {
     for (auto i : c10::irange(nOutputs_)) {
-      args.emplace_back(stack_outputs[i].toTensor().data_ptr());
+      args.emplace_back(stack_outputs[i].toTensor().mutable_data_ptr());
     }
   }
 

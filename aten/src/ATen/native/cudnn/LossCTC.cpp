@@ -174,12 +174,12 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
       targets->data_ptr<int>(),
       target_lengths.data(),
       input_lengths.data(),
-      costs.data_ptr(),
+      costs.mutable_data_ptr(),
       grad_desc.desc(),
-      grad.data_ptr(),
+      grad.mutable_data_ptr(),
       algo,
       ctc_loss_desc.desc(),
-      workspace.data_ptr(),
+      workspace.mutable_data_ptr(),
       workspace_size));
   return std::make_tuple(costs, grad);
 }

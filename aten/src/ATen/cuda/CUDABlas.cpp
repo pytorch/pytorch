@@ -740,7 +740,7 @@ void gemm_and_bias(
       result_ptr,
       Cdesc.descriptor(),
       &heuristicResult.algo,
-      workspace.data_ptr(),
+      workspace.mutable_data_ptr(),
       workspaceSize,
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(

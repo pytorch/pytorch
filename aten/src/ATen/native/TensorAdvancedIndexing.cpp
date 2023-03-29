@@ -910,8 +910,8 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       for (const auto i : c10::irange(numel)) {
           auto self_i = index_data[i];
           TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-          auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
           auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+          auto self_data = static_cast<char*>(selfSlice.mutable_data_ptr()) + self_i * self_stride_bytes;
           iter.unsafe_replace_operand(0, self_data);
           iter.unsafe_replace_operand(1, self_data);
           iter.unsafe_replace_operand(2, source_data);
@@ -1008,8 +1008,8 @@ void index_reduce_func_impl(
       for (const auto i : c10::irange(numel)) {
         auto self_i = index_data[i];
         TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-        auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
         auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+        auto self_data = static_cast<char*>(selfSlice.mutable_data_ptr()) + self_i * self_stride_bytes;
         iter.unsafe_replace_operand(0, self_data);
         iter.unsafe_replace_operand(1, self_data);
         iter.unsafe_replace_operand(2, source_data);
@@ -1137,7 +1137,7 @@ Tensor & index_select_out_cpu_dim1_(
   const caffe2::TypeMeta dataType = self_contig.dtype();
   size_t item_bytesize = dataType.itemsize();
 
-  auto out = static_cast<char*>(result_contig.data_ptr());
+  auto out = static_cast<char*>(result_contig.mutable_data_ptr());
 
   auto src_base = static_cast<const char*>(self_contig.data_ptr());
 
@@ -1233,8 +1233,8 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
 
     auto selfSlice = self.select(dim, 0);
     auto resultSlice = result.select(dim, 0);
-    auto selfSlice_data = selfSlice.data_ptr();
     auto resultSlice_data = resultSlice.data_ptr();
+    auto selfSlice_data = selfSlice.mutable_data_ptr();
     auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
     auto self_dim_size = self.size(dim);

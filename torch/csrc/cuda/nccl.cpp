@@ -437,7 +437,7 @@ void broadcast(
         ")");
     ncclComm_t comm = comms[i];
     NCCL_CHECK(ncclBcast(
-        tensors[i].data_ptr(),
+        tensors[i].mutable_data_ptr(),
         numel,
         data_type,
         0,
@@ -483,7 +483,8 @@ void reduce(
     ncclComm_t comm = comms_ref[i];
     NCCL_CHECK(ncclReduce(
         inputs[i].data_ptr(),
-        static_cast<decltype(i)>(root) == i ? output.data_ptr() : nullptr,
+        static_cast<decltype(i)>(root) == i ? output.mutable_data_ptr()
+                                            : nullptr,
         count,
         data_type,
         to_nccl_red_op(op),
@@ -535,7 +536,7 @@ void all_reduce(
     ncclComm_t comm = comms_ref[i];
     NCCL_CHECK(ncclAllReduce(
         inputs[i].data_ptr(),
-        outputs[i].data_ptr(),
+        outputs[i].mutable_data_ptr(),
         count,
         data_type,
         to_nccl_red_op(op),
@@ -577,7 +578,7 @@ void reduce_scatter(
     ncclComm_t comm = comms_ref[i];
     NCCL_CHECK(ncclReduceScatter(
         inputs[i].data_ptr(),
-        outputs[i].data_ptr(),
+        outputs[i].mutable_data_ptr(),
         count,
         data_type,
         to_nccl_red_op(op),
@@ -619,7 +620,7 @@ void all_gather(
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclAllGather(
         inputs[i].data_ptr(),
-        outputs[i].data_ptr(),
+        outputs[i].mutable_data_ptr(),
         count,
         data_type,
         to_nccl_comm(comm),
@@ -629,7 +630,7 @@ void all_gather(
         inputs[i].data_ptr(),
         count,
         data_type,
-        outputs[i].data_ptr(),
+        outputs[i].mutable_data_ptr(),
         to_nccl_comm(comm),
         stream));
 #endif
@@ -654,8 +655,8 @@ void all2all_single_equal_split(
   auto type = to_nccl_data_type(input);
   size_t count = input.numel() / size;
   size_t rankdiff = input.nbytes() / size;
-  const auto* sendbuff = reinterpret_cast<char*>(input.data_ptr());
-  auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
+  const auto* sendbuff = reinterpret_cast<const char*>(input.data_ptr());
+  auto* recvbuff = reinterpret_cast<char*>(output.mutable_data_ptr());
   auto comm = to_nccl_comm(_comm);
 #if defined(USE_ROCM) && ROCM_VERSION >= 50000
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
@@ -683,7 +684,7 @@ void all2all_single_equal_split(
 }
 
 void all2all_single_unequal_split(
-    void* sendbuff,
+    const void* sendbuff,
     const size_t* sendcounts,
     const size_t* senddispls,
     void* recvbuff,
@@ -708,7 +709,7 @@ void all2all_single_unequal_split(
     // Avoid send/recv when message size is zero
     if (sendcounts[r] != 0) {
       NCCL_CHECK(ncclSend(
-          ((char*)sendbuff) + senddispls[r] * size,
+          ((const char*)sendbuff) + senddispls[r] * size,
           sendcounts[r],
           type,
           r,
@@ -747,7 +748,7 @@ void all2all(
 
   NCCL_CHECK(ncclGroupStart());
   for (const auto r : c10::irange(outputTensors.size())) {
-    at::Tensor& input = inputTensors[r];
+    const at::Tensor& input = inputTensors[r];
     at::Tensor& output = outputTensors[r];
     if (input.numel() != 0) {
       NCCL_CHECK(ncclSend(
@@ -760,7 +761,7 @@ void all2all(
     }
     if (output.numel() != 0) {
       NCCL_CHECK(ncclRecv(
-          output.data_ptr(),
+          output.mutable_data_ptr(),
           output.numel(),
           to_nccl_data_type(output),
           r,
@@ -811,7 +812,7 @@ void recv(
     (NCCL_MINOR >= 7)
   using namespace torch::cuda::nccl::detail;
   NCCL_CHECK(ncclRecv(
-      output.data_ptr(),
+      output.mutable_data_ptr(),
       output.numel(),
       to_nccl_data_type(output),
       src,
@@ -843,14 +844,14 @@ void gather(
 
   size_t count = inputs.numel();
   auto type = to_nccl_data_type(inputs);
-  const auto* sendbuff = reinterpret_cast<char*>(inputs.data_ptr());
+  const auto* sendbuff = reinterpret_cast<const char*>(inputs.data_ptr());
 
   NCCL_CHECK(ncclGroupStart());
 
   if (cur_rank == root) {
     for (const auto r : c10::irange(numranks)) {
       if (r != root) {
-        auto* recvbuff = reinterpret_cast<char*>(outputs[r].data_ptr());
+        auto* recvbuff = reinterpret_cast<char*>(outputs[r].mutable_data_ptr());
         NCCL_CHECK(ncclRecv(recvbuff, count, type, r, comm, stream));
       } else {
         // on its own rank, simply copy from the input
@@ -892,7 +893,8 @@ void scatter(
       if (r != root) {
         size_t send_count = inputs[r].numel();
         auto send_type = to_nccl_data_type(inputs[r]);
-        const auto* sendbuff = reinterpret_cast<char*>(inputs[r].data_ptr());
+        const auto* sendbuff =
+            reinterpret_cast<const char*>(inputs[r].data_ptr());
         NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
       } else {
         // on its own rank, simply copy it to the output
@@ -902,7 +904,7 @@ void scatter(
   } else {
     size_t recv_count = outputs.numel();
     auto recv_type = to_nccl_data_type(outputs);
-    auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
+    auto* recvbuff = reinterpret_cast<char*>(outputs.mutable_data_ptr());
     NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
   }
   NCCL_CHECK(ncclGroupEnd());
