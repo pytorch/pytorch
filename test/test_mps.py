@@ -9533,24 +9533,23 @@ class TestAdvancedIndexing(TestCaseMPS):
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
 
-    # FIXME: conditional indexing not working
-    # def test_jit_indexing(self, device="mps"):
-    #     def fn1(x):
-    #         x[x < 50] = 1.0
-    #         return x
+    def test_jit_indexing(self, device="mps"):
+        def fn1(x):
+            x[x < 50] = 1.0
+            return x
 
-    #     def fn2(x):
-    #         x[0:50] = 1.0
-    #         return x
+        def fn2(x):
+            x[0:50] = 1.0
+            return x
 
-    #     scripted_fn1 = torch.jit.script(fn1)
-    #     scripted_fn2 = torch.jit.script(fn2)
-    #     data = torch.arange(100, device=device, dtype=torch.float)
-    #     out = scripted_fn1(data.detach().clone())
-    #     ref = torch.tensor(np.concatenate((np.ones(50), np.arange(50, 100))), device=device, dtype=torch.float)
-    #     self.assertEqual(out, ref)
-    #     out = scripted_fn2(data.detach().clone())
-    #     self.assertEqual(out, ref)
+        scripted_fn1 = torch.jit.script(fn1)
+        scripted_fn2 = torch.jit.script(fn2)
+        data = torch.arange(100, device=device, dtype=torch.float)
+        out = scripted_fn1(data.detach().clone())
+        ref = torch.tensor(np.concatenate((np.ones(50), np.arange(50, 100))), device=device, dtype=torch.float)
+        self.assertEqual(out, ref)
+        out = scripted_fn2(data.detach().clone())
+        self.assertEqual(out, ref)
 
     def test_int_indices(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
