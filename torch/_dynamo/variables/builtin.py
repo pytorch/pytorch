@@ -26,7 +26,13 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
-from .lists import BaseListVariable, ListVariable, TupleVariable
+from .lists import (
+    BaseListVariable,
+    ListIteratorVariable,
+    ListVariable,
+    TupleIteratorVariable,
+    TupleVariable,
+)
 from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
 
@@ -739,7 +745,10 @@ class BuiltinVariable(VariableTracker):
         elif obj.has_unpack_var_sequence(tx):
             guards = set()
             if obj.source and not is_constant_source(obj.source):
-                guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+                if isinstance(obj, TupleIteratorVariable):
+                    guards.add(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
+                else:
+                    guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
