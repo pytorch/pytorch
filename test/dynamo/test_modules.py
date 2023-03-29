@@ -974,7 +974,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             module(input)
 
-        opt_test_static_module = torch._dynamo.optimize(cnt)(test_static_module)
+        opt_test_static_module = torch._dynamo.optimize(cnt, nopython=True)(
+            test_static_module
+        )
         opt_test_static_module()
 
         self.assertTrue(
@@ -1014,7 +1016,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             return module(input)  # fully materialized
 
-        opt_test_torch_static = torch._dynamo.optimize(cnt)(test_torch_static)
+        opt_test_torch_static = torch._dynamo.optimize(cnt, nopython=True)(
+            test_torch_static
+        )
         opt_test_torch_static()
         out = opt_test_torch_static()
 
