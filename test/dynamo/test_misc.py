@@ -5239,9 +5239,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             _ = compiled(new_shape_input)
 
             base_checker().check("Recompile Reasons").check("'forward'").check(
-                "tensor 'input' size mismatch at index 0. expected 2, actual 3"
+                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
             ).check(
-                "tensor 'input' size mismatch at index 0. expected 3, actual 4"
+                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
             ).run(
                 prof.report()
             )

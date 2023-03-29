@@ -1626,7 +1626,7 @@ class ShapeEnv:
         guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
         if guards:
             code = " and ".join(guards)
-            return eval(code, SYMPY_INTERP, dict(zip(arg_names, args)))
+            return eval(code, SYMPY_INTERP, {"G": dict(zip(arg_names, args))})
         return True
 
     def bind_symbols(self, placeholders, args):
