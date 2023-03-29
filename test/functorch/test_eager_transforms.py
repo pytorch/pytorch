@@ -39,7 +39,7 @@ from torch._functorch.make_functional import (
 )
 from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._functorch.utils import enable_single_level_autograd_function
 import torch.autograd.forward_ad as fwAD
 from torch.func import functional_call, stack_module_state, linearize
@@ -2142,6 +2142,16 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all outputs"):
             jacfwd(fn)(x)
 
+    @jacrev_and_jacfwd
+    def test_jac_with_non_tensor_args(self, device, jacapi):
+        def f(t, int_x):
+            return t + int_x
+
+        t = torch.randn(3, 3, device=device)
+
+        actual = jacapi(f)(t, 3)
+        expected = torch.autograd.functional.jacobian(partial(f, int_x=3), t)
+        self.assertEqual(actual, expected)
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
@@ -4439,7 +4449,7 @@ def forward(self, x_1):
 
 
 def construct_sum_pyop():
-    mysum = PyOperator("mysum")
+    mysum = HigherOrderOperator("mysum")
 
     @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
     def mysum_batch_rule(interpreter, x, dim):
@@ -4493,7 +4503,7 @@ def construct_sum_pyop():
 
 sum_pyop = construct_sum_pyop()
 
-class TestPyOperatorInteraction(TestCase):
+class TestHigherOrderOperatorInteraction(TestCase):
 
     def test_basic_sum(self, device):
         x = torch.randn(2, 3, 4, device=device)
@@ -4609,7 +4619,7 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(
-    TestPyOperatorInteraction,
+    TestHigherOrderOperatorInteraction,
     globals(),
     only_for=only_for,
 )

@@ -1072,7 +1072,6 @@ class TestOperators(TestCase):
         xfail('lu'),
         xfail('cumprod'),
         xfail('masked_fill'),
-        xfail('copysign'),
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
@@ -1139,7 +1138,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('view_as_complex'),
-        xfail('copysign'),
         xfail('cummax'),
         xfail('cummin'),
         xfail('fill'),
@@ -1555,6 +1553,7 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
         xfail('native_dropout_backward'),
         decorate('linalg.svd', decorator=skipIfRocm),  # https://github.com/pytorch/pytorch/issues/97256
+        decorate('svd', decorator=skipIfRocm),  # Flaky tensor-likes are not close error on ROCm, adjust tolerance?
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1947,7 +1946,7 @@ class TestOperators(TestCase):
     # Usually testing the composition of two transforms is sufficient to convince
     # ourselves that an operator is correctly implemented. For the following cases,
     # we want to be extra sure, so we send those through some three-transform tests:
-    # - autograd.Function. The mechanism is via PyDispatcher/PyOperator, not the
+    # - autograd.Function. The mechanism is via PyDispatcher/HigherOrderOperator, not the
     #   regular PyTorch dispatcher, so it's good to exercise more caution.
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_vmapvjpvmap', {

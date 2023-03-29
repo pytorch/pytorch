@@ -690,6 +690,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 assert name in self.f_builtins
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
 
+        if inst.argval == "AssertionError":
+            unimplemented("assert with non-string message")
+
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
             self.push(self.output.side_effects.load_global(variable, name))
@@ -1454,6 +1457,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable(False))
 
+    def LOAD_ASSERTION_ERROR(self, inst):
+        unimplemented("assert with non-string message")
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)
@@ -1906,8 +1912,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             f"torchdynamo done tracing {self.f_code.co_name} (RETURN_VALUE)",
         )
         self.output.compile_subgraph(
-            self, reason=GraphCompileReason("return_value", [self.frame_summary()]),
-            graph_break=False
+            self,
+            reason=GraphCompileReason("return_value", [self.frame_summary()]),
+            graph_break=False,
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 

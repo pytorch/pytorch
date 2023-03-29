@@ -423,8 +423,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
             if self.module_has_hooks(target, only_check_unsupported=True):
-                log.warning(
-                    "nn.Module hooks are not fully supported, they may be ignored"
+                torch._logging.warning_once(
+                    log, "nn.Module hooks are not fully supported, they may be ignored"
                 )
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
@@ -502,19 +502,21 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self, tx, *,
+        self,
+        tx,
+        *,
         reason: GraphCompileReason,
         partial_convert=False,
         # If True, we will count this compilation as a graph break for
         # reporting reasons
-        graph_break=True
+        graph_break=True,
     ):
         """
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
-        from .eval_frame import disable
         import torch._dynamo.symbolic_convert as symbolic_convert
+        from .eval_frame import disable
 
         user_stack = reason.user_stack
         frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
@@ -523,15 +525,17 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # formats this a little nicer, and presents a slightly more actionable
         # user code pointer
         if (
-            graph_break and
-            config.print_graph_breaks and
-            not symbolic_convert.explain and
-            graph_break_dup_warning_checker.add(frame_loc) and
-            log.isEnabledFor(logging.WARNING)
+            graph_break
+            and config.print_graph_breaks
+            and not symbolic_convert.explain
+            and graph_break_dup_warning_checker.add(frame_loc)
+            and log.isEnabledFor(logging.WARNING)
         ):
             user_stack_formatted = "".join(traceback.format_list(user_stack))
             log.warning(
-                "Graph break: %s from user code at:\n%s", reason.reason, user_stack_formatted
+                "Graph break: %s from user code at:\n%s",
+                reason.reason,
+                user_stack_formatted,
             )
 
         # Don't record graph_break counters if this is just a plain return
