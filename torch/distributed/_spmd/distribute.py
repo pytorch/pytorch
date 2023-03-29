@@ -23,7 +23,7 @@ from torch.distributed._tensor import (
 )
 from torch.distributed._tensor.dispatch import (
     _CURRENT_DECOMPOSITION_TABLE,
-    operator_dispatch
+    operator_dispatch,
 )
 from torch.distributed._tensor.redistribute import (
     _redistribute_with_local_tensor,
@@ -72,10 +72,14 @@ def _dispatch_with_local_tensors(
     op: torch._ops.OpOverload,
     local_args: Tuple[object, ...],
     kwargs: Optional[Dict[str, object]] = None,
-    specs: Optional[Dict[
-        torch.Tensor,
-        Tuple[torch.Size, DeviceMesh, Sequence[Placement], Sequence[Placement]],
-    ]] = None,
+    specs: Optional[
+        Dict[
+            torch.Tensor,
+            Tuple[
+                torch.Size, DeviceMesh, Sequence[Placement], Sequence[Placement]
+            ],
+        ]
+    ] = None,
 ) -> object:
     if kwargs is None:
         kwargs = {}
@@ -140,50 +144,67 @@ def _get_dtensor_dispatch_graph(
         else:
             return arg
 
-    # Args should be a list of objects post remapping.
-    args = tree_map(_remap_arg, node.args)
-    # kwargs in this set of tests are all constants
-    kwargs = cast(Dict[str, object], node.kwargs)
-
-    op_overload = cast(torch._ops.OpOverload, node.target)
-
-    # run dispatch once to get the real DTensor output.
     with torch.no_grad():
+        # Args should be a list of objects post remapping.
+        args = tree_map(_remap_arg, node.args)
+        # kwargs in this set of tests are all constants
+        kwargs = cast(Dict[str, object], node.kwargs)
+
+        op_overload = cast(torch._ops.OpOverload, node.target)
+
+        # run dispatch once to get the real DTensor output.
         out = operator_dispatch(
             op_overload,
             args,
             kwargs,  # kwargs in this set of tests are all constants
             DTensor._propagator,
-            DTensor._custom_dispatch_ops,
         )
         node_to_obj[node] = out
 
-    op_schema = DTensor._propagator.prepare_op_schema(op_overload, args, kwargs)
-    # get DTensor specs for inputs and outputs
-    output_sharding = DTensor._propagator.propagate_op_sharding(
-        op_overload,
-        op_schema,
-    )
+        op_schema = DTensor._propagator.prepare_op_schema(
+            op_overload, args, kwargs
+        )
+        # get DTensor specs for inputs and outputs
+        output_sharding = DTensor._propagator.propagate_op_sharding(
+            op_overload,
+            op_schema,
+        )
 
-    assert output_sharding.schema_suggestions is not None
-    target_schema = output_sharding.schema_suggestions[0]
-    redistribute = target_schema is not op_schema
+        assert output_sharding.schema_suggestions is not None
+        target_schema = output_sharding.schema_suggestions[0]
+        redistribute = target_schema is not op_schema
 
-    # TODO: this is broken when kwargs contains tensors
-    # or if a non-tensor kwarg was modified by the sharding propagation
-    # (in order to fix, need to port over pack_args_kwargs_with_local_tensor for kwargs as well)
-    updated_args_spec, unflattened_args = _update_specs_for_redistribute(
-        args, target_schema, redistribute
-    )
+        # TODO: this is broken when kwargs contains tensors
+        # or if a non-tensor kwarg was modified by the sharding propagation
+        # (in order to fix, need to port over pack_args_kwargs_with_local_tensor for kwargs as well)
+        updated_args_spec, unflattened_args = _update_specs_for_redistribute(
+            args, target_schema, redistribute
+        )
 
-    dispatch = partial(
-        _dispatch_with_local_tensors,
-        op_overload,
-        kwargs=kwargs,
-        specs=updated_args_spec,
-    )
+        dispatch = partial(
+            _dispatch_with_local_tensors,
+            op_overload,
+            kwargs=kwargs,
+            specs=updated_args_spec,
+        )
 
-    return make_fx(dispatch)(unflattened_args)
+        gm = make_fx(dispatch, _allow_non_fake_inputs=False)(unflattened_args)
+        # FIXME(@wanchaol, @mrshenli): the above seems to accidentally captured
+        # DeviceMesh tensor ops when handling inplace operators? The ``_to_copy`` is
+        # not connected to graph output. So, using DCE to get rid of it, but this
+        # doesn't look correct.
+        #
+        # The following operators appear in the captured graph, where the dtype is
+        # torch.int64.
+        #
+        # get_attr       _tensor_constant0  _tensor_constant0         ()
+        # call_function  transpose          aten.transpose.int        (_tensor_constant0, -1, 0)
+        # call_function  view               aten.view.default         (transpose, [-1, 2])
+        # call_function  view_1             aten.view.default         (view, [2])
+        # call_function  _to_copy           aten._to_copy.default     (view_1,)
+        gm.graph.eliminate_dead_code()
+
+        return gm
 
 
 def _build_dummy_add_graph(
@@ -219,8 +240,6 @@ def _build_dummy_add_graph(
         call_functions[0], node_to_obj
     )
 
-    traced_dispatch.graph.lint()
-
     # TODO(anj): This depends on the call function node -> actual DTensor output
     # mapping that we want to avoid for SPMD expansion
     return traced_dispatch, node_to_obj[call_functions[0]]
@@ -251,13 +270,16 @@ def _convert_output(
 
         traced_dispatch, result_obj = _build_dummy_add_graph(dt, node_to_obj)
 
-        wait = [n for n in traced_dispatch.graph.nodes if n.name == "wait_comm" or n.name == "wait_tensor"]
+        wait = [
+            n
+            for n in traced_dispatch.graph.nodes
+            if n.name == "wait_comm" or n.name == "wait_tensor"
+        ]
         add = [n for n in traced_dispatch.graph.nodes if n.name == "add"]
         assert len(wait) == 1 and len(add) == 1
 
         # remove add node and replace it with wait node
         add[0].replace_all_uses_with(wait[0])
-        traced_dispatch.graph.lint()
         traced_dispatch.graph.eliminate_dead_code()
         # also update the actual DTensor corresponding to the node
         # TODO(anj): We require mapping of the final DTensor output to the wait
@@ -305,7 +327,6 @@ def _rebuild_graph(
     gm: fx.GraphModule,
     node_replacements: Dict[torch.fx.Node, torch.fx.GraphModule],
 ) -> None:
-
     # replace nodes in local traced graph with DTensor's dispatch graph
     for node in gm.graph.nodes:
         if node not in node_replacements:
@@ -325,7 +346,6 @@ def _rebuild_graph(
         # insert DT's dispatch graph to traced local graph.
         with gm.graph.inserting_before(node):
             for dtn in traced_dispatch.graph.nodes:
-
                 if dtn.op == OP.PLACEHOLDER:
                     # do nothing, ignore placeholders, as it has already
                     # been prepared in value_remap
@@ -366,7 +386,6 @@ def _rebuild_graph(
                         dtn, lambda n: value_remap[n]
                     )
 
-    gm.graph.lint()
     gm.graph.eliminate_dead_code()
     gm.recompile()
 
@@ -429,7 +448,9 @@ def _convert_to_distributed(
 
             # our example inputs are local shards. Create DTensors from them.
             node_to_obj[node] = DTensor.from_local(
-                inps[i],
+                inps[
+                    i
+                ].clone(),  # use clone to avoid modifications from inplace ops
                 schemas[i].mesh,
                 schemas[i].placements,
                 # prevent running this collective in backwards pass
@@ -518,7 +539,6 @@ class _SPMD:
         gm: fx.GraphModule,
         inps: List[torch.Tensor],
     ) -> fx.GraphModule:
-
         with maybe_disable_fake_tensor_mode():
             return self._compile(training_phase, gm, original_inputs[0])
 
@@ -592,7 +612,6 @@ def distribute(
     *args: Tuple[object],
     **kwargs: Dict[str, object],
 ) -> nn.Module:
-
     flat_args, _ = tree_flatten(args)
     flat_kwargs, _ = tree_flatten(kwargs)
     input_set: Set[object] = set(flat_args + flat_kwargs)

@@ -754,7 +754,7 @@ def _check_inputs(tupled_inputs) -> bool:
                         'compute the numerical gradients correctly. You should call '
                         '.contiguous on the input before passing it to gradcheck.')
             any_input_requiring_grad = True
-            inp.retain_grad()
+
     if not any_input_requiring_grad:
         raise ValueError(
             'gradcheck expects at least one input tensor to require gradient, '

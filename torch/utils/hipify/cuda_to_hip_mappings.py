@@ -635,7 +635,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("cub/device/device_radix_sort.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
-        ("nvtx3/nvToolsExt.h", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
+        ("nvToolsExt.h", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
     ]
 )
 

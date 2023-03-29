@@ -713,9 +713,6 @@ cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
   "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
-if(USE_FLASH_ATTENTION)
-    ADD_DEFINITIONS(-DUSE_FLASH_ATTENTION)
-ENDIF()
 
 
 if(USE_FBGEMM)
@@ -811,7 +808,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-error=deprecated-declarations" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
@@ -857,19 +853,13 @@ if(NOT MSVC)
 
   append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
-  # These flags are not available in GCC-4.8.5. Set only when using clang.
-  # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
-  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
-    if(${USE_COLORIZE_OUTPUT})
-    endif()
-  endif()
+  append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
 
   if(${USE_COLORIZE_OUTPUT})
     append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
@@ -882,17 +872,13 @@ if(NOT MSVC)
     string(APPEND CMAKE_CXX_FLAGS " -faligned-new")
   endif()
   if(WERROR)
-    check_cxx_compiler_flag("-Werror" COMPILER_SUPPORT_WERROR)
+    append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
     if(NOT COMPILER_SUPPORT_WERROR)
       set(WERROR FALSE)
-    else()
-      string(APPEND CMAKE_CXX_FLAGS " -Werror")
     endif()
-  endif(WERROR)
-  if(NOT APPLE)
-    append_cxx_flag_if_supported("-Wno-unused-but-set-variable" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
   endif()
+  append_cxx_flag_if_supported("-Wno-unused-but-set-variable" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
   string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
@@ -1099,15 +1085,10 @@ endif()
 # https://cmake.org/pipermail/cmake/2016-May/063400.html
 if(BUILD_SHARED_LIBS)
   configure_file(
-      ${PROJECT_SOURCE_DIR}/cmake/Caffe2ConfigVersion.cmake.in
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
-      @ONLY)
-  configure_file(
       ${PROJECT_SOURCE_DIR}/cmake/Caffe2Config.cmake.in
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       @ONLY)
   install(FILES
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       DESTINATION share/cmake/Caffe2
       COMPONENT dev)
