@@ -1,6 +1,7 @@
 import dataclasses
 import dis
 import itertools
+import math
 import sys
 import types
 from typing import Any, Dict, List, Optional, Tuple
@@ -61,6 +62,9 @@ def create_instruction(name, arg=None, argval=_NotProvided, target=None):
     `argval` or `target`.
 
     Do not use for LOAD_GLOBAL - use create_load_global instead.
+
+    TODO: make `arg` kwarg-only: def create_instruction(name, *, arg=None, ...)
+    and update callsites
     """
     assert name != "LOAD_GLOBAL"
     cnt = (arg is not None) + (argval is not _NotProvided) + (target is not None)
@@ -467,9 +471,29 @@ HAS_FREE = set(dis.hasfree)
 HAS_CONST = set(dis.hasconst)
 
 
+def _equal(v1, v2):
+    # NOTE: it is possible for 2 const values to compare equal in Python
+    # but have different semantics. Corner cases are handled here.
+    if type(v1) != type(v2):
+        return False
+    if hasattr(v1, "__iter__") and hasattr(v2, "__iter__"):
+        if len(v1) != len(v2):
+            return False
+        for x1, x2 in zip(v1, v2):
+            if not _equal(x1, x2):
+                return False
+    else:
+        if v1 != v2:
+            return False
+        # case 0.0 == -0.0
+        if v1 == 0.0 and math.copysign(1, v1) != math.copysign(1, v2):
+            return False
+    return True
+
+
 def get_const_index(code_options, val):
     for i, v in enumerate(code_options["co_consts"]):
-        if type(val) is type(v) and val == v:
+        if _equal(val, v):
             return i
     return -1
 
