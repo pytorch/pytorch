@@ -1643,6 +1643,7 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
+        "//caffe2/proto:torch_cc_proto",
         "@kineto",
     ] + if_cuda([
         ":torch_distributed_cuda",

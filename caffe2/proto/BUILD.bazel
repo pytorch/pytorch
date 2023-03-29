@@ -25,6 +25,18 @@ proto_library(
 )
 
 cc_proto_library(
+    name = "torch_cc_proto",
+    visibility = ["//:__pkg__"],  # used in torch
+    deps = [":torch_proto"],
+)
+
+proto_library(
+    name = "torch_proto",
+    srcs = ["torch.proto"],
+    deps = [":caffe2_proto"],
+)
+
+cc_proto_library(
     name = "cc_proto",
     visibility = ["//:__pkg__"],
     deps = [":proto"],
@@ -38,7 +50,6 @@ proto_library(
         "metanet.proto",
         "predictor_consts.proto",
         "prof_dag.proto",
-        "torch.proto",
     ],
     deps = [":caffe2_proto"],
 )
