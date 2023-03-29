@@ -675,7 +675,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(ClosureVariable(name=inst.argval))
 
     def LOAD_CONST(self, inst):
-        self.push(ConstantVariable(value=inst.argval))
+        # For empty tuples, create empty TupleVariable
+        if isinstance(inst.argval, tuple) and not inst.argval:
+            self.push(TupleVariable([]))
+        else:
+            self.push(ConstantVariable(value=inst.argval))
 
     def get_global_source(self, name):
         if self.output.root_globals is self.f_globals:
