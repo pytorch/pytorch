@@ -49,6 +49,57 @@ def _prop__foreach_add(op_schema: OpSchema) -> OutputSharding:
         return OutputSharding(output_spec=self)
 
 
+@register_prop_rule(  # pyre-ignore
+    [
+        aten._foreach_add.Scalar,
+        aten._foreach_div.Scalar,
+        aten._foreach_mul.Scalar,
+        aten._foreach_sub.Scalar,
+    ]
+)
+def _prop__foreach_binop_scalar(op_schema: OpSchema) -> OutputSharding:
+    self, other = op_schema.args_schema
+    assert isinstance(self, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
+    assert not isinstance(other, list)
+    return OutputSharding(output_spec=self)
+
+
+@register_prop_rule(  # pyre-ignore
+    [
+        aten._foreach_addcdiv.Scalar,
+        aten._foreach_addcmul.Scalar,
+    ]
+)
+def _prop__foreach_addcop_scalar(op_schema: OpSchema):
+    self, tensor1, tensor2, scalar = op_schema.args_schema
+    if any([s != t1 or s != t2 for s, t1, t2 in zip(self, tensor1, tensor2)]):
+        # If DTensorSpec for the two operand do not match, suggest using
+        # self's DTensorSpec. This will trigger allreduce if other is partial
+        # and self is replicated.
+        return OutputSharding(
+            output_spec=None,
+            schema_suggestions=[
+                OpSchema(
+                    func_schema=op_schema.func_schema,
+                    args_schema=(self, self, self, scalar),
+                    kwargs_schema=op_schema.kwargs_schema,
+                    is_inplace=op_schema.is_inplace,
+                    is_out_variant=op_schema.is_out_variant,
+                )
+            ],
+        )
+    else:
+        return OutputSharding(output_spec=self)
+
+
+@register_prop_rule([aten._foreach_pow.ScalarAndTensor])
+def _prop__foreach_pow_scalar_and_tensor(op_schema: OpSchema):
+    scalar, exponent = op_schema.args_schema
+    return OutputSharding(output_spec=exponent)
+
+
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
 def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:
     input, normalized_shape, weight, bias, eps = op_schema.args_schema

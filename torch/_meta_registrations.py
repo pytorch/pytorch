@@ -1204,6 +1204,8 @@ def meta__foreach_unaop_(self):
 
 @register_meta(
     [
+        aten._foreach_neg.default,
+        aten._foreach_reciprocal.default,
         aten._foreach_sqrt.default,
     ]
 )
@@ -1247,7 +1249,12 @@ def meta__foreach_binop__list(self, other):
     _check_foreach_binop_tensor_lists(self, other)
 
 
-@register_meta([aten._foreach_mul.List])
+@register_meta(
+    [
+        aten._foreach_div.List,
+        aten._foreach_mul.List,
+    ]
+)
 def meta__foreach_binop_list(self, other):
     _check_foreach_binop_tensor_lists(self, other)
     return [torch.empty_like(s) for s in self]
@@ -1267,7 +1274,14 @@ def meta__foreach_binop__scalar(self, scalar):
     )
 
 
-@register_meta([aten._foreach_div.Scalar])
+@register_meta(
+    [
+        aten._foreach_add.Scalar,
+        aten._foreach_div.Scalar,
+        aten._foreach_mul.Scalar,
+        aten._foreach_sub.Scalar,
+    ]
+)
 def meta__foreach_binop_scalar(self, scalar):
     check(
         isinstance(self, List),
@@ -1297,10 +1311,33 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
     )
 
 
+@register_meta(
+    [
+        aten._foreach_addcdiv.Scalar,
+        aten._foreach_addcmul.Scalar,
+    ]
+)
+def meta__foreach_addcop_scalar(self, tensor1, tensor2, scalar=1):
+    assert all([isinstance(l, List) for l in [self, tensor1, tensor2]]), (
+        "All arguments of _foreach_addcmul_ must be List[Tensor], but got "
+        f"{type(self)}, {type(tensor1)}, and {type(tensor2)}"
+    )
+    check(
+        len(self) > 0,
+        lambda: "input tensor list must not be empty.",
+    )
+    check(
+        len(self) == len(tensor1) and len(self) == len(tensor2),
+        lambda: "All input tensor lists must have the same length",
+    )
+
+    return [torch.empty_like(s) for s in self]
+
+
 @register_meta([aten._foreach_pow.ScalarAndTensor])
 def meta__foreach_pow_scalar_and_tensor(self, exponent):
     check(isinstance(exponent, List), lambda: f"exponent must be a tensor list but got {type(exponent)}")
-    return exponent
+    return [torch.empty_like(e) for e in exponent]
 
 
 @register_meta([aten._int_mm])
