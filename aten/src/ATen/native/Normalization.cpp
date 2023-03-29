@@ -118,8 +118,8 @@ static inline bool is_contiguous(const Tensor& t) {
 //   `suggest_memory_format` of Contiguous.
 // See https://github.com/pytorch/pytorch/issues/63224 for details.
 static inline MemoryFormat suggest_memory_format_contig(const Tensor& t) {
-  return t.is_contiguous() ? 
-    at::MemoryFormat::Contiguous : (t.is_contiguous(at::MemoryFormat::ChannelsLast3d) ? 
+  return t.is_contiguous() ?
+    at::MemoryFormat::Contiguous : (t.is_contiguous(at::MemoryFormat::ChannelsLast3d) ?
     at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast);
 }
 
