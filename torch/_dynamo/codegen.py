@@ -13,12 +13,11 @@ from .bytecode_transformation import (
     create_instruction,
     create_load_global,
     create_rot_n,
-    get_const_index,
     Instruction,
 )
 from .exc import unimplemented
 from .source import AttrSource, GeneratorStateSource, Source
-from .utils import is_safe_constant, istype, rot_n_helper
+from .utils import is_safe_constant, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
@@ -218,15 +217,7 @@ class PyCodegen:
         assert is_safe_constant(value), f"unsafe constant {value}"
         return self._create_load_const(value)
 
-    @staticmethod
-    def maybe_upd_consts(code_options, value):
-        co_consts = code_options["co_consts"]
-        assert istype(co_consts, tuple)
-        if get_const_index(code_options, value) == -1:
-            code_options["co_consts"] = co_consts + (value,)
-
     def _create_load_const(self, value):
-        self.maybe_upd_consts(self.code_options, value)
         return create_instruction("LOAD_CONST", argval=value)
 
     create_load_output = _create_load_const
@@ -338,7 +329,6 @@ class PyCodegen:
         if sys.version_info >= (3, 11):
             output = create_call_function(nargs, push_null)
             assert output[-2].opname == "PRECALL"
-            self.maybe_upd_consts(self.code_options, kw_names)
             kw_names_inst = create_instruction("KW_NAMES", argval=kw_names)
             output.insert(-2, kw_names_inst)
             return output
