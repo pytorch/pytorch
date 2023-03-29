@@ -582,6 +582,8 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 tiny_config,
                 triton_config_reduction(size_hints, 64, 64),
                 triton_config_reduction(size_hints, 8, 512),
+                # improve 1.121x for https://gist.github.com/shunting314/6267da87c6524dab29a3e33f14ff91db
+                Config({"XBLOCK": 1, "RBLOCK": 4096}, num_warps=8, num_stages=1),
             ],
             meta=meta,
             filename=filename,
