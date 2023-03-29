@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import hashlib
+import os
 from itertools import count
 from typing import Any, Dict, List, Tuple
 
@@ -12,7 +13,7 @@ from sympy import Expr
 from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
-from ..codecache import code_hash, cpp_compile_command, get_code_path
+from ..codecache import code_hash, cpp_compile_command, cubin_cache_dir, get_code_path
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
@@ -23,14 +24,7 @@ from ..utils import (
     sympy_symbol,
 )
 from ..virtualized import V
-from .common import (
-    CodeGen,
-    DeferredLine,
-    DeferredLineBase,
-    IndentedBuffer,
-    Kernel,
-    PythonPrinter,
-)
+from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
 
 pexpr = PythonPrinter().doprint
 
@@ -64,6 +58,21 @@ def is_float(s: str):
     return True
 
 
+class KernelParamCache:
+    cache = dict()
+
+    def __init__(self):
+        self.prev_cache = None
+
+    def __enter__(self):
+        self.prev_cache = KernelParamCache.cache
+        KernelParamCache.cache = dict()
+
+    def __exit__(self, *args):
+        KernelParamCache.cache.clear()
+        KernelParamCache.cache = self.prev_cache
+
+
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
@@ -88,14 +97,24 @@ class MemoryPlanningState:
 class EnterCudaDeviceContextManagerLine:
     device_idx: int
 
-    def codegen(self, code: IndentedBuffer):
-        # Note _DeviceGuard has less overhead than device, but only accepts
-        # integers
-        code.writeline(f"with torch.cuda._DeviceGuard({self.device_idx}):")
+    def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
+        if V.graph.cpp_wrapper:
+            code.writeline("\n")
+            code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+        else:
+            # Note _DeviceGuard has less overhead than device, but only accepts
+            # integers
+            code.writeline(f"with torch.cuda._DeviceGuard({self.device_idx}):")
+            device_cm_stack.enter_context(code.indent())
+            code.writeline(
+                f"torch.cuda.set_device({self.device_idx}) # no-op to ensure context"
+            )
 
 
 class ExitCudaDeviceContextManagerLine:
-    pass
+    def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
+        if not V.graph.cpp_wrapper:
+            device_cm_stack.close()
 
 
 @dataclasses.dataclass
@@ -173,38 +192,6 @@ class ReuseLine(MemoryPlanningLine):
         )
 
 
-class DeferredKernelNameLine(DeferredLineBase):
-    """A line that contains mangled CUDA kernel name that will be filled in the second pass"""
-
-    def __init__(self, name, line):
-        super().__init__(line)
-        self.name = name
-
-    def __call__(self):
-        with open(f"{self.name}.mangled", "r") as f:
-            mangled_name = f.readline()
-            return self.line.replace("MANGLED_NAME", mangled_name)
-
-    def _new_line(self, line):
-        return DeferredKernelNameLine(self.name, line)
-
-
-class DeferredKernelParamLine(DeferredLineBase):
-    """A line that contains CUDA launch parameters that will be filled in the second pass"""
-
-    def __init__(self, name, line):
-        super().__init__(line)
-        self.name = name
-
-    def __call__(self):
-        with open(f"{self.name}.param", "r") as f:
-            params = f.readline()
-            return self.line.replace("LAUNCH_PARAMS", params)
-
-    def _new_line(self, line):
-        return DeferredKernelParamLine(self.name, line)
-
-
 class NullLine(MemoryPlanningLine):
     pass
 
@@ -260,6 +247,10 @@ class WrapperCodeGen(CodeGen):
                 import torch
                 import math
                 import random
+                import os
+                import tempfile
+                from torch._inductor.utils import maybe_profile
+
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
@@ -276,7 +267,7 @@ class WrapperCodeGen(CodeGen):
                 """
                 import triton
                 import triton.language as tl
-                from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
+                from torch._inductor.triton_heuristics import grid, start_graph, end_graph
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
@@ -384,14 +375,10 @@ class WrapperCodeGen(CodeGen):
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
                     line.codegen(self.wrapper_call)
-                elif isinstance(line, EnterCudaDeviceContextManagerLine):
-                    line.codegen(self.wrapper_call)
-                    device_cm_stack.enter_context(self.wrapper_call.indent())
-                    self.wrapper_call.writeline(
-                        f"torch.cuda.set_device({line.device_idx}) # no-op to ensure context"
-                    )
-                elif isinstance(line, ExitCudaDeviceContextManagerLine):
-                    device_cm_stack.close()
+                elif isinstance(line, EnterCudaDeviceContextManagerLine) or isinstance(
+                    line, ExitCudaDeviceContextManagerLine
+                ):
+                    line.codegen(self.wrapper_call, device_cm_stack)
                 else:
                     self.wrapper_call.writeline(line)
 
@@ -512,6 +499,9 @@ class WrapperCodeGen(CodeGen):
             )
 
             for name, value in V.graph.constants.items():
+                # all the constants are global variables, that's why we need
+                # these 'global var_name' lines
+                output.writeline(f"global {name}")
                 add_fake_input(
                     name, value.size(), value.stride(), value.device, value.dtype
                 )
@@ -552,6 +542,7 @@ class WrapperCodeGen(CodeGen):
                     "parser = argparse.ArgumentParser()",
                     'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
                     'parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")',  # noqa: B950, line too long
+                    'parser.add_argument("--profile", "-p", action="store_true", help="Whether to profile the compiled module")',  # noqa: B950, line too long
                     "args = parser.parse_args()",
                     "",
                     "if args.benchmark_kernels:",
@@ -563,7 +554,19 @@ class WrapperCodeGen(CodeGen):
                 )
             output.writeline("else:")
             with output.indent():
-                output.writeline("benchmark_compiled_module()")
+                output.writeline("with maybe_profile(args.profile) as p:")
+                with output.indent():
+                    output.writeline("benchmark_compiled_module()")
+                output.writeline("")
+                output.writeline("if p:")
+                with output.indent():
+                    output.writelines(
+                        [
+                            'path = f"{tempfile.gettempdir()}/compiled_module_profile.json"',
+                            "p.export_chrome_trace(path)",
+                            'print(f"Chrome trace for the profile is written to {path}")',
+                        ]
+                    )
 
     def define_kernel(self, name: str, kernel: str, metadata: str = None):
         metadata_comment = f"{metadata}\n" if metadata else ""
@@ -581,9 +584,7 @@ class WrapperCodeGen(CodeGen):
         stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(self, name, call_args, device_index=None):
-        self.writeline(
-            self.wrap_kernel_call(name, call_args),
-        )
+        self.writeline(self.wrap_kernel_call(name, call_args))
 
     def call_kernel(self, name: str, kernel: Kernel):
         tmp = IndentedBuffer()
@@ -714,7 +715,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
     """
 
     call_func_id = count()
-    decl_str = None
 
     def __init__(self):
         super().__init__()
@@ -778,18 +778,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
-        output_refs = self.get_output_refs()
-        if output_refs:
-            output_types = "std::vector<at::Tensor>"
-        else:
-            output_types = "void"
-
-        inputs_types = "std::vector<at::Tensor>"
-
-        CppWrapperCodeGen.decl_str = (
-            f"{output_types} {self.call_func_name()}({inputs_types} args)"
+        self.prefix.splice(
+            f"""std::vector<at::Tensor> {self.call_func_name()}(const std::vector<at::Tensor>& args) {{"""
         )
-        self.prefix.splice(f"{CppWrapperCodeGen.decl_str} {{")
         with self.wrapper_call.indent():
             if inputs_len != 0:
                 inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
@@ -985,8 +976,6 @@ class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
             #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
             #include <c10/cuda/CUDAGuard.h>
 
-            #include <fstream>
-
             CUfunction loadKernel(const std::string &filePath, const std::string &funcName) {
                 CUmodule mod;
                 CUfunction func;
@@ -1004,16 +993,15 @@ class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
                     int sharedMemBytes,
                     void* args[],
                     int device_index) {
-                at::cuda::CUDAGuard device_guard(device_index);
                 AT_CUDA_DRIVER_CHECK(cuLaunchKernel(
                     func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
-                    at::cuda::getCurrentCUDAStream(), args, nullptr));
+                    at::cuda::getCurrentCUDAStream(device_index), args, nullptr));
             }
             """
         )
 
     def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
-        self.kernels[kernel] = name
+        pass
 
     def generate(self):
         self.prefix.writeline("\n")
@@ -1023,11 +1011,20 @@ class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
         return super().generate()
 
     def generate_load_kernel(self, name: str = None):
+        params = KernelParamCache.cache.get(name, None)
+        assert (
+            params is not None
+        ), "cuda kernel parameters should already exist at this moment"
+        mangled_name = params.get("mangled_name", None)
+        assert mangled_name is not None, "missing mangled_name"
+        cubin_path = os.path.join(cubin_cache_dir(), f"{name}.cubin")
+        assert os.path.exists(
+            cubin_path
+        ), "cubin file should already exist at this moment"
+
         self.writeline(f"if ({name} == nullptr) {{")
         self.writeline(
-            DeferredKernelNameLine(
-                name, f"""     {name} = loadKernel("{name}.cubin", "MANGLED_NAME");"""
-            )
+            f"""     {name} = loadKernel("{cubin_path}", "{mangled_name}");"""
         )
         self.writeline("}")
 
@@ -1050,67 +1047,22 @@ class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
         return ", ".join(new_args)
 
     def generate_kernel_call(self, name, call_args, device_index):
+        params = KernelParamCache.cache.get(name, None)
+        assert (
+            params is not None
+        ), "cuda kernel parameters should already exist at this moment"
+        grid_x = params.get("grid_x", None)
+        grid_y = params.get("grid_y", None)
+        grid_z = params.get("grid_z", None)
+        num_warps = params.get("num_warps", None)
+        shared_mem = params.get("shared_mem", None)
+
         self.generate_load_kernel(name)
+
         call_args = self.generate_args_decl(call_args)
-        self.writeline(
-            f"void* kernel_args_{self.kernel_callsite_id}[] = {{{call_args}}};"
-        )
-        self.writeline(
-            DeferredKernelParamLine(
-                name,
-                f"launchKernel({name}, LAUNCH_PARAMS, kernel_args_{self.kernel_callsite_id}, {device_index});",
-            )
-        )
+        args_name = f"kernel_args_{self.kernel_callsite_id}"
         self.kernel_callsite_id += 1
-
-
-class TwoPassAotWrapperCodeGen(WrapperCodeGen):
-    """
-    When performing AOT compilation for the CUDA backend, we need to maintain
-    two sets of wrapper code. WrapperCodeGen is still needed to generate the
-    Python wrapper code which will be executed to perform Triton compilaiton
-    and autotuning. CudaAotWrapperCodeGen generates C++ version wrapper code
-    which calls CUDA kernels produced from autotuning.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.cpp_wrapper = CudaAotWrapperCodeGen()
-
-    def generate(self):
-        from ..codecache import PyCodeCache
-
-        # Generate and run the python wrapper first
-        python_wrapper_code, linemap = super().generate()
-        if config.debug:
-            print("/* AOT-Inductor generated first-pass python wrapper */")
-            print(python_wrapper_code)
-            print("Running the generated python wrapper")
-        mod = PyCodeCache.load(python_wrapper_code, linemap=linemap)
-        mod.benchmark_compiled_module()
-
-        # Generate the cpp wrapper
-        return self.cpp_wrapper.generate()
-
-    # For actions happen before calling .generate(), we need to record them
-    # for both WrapperCodeGen
-    def generate_kernel_call(self, name, call_args, device_index):
-        # The Triton codegen does not call generate_kernel_call.
-        # Could use some refactoring here.
-        self.cpp_wrapper.generate_kernel_call(name, call_args, device_index)
-
-    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
-        self.cpp_wrapper.define_kernel(name, kernel)
-        return super().define_kernel(name, kernel)
-
-    def codegen_allocation(self, buffer):
-        self.cpp_wrapper.codegen_allocation(buffer)
-        return super().codegen_allocation(buffer)
-
-    def codegen_free(self, buffer):
-        self.cpp_wrapper.codegen_free(buffer)
-        return super().codegen_free(buffer)
-
-    def codegen_inplace_reuse(self, input_buffer, output_buffer):
-        self.cpp_wrapper.codegen_inplace_reuse(input_buffer, output_buffer)
-        return super().codegen_inplace_reuse(input_buffer, output_buffer)
+        self.writeline(f"void* {args_name}[] = {{{call_args}}};")
+        self.writeline(
+            f"launchKernel({name}, {grid_x}, {grid_y}, {grid_z}, {num_warps}, {shared_mem}, {args_name}, {device_index});"
+        )

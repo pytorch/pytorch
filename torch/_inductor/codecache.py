@@ -74,6 +74,13 @@ def cache_dir():
     return cache_dir
 
 
+@functools.lru_cache(None)
+def cubin_cache_dir():
+    cubin_dir = os.path.join(cache_dir(), "cubin")
+    os.makedirs(cubin_dir, exist_ok=True)
+    return cubin_dir
+
+
 class PersistentCache:
     def __init__(self):
         self.local_cache_path = os.path.join(cache_dir(), "local_cache")
@@ -482,12 +489,12 @@ def get_include_and_linking_paths(
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
-        libs = ["c10", "torch", "torch_python"]
+        libs = ["c10", "torch", "torch_cpu", "torch_python"]
         if cuda:
-            libs += ["torch_cuda", "cuda"]
+            libs += ["c10_cuda", "cuda", "torch_cuda"]
             ipaths += [f"{cpp_extension._TORCH_PATH}/../aten/src/"]
         else:
-            libs += ["torch_cpu", "gomp"]
+            libs += ["gomp"]
             macros = vec_isa.build_macro()
             if macros:
                 macros = f"-D{macros}"
@@ -554,8 +561,6 @@ class AotCodeCache:
 
     @classmethod
     def compile(cls, source_code, cuda):
-        from .codegen.wrapper import CppWrapperCodeGen
-
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
         key, input_path = write(
@@ -571,17 +576,7 @@ class AotCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_so = (
-                    os.path.join(os.getcwd(), f"{config.aot_codegen_output_prefix}.so")
-                    if config.aot_codegen_output_prefix
-                    else f"{input_path[:-3]}.so"
-                )
-
-                output_header = f"{output_so[:-3]}.h"
-                with open(output_header, "w") as header_file:
-                    header_file.writelines("#include <torch/torch.h>\n\n")
-                    header_file.writelines(f"{CppWrapperCodeGen.decl_str};\n")
-
+                output_so = f"{input_path[:-4]}.so"
                 if not os.path.exists(output_so):
                     cmd = cpp_compile_command(
                         input=input_path,
@@ -595,6 +590,7 @@ class AotCodeCache:
                         raise exc.CppCompileError(cmd, e.output) from e
 
                 cls.cache[key] = output_so
+
         return cls.cache[key]
 
 
@@ -677,7 +673,8 @@ class PyCodeCache:
                 exec(code, mod.__dict__, mod.__dict__)
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)
-                cls.linemaps[path] = linemap
+                # unzip into separate lines/nodes lists
+                cls.linemaps[path] = list(zip(*linemap))
 
         return cls.cache[key]
 
@@ -687,11 +684,11 @@ class PyCodeCache:
         if path not in cls.linemaps:
             return None
         # [(starting_line, <fx node>), ...]
-        linemap = cls.linemaps[path]
-        p = bisect_right(linemap, lineno, key=lambda x: x[0])
+        lines, nodes = cls.linemaps[path]
+        p = bisect_right(lines, lineno)
         if p == 0:
             return None
-        _, entry = linemap[p - 1]
+        entry = nodes[p - 1]
         if not entry:
             return None
 

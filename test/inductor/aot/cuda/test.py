@@ -1,9 +1,8 @@
+import shutil
+
 import torch
 import torch._dynamo
 import torch._inductor
-import torch._inductor.config
-
-torch._inductor.config.aot_codegen_output_prefix = "aot_inductor_output"
 
 
 class Net(torch.nn.Module):
@@ -12,14 +11,12 @@ class Net(torch.nn.Module):
         self.weight = torch.ones((32, 64), device="cuda")
 
     def forward(self, x):
-        # x = torch.relu(x + self.weight)
-        x = x + self.weight
+        x = torch.relu(x + self.weight)
         return x
 
 
 inp = torch.randn((32, 64), device="cuda")
-module, _ = torch._dynamo.export(Net().cuda(), inp)
-module.graph.print_tabular()
 
-so_path = torch._inductor.aot_compile(module, [inp])
-print(so_path)
+module, _ = torch._dynamo.export(Net().cuda(), inp)
+lib_path = torch._inductor.aot_compile(module, [inp])
+shutil.copy(lib_path, "aot_inductor_output.so")

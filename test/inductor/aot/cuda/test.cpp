@@ -1,7 +1,10 @@
 //#include <gtest/gtest.h>
 #include <iostream>
+#include <vector>
 
-#include "build/aot_inductor_output.h"
+#include <torch/torch.h>
+
+extern std::vector<at::Tensor> aot_inductor_entry(const std::vector<at::Tensor>& args);
 
 /*
 class Net(torch.nn.Module):
@@ -18,24 +21,23 @@ struct Net : torch::nn::Module {
     weight = register_parameter("weight", torch::ones({32, 64}, at::TensorOptions(at::kCUDA).dtype(at::ScalarType::Float)));
   }
   torch::Tensor forward(torch::Tensor input) {
-    //return torch::relu(input + weight);
-    return input + weight;
+    return torch::relu(input + weight);
   }
   torch::Tensor weight;
 };
 
 int main() {
-    torch::Tensor x = at::randn({32, 64}, at::device(at::kCUDA).dtype(at::kFloat));
-    //torch::Tensor x = at::randn({32, 64}, at::dtype(at::kFloat).device(at::kCUDA));
+    torch::Tensor x = at::randn({32, 64}, at::dtype(at::kFloat).device(at::kCUDA));
     Net net;
     torch::Tensor results_ref = net.forward(x);
 
     // TODO: we need to provide an API to concatenate args and weights
-    std::vector<torch::Tensor> inputs = {x};
+    std::vector<torch::Tensor> inputs;
 
     for (const auto& pair : net.named_parameters()) {
       inputs.push_back(pair.value());
     }
+    inputs.push_back(x);
     auto results_opt = aot_inductor_entry(inputs);
 
     assert(torch::allclose(results_ref, results_opt[0]));

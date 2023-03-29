@@ -15,10 +15,11 @@ from typing import List
 import torch
 from torch._dynamo.utils import dynamo_timed
 
-from .. import config
-from ..codecache import cache_dir
-from ..ir import ReductionHint, TileHint
-from ..utils import (
+from . import config
+from .codecache import cache_dir, cubin_cache_dir
+from .codegen.wrapper import KernelParamCache
+from .ir import ReductionHint, TileHint
+from .utils import (
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -28,11 +29,6 @@ from ..utils import (
     next_power_of_2,
 )
 
-from ..virtualized import V
-from .conv_perf_model import (
-    early_config_prune as conv_early_config_prune,
-    estimate_conv_time,
-)
 
 log = logging.getLogger(__name__)
 
@@ -105,6 +101,7 @@ class CachingAutotuner(KernelInterface):
                 self.fn,
                 **compile_meta,
             )
+            binary._init_handles()
 
         call_args = [
             arg
@@ -138,12 +135,10 @@ class CachingAutotuner(KernelInterface):
 
         launcher = scope["launcher"]
         launcher.config = cfg
-
-        binary._init_handles()
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
-        if getattr(V.graph, "aot_mode", False):
+        if config.triton.store_cubin:
             launcher.kernel_name = self.fn.__name__
             launcher.bin = binary
 
@@ -168,7 +163,7 @@ class CachingAutotuner(KernelInterface):
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        from ..compile_fx import clone_preserve_strides
+        from .compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
@@ -194,6 +189,38 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
 
+    def save_cuda_kernel(self, grid, stream, launcher):
+        # Make sure kernel_name is enough for distiguishing kernels
+        assert config.triton.unique_kernel_names
+
+        if callable(grid):
+            grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
+        else:
+            grid_x, grid_y, grid_z = grid
+
+        kernel_name = launcher.kernel_name
+        cubin_path = os.path.join(cubin_cache_dir(), f"{kernel_name}.cubin")
+        with open(cubin_path, "wb") as f:
+            f.write(launcher.bin.asm["cubin"])
+
+        params = {
+            "mangled_name": launcher.bin.metadata["name"],
+            "grid_x": grid_x,
+            "grid_y": grid_y,
+            "grid_z": grid_z,
+            "num_warps": launcher.bin.num_warps,
+            "shared_mem": launcher.bin.shared,
+            "stream": stream,
+        }
+        with self.lock:
+            if KernelParamCache.cache.get(kernel_name, None):
+                assert (
+                    KernelParamCache.cache[kernel_name].get("mangled_name", None)
+                    == launcher.bin.metadata["name"]
+                )
+            else:
+                KernelParamCache.cache[kernel_name] = params
+
     def run(self, *args, grid, stream):
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
@@ -201,23 +228,10 @@ class CachingAutotuner(KernelInterface):
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid)
 
+        if config.triton.store_cubin:
+            self.save_cuda_kernel(grid, stream, self.launchers[0])
+
         (launcher,) = self.launchers
-
-        if getattr(V.graph, "aot_mode", False):
-            if callable(grid):
-                grid_0, grid_1, grid_2 = grid(launcher.config.kwargs)
-            else:
-                grid_0, grid_1, grid_2 = grid
-
-            with open(f"{launcher.kernel_name}.mangled", "w") as f:
-                f.write(launcher.bin.metadata["name"])
-            with open(f"{launcher.kernel_name}.param", "w") as f:
-                f.write(
-                    f"{grid_0}, {grid_1}, {grid_2}, {launcher.bin.num_warps}, {launcher.bin.shared}"
-                )
-            with open(f"{launcher.kernel_name}.cubin", "wb") as f:
-                f.write(launcher.bin.asm["cubin"])
-
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
@@ -650,89 +664,6 @@ def template(num_stages, num_warps, meta, filename=None):
     return cached_autotune(
         [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta
     )
-
-
-def conv_heuristics():
-    configs = [
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=2
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 128}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        ),
-        # triton.Config(
-        #     {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        # ),
-    ]
-    key = [
-        "BATCH",
-        "IN_C",
-        "IN_H",
-        "IN_W",
-        "KERNEL_N",
-        "KERNEL_H",
-        "KERNEL_W",
-        "OUT_H",
-        "OUT_W",
-        # parameters of conv
-        "stride_h",
-        "stride_w",
-        "padding_h",
-        "padding_w",
-        "dilation_h",
-        "dilation_w",
-        "output_padding_h",
-        "output_padding_w",
-        "groups",
-    ]
-    prune_configs_by = {
-        "early_config_prune": conv_early_config_prune,
-        "perf_model": estimate_conv_time,
-        "top_k": 10,
-    }
-    return triton.autotune(configs, key, prune_configs_by=prune_configs_by)
 
 
 def grid(xnumel, ynumel=None, znumel=None):
