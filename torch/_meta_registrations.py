@@ -1189,6 +1189,15 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
+@register_meta([aten._foreach_add_.List])
+def meta__foreach_add_(self, other, alpha):
+    assert isinstance(self, List) and isinstance(other, List), (
+        "first two arguments of _foreach_add_ must be List[Tensor], but got "
+        f"{type(self)} and {type(other)}"
+    )
+    check(len(self) == len(other), lambda: "self and other must match in length")
+
+
 @register_meta([aten._int_mm])
 @out_wrapper()
 def meta__int_mm(a, b):

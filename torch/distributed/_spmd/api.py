@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
 from copy import copy
 from functools import wraps, partial
+from re import search
 from typing import (
     Any,
     Callable,
@@ -25,6 +26,7 @@ from torch.distributed._spmd.distribute import (
     Schema,
 )
 from torch.distributed._spmd.distributed_graph import DistributedGraph
+from torch.distributed._spmd.graph_utils import OP
 from torch.distributed._tensor import (
     DeviceMesh,
     Placement,
@@ -204,6 +206,70 @@ def _rematerialize_optimizer(
         opt.state.update(orig_states)
 
 
+aten = torch.ops.aten  # pyre-ignore
+
+FOREACH_OP_MAP = {
+    aten._foreach_add_.List: aten._foreach_add.List,
+}
+
+
+def getitem(l, i):
+    return l[i]
+
+
+def _functionalize_and_reinplace_foreach_ops(gm: fx.GraphModule) -> fx.GraphModule:
+    # inplace foreach ops been replaced
+    inplace_updated: Dict[fx.Node, fx.Node] = {}
+    # skip newly inserted nodes
+    skip_nodes: Set[fx.Node] = set()
+
+    for node in gm.graph.nodes:
+        if node in skip_nodes:
+            continue
+
+        flat_args, spec = pytree.tree_flatten(node.args)
+        updated_args = [inplace_updated.get(a) or a for a in flat_args]
+        new_args = pytree.tree_unflatten(updated_args, spec)
+
+        # If we got new arg, it means this node consumes inplace results.
+        # Replace this node with a new one that uses functionalized outputs.
+        if new_args != node.args:
+            with gm.graph.inserting_after(node):
+                new_node = gm.graph.create_node(node.op, node.target, new_args, node.kwargs, node.name, node.type)
+                node.replace_all_uses_with(new_node)
+            gm.graph.erase_node(node)
+            continue
+
+        # Only functionalize aten._foreach_* ops.
+        if node.op == OP.CALL_FUNCTION and node.target in FOREACH_OP_MAP:
+            with gm.graph.inserting_after(node):
+                # N.B.: inplace foreach does not return anything, so its output
+                # is not connected to any subsequent nodes anyway. It's safe to
+                # create a out of place version and remove the inplace one.
+                new_node = gm.graph.call_function(FOREACH_OP_MAP[node.target], args=node.args, kwargs=node.kwargs)
+                getitems: Dict[fx.Node, fx.Node] = {}
+                # need another inserting_after, otherwise new ones are always
+                # inserted immediately after ``node``
+                with gm.graph.inserting_after(new_node):
+                    # use getitem to retrieve individual tensors
+                    for i, a in enumerate(node.args[0]):
+                        getitems[a] = gm.graph.call_function(getitem, args=(new_node, i))
+                skip_nodes.add(new_node)
+
+            # Copy output of place foreach results back to its first arguments,
+            # so that the graph will still update parameter inplace.
+            # FIXME(@mrshenli): we need inductor to optimize away this copy.
+            for orig, updated in getitems.items():
+                with gm.graph.inserting_after(updated):
+                    copy_node = gm.graph.call_function(aten.copy_, args=(orig, updated))
+                    skip_nodes.add(copy_node)
+                    inplace_updated[orig] = copy_node
+
+            gm.graph.erase_node(node)
+
+    return gm
+
+
 @contextmanager
 def _enable_compile():
     # The return value of torch._utils.is_compiling changes optimizer behavior.
@@ -314,6 +380,15 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
                     _allow_non_fake_inputs=False,
                 )(args, kwargs, named_states, params_and_buffers)
 
+            # FIXME(@mrshenli): functionalization does not work for our use case
+            # yet. I so implemented a mini-functionalization just for foreach
+            # ops. Remove this when the following issue is addressed.
+            # Issue: https://github.com/pytorch/pytorch/issues/97852
+            gm = _functionalize_and_reinplace_foreach_ops(gm)
+
+            if torch.distributed.get_rank():
+                gm.graph.print_tabular()
+
             # 4. Use DTensor to insert collectives
             gm, name_to_spec = _dtensor_expand(
                 gm, args, kwargs, named_states, params_and_buffers
@@ -323,6 +398,9 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
             if module_override:
                 for _, override in module_override.items():
                     gm = override.transform(gm, name_to_spec)
+
+            if torch.distributed.get_rank():
+                gm.graph.print_tabular()
 
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been
