@@ -264,6 +264,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fill_",
     "exp",
     "exp2",
+    "expm1",
     "nonzero",
     "mean",
     "std_mean",
@@ -550,6 +551,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # _nested_tensor_size() should never actually be called with requires_grad=True tensor
     "_nested_tensor_size",
     "_nested_tensor_strides",
+    "_nested_tensor_storage_offsets",
     # Functional collectives keep an internal ref through the Work object
     "all_reduce",
     "all_gather_into_tensor",

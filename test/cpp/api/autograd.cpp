@@ -254,6 +254,28 @@ TEST(AutogradAPITests, AnomalyMode) {
   double_backward_produce_nan(true);
 }
 
+TEST(CustomAutogradTest, CustomFunctionReturnInputAsIsAndSavesIt) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(
+        AutogradContext* ctx,
+        Variable var1,
+        Variable var2) {
+      ctx->save_for_backward({var1, var2});
+      return var1 * var2, var1;
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      return {};
+    }
+  };
+
+  Variable x = torch::randn({5, 5}, torch::requires_grad());
+  Variable y = torch::randn({5, 5}, torch::requires_grad());
+  MyFunction::apply(x, y);
+}
+
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(

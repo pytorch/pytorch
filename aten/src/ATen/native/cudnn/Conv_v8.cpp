@@ -45,7 +45,7 @@ namespace at { namespace native {
 namespace {
 
 // TODO: remove duplicate code in Conv_v7.cpp
-constexpr size_t operator "" _TiB(unsigned long long n) {
+constexpr int64_t operator "" _TiB(unsigned long long n) {
   return size_t(n) << 40;
 }
 
@@ -323,12 +323,12 @@ auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const Tenso
   }
 }
 
-size_t get_available_workspace() {
+int64_t get_available_workspace() {
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   size_t max_block_size = 0;
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
-  return max_block_size;
+  return static_cast<int64_t>(max_block_size);
 }
 
 static nlohmann::json errata_json_handle;
@@ -347,10 +347,10 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
     return plan_errata_exception(handle, plan.getTag());
   };
   auto plans = generator.cudnnGetPlan(handle, opGraph, initial_predicate_function);
-  size_t max_block_size = get_available_workspace();
-  size_t max_workspace_size = 0u;
+  int64_t max_block_size = get_available_workspace();
+  int64_t max_workspace_size = 0;
   std::for_each(plans.begin(), plans.end(), [&] (cudnn_frontend::ExecutionPlan& plan) {
-    size_t curr_workspace_size = plan.getWorkspaceSize();
+    int64_t curr_workspace_size = plan.getWorkspaceSize();
     if (curr_workspace_size <= max_block_size) {
       if (curr_workspace_size > max_workspace_size) {
         max_workspace_size = plan.getWorkspaceSize();
@@ -373,7 +373,7 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
   if (remove_invalid) {
     cudnn_frontend::executionPlans_t new_valid_plans;
     for (auto &plan : valid_plans) {
-      if (static_cast<size_t>(plan.getWorkspaceSize()) <= max_workspace_size) {
+      if (plan.getWorkspaceSize() <= max_workspace_size) {
         new_valid_plans.emplace_back(std::move(plan));
       }
     }
