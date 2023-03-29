@@ -265,5 +265,26 @@ class TestMakeFx(MultiThreadedTestCase):
         self.assertEqual("aten::all_reduce", nodes[1].target.name())
         self.assertEqual("aten::wait_tensor", nodes[2].target.name())
 
+        mesh = dt.DeviceMesh("cpu", torch.arange(self.world_size))
+
+        def allred_mesh(input):
+            return ft_c.all_reduce(input, "sum", mesh) + 1
+
+        mesh_graph = make_fx(allred_mesh)(torch.rand(4))
+        nodes = list(mesh_graph.graph.nodes)
+        # no getattr should appear in the graph
+        for node in nodes:
+            self.assertNotEqual("getattr", str(node.op))
+
+        def allred_mesh_dim(input):
+            return ft_c.all_reduce(input, "sum", (mesh, 0)) + 1
+
+        mesh_dim_graph = make_fx(allred_mesh_dim)(torch.rand(4))
+        # no getattr should appear in the graph
+        nodes = list(mesh_dim_graph.graph.nodes)
+        for node in nodes:
+            self.assertNotEqual("getattr", str(node.op))
+
+
 if __name__ == "__main__":
     run_tests()
