@@ -102,7 +102,8 @@ def is_fbcode():
 
 
 # warnings intended for PyTorch developers, disable for point releases
-developer_warnings = is_fbcode() or "+" in torch.__version__
+is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
+developer_warnings = is_fbcode() or is_nightly_or_source
 
 
 def decide_compile_threads():
@@ -156,6 +157,8 @@ _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
+disable_cpp_codegen = is_fbcode()
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -194,7 +197,11 @@ class triton:
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = False
 
-    debug_cudagraph_trees = True
+    # assertions not on the fast path, steady state
+    fast_cudagraph_asserts = True
+
+    # assertions on the fast path
+    slow_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
@@ -235,11 +242,9 @@ class triton:
     # use alternate codegen for smaller reductions
     persistent_reductions = True
 
-    # theses are not enforced, but they are used by asserts in triton_ops/autotune.py
+    # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
-
-    mathlib_name = "libdevice" if is_fbcode() else "math"
 
 
 # create a directory containing lots of debug information
