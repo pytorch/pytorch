@@ -582,8 +582,12 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        if istype(value, (tuple, list)) and all(
-            [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+        if (
+            istype(value, (tuple, list))
+            and all(
+                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+            )
+            and not config.dynamic_shapes
         ):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
         else:
