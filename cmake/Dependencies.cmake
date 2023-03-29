@@ -1288,7 +1288,7 @@ if(USE_ROCM)
     # host linker to link.
     list(APPEND HIP_CLANG_FLAGS -fno-gpu-rdc)
     foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
-      list(APPEND HIP_CLANG_FLAGS --amdgpu-target=${pytorch_rocm_arch})
+      list(APPEND HIP_CLANG_FLAGS --offload-arch=${pytorch_rocm_arch})
     endforeach()
 
     set(Caffe2_HIP_INCLUDE
