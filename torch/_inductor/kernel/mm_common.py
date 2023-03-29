@@ -63,6 +63,27 @@ mm_configs = functools.partial(
     ),
 )
 
+int8_mm_configs = functools.partial(
+    filtered_configs,
+    configs=(
+        # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
+        (64, 64, 32, 2, 4),
+        (64, 128, 32, 3, 4),
+        (128, 64, 32, 3, 4),
+        (64, 128, 32, 4, 8),
+        (128, 64, 32, 4, 8),
+        (64, 32, 32, 5, 8),
+        (32, 64, 32, 5, 8),
+        (128, 128, 32, 2, 8),
+        (64, 64, 64, 3, 8),
+        # (32, 32, 128, 2, 4),
+        # (64, 64, 16, 2, 4),
+        # (32, 32, 16, 1, 2),
+        (128, 256, 128, 3, 8),
+        (256, 128, 128, 3, 8),
+    ),
+)
+
 
 def mm_grid(m, n, meta):
     """
@@ -97,7 +118,7 @@ def mm_options(config, sym_k, layout):
     )
 
 
-def mm_args(mat1, mat2, *others, layout=None):
+def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):
     """
     Common arg processing for mm,bmm,addmm,etc
     """
@@ -109,11 +130,15 @@ def mm_args(mat1, mat2, *others, layout=None):
     if layout is None:
         from torch._inductor.ir import FixedLayout
 
+        if out_dtype is None:
+            out_dtype = mat1.get_dtype()
         layout = FixedLayout(
             mat1.get_device(),
-            mat1.get_dtype(),
+            out_dtype,
             [*b, m, n],
         )
+    else:
+        assert out_dtype is None, "out_dtype is ignored if layout is specified."
 
     from ..lowering import expand
 

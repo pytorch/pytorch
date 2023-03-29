@@ -287,6 +287,16 @@ def forward(self, a_1):
         self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
         self.assertTrue(is_any_digamma(traced))
 
+    # See https://github.com/pytorch/pytorch/issues/97541
+    def test_empty_like_doesnt_burn_in_defaults(self):
+        def f(x):
+            return torch.empty_like(x)
+        out = make_fx(f)(torch.randn(3))
+        self.assertExpectedInline(out.code.strip(), """\
+def forward(self, x_1):
+    empty_like = torch.ops.aten.empty_like.default(x_1, pin_memory = False);  x_1 = None
+    return empty_like""")
+
     def test_proxy_tensor_mode_with_decomp_table_preserves_proxy(self):
         def f(x):
             y = x.new_zeros(x.size())
