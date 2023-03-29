@@ -10080,19 +10080,6 @@ class TestNoRegression(TestCase):
         # with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
             # torch.testing.assert_close(a, nan)
 
-    @unittest.expectedFailure
-    def test_mps_compat(self):
-        # If this test is successful, that means that all operations in the comparison logic are supported natively on
-        # the MPS backend. Please remove this test as well as the compatibility logic in
-        # torch.testing._comparison.TensorLikePair._equalize_attributes
-        actual = torch.zeros(2, 3, 4, 5, 6, device="mps")
-        expected = actual.clone()
-
-        # We can't use assert_close or TensorLikePair.compare() directly, since that would hit the compatibility logic
-        # in torch.testing._comparison.TensorLikePair._equalize_attributes that we want to circumvent here
-        pair = TensorLikePair(actual, expected)
-        pair._compare_values(actual, expected)
-
     def test_double_error(self):
         with self.assertRaisesRegex(TypeError, "the MPS framework doesn't support float64"):
             a = torch.ones(2, dtype=torch.float64, device="mps")
