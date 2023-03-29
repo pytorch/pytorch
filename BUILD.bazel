@@ -1285,7 +1285,6 @@ cc_library(
         ":caffe2_core_macros_h",
         "//c10:headers",
         "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:cc_proto",
     ],
 )
 
