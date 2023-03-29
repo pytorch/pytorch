@@ -609,9 +609,15 @@ Tensor index_select_mps(const Tensor& self, int64_t dim, const Tensor& index) {
 Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& index, Tensor& output) {
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
+  auto num_indices = index.numel();
   dim = maybe_wrap_dim(dim, self.dim());
+
   // Checks
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
+  TORCH_CHECK(!(self.dim() == 0 && num_indices != 1),
+              "index_select(): Index to scalar can have only 1 value, got ",
+              num_indices,
+              " value(s)");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
               "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == output.scalar_type(),
@@ -619,7 +625,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
 
   // Empty index
-  if (index.numel() == 0) {
+  if (num_indices == 0) {
     return output;
   }
 
