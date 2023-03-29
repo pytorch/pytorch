@@ -5846,10 +5846,20 @@ class TestFailure:
 def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
-            # Deep copy the functions, otherwise unittest.skip would modify
-            # methods on both classes.
+            # You cannot copy functions in Python, so we use closures here to
+            # create objects with different ids. Otherwise, unittest.skip
+            # would modify all methods sharing the same object id. Also, by
+            # using a default argument, we create a copy instead of a
+            # reference. Otherwise, we would lose access to the value.
+
+            @functools.wraps(value)
+            def new_test(self, value=value):
+                return value(self)
+
+            # Copy __dict__ which may contain test metadata
+            new_test.__dict__ = copy.deepcopy(value.__dict__)
+
             tf = test_failures and test_failures.get(name)
-            new_test = copy.deepcopy(value)
             if tf is not None and suffix in tf.suffixes:
                 skip_func = (
                     unittest.skip("Skipped!")
