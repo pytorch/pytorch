@@ -24,7 +24,7 @@ from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
     CSEVariable,
-    DeferredIndentedBuffer,
+    DeferredLine,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
@@ -891,10 +891,10 @@ class CppKernel(Kernel):
         self.itervars = None
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
-        self.reduction_suffix = DeferredIndentedBuffer()
+        self.reduction_suffix = IndentedBuffer()
         self.reduction_var_map = {}
         self.preloads = IndentedBuffer()
-        self.poststores = DeferredIndentedBuffer()
+        self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
 
     def scale_index_with_offset(
@@ -927,7 +927,7 @@ class CppKernel(Kernel):
                 line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
-        self.stores.writeline(name, line)
+        self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
@@ -942,7 +942,6 @@ class CppKernel(Kernel):
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
             self.stores.writelines(
-                None,
                 [
                     f"if ({tmpvar}.value {compare_op} {value}) {{",
                     f"    {tmpvar}.index = {self.itervars[-1]}; {tmpvar}.value = {value};",
@@ -959,14 +958,14 @@ class CppKernel(Kernel):
                     f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
             self.stores.writeline(
-                None, f"{reduction_combine(reduction_type, tmpvar, value)};"
+                f"{reduction_combine(reduction_type, tmpvar, value)};"
             )
 
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
             member_name = ".index" if argmax_or_argmin else ""
             self.reduction_suffix.writeline(
-                name, f"{var}[{cexpr(index)}] = {tmpvar}{member_name};"
+                DeferredLine(name, f"{var}[{cexpr(index)}] = {tmpvar}{member_name};")
             )
         self.cse.store_cache[name] = tmpvar
 
@@ -1095,7 +1094,7 @@ class CppKernel(Kernel):
         prior = (self.loads, self.compute, self.stores, self.cse)
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = DeferredIndentedBuffer()
+        self.stores = IndentedBuffer()
         self.cse = self.cse.clone()
         yield
         self.reduction_suffix.splice(self.loads)
@@ -1187,7 +1186,7 @@ class CppVecKernel(CppKernel):
                 )
         else:
             line = f"{value}.store({var} + {cexpr(new_index)});"
-        self.stores.writeline(name, line)
+        self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert reduction_type in {"max", "min", "sum"}
@@ -1229,7 +1228,7 @@ class CppVecKernel(CppKernel):
             f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
         )
         self.stores.writeline(
-            None, f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
+            f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
         )
 
         reduce_all_body = "{"
@@ -1241,8 +1240,10 @@ class CppVecKernel(CppKernel):
         vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
         next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
         self.reduction_suffix.writeline(
-            name,
-            f"{reduction_combine(reduction_type, tmpvar, next_value)};",
+            DeferredLine(
+                name,
+                f"{reduction_combine(reduction_type, tmpvar, next_value)};",
+            )
         )
         # NOTE(jgong5): we do not generate the real stores here with the assumption that
         # the scalar kernel that handles the loop tail would be generated and generates
@@ -1325,7 +1326,7 @@ class CppTile2DKernel(CppVecKernel):
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
         if is_store:
-            self.poststores.writeline(name, load_or_store)
+            self.poststores.writeline(DeferredLine(name, load_or_store))
         else:
             self.preloads.writeline(load_or_store)
 
@@ -1368,7 +1369,7 @@ class CppTile2DKernel(CppVecKernel):
             )
             # vector store inside the kernel inner loop
             line = f"{value}.store({tile_var} + {cexpr(inner * self.tiling_factor)});"
-            self.stores.writeline(name, line)
+            self.stores.writeline(DeferredLine(name, line))
         else:
             new_index = self.scale_index_with_offset(
                 expanded_index,
