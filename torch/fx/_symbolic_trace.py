@@ -228,6 +228,7 @@ class Tracer(TracerBase):
         autowrap_modules: Tuple[ModuleType] = (math,),
         autowrap_functions: Tuple[Callable, ...] = (),
         param_shapes_constant: bool = False,
+        leaf_module_name_list: List[str] = [],
     ) -> None:
         # This method's signature is overridden by the first line of this class'
         # docstring. If this method's signature is modified, the signature that
@@ -279,6 +280,7 @@ class Tracer(TracerBase):
         self.module_stack = collections.OrderedDict()
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
+        self.leaf_module_name_list = leaf_module_name_list
 
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> "Argument":
@@ -392,6 +394,9 @@ class Tracer(TracerBase):
                 submodule ``bar``, which contains submodule ``baz``, that module will
                 appear with the qualified name ``foo.bar.baz`` here.
         """
+        for leaf_node in self.leaf_module_name_list:
+            if leaf_node in module_qualified_name:
+                return True
         return (
             (m.__module__.startswith("torch.nn") or m.__module__.startswith("torch.ao.nn"))
             and not isinstance(m, torch.nn.Sequential)
@@ -1057,6 +1062,7 @@ def wrap(fn_or_name: Union[str, Callable]):
 def symbolic_trace(
     root: Union[torch.nn.Module, Callable[..., Any]],
     concrete_args: Optional[Dict[str, Any]] = None,
+    leaf_module_name_list: Optional[List[str]] = [],
 ) -> GraphModule:
     """
     Symbolic tracing API
@@ -1105,7 +1111,7 @@ def symbolic_trace(
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
     """
-    tracer = Tracer()
+    tracer = Tracer(leaf_module_name_list=leaf_module_name_list)
     graph = tracer.trace(root, concrete_args)
     name = (
         root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
