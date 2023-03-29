@@ -2944,6 +2944,64 @@ def native_batch_norm(input: List[int],
   return (out, _size, _size)
 
 )=====")
++ std::string(R"=====(def cross_entropy_loss(self: List[int],
+    target: List[int],
+    weight: Optional[List[int]]=None,
+    reduction: int=1,
+    ignore_index: int=-100,
+    label_smoothing: float=0.) -> List[int]:
+  self_dim = torch.len(self)
+  target_dim = torch.len(target)
+  if torch.lt(0, self_dim):
+    _0 = torch.le(self_dim, 2)
+  else:
+    _0 = False
+  if _0:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.le(target_dim, 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.eq(self_dim, 1):
+    no_batch_dim = torch.eq(target_dim, 0)
+  else:
+    no_batch_dim = False
+  if no_batch_dim:
+    _1 = True
+  else:
+    _1 = torch.eq(self[0], target[0])
+  if _1:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  n_classes = self[-1]
+  if torch.__is__(weight, None):
+    _2 = True
+  else:
+    weight0 = unchecked_cast(List[int], weight)
+    if torch.eq(torch.len(weight0), 1):
+      _3 = torch.eq(weight0[0], n_classes)
+    else:
+      _3 = False
+    _2 = _3
+  if _2:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.eq(reduction, 0):
+    _4 = torch.eq(self_dim, 2)
+  else:
+    _4 = False
+  if _4:
+    reduction_shape = [self[0]]
+  else:
+    reduction_shape = annotate(List[int], [])
+  _5 = (reduction_shape, annotate(List[int], []))
+  return (_5)[0]
+
+)=====")
 + std::string(R"=====(def broadcast_three(a: List[int],
     b: List[int],
     c: List[int]) -> List[int]:
@@ -3182,6 +3240,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
     {"aten::_native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
     {"aten::_native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
+    {"aten::cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0) -> Tensor", "cross_entropy_loss"},
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},
