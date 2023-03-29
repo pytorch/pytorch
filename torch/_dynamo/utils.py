@@ -1201,6 +1201,14 @@ def get_fake_value(node, tx):
         ):
             unimplemented(f"dynamic shape operator: {cause.func}")
         elif isinstance(
+            cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
+        ):
+            unimplemented(
+                f"unsupported operator: {cause.func} (see "
+                "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
+                " for how to fix)"
+            )
+        elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
             unimplemented("guard on data-dependent symbolic int/float")
