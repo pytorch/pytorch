@@ -910,6 +910,7 @@ class FakeTensor(torch.Tensor):
         with no_dispatch():
             new_tensor = torch.tensor([], dtype=self.dtype, device=storage.device)
             new_tensor.set_(storage, self.storage_offset(), self.size(), self.stride())
+            new_tensor.requires_grad = self.requires_grad
         return self.fake_mode.fake_tensor_converter.from_meta_and_device(
             self.fake_mode, new_tensor, self.device
         )

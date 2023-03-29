@@ -528,8 +528,8 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # clone inputs to avoid side effects caused by inplace ops during propagate
     tmp_example_inputs = list(
         map(
-            lambda x: torch._prims_common.clone_preserve_strides(x)
-            if isinstance(x, torch.Tensor)
+            lambda x: x.clone_preserve_strides_storage()
+            if isinstance(x, torch._subclasses.FakeTensor)
             else copy.deepcopy(x),
             example_inputs,
         )

@@ -454,7 +454,6 @@ class TensorVariable(VariableTracker):
                 **options,
             )
             if name[-1] == "_" and not has_same_metadata(out, self):
-                # tx.metadata_mutated_variables[self] = out
                 tx.update_locals_and_stack_ex(self, out)
             return out
 
