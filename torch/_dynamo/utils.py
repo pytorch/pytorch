@@ -139,15 +139,16 @@ def print_time_report():
     print(out)
 
 
+# NB: There may be multiple TimedFunc with same key
 @dataclasses.dataclass
 class TimedFunc:
     key: str
     children: collections.OrderedDict[str, "TimedFunc"] = dataclasses.field(
         default_factory=collections.OrderedDict
     )
+    metrics: List[float] = dataclasses.field(default_factory=list)
 
 
-TIMED_FUNCS = {}
 ROOT_TIMED_FUNC = TimedFunc("<root>")
 CURRENT_TIMED_FUNC = ROOT_TIMED_FUNC
 
@@ -184,15 +185,12 @@ def dynamo_timed(original_function=None, phase_name=None):
             if key not in compilation_metrics:
                 compilation_metrics[key] = []
             global CURRENT_TIMED_FUNC
-            # Force a tree structure. If there is a cycle, we use whatever the
-            # first run's hierarchy was.  TODO: We should probably also hard
-            # enforce dynamo_timed doesn't have cycles
-            if key not in TIMED_FUNCS:
+            timed_func = CURRENT_TIMED_FUNC.children.get(key)
+            if timed_func is None:
                 timed_func = TimedFunc(key)
-                TIMED_FUNCS[key] = timed_func
                 CURRENT_TIMED_FUNC.children[key] = timed_func
             prev_timed_func = CURRENT_TIMED_FUNC
-            CURRENT_TIMED_FUNC = TIMED_FUNCS[key]
+            CURRENT_TIMED_FUNC = timed_func
             try:
                 t0 = time.time()
                 r = func(*args, **kwargs)
@@ -201,6 +199,7 @@ def dynamo_timed(original_function=None, phase_name=None):
                 CURRENT_TIMED_FUNC = prev_timed_func
             # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
             compilation_metrics[key].append(time_spent)
+            timed_func.metrics.append(time_spent)
             if phase_name:
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
