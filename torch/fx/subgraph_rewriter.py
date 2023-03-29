@@ -309,7 +309,10 @@ def _replace_pattern(
             replacement_nodes.append(curr_node)
 
         for ret_node in copied_returning_nodes:
-            get_replacement_nodes(ret_node)
+            if ret_node in match.placeholder_nodes:
+                replacement_nodes.append(ret_node)
+            else:
+                get_replacement_nodes(ret_node)
 
         # Hook the output Node of the replacement subgraph in to the
         # original Graph at the correct location
