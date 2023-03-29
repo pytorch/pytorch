@@ -719,3 +719,21 @@ Classes
     JitScalarType
     torch.onnx.verification.GraphInfo
     torch.onnx.verification.VerificationOptions
+
+Preview: torch.onnx TorchDynamo Exporter
+----------------------------------------
+
+.. warning::
+  The ONNX exporter for TorchDynamo is under active development and is
+  subject to rapid change.
+
+.. autofunction:: torch.onnx.dynamo_export
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    torch.onnx.ExportOptions
+    torch.onnx.ExportOutput
+    torch.onnx.ExportOutputSerializer
