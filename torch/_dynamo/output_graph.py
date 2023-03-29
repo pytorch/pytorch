@@ -634,7 +634,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.remove_unused_graphargs()
         ncalls = count_calls(self.graph)
         counters["stats"]["calls_captured"] += ncalls
-        counters["stats"]["fusions_possible"] += ncalls - 1
 
         # free a bit of memory
         for node in self.graph.nodes:
