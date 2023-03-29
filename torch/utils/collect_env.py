@@ -387,6 +387,7 @@ def get_pip_packages(run_lambda):
                     "torch",
                     "numpy",
                     "mypy",
+                    "flake8",
                     "triton",
                 }
             )
