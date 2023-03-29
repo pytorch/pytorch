@@ -1,5 +1,4 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import numpy.typing as npt
 import warnings
 from typing import List, Optional, Union
 
@@ -27,6 +26,13 @@ from torch.distributed.distributed_c10d import (
 
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._functional_collectives as funcol
+
+try:
+    from numpy.typing import ArrayLike
+    NDArrayType = ArrayLike
+except ImportError:
+    NDArrayType = "ArrayLike"
+
 
 _global_device_mesh: Optional["DeviceMesh"] = None
 
@@ -93,7 +99,7 @@ class DeviceMesh(object):
     def __init__(
         self,
         device_type: str,
-        mesh: Union[torch.Tensor, npt.ArrayLike],
+        mesh: Union[torch.Tensor, NDArrayType],
         *,
         _init_process_groups: bool = True,
     ) -> None:
