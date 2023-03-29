@@ -858,8 +858,8 @@ torch.cuda.synchronize()
         helper(1, 129, 8, 8, 3, stride=2)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.half, torch.float, torch.double)
-    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
     def test_max_pool3d_ndhwc(self, device, dtype):
         def helper(n, c, h, w, d, kernel_size, stride=None):
@@ -914,21 +914,27 @@ torch.cuda.synchronize()
         helper(4, 8, 8, 8, 8, 7)
         helper(4, 8, 8, 8, 8, (5, 6, 7))
         helper(1, 8, 8, 8, 8, (5, 6, 7))
-        helper(0, 6, 12, 13, 14, (5, 6, 7))
+        if device != "cpu":
+            helper(0, 6, 12, 13, 14, (5, 6, 7))
         helper(4, 8, 7, 7, 7, 3, stride=1)
         helper(10, 128, 19, 19, 19, 3, stride=2)
         helper(10, 128, 19, 19, 19, (1, 2, 3), stride=2)
         helper(1, 128, 19, 19, 19, (1, 2, 3), stride=2)
-        helper(0, 128, 19, 19, 19, (1, 2, 3), stride=2)
+        if device != "cpu":
+            helper(0, 128, 19, 19, 19, (1, 2, 3), stride=2)
         helper(1, 79, 4, 4, 4, 3, stride=2)
-        helper(0, 79, 4, 4, 4, 3, stride=2)
+        if device != "cpu":
+            helper(0, 79, 4, 4, 4, 3, stride=2)
 
     @onlyCPU
-    def test_max_pool2d_bfloat16(self, device):
-        def helper(n, c, h, w, kernel_size, stride, memory_format):
-            input = torch.randn(n, c, h, w, dtype=torch.float32, device=device).bfloat16()
+    def test_max_pool_bfloat16(self, device):
+        def helper(shape, kernel_size, stride, memory_format):
+            input = torch.randn(shape, dtype=torch.float32, device=device).bfloat16()
             input = input.to(memory_format=memory_format).requires_grad_()
-            pool = torch.nn.MaxPool2d(kernel_size, stride, return_indices=True).to(device)
+            if len(shape) == 4:
+                pool = torch.nn.MaxPool2d(kernel_size, stride, return_indices=True).to(device)
+            else:
+                pool = torch.nn.MaxPool3d(kernel_size, stride, return_indices=True).to(device)
 
             input2 = input.detach().clone().float().requires_grad_(True)
 
@@ -944,10 +950,16 @@ torch.cuda.synchronize()
             self.assertEqual(ind, ind2)
             self.assertEqual(input.grad, input2.grad.bfloat16())
 
-        helper(4, 30, 8, 8, 7, 1, torch.contiguous_format)
-        helper(4, 65, 8, 8, 7, 1, torch.channels_last)
-        helper(1, 19, 20, 10, 8, 2, torch.contiguous_format)
-        helper(1, 19, 20, 10, 8, 2, torch.channels_last)
+        helper((4, 30, 8, 8), 7, 1, torch.contiguous_format)
+        helper((4, 65, 8, 8), 7, 1, torch.channels_last)
+        helper((1, 19, 20, 10), 8, 2, torch.contiguous_format)
+        helper((1, 19, 20, 10), 8, 2, torch.channels_last)
+        helper((4, 30, 8, 8), 7, 1, torch.contiguous_format)
+        helper((4, 65, 8, 8), 7, 1, torch.channels_last)
+        helper((1, 19, 10, 10, 10), 8, 2, torch.contiguous_format)
+        helper((1, 19, 10, 9, 14), 8, 2, torch.channels_last_3d)
+        helper((4, 10, 3, 8, 8), 3, 1, torch.contiguous_format)
+        helper((4, 10, 8, 8, 8), 7, 1, torch.channels_last_3d)
 
     @onlyCUDA
     @gcIfJetson

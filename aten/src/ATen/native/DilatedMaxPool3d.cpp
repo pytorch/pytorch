@@ -1,11 +1,6 @@
-<<<<<<< HEAD
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
-=======
-#include <ATen/ATen.h>
->>>>>>> 2c7b6139d5 (add channel last 3d support for maxpool3d (#55))
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <c10/util/irange.h>
@@ -301,9 +296,8 @@ Tensor max_pool3d_with_indices_backward_cpu(
     ceil_mode);
   return gradInput;
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+
 DEFINE_DISPATCH(max_pool3d_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_pool3d_backward_kernel);
 } // at::native
 } // at
