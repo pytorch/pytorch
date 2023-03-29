@@ -259,9 +259,7 @@ class TensorVariable(VariableTracker):
 
             if "dim" in kwargs:
                 dim = kwargs.pop("dim")
-                constant_result = constant_result.call_method(
-                    tx, "__getitem__", [dim], {}
-                )
+                constant_result = constant_result.getitem_const(dim)
 
         elif name == "size" and self.size is None and config.dynamic_shapes:
             return wrap_fx_proxy(

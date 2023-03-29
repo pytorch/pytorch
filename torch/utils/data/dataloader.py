@@ -13,7 +13,7 @@ import queue
 import threading
 import warnings
 
-from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
+from typing import Any, Callable, Iterable, TypeVar, Generic, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
 import torch
@@ -83,13 +83,7 @@ class _DatasetKind:
 class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
-
-    Args:
-        data_source (Dataset): dataset to sample from
     """
-
-    def __init__(self):
-        super().__init__(None)
 
     def __iter__(self):
         while True:
@@ -223,8 +217,8 @@ class DataLoader(Generic[T_co]):
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
-                 shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
-                 batch_sampler: Union[Sampler[Sequence], Iterable[Sequence], None] = None,
+                 shuffle: Optional[bool] = None, sampler: Union[Sampler[int], Iterable[int], None] = None,
+                 batch_sampler: Union[Sampler[List[int]], Iterable[List[int]], None] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
