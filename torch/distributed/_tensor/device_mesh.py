@@ -449,9 +449,15 @@ class DeviceMesh:
                 "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
             )
             dim_group = self._dim_groups[mesh_dim]
+            group_size = get_world_size(dim_group)
+            group_rank = get_rank(dim_group)
+            if scatter_dim != 0:
+                tensor_list = torch.chunk(input, group_size, dim=scatter_dim)
+                input = torch.cat(tensor_list)
+
             flat_tensor = funcol.all_reduce(input, reduceOp=op_name, group=dim_group)
-            chunks = flat_tensor.chunk(get_world_size(dim_group))
-            scatter_tensor = chunks[get_rank(dim_group)]
+            chunks = flat_tensor.chunk(group_size, dim=0)
+            scatter_tensor = chunks[group_rank]
         else:
             raise RuntimeError(
                 f"backend {self._backend} does not support reduce_scatter!"
