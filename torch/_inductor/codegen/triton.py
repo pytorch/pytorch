@@ -1639,25 +1639,24 @@ class TritonScheduling:
             return node.node.data.reduction_hint
 
     @staticmethod
-    def can_use_32bit_indexing(buffers: Iterable[ir.Buffer]):
+    def can_use_32bit_indexing(numel: sympy.Expr, buffers: Iterable[ir.Buffer]) -> bool:
         int_max = torch.iinfo(torch.int32).max
-        buf_numel = [sympy_product(buf.get_size()) for buf in buffers]
-        buf_storage_sizes = [buf.get_layout().storage_size() for buf in buffers]
-        for numel, storage_size in zip(buf_numel, buf_storage_sizes):
-            if V.graph.sizevars.size_hint(numel) > int_max:
-                return False
-            if V.graph.sizevars.size_hint(storage_size) > int_max:
-                return False
+        size_hint = V.graph.sizevars.size_hint
+        if size_hint(numel) > int_max:
+            return False
+
+        buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
+        if any(size_hint(size) > int_max for size in buf_sizes):
+            return False
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
-        for numel, storage_size in zip(buf_numel, buf_storage_sizes):
-            V.graph.sizevars.guard_leq(numel, int_max)
-            V.graph.sizevars.guard_leq(storage_size, int_max)
+        for size in buf_sizes:
+            V.graph.sizevars.guard_leq(size, int_max)
         return True
 
     @staticmethod
-    def select_index_dtype(node_schedule):
+    def select_index_dtype(node_schedule, numel, reduction_numel):
         # Gather all used buffer names
         buffer_names = set()
         for node in node_schedule:
@@ -1684,7 +1683,13 @@ class TritonScheduling:
             raise RuntimeError(f"Failed to find buffer matching name {name}")
 
         buffers = [_get_buffer(name) for name in buffer_names]
-        if TritonScheduling.can_use_32bit_indexing(buffers):
+
+        # In theory we can separately check xnumel and rnumel are <= int_max
+        # but some indexers do use the full linear index so we need to be
+        # conservative here.
+        total_numel = numel * reduction_numel
+
+        if TritonScheduling.can_use_32bit_indexing(total_numel, buffers):
             return "tl.int32"
         return "tl.int64"
 
@@ -1711,7 +1716,7 @@ class TritonScheduling:
             if hasattr(node, "get_mutations"):
                 mutations.update(node.get_mutations())
 
-        index_dtype = self.select_index_dtype(node_schedule)
+        index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
         with TritonKernel(
             *tiled_groups,

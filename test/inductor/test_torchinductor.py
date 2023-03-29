@@ -1480,7 +1480,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    @slow()
     def test_large_tensor_reduction(self):
         if not _has_sufficient_memory(self.device, 4.5 * 1024**3):  # 4.5 GiB
             raise unittest.SkipTest("insufficient memory")
@@ -1497,6 +1496,40 @@ class CommonTemplate:
         actual = compiled_fn(t)
         expect = torch.tensor(2, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
+
+    def test_large_broadcast_reduction(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Fails on CPU")
+
+        # Test 64-bit indexing works correctly when inputs are less than 32-bit
+        # but intermediate tensors require 64-bit indexing
+        def fn(a, b):
+            return torch.max(a + b)
+
+        t1 = torch.ones(1, 2**16, dtype=torch.int8, device=self.device)
+        t2 = torch.ones(2**16, 1, dtype=torch.int8, device=self.device)
+
+        t1[-1, -1] = 2
+        t2[-1, -1] = 2
+
+        self.common(fn, (t1, t2), reference_in_float=False)
+
+    def test_large_pointwise(self):
+        if not _has_sufficient_memory(self.device, 2**32):
+            raise unittest.SkipTest("insufficient memory")
+
+        def fn(a):
+            return a + 1
+
+        t = torch.ones(2**31, dtype=torch.int8, device=self.device)
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(t)
+
+        # Can't use assertEqual as it expands broadcasted inputs
+        del t
+        if torch.device(self.device).type == "cuda":
+            torch.cuda.empty_cache()
+        self.assertTrue((actual == 2).all())
 
     def test_softmax(self):
         def fn(a, b):

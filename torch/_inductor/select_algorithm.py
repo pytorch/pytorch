@@ -369,10 +369,11 @@ class TritonTemplate:
         fake_out = ir.Buffer("buf_out", layout)
         kernel_name = f"triton_{self.name}"
 
+        numel = sympy_product(layout.size)
         buffers = itertools.chain(input_nodes, (fake_out,))
         index_dtype = (
             "tl.int32"
-            if TritonScheduling.can_use_32bit_indexing(buffers)
+            if TritonScheduling.can_use_32bit_indexing(numel, buffers)
             else "tl.int64"
         )
 
