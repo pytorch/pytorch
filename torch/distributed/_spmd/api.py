@@ -308,7 +308,7 @@ def _compile(
         gm = make_fx(
             partial(stateless_func, func),
             tracing_mode="symbolic",
-            _allow_non_fake_inputs=True,
+            _allow_non_fake_inputs=False,
         )(args, kwargs, named_states, params_and_buffers)
 
     # 4. Use DTensor to insert collectives
