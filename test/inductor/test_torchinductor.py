@@ -5683,6 +5683,16 @@ class CommonTemplate:
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_group_norm(self):
+        @torch.compile(dynamic=True)
+        def fn(x):
+            return nn.GroupNorm(32, 512)(x)
+
+        x = torch.randn([1, 512, 32, 32])
+        y = fn(x)
+        self.assertEqual(y.size(), [1, 512, 32, 32])
+
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):
         def fn(x, y):
