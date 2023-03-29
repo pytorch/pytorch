@@ -39,23 +39,23 @@ class ShardedTest(NamedTuple):
     time: Optional[float]
 
     def __str__(self) -> str:
-        if self.num_shards == 1:
-            return self.name
         return f"{self.name} {self.shard}/{self.num_shards}"
+
+    def get_time(self) -> float:
+        return self.time or 0
 
 
 class ShardJob:
-    def __init__(self, test_times: Dict[str, float]):
+    def __init__(self) -> None:
         self.serial: List[ShardedTest] = []
         self.parallel: List[ShardedTest] = []
 
     def get_total_time(self) -> float:
         procs = [0.0 for _ in range(NUM_PROCS)]
         for test in self.parallel:
-            test_time = test.time
             min_index = procs.index(min(procs))
-            procs[min_index] += test_time or 0
-        time = max(procs) + sum(test.time or 0 for test in self.serial)
+            procs[min_index] += test.get_time()
+        time = max(procs) + sum(test.get_time() for test in self.serial)
         return time
 
     def convert_to_tuple(self) -> Tuple[float, List[ShardedTest]]:
@@ -92,13 +92,11 @@ def calculate_shards(
 
     sorted_tests = sorted(
         get_with_pytest_shard(known_tests, test_file_times),
-        key=lambda j: j.time or 0,
+        key=lambda j: j.get_time(),
         reverse=True,
     )
 
-    sharded_jobs: List[ShardJob] = [
-        ShardJob(test_file_times) for _ in range(num_shards)
-    ]
+    sharded_jobs: List[ShardJob] = [ShardJob() for _ in range(num_shards)]
     for test in sorted_tests:
         if must_serial(test.name):
             min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
