@@ -1346,7 +1346,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 # assert that each of the desired modules have the observers inserted
                 for fqn, module in prepared_for_callibrate_model.named_modules():
                     # check if module is a supported module
-                    is_in_include_list = sum(list(map(lambda x: isinstance(module, x), mods_to_check))) > 0
+                    is_in_include_list = sum([isinstance(module, x) for x in mods_to_check]) > 0
 
                     if is_in_include_list:
                         # make sure it has the observer attribute
