@@ -281,6 +281,17 @@ class UserMethodVariable(UserFunctionVariable):
     def python_type(self):
         return types.MethodType
 
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        if isinstance(self.obj, variables.NNModuleVariable):
+            module_attr = getattr(self.fn, "__module__", "")
+            if self.is_constant:
+                return self.obj.call_method(
+                    tx, self.fn.__name__, args, kwargs, constant=self.is_constant
+                ).add_options(self)
+        return super().call_function(tx, args, kwargs)
+
     def num_parameters(self):
         return super().num_parameters() - 1
 
