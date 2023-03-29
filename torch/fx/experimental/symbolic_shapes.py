@@ -2292,9 +2292,6 @@ class ShapeEnv:
                 self._add_guard(sympy.Eq(expr, concrete_val))  # type: ignore[arg-type]
         return concrete_val
 
-def _dynamic_dim_range(t, d) -> DimConstraint:
-    return t._dynamo_dynamic_indices[d]
-
 def _is_int(expr):
     if not isinstance(expr, SymInt):
         return False
