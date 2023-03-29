@@ -867,7 +867,7 @@ if(NOT MSVC)
   endif()
 
   append_cxx_flag_if_supported("-faligned-new" CMAKE_CXX_FLAGS)
-  
+
   if(WERROR)
     append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
     if(NOT COMPILER_SUPPORT_WERROR)
