@@ -8,7 +8,14 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import use_triton_template
-from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_grid, mm_options
+from .mm_common import (
+    addmm_epilogue,
+    int8_mm_configs,
+    mm_args,
+    mm_configs,
+    mm_grid,
+    mm_options,
+)
 
 from ..coordinate_descent_tuner import CoordescTuner
 from ..select_algorithm import AlgorithmSelectorCache
@@ -78,6 +85,8 @@ aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out", ("beta", "alpha"))
 
+aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
+
 
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
     """
@@ -126,6 +135,26 @@ def tuned_mm(mat1, mat2, *, layout=None):
     tuner = CoordescTuner(is_mm=True)
     tuner.autotune(func, list(mm_configs(m, n, k))[0])
     return out
+
+
+@register_lowering(aten._int_mm)
+def tuned_int_mm(mat1, mat2, *, layout=None):
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, layout=layout, out_dtype=torch.int32
+    )
+    choices = [aten__int_mm.bind((mat1, mat2), layout)]
+    if use_triton_template(layout, enable_int32=True):
+        # TODO: Re-enable eager mode implementation once cuBLAS is fixed
+        choices = []
+        for config in int8_mm_configs(m, n, k):
+            choices.append(
+                mm_template.generate(
+                    (mat1, mat2),
+                    layout,
+                    **mm_options(config, k, layout),
+                )
+            )
+    return autotune_select_algorithm(choices, [mat1, mat2], layout)
 
 
 @register_lowering(aten.addmm)

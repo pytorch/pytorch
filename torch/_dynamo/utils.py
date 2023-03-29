@@ -48,7 +48,7 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
+troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
@@ -1200,6 +1200,14 @@ def get_fake_value(node, tx):
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             unimplemented(f"dynamic shape operator: {cause.func}")
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
+        ):
+            unimplemented(
+                f"unsupported operator: {cause.func} (see "
+                "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
+                " for how to fix)"
+            )
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
