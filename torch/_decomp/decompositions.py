@@ -3361,7 +3361,6 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
-register_inplace(aten._foreach_add_, aten._foreach_add)
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)

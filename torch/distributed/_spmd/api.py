@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
 from copy import copy
 from functools import wraps, partial
-from re import search
 from typing import (
     Any,
     Callable,
@@ -217,7 +216,9 @@ def getitem(l, i):
     return l[i]
 
 
-def _functionalize_and_reinplace_foreach_ops(gm: fx.GraphModule) -> fx.GraphModule:
+def _functionalize_and_reinplace_foreach_ops(
+    gm: fx.GraphModule,
+) -> fx.GraphModule:
     # inplace foreach ops been replaced
     inplace_updated: Dict[fx.Node, fx.Node] = {}
     # skip newly inserted nodes
@@ -235,7 +236,14 @@ def _functionalize_and_reinplace_foreach_ops(gm: fx.GraphModule) -> fx.GraphModu
         # Replace this node with a new one that uses functionalized outputs.
         if new_args != node.args:
             with gm.graph.inserting_after(node):
-                new_node = gm.graph.create_node(node.op, node.target, new_args, node.kwargs, node.name, node.type)
+                new_node = gm.graph.create_node(
+                    node.op,
+                    node.target,
+                    new_args,
+                    node.kwargs,
+                    node.name,
+                    node.type,
+                )
                 node.replace_all_uses_with(new_node)
             gm.graph.erase_node(node)
             continue
@@ -246,14 +254,20 @@ def _functionalize_and_reinplace_foreach_ops(gm: fx.GraphModule) -> fx.GraphModu
                 # N.B.: inplace foreach does not return anything, so its output
                 # is not connected to any subsequent nodes anyway. It's safe to
                 # create a out of place version and remove the inplace one.
-                new_node = gm.graph.call_function(FOREACH_OP_MAP[node.target], args=node.args, kwargs=node.kwargs)
+                new_node = gm.graph.call_function(
+                    FOREACH_OP_MAP[node.target],
+                    args=node.args,
+                    kwargs=node.kwargs,
+                )
                 getitems: Dict[fx.Node, fx.Node] = {}
                 # need another inserting_after, otherwise new ones are always
                 # inserted immediately after ``node``
                 with gm.graph.inserting_after(new_node):
                     # use getitem to retrieve individual tensors
                     for i, a in enumerate(node.args[0]):
-                        getitems[a] = gm.graph.call_function(getitem, args=(new_node, i))
+                        getitems[a] = gm.graph.call_function(
+                            getitem, args=(new_node, i)
+                        )
                 skip_nodes.add(new_node)
 
             # Copy output of place foreach results back to its first arguments,
@@ -261,7 +275,9 @@ def _functionalize_and_reinplace_foreach_ops(gm: fx.GraphModule) -> fx.GraphModu
             # FIXME(@mrshenli): we need inductor to optimize away this copy.
             for orig, updated in getitems.items():
                 with gm.graph.inserting_after(updated):
-                    copy_node = gm.graph.call_function(aten.copy_, args=(orig, updated))
+                    copy_node = gm.graph.call_function(
+                        aten.copy_, args=(orig, updated)
+                    )
                     skip_nodes.add(copy_node)
                     inplace_updated[orig] = copy_node
 
@@ -386,9 +402,6 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
             # Issue: https://github.com/pytorch/pytorch/issues/97852
             gm = _functionalize_and_reinplace_foreach_ops(gm)
 
-            if torch.distributed.get_rank():
-                gm.graph.print_tabular()
-
             # 4. Use DTensor to insert collectives
             gm, name_to_spec = _dtensor_expand(
                 gm, args, kwargs, named_states, params_and_buffers
@@ -398,9 +411,6 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
             if module_override:
                 for _, override in module_override.items():
                     gm = override.transform(gm, name_to_spec)
-
-            if torch.distributed.get_rank():
-                gm.graph.print_tabular()
 
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been
