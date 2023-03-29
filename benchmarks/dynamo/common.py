@@ -590,8 +590,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     Writes to ./speedups.csv
     """
-    if args.dynamic_shapes:
-        return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
+    # if args.dynamic_shapes:
+    #     return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
 
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
