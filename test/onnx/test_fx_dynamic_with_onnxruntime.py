@@ -46,6 +46,7 @@ def _run_ort(
 
 @_beartype.beartype
 def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+    test_suite: onnx_test_common._TestONNXRuntime,
     model: _ModelType,
     input_args: _InputArgsType,
     rtol: float = 1e-3,
@@ -107,6 +108,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
                 ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
             )
 
+    op_level_debug = test_suite.op_level_debug
     # Feed args and kwargs into exporter.
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
@@ -116,6 +118,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         opset_version=opset_version,
         use_binary_format=True,
         enable_dynamic_axes=True,  # export models with dynamic shapes
+        op_level_debug=op_level_debug,
         **input_kwargs,
     )
 
@@ -165,6 +168,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self,
             model,
             (dummy_input,),
             additional_test_inputs=[(dummy_input,), (test_inputs,)],
@@ -183,7 +187,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         another_y = torch.randn(3, 4)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            DynamicAdd(), (x, y), additional_test_inputs=[(another_x, another_y)]
+            self, DynamicAdd(), (x, y), additional_test_inputs=[(another_x, another_y)]
         )
 
     def test_sigmoid_add(self):
@@ -204,7 +208,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_y = torch.randn(1, 4)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
+            self, DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
     @unittest.skip("flaky test: https://github.com/microsoft/onnx-script/issues/523")
@@ -219,7 +223,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_y = torch.randn(2, 4, 4)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            DynamicMatMul(), (x, y), additional_test_inputs=[(input_x, input_y)]
+            self, DynamicMatMul(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
     @unittest.skip(
@@ -236,6 +240,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         y = torch.randn(7, 8, 9)
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self,
             test(),
             (x,),
             additional_test_inputs=[(y,)],
@@ -260,6 +265,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(32, 3, 64, 64)
         y = torch.randn(16, 3, 8, 64)
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self,
             TransposeModule(),
             (x,),
             additional_test_inputs=[(y,)],
@@ -276,10 +282,10 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         d3 = torch.tensor([3])
         d4 = torch.tensor([4])
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            Squeeze(), (d1, d4), additional_test_inputs=[(d3, d4)]
+            self, Squeeze(), (d1, d4), additional_test_inputs=[(d3, d4)]
         )
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            Squeeze(), (d3, d4), additional_test_inputs=[(d1, d3)]
+            self, Squeeze(), (d3, d4), additional_test_inputs=[(d1, d3)]
         )
 
     @unittest.skip(
@@ -298,6 +304,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.rand(5, 5, 5)
         y = torch.randn(6, 7, 8)
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self,
             DynamicSliceExportMod(),
             (x,),
             additional_test_inputs=[(y,)],
@@ -319,6 +326,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(5, 3, 2)
         y = torch.randn(8, 3, 2)
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self,
             ArangeModel(),
             (x,),
             additional_test_inputs=[(y,)],
@@ -337,6 +345,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones(2, 5)
         x2 = torch.randn(3, 4)
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self,
             Model(),
             (x,),
             additional_test_inputs=[(x2,)],
@@ -355,6 +364,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones(2, 5, 3)
         x2 = torch.randn(3, 4, 3)
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self,
             Model(),
             (x,),
             additional_test_inputs=[(x2,)],
@@ -369,6 +379,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones(3, 2)
         x2 = torch.randn(3, 5)
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self,
             Model(),
             (x,),
             additional_test_inputs=[(x2,)],
@@ -383,6 +394,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones(2)
         another_x = torch.empty((0,))
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self,
             ViewModel(),
             (x,),
             additional_test_inputs=[(another_x,)],
@@ -398,7 +410,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(5, 5, 4, 5)
         model = MyModule()
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            model, (x,), additional_test_inputs=[(y,)]
+            self, model, (x,), additional_test_inputs=[(y,)]
         )
 
 

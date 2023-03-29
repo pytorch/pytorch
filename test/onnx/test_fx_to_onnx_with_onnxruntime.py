@@ -47,6 +47,7 @@ def _run_ort(
 
 @_beartype.beartype
 def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+    test_suite: onnx_test_common._TestONNXRuntime,
     model: _ModelType,
     input_args: _InputArgsType,
     rtol: float = 1e-3,
@@ -55,6 +56,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     op_level_debug=False,
     **input_kwargs,
 ):
+    op_level_debug = test_suite.op_level_debug
     # Feed args and kwargs into exporter.
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
@@ -126,7 +128,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
 
     def test_func_with_args_and_kwargs(self):
         # Non-tensor optional kwargs are always folded into constant and
@@ -150,14 +152,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
         # Test without providing optional kwarg.
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
         # Test with only positional args.
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x, torch.tensor(8.0))
+            self, func, (tensor_x, torch.tensor(8.0))
         )
         # Test while specifying optional kwarg.
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x,), b=torch.tensor(5.0)
+            self, func, (tensor_x,), b=torch.tensor(5.0)
         )
 
     def test_mnist(self):
@@ -182,7 +184,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            MNISTModel(), (tensor_x,), op_level_debug=True
+            self, MNISTModel(), (tensor_x,)
         )
 
     # test single op with no kwargs
@@ -197,7 +199,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x):
                 return self.sigmoid(x)
 
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(SigmoidModel(), (x,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, SigmoidModel(), (x,))
 
     # test single op with no kwargs
     def test_sigmoid_add(self):
@@ -214,8 +216,23 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return self.sigmoid(x)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            SigmoidAddModel(), (x,), op_level_debug=True
+            self, SigmoidAddModel(), (x,), op_level_debug=True
         )
+
+
+class TestFxToOnnxWithOnnxRuntimeSpecialCases(onnx_test_common._TestONNXRuntime):
+    def setUp(self):
+        super().setUp()
+        self.diag_ctx = diagnostics.engine.create_diagnostic_context(
+            "test_fx_export", version=torch.__version__
+        )
+        self.opset_version = 18
+
+    def tearDown(self):
+        diagnostics.engine.dump(
+            f"test_report_{self._testMethodName}.sarif", compress=False
+        )
+        super().tearDown()
 
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -314,6 +331,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     use_binary_format=False,
                     opset_version=self.opset_version,
                     enable_dynamic_axes=enable_dynamic_axes,
+                    op_level_debug=True,
                 )
 
             # Tasks done by the following block.

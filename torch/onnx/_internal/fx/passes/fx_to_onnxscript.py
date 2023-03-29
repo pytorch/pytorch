@@ -448,7 +448,11 @@ def _export_fx_node_to_onnxscript(
         assert isinstance(output, (graph_building.TorchScriptTensor, tuple)), type(
             output
         )
-        if export_options.op_level_debug:
+        if (
+            export_options.op_level_debug
+            and not isinstance(node.target, torch._ops.OpOverloadPacket)
+            and not isinstance(node.target, types.BuiltinFunctionType)
+        ):
             (
                 node_with_fixed_shape_args,
                 node_with_fixed_shape_kwargs,

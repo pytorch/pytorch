@@ -35,96 +35,78 @@ def validate_op_between_ort_torch(
         if isinstance(symbolic_fn, onnxscript.OnnxFunction)
         else symbolic_fn.__name__
     )
-    try:
-        with evaluator.default_as(evaluator.ort_evaluator):
-            try:
-                expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
-            except IndexError as index_error:
-                # TODO(titaiwang): How to bound indices/dim: INT64
-                warnings.warn(
-                    f"\nBypass the test of running on PyTorch Op {node.target} with "
-                    f"IndexError: \n{index_error}.\n This is possibly raised by "
-                    f"unsupported args {torch_args} of randomnized dim/slices(INT64).\n"
-                )
-                diagnostic = diagnostics.export_context().inflight_diagnostic()
-                diagnostic.with_additional_message(
-                    f"### Validation bypass\n"
-                    f"{diagnostics.decorator.format_exception_in_markdown(index_error)}"
-                )
-                diagnostic.level = diagnostics.levels.WARNING
-                return
-
-            input_onnx = [
-                onnx_proto_utils._convert_tensor_to_numpy(x) for x in torch_args
-            ]
-            kwargs_onnx = fx_to_onnxscript.filter_incompatible_and_dtype_convert_kwargs(
-                torch_kwargs
-            )
-            try:
-                ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
-            except TypeError as type_error:
-                # TODO(titaiwang): trace_only function is not supported by onnxscript
-                # param_schema
-                warnings.warn(
-                    f"\nBypass the test of running on ONNX function {function_name} with "
-                    f"TypeError: \n{type_error}.\n If this is a trace_only onnxscript "
-                    f"function, it is possibly raised by unsupported separated "
-                    f"parameter schema. args {input_onnx} and kwargs: {kwargs_onnx}.\n"
-                )
-                diagnostic = diagnostics.export_context().inflight_diagnostic()
-                diagnostic.with_additional_message(
-                    f"### Validation bypass\n"
-                    f"{diagnostics.decorator.format_exception_in_markdown(type_error)}"
-                )
-                diagnostic.level = diagnostics.levels.WARNING
-                return
-
-            flattened_torch_outputs, _ = _pytree.tree_flatten(expected_outputs)
-            flattened_function_outputs, _ = _pytree.tree_flatten(ort_outputs)
-
-            assert flattened_torch_outputs
-            assert len(flattened_torch_outputs) == len(flattened_function_outputs)
-
-            for torch_output, function_output in zip(
-                flattened_torch_outputs, flattened_function_outputs
-            ):
-                try:
-                    if not isinstance(function_output, np.ndarray):
-                        # An onnxscript tensor
-                        function_output = function_output.value
-
-                    # Use torch.testing as opposed to np.testing to ensure dtypes and shapes match
-                    torch.testing.assert_close(
-                        torch.tensor(function_output).cpu(),
-                        torch_output.cpu()
-                        if isinstance(torch_output, torch.Tensor)
-                        else torch.tensor(torch_output).cpu(),
-                        rtol=1e-4,
-                        atol=1e-3,
-                    )
-                except AssertionError as e:
-                    warnings.warn(
-                        f"\nSuppressed AssertionError:\n{e}.\n"
-                        f"Op {node.target} has mismatch outputs. "
-                        f"Please check the implementation of {function_name}.\n"
-                    )
-                    diagnostic = diagnostics.export_context().inflight_diagnostic()
-                    diagnostic.with_additional_message(
-                        f"### Validation failed\n"
-                        f"{diagnostics.decorator.format_exception_in_markdown(e)}"
-                    )
-                    diagnostic.level = diagnostics.levels.ERROR
-    except Exception as e:
+    # TODO(titaiwang): Support trace_only function
+    if not isinstance(symbolic_fn, onnxscript.OnnxFunction):
         warnings.warn(
-            f"\nORT fails to run on Op {node.target} with error: \n{e}.\n"
-            f"Please check the implementation of {function_name}.\n"
+            f"\nBypass the test of running on trace_only ONNX function {function_name}."
+            f"\nIt is not supported with separated parameter schema.\n"
         )
-        diagnostic = diagnostics.export_context().inflight_diagnostic()
-        diagnostic.with_additional_message(
-            f"### Validation failed\n"
-            f"{diagnostics.decorator.format_exception_in_markdown(e)}"
+        return
+
+    with evaluator.default_as(evaluator.ort_evaluator):
+        try:
+            expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
+        except IndexError as index_error:
+            # TODO(titaiwang): How to bound indices/dim: INT64
+            warnings.warn(
+                f"\nBypass the test of running on PyTorch Op {node.target} with "
+                f"IndexError: \n{index_error}.\n This is possibly raised by "
+                f"unsupported args {torch_args} of randomnized dim/slices(INT64).\n"
+            )
+            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic.with_additional_message(
+                f"### Validation bypass\n"
+                f"{diagnostics.decorator.format_exception_in_markdown(index_error)}"
+            )
+            diagnostic.level = diagnostics.levels.WARNING
+            return
+
+        input_onnx = [
+            onnx_proto_utils._convert_tensor_to_numpy(x)
+            if isinstance(x, (torch.Tensor, Sequence, torch.dtype))
+            else x
+            for x in torch_args
+        ]
+        kwargs_onnx = fx_to_onnxscript.filter_incompatible_and_dtype_convert_kwargs(
+            torch_kwargs
         )
-        diagnostic.level = diagnostics.levels.WARNING
+        ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
+
+        flattened_torch_outputs, _ = _pytree.tree_flatten(expected_outputs)
+        flattened_function_outputs, _ = _pytree.tree_flatten(ort_outputs)
+
+        assert flattened_torch_outputs
+        assert len(flattened_torch_outputs) == len(flattened_function_outputs)
+
+        for torch_output, function_output in zip(
+            flattened_torch_outputs, flattened_function_outputs
+        ):
+            try:
+                if not isinstance(function_output, np.ndarray):
+                    # An onnxscript tensor
+                    function_output = function_output.value
+
+                # Use torch.testing as opposed to np.testing to ensure dtypes and shapes match
+                torch.testing.assert_close(
+                    torch.tensor(function_output).cpu(),
+                    torch_output.cpu()
+                    if isinstance(torch_output, torch.Tensor)
+                    else torch.tensor(torch_output).cpu(),
+                    rtol=1e-4,
+                    atol=1e-3,
+                )
+            except AssertionError as e:
+                warnings.warn(
+                    f"\nSuppressed AssertionError:\n{e}.\n"
+                    f"Op {node.target} has mismatch outputs. "
+                    f"Please check the implementation of {function_name}.\n"
+                )
+                diagnostic = diagnostics.export_context().inflight_diagnostic()
+                diagnostic.with_additional_message(
+                    f"### Validation failed\n"
+                    f"{diagnostics.decorator.format_exception_in_markdown(e)}"
+                )
+                diagnostic.level = diagnostics.levels.ERROR
 
 
 @_beartype.beartype
@@ -158,6 +140,42 @@ def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
 
 
 @_beartype.beartype
+def _recursive_wrap_args(
+    complete_args: List[_type_utils.Argument],
+) -> List[_type_utils.Argument]:
+    """Wrap args in torch.fx.Node to FakeTensor"""
+    wrapped_args: List[_type_utils.Argument] = []
+    for arg in complete_args:
+        if isinstance(arg, torch.fx.Node):
+            fake_tensor = arg.meta["val"]
+            if isinstance(fake_tensor, torch.Tensor):
+                real_tensor = generate_random_tensors(
+                    fake_tensor.shape, fake_tensor.dtype
+                )
+                wrapped_args.append(real_tensor)
+            elif isinstance(fake_tensor, (int, float)):
+                # TODO(titaiwang): Could dtype be inside a fx.Node?
+                wrapped_args.append(fake_tensor)
+            else:
+                warnings.warn(
+                    f"Unexpected argument type found inside fx.Node. arg: {arg}; "
+                    f"arg.meta['val']: {fake_tensor}; type(arg.meta['val']): "
+                    f"{type(fake_tensor)}. This might lead to an error when running on Ops."
+                )
+        elif isinstance(arg, Sequence):
+            wrapped_args.append(_recursive_wrap_args(arg))
+        elif isinstance(arg, (int, float, torch.dtype)):
+            wrapped_args.append(arg)
+        else:
+            warnings.warn(
+                f"Unexpected argument type found. arg: {arg}; type(arg): {type(arg)}. "
+                "This might lead to an error when running on Ops"
+            )
+
+    return wrapped_args
+
+
+@_beartype.beartype
 def wrap_fx_args_as_torch_args(
     complete_args: List[_type_utils.Argument],
     complete_kwargs: Dict[str, _type_utils.Argument],
@@ -165,23 +183,6 @@ def wrap_fx_args_as_torch_args(
     """Prepare torch format args and kwargs for op-level validation by using fake tensor to create real tensor to feed in ops"""
 
     # NOTE: This function only supports FakeTensor with concrete shapes
-    torch_args: List[_type_utils.Argument] = []
-    for idx, arg in enumerate(complete_args):
-        if isinstance(arg, torch.fx.Node):
-            fake_tensor = arg.meta["val"]
-            if isinstance(fake_tensor, Sequence):
-                for meta_value in fake_tensor:
-                    if isinstance(fake_tensor, torch.Tensor):
-                        real_tensor = generate_random_tensors(
-                            meta_value.shape, meta_value.dtype
-                        )
-                        torch_args.append(real_tensor)
-            elif isinstance(fake_tensor, torch.Tensor):
-                real_tensor = generate_random_tensors(
-                    fake_tensor.shape, fake_tensor.dtype
-                )
-                torch_args.append(real_tensor)
-        else:
-            torch_args.append(arg)
+    torch_args: List[_type_utils.Argument] = _recursive_wrap_args(complete_args)
     torch_kwargs = complete_kwargs
     return (tuple(torch_args), torch_kwargs)
