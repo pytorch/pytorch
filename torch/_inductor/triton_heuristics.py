@@ -41,7 +41,7 @@ else:
     KernelInterface = object
     triton = None
 
-DEBUG = False
+DEBUG = True
 
 class CachingAutotuner(KernelInterface):
     """
@@ -183,6 +183,9 @@ class CachingAutotuner(KernelInterface):
             launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
             for launcher in self.launchers
         }
+        if DEBUG:
+            for k, v in timings.items():
+                print(f"{k.config}: {v}")
         return timings
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
@@ -645,7 +648,13 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     bs = max(256, min(numel // 128, 1024))
 
     if len(size_hints) == 1:
-        return cached_autotune([triton_config(size_hints, bs)], meta=meta, filename=filename)
+        configs = [triton_config(size_hints, bs)]
+        if config.max_autotune:
+            configs.extend([
+                # improve 1.832x for https://gist.github.com/shunting314/69b5055193148ade349ac7e58c85d2d9 
+                Config({"XBLOCK": 256}, num_warps=8, num_stages=1),
+            ])
+        return cached_autotune(configs, meta=meta, filename=filename)
     if len(size_hints) == 2:
         if (
             not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
