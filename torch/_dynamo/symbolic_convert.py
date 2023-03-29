@@ -402,7 +402,6 @@ def break_graph_if_unsupported(*, push):
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = self.kw_names.value if self.kw_names is not None else ()
                 if len(kw_names) > 0:
-                    PyCodegen.maybe_upd_consts(self.code_options, kw_names)
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
