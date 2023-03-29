@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import dataclasses
 import functools
 import importlib
@@ -41,7 +42,6 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TEST_WITH_SLOW,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -74,9 +74,9 @@ from torch._inductor.ir import ModularIndexing
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import has_torchvision_roi_align, timed
 from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.testing._internal.common_utils import slowTest
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-from torch.testing._internal.common_utils import slowTest
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -5846,27 +5846,19 @@ class TestFailure:
 def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
-            # You cannot copy functions in Python, so we use lambdas here to
-            # create objects with different ids. Otherwise, unittest.skip
-            # would modify all methods sharing the same object id. Also, by
-            # using a default argument in a lambda, we create a copy instead of
-            # a reference. Otherwise, we would lose access to the value.
+            # Deep copy the functions, otherwise unittest.skip would modify
+            # methods on both classes.
             tf = test_failures and test_failures.get(name)
+            new_test = copy.deepcopy(value)
             if tf is not None and suffix in tf.suffixes:
                 skip_func = (
                     unittest.skip("Skipped!")
                     if tf.is_skip
                     else unittest.expectedFailure
                 )
-                setattr(
-                    other_cls,
-                    f"{name}_{suffix}",
-                    skip_func(lambda self, value=value: value(self)),
-                )
-            else:
-                setattr(
-                    other_cls, f"{name}_{suffix}", lambda self, value=value: value(self)
-                )
+                new_test = skip_func(new_test)
+
+            setattr(other_cls, f"{name}_{suffix}", new_test)
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
