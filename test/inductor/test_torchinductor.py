@@ -5763,7 +5763,6 @@ class CommonTemplate:
             fn,
             [x],
         )
->>>>>>> 8372c5dc687d622c7d2e0d411f61cd2720fc1052
 
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):
