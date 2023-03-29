@@ -7007,6 +7007,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
                         "cpu",
                     )
                 ]
+                torch._dynamo.reset()
                 args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
                 torch._dynamo.config.dynamic_shapes = dynamic_shapes
                 with torch.no_grad():
@@ -7031,6 +7032,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
                         "cpu",
                     )
                 ]
+                torch._dynamo.reset()
                 args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
                 torch._dynamo.config.dynamic_shapes = dynamic_shapes
                 with torch.no_grad():
@@ -7054,6 +7056,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
                         "cpu",
                     )
                 ]
+                torch._dynamo.reset()
                 args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
                 torch._dynamo.config.dynamic_shapes = dynamic_shapes
                 with torch.no_grad():

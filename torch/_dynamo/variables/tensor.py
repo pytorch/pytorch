@@ -41,7 +41,15 @@ supported_const_comparison_ops = {
 
 
 def has_same_metadata(t1, t2):
-    return t1.size == t2.size and t1.stride == t2.stride
+    t1 = t1.proxy.node.meta["example_value"]
+    t2 = t2.proxy.node.meta["example_value"]
+    return (
+        t1.size == t2.size
+        and t1.stride == t2.stride
+        and t1.dtype == t2.dtype
+        and t1.device == t2.device
+        and t1.storage_offset() == t2.storage_offset()
+    )
 
 
 class TensorVariable(VariableTracker):
@@ -406,7 +414,7 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
-            tx.metadata_mutated_variables[self] = out
+            tx.update_locals_and_stack_ex(self, out)
             return out
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
@@ -446,7 +454,8 @@ class TensorVariable(VariableTracker):
                 **options,
             )
             if name[-1] == "_" and not has_same_metadata(out, self):
-                tx.metadata_mutated_variables[self] = out
+                # tx.metadata_mutated_variables[self] = out
+                tx.update_locals_and_stack_ex(self, out)
             return out
 
 

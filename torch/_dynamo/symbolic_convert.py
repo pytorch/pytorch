@@ -438,7 +438,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     random_calls: List[
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
-    metadata_mutated_variables: Dict[VariableTracker, VariableTracker]
 
     def has_backedge(self):
         cur_offset = self.current_instruction.offset
@@ -513,6 +512,20 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.symbolic_locals[k] = VariableTracker.apply(
                 repl, x, cache, skip_fn=skip
             )
+
+    def update_locals_and_stack_ex(
+        self, oldvar: VariableTracker, newvar: VariableTracker
+    ):
+        def repl(v: VariableTracker):
+            if v is oldvar:
+                return newvar
+            return v
+
+        cache: Dict[int, Tuple[object, object]] = dict()
+        self.output.side_effects.apply(repl, cache)
+        self.stack = [VariableTracker.apply(repl, x, cache) for x in self.stack]
+        for k, x in self.symbolic_locals.items():
+            self.symbolic_locals[k] = VariableTracker.apply(repl, x, cache)
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
@@ -650,10 +663,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert name not in self.cell_and_freevars()
         if name not in self.symbolic_locals:
             unimplemented("undefined LOAD_FAST")
-        if self.symbolic_locals[name] in self.metadata_mutated_variables:
-            self.push(self.metadata_mutated_variables[self.symbolic_locals[name]])
-        else:
-            self.push(self.symbolic_locals[name])
+        self.push(self.symbolic_locals[name])
         if name.startswith("___stack"):
             self.symbolic_locals.pop(name)
 
@@ -1852,7 +1862,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         for name in self.code_options["co_freevars"]:
             if name in f_locals:
                 self._freevars_ids[name] = id(f_locals[name])
-        self.metadata_mutated_variables = dict()
 
     def run(self):
         _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
@@ -2070,7 +2079,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.symbolic_result = None
         self.closure_cells = closure_cells
         self.nn_module_stack = parent.nn_module_stack.copy()
-        self.metadata_mutated_variables = dict()
 
     @property
     def fake_mode(self):
