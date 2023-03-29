@@ -76,10 +76,10 @@ def strip_function_call(name):
     valid_name = re.compile("[A-Za-z_].*")
     curr = ""
     for char in name:
-        if char in ' (':
+        if char in " (":
             curr = ""
-        elif char in '),[]':
-            if curr and curr!='None' and valid_name.match(curr):
+        elif char in "),[]":
+            if curr and curr != "None" and valid_name.match(curr):
                 return strip_function_call(curr)
         else:
             curr += char
