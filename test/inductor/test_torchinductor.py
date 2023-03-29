@@ -5741,7 +5741,6 @@ class CommonTemplate:
             func = getattr(self, test_name)
             assert callable(func), "not a callable"
             code = run_and_get_cpp_code(func, [])
-            print(code)
             self.assertEqual("CppWrapperCodeCache" in code, supported)
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
