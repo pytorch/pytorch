@@ -6253,7 +6253,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
 
     def test_channel_shuffle_return_self(self):
-        # gh-76616: nn.ChannelShuffle will return self with an  empty input tensor
+        # gh-76616: nn.ChannelShuffle will return self with an empty input tensor
         groups = 3
         input_tensor = torch.rand([0, 9, 4, 4])
         output = torch.nn.ChannelShuffle(groups)(input_tensor)
@@ -6280,6 +6280,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     else:
                         gradcheck(lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs), (input,))
 
+        # Check https://github.com/pytorch/pytorch/issues/62396
+        test_scales = [0.1234, 0.9999, 1.8]
+        isize = 32
+        expected_out_sizes = [int(0.5 + s * isize) for s in test_scales]
+        t_in = torch.randint(0, 256, size=(1, 1, isize), dtype=torch.float)
+        for r in [True, False]:
+            for s, expected_osize in zip(test_scales, expected_out_sizes):
+                t_out = F.interpolate(
+                    t_in, scale_factor=s, recompute_scale_factor=r, mode="nearest"
+                )
+                self.assertEqual(t_out.shape[-1], expected_osize)
+
     def test_upsamplingLinear1d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9)
@@ -6291,17 +6303,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_upsampling_not_recompute_scale_factor(self):
         # test output against known input: result must match opencv
+        # opencv gives output of shape (5, 5, 2)
         in_t = torch.arange(8.).view(1, 2, 2, 2)
         expected_out_t = torch.tensor(
-            [[[[-0.32725, -0.08843, 0.37933, 0.79744],
-              [0.15039, 0.38921, 0.85697, 1.27508],
-              [1.08591, 1.32473, 1.79249, 2.21060],
-              [1.92213, 2.16095, 2.62871, 3.04682]],
+            [[[[-0.32725, -0.08843, 0.37933, 0.79744, 0.88296],
+              [0.15039, 0.38921, 0.85697, 1.27508, 1.3606],
+              [1.08591, 1.32473, 1.79249, 2.21060, 2.29613],
+              [1.92213, 2.16095, 2.62871, 3.04682, 3.13234],
+              [2.09318, 2.33200, 2.79976, 3.21787, 3.30340]],
 
-             [[3.67275, 3.91157, 4.37933, 4.79744],
-              [4.15039, 4.38921, 4.85697, 5.27508],
-              [5.08591, 5.32473, 5.79249, 6.21060],
-              [5.92213, 6.16095, 6.62871, 7.04682]]]])
+             [[3.67275, 3.91157, 4.37933, 4.79744, 4.88296],
+              [4.15039, 4.38921, 4.85697, 5.27508, 5.36060],
+              [5.08591, 5.32473, 5.79249, 6.21060, 6.29613],
+              [5.92213, 6.16095, 6.62871, 7.04682, 7.13234],
+              [6.09318, 6.33200, 6.79976, 7.21787, 7.30340]]]])
         if IS_PPC:
             # Both OpenCV and PyTorch give a slightly different result on PPC
             expected_out_t = torch.tensor(
@@ -6316,7 +6331,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                   [5.92212, 6.16094, 6.62870, 7.04680]]]])
         out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
         torch.set_printoptions(precision=5)
-        self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
+        if IS_PPC:
+            self.assertEqual(out_t[..., :3, :3], expected_out_t[..., :3, :3], atol=1e-4, rtol=0)
+        else:
+            self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
 
         device_list = ['cpu']
         if TEST_CUDA:
@@ -6329,7 +6347,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 for scale_factor in [0.6, 1.6, 2.3]:
                     in_t = torch.ones(2, 2, 2, 2).to(device)
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    out_size = int(math.floor(0.5 + in_t.shape[-1] * scale_factor))
                     self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data, atol=1e-5, rtol=0)
 
                     input = torch.randn(2, 2, 2, 2, requires_grad=True)
@@ -9087,6 +9105,40 @@ class TestNNDeviceType(NNTestCase):
         test('leaky_relu', 0.2)
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
+
+    @parametrize_test("round_with_scale_factor", [True, False, None])
+    @parametrize_test("mode", ["nearest", "linear", "bilinear", "trilinear", "bicubic"])
+    def test_upsampling_output_size(self, device, round_with_scale_factor, mode):
+        s = 1.15
+        isize = 32
+
+        input_shape = [1, 1, isize]
+        if "bi" in mode:
+            input_shape.append(isize)
+        if "tri" in mode:
+            input_shape += (isize, isize)
+
+        d = 0.5 if round_with_scale_factor in (True, None) else 0.0
+        expected_out_size = int(d + s * isize)
+
+        t_in = torch.randint(0, 256, size=input_shape, dtype=torch.float, device=device)
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            t_out = F.interpolate(
+                t_in, scale_factor=s, mode=mode, round_with_scale_factor=round_with_scale_factor
+            )
+            if round_with_scale_factor is None:
+                self.assertEqual(len(ws), 1)
+            else:
+                self.assertEqual(len(ws), 0)
+
+        self.assertEqual(t_out.shape[-1], expected_out_size)
+        if "bi" in mode:
+            self.assertEqual(t_out.shape[-2], expected_out_size)
+        if "tri" in mode:
+            self.assertEqual(t_out.shape[-2], expected_out_size)
+            self.assertEqual(t_out.shape[-3], expected_out_size)
 
     def test_upsamplingNearest1d(self, device):
         # Forward AD does not support XLA because XLA tensors don't have storage

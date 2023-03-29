@@ -3752,17 +3752,17 @@ if upsample.__doc__:
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False, round_with_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False, round_with_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False, round_with_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
     pass
 
 
@@ -3775,10 +3775,20 @@ def interpolate(  # noqa: F811
     align_corners: Optional[bool] = None,
     recompute_scale_factor: Optional[bool] = None,
     antialias: bool = False,
+    round_with_scale_factor: Optional[bool] = None,
 ) -> Tensor:  # noqa: F811
     pass
 
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(
+    input: Tensor,
+    size: Optional[int] = None,
+    scale_factor: Optional[List[float]] = None,
+    mode: str = 'nearest',
+    align_corners: Optional[bool] = None,
+    recompute_scale_factor: Optional[bool] = None,
+    antialias: bool = False,
+    round_with_scale_factor: Optional[bool] = None,
+) -> Tensor:  # noqa: F811
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -3823,6 +3833,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         antialias (bool, optional): flag to apply anti-aliasing. Default: ``False``. Using anti-alias
             option together with ``align_corners=False``, interpolation result would match Pillow
             result for downsampling operation. Supported modes: ``'bilinear'``, ``'bicubic'``.
+        round_with_scale_factor (bool, optional): if ``True`` output size is computed as
+            ``round(input_size * scale_factor)`` (correct way) instead of ``int(input_size * scale_factor)``
+            (old incorrect way).
+            See the note below for further details. If `round_with_scale_factor` is ``None``,
+            a warning is raised and computation is done as ``round_with_scale_factor=True``.
+            If ``False``, old incorrect way to compute the output size is used for backward compatibility.
+            By default, ``None``.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
@@ -3835,6 +3852,14 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         algorithms and fixes known issues with ``mode='nearest'``. This mode is introduced to keep
         backward compatibility.
         Mode ``mode='nearest'`` matches buggy OpenCV's ``INTER_NEAREST`` interpolation algorithm.
+
+    .. note::
+        ``round_with_scale_factor`` argument fixes the output size issue when ``scale_factor`` is
+        provided. Historically, the output size is computed as ``output_size = int(input_size * scale_factor)`
+        which does not match with OpenCV, Scikit-Image, Scipy. Correct way to compute the output size is to
+        ``output_size = round(input_size * scale_factor)``. The difference of +1 in the output size is
+        visible for floating ``scale_factor`` values.
+        Related issue: https://github.com/pytorch/pytorch/issues/62396
 
     Note:
         {backward_reproducibility_note}
@@ -3849,7 +3874,8 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             mode=mode,
             align_corners=align_corners,
             recompute_scale_factor=recompute_scale_factor,
-            antialias=antialias
+            antialias=antialias,
+            round_with_scale_factor=round_with_scale_factor,
         )
 
     if mode in ("nearest", "area", "nearest-exact"):
@@ -3900,6 +3926,17 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             scale_factors = scale_factor
         else:
             scale_factors = [scale_factor for _ in range(dim)]
+
+        if round_with_scale_factor is None:
+            correct_output_size = [
+                int(0.5 + input.size(i + 2) * scale_factors[i]) for i in range(dim)
+            ]
+            incorrect_output_size = [
+                int(input.size(i + 2) * scale_factors[i]) for i in range(dim)
+            ]
+            if correct_output_size != incorrect_output_size:
+                # TODO: Write a deprecation message
+                warnings.warn("...")
     else:
         raise ValueError("either size or scale_factor should be defined")
 
@@ -3915,18 +3952,24 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
         assert scale_factors is not None
+        d = 0.5 if round_with_scale_factor in (None, True) else 0.0
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
+            # we perform round (i.e. floor(0.5 + x)) to match opencv, scipy, scikit-image output size
             output_size = [
-                (torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
+                (torch.floor(d + (input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
                 for i in range(dim)
             ]
         elif torch.jit.is_scripting():
-            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i]))
-                           for i in range(dim)]
-        else:
+            # we perform round (i.e. floor(0.5 + x)) to match opencv, scipy, scikit-image output size
             output_size = [
-                _sym_int(input.size(i + 2) * scale_factors[i])
+                int(math.floor(d + float(input.size(i + 2)) * scale_factors[i]))
+                for i in range(dim)
+            ]
+        else:
+            # we perform round (i.e. floor(0.5 + x)) to match opencv, scipy, scikit-image output size
+            output_size = [
+                _sym_int(d + input.size(i + 2) * scale_factors[i])
                 for i in range(dim)
             ]
         scale_factors = None
@@ -3934,19 +3977,22 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
         raise ValueError("Anti-alias option is only supported for bilinear and bicubic modes")
 
+    if round_with_scale_factor is None:
+        round_with_scale_factor = True
+
     if input.dim() == 3 and mode == "nearest":
-        return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
+        return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors, round_with_scale_factor)
     if input.dim() == 4 and mode == "nearest":
-        return torch._C._nn.upsample_nearest2d(input, output_size, scale_factors)
+        return torch._C._nn.upsample_nearest2d(input, output_size, scale_factors, round_with_scale_factor)
     if input.dim() == 5 and mode == "nearest":
-        return torch._C._nn.upsample_nearest3d(input, output_size, scale_factors)
+        return torch._C._nn.upsample_nearest3d(input, output_size, scale_factors, round_with_scale_factor)
 
     if input.dim() == 3 and mode == "nearest-exact":
-        return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors)
+        return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors, round_with_scale_factor)
     if input.dim() == 4 and mode == "nearest-exact":
-        return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors)
+        return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors, round_with_scale_factor)
     if input.dim() == 5 and mode == "nearest-exact":
-        return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
+        return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors, round_with_scale_factor)
 
     if input.dim() == 3 and mode == "area":
         assert output_size is not None
@@ -3960,20 +4006,20 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
 
     if input.dim() == 3 and mode == "linear":
         assert align_corners is not None
-        return torch._C._nn.upsample_linear1d(input, output_size, align_corners, scale_factors)
+        return torch._C._nn.upsample_linear1d(input, output_size, align_corners, scale_factors, round_with_scale_factor)
     if input.dim() == 4 and mode == "bilinear":
         assert align_corners is not None
         if antialias:
-            return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
-        return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
+            return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors, round_with_scale_factor)
+        return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors, round_with_scale_factor)
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
-        return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors)
+        return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors, round_with_scale_factor)
     if input.dim() == 4 and mode == "bicubic":
         assert align_corners is not None
         if antialias:
-            return torch._C._nn._upsample_bicubic2d_aa(input, output_size, align_corners, scale_factors)
-        return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, scale_factors)
+            return torch._C._nn._upsample_bicubic2d_aa(input, output_size, align_corners, scale_factors, round_with_scale_factor)
+        return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, scale_factors, round_with_scale_factor)
 
     if input.dim() == 3 and mode == "bilinear":
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
