@@ -54,7 +54,7 @@ from .source import (
     LocalInputSource,
     LocalSource,
 )
-from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
+from .utils import counters, istype, proxy_args_kwargs
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
@@ -272,7 +272,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 raise exc.SkipFrame(msg)
 
             self.push(value)
-            log.debug("generic_jump triggered compile")
             self.output.compile_subgraph(
                 self,
                 reason=GraphCompileReason(
@@ -357,21 +356,6 @@ def break_graph_if_unsupported(*, push):
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
 
                 user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
-                user_stack_formatted = "".join(traceback.format_list(user_stack))
-                frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-                # torch._dynamo.explain() formats this a little nicer, and presents a slightly
-                # more actionable user code pointer
-                if (
-                    config.print_graph_breaks
-                    and not explain
-                    and graph_break_dup_warning_checker.add(frame_loc)
-                ):
-                    log.warning(
-                        f"Graph break: {excp} from user code at {user_stack_formatted}"
-                    )
-
-                excp.remove_from_stats()
-                excp.add_to_stats("graph_break")
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
 
@@ -1097,8 +1081,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if not self.should_compile_partial_graph():
                 raise
             log.debug("STORE_ATTR triggered compile", exc_info=True)
-            e.remove_from_stats()
-            e.add_to_stats("graph_break")
             self.restore_graphstate(prior)
 
         # break the graph
@@ -1923,9 +1905,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             logging.INFO,
             f"torchdynamo done tracing {self.f_code.co_name} (RETURN_VALUE)",
         )
-        log.debug("RETURN_VALUE triggered compile")
         self.output.compile_subgraph(
-            self, reason=GraphCompileReason("return_value", [self.frame_summary()])
+            self, reason=GraphCompileReason("return_value", [self.frame_summary()]),
+            graph_break=False
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
