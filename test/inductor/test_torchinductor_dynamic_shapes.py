@@ -52,11 +52,12 @@ test_failures = {
 
 if TEST_WITH_ROCM:
     # LLVM assertion error
-    test_skips["test_argmax_argmin1_dynamic_shapes"] = ("cpu", "cuda")
+    test_failures["test_argmax_argmin1_dynamic_shapes"] = TestFailure(("cpu", "cuda"), is_skip=True)
     # Tensor-likes are not close
-    test_skips["test_convolution1_dynamic_shapes"] = ("cpu", "cuda")
+    test_failures["test_convolution1_dynamic_shapes"] = TestFailure(("cpu", "cuda"), is_skip=True)
+    test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(("cuda"), is_skip=True)
     # aten.miopen_batch_norm is not registered for lowering
-    test_skips["test_batch_norm_2d_dynamic_shapes"] = ("cuda")
+    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
 
 
 def make_dynamic_cls(cls):
