@@ -171,7 +171,7 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: huydhn/test-infra/.github/actions/setup-nvidia@new-nvidia-driver
         if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' }}
 
       - name: Pull Docker image

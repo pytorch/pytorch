@@ -90,10 +90,8 @@ jobs:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: huydhn/test-infra/.github/actions/setup-nvidia@new-nvidia-driver
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
-        with:
-          driver-version: "525.85.05"
 
       - name: Lock NVIDIA A100 40GB Frequency
         run: |
