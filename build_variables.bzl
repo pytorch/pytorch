@@ -337,6 +337,7 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/passes/quantization/fusion_passes.cpp",
     "torch/csrc/jit/passes/quantization/register_packed_params.cpp",
     "torch/csrc/jit/python/update_graph_executor_opt.cpp",
+    "torch/csrc/jit/python/utf8_decoding_ignore.cpp",
     "torch/csrc/jit/runtime/argument_spec.cpp",
     "torch/csrc/jit/runtime/autodiff.cpp",
     "torch/csrc/jit/runtime/graph_executor.cpp",

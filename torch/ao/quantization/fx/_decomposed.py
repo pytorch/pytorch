@@ -126,7 +126,7 @@ def quantize_per_tensor_tensor(
     assert zero_point.numel() == 1, f"Exepecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
     return _quantize_per_tensor_impl(
-        input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)  # type: ignore[arg-type]
+        input, scale, zero_point, quant_min, quant_max, dtype)  # type: ignore[arg-type]
 
 @register_decomposition(torch.ops.quantized_decomposed.quantize_per_tensor.tensor)
 def quantize_per_tensor_tensor_decomp_impl(

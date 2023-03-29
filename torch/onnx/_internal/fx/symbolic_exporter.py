@@ -173,6 +173,7 @@ def export_without_parameters_and_buffers(
     use_binary_format: bool = True,
     opset_version: int = _constants.ONNX_DEFAULT_OPSET,
     op_level_debug: bool = False,
+    enable_dynamic_axes: bool = True,
     # kwargs are the keyword arguments to call "module"; that is,
     # module(*args, **kwargs) must run.
     **kwargs,
@@ -214,6 +215,7 @@ def export_without_parameters_and_buffers(
             decomposition_table=decomposition_table,
             use_binary_format=use_binary_format,
             op_level_debug=op_level_debug,
+            enable_dynamic_axes=enable_dynamic_axes,
         ),
         graph_module,
         bound_args,
