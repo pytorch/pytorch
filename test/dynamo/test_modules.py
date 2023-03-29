@@ -305,19 +305,32 @@ class ModuleDict(torch.nn.Module):
             }
         )
 
-    def __getitem__(self, key: str) -> torch.nn.Module:
-        return self.layers[key]
-
     def forward(self, x):
         # TODO(future PR): handle more logic
         x = self.layers["0"](x)
+        return x
+    
+class ModuleDictWithCustomGetItem(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleDict(
+            {
+                "__0": torch.nn.Linear(10, 10),
+            }
+        )
+
+    def __getitem__(self, key: str) -> torch.nn.Module:
+        return self.layers["__" + key]
+
+    def forward(self, x):
+        x = self["0"](x)
         return x
 
 
 class ModuleWithCustomModuleDict(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.dict = ModuleDict()
+        self.dict = ModuleDictWithCustomGetItem()
         
     def forward(self, x):
         return self.dict["0"](x)

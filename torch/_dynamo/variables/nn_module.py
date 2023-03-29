@@ -272,6 +272,16 @@ class NNModuleVariable(VariableTracker):
                     kwargs,
                 )
 
+    def _custom_getitem_fallback(self, module, tx, name, options, key):
+        getitem_fn = getattr(module, name).__func__
+
+        if not isinstance(getitem_fn, types.FunctionType):
+            unimplemented(f"torch.nn.Module with a non-function custom __getitem__")
+            
+        return variables.UserMethodVariable(getitem_fn, self, **options).call_function(
+            tx, [key], {}
+        )
+                    
     def call_method(
         self,
         tx,
@@ -455,12 +465,20 @@ class NNModuleVariable(VariableTracker):
             )
         elif name == "__getitem__":
             assert not kwargs and len(args) == 1
-            assert type(module).__getitem__ in (
+            inline_supported = (
                 torch.nn.ModuleDict.__getitem__,
                 torch.nn.ModuleList.__getitem__,
                 torch.nn.ParameterList.__getitem__,
                 torch.nn.Sequential.__getitem__,
-            ), typestr(module)
+            )
+            
+            if type(module).__getitem__ not in inline_supported:
+                assert isinstance(args[0], variables.ConstantVariable), typestr(args[0])
+                key = args[0].as_python_constant()
+                assert isinstance(key, str)
+                # Try fallback to custom __getitem__
+                return self._custom_getitem_fallback(module, tx, name, options, args[0])
+            
             assert self.source
 
             if isinstance(args[0], SliceVariable):
