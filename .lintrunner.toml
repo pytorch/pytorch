@@ -644,10 +644,20 @@ include_patterns = [
     'torch/csrc/**',
 ]
 exclude_patterns = [
+    'aten/src/ATen/cuda/CUDAContext.cpp',
+    'aten/src/ATen/cuda/CUDAGeneratorImpl.cpp',
+    'aten/src/ATen/cuda/CuSparseHandlePool.cpp',
+    'aten/src/ATen/cuda/CublasHandlePool.cpp',
+    'aten/src/ATen/cudnn/Handle.cpp',
+    'aten/src/ATen/native/cuda/RNN.cu',
+    'aten/src/ATen/native/cuda/UniqueCub.cu',
+    'aten/src/ATen/native/cuda/linalg/CusolverDnHandlePool.cpp',
     'aten/src/ATen/test/**',
     'aten/src/ATen/native/cudnn/Conv_v8.cpp',
     'aten/src/ATen/native/sparse/cuda/SparseCUDATensorMath.cu',
+    'c10/core/impl/InlineDeviceGuard.h',
     'c10/cuda/CUDAFunctions.cpp',
+    'c10/cuda/impl/CUDATest.cpp',
     'torch/csrc/cuda/nccl.cpp',
 ]
 command = [
