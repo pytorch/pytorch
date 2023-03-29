@@ -4954,7 +4954,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(input.grad, ref_input.grad)
 
         # test NC11 and N1HW; test mixed dtype
-        for shape in [(4, 8, 10, 10), (4, 1, 9, 9), (4, 9, 1, 1), (4, 8, 9, 10, 10), (4, 1, 9, 9, 9), (4, 9, 1, 1, 1)]:
+        for shape in [(4, 8, 10, 10), (4, 1, 9, 9), (4, 9, 1, 1), (4, 8, 2, 10, 10), (4, 1, 2, 9, 9), (4, 9, 1, 1, 1)]:
             helper(self, shape, torch.float, False)
             helper(self, shape, torch.bfloat16, False)
             helper(self, shape, torch.bfloat16, True)
