@@ -698,8 +698,7 @@ class CppWrapperCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, source_code, func_name):
-        key = code_hash(source_code)
+    def load(cls, source_code, func_name, key):
         # cpp_wrapper_dir = os.path.join(cache_dir(), "cpp_wrapper")
         cpp_wrapper_dir = cpp_extension.get_default_build_root()
         name = f"inline_extension_{key}"
@@ -710,12 +709,13 @@ class CppWrapperCodeCache:
             # TODO: Filelock
             if not os.path.exists(cpp_wrapper_dir):
                 os.mkdir(cpp_wrapper_dir)
-
+            print("not in cache")
+            shared = get_shared()
+            warning_all_flag = get_warning_all_flag()
             ipaths, lpaths, libs, macros = get_include_and_linking_paths()
 
-            extra_cflags = f"{cpp_flags()} -ftemplate-depth-5000 -fconstexpr-depth=1024"
-            " {optimization_flags()} {get_warning_all_flag()} {macros} {use_custom_generated_macros()}"
-            extra_ldflags = f"{get_shared()} {lpaths} {libs}"
+            extra_cflags = f"{cpp_flags()} {optimization_flags()} {warning_all_flag} {macros} {use_custom_generated_macros()}"
+            extra_ldflags = f"{shared} {lpaths} {libs}"
             extra_include_paths = f"{ipaths}"
 
             mod = torch.utils.cpp_extension.load_inline(
@@ -729,6 +729,7 @@ class CppWrapperCodeCache:
             )
             cls.cache[key] = mod
         else:
+            print("in cache, directly load")
             spec = importlib.util.spec_from_file_location(name, filepath)
             assert spec is not None
             mod = importlib.util.module_from_spec(spec)

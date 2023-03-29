@@ -832,22 +832,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.wrapper_call.writeline(f"return;{self.return_end_str()}")
 
     def generate_end(self, result):
-        shared = codecache.get_shared()
-        warning_all_flag = codecache.get_warning_all_flag()
-        cpp_flags = codecache.cpp_flags()
-        ipaths, lpaths, libs, macros = codecache.get_include_and_linking_paths()
-        optimization_flags = codecache.optimization_flags()
-        use_custom_generated_macros = codecache.use_custom_generated_macros()
-
-        extra_cflags = f"{cpp_flags} {optimization_flags} {warning_all_flag} {macros} {use_custom_generated_macros}"
-        extra_ldflags = f"{shared} {lpaths} {libs}"
-        extra_include_paths = f"{ipaths}"
-
         # get the hash of the wrapper code to name the extension
         wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
         result.splice(
             f"""
-            module = CppWrapperCodeCache.load(wrapper, 'call_{self._call_func_id}')
+            module = CppWrapperCodeCache.load(wrapper, 'call_{self._call_func_id}', '{wrapper_call_hash}')
             """
         )
         # Wrap the func to support setting result._boxed_call = True
