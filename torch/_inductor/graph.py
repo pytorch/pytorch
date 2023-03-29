@@ -238,8 +238,9 @@ class GraphLowering(torch.fx.Interpreter):
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
-        self._can_use_cpp_wrapper = False
-        log.debug("Set _can_use_cpp_wrapper to False due to %s", cond)
+        self.cpp_wrapper = False
+        assert not self.aot_mode, "AOT compilation failed"
+        log.debug("Set cpp_wrapper to False due to %s", cond)
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
