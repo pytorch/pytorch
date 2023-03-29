@@ -32,7 +32,7 @@ from torch._inductor.utils import run_and_get_triton_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing import make_tensor
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -6385,6 +6385,32 @@ if HAS_CPU and not torch.backends.mps.is_available():
                         metrics.generated_kernel_count
                         - metrics.generated_cpp_vec_kernel_count
                     ) == 0
+
+        def test_skip_cpp_codegen(self):
+            with config.patch({"disable_cpp_codegen": True}):
+                inps = torch.ones([20]), torch.rand([20])
+
+                def f(x, y):
+                    return x + y + torch.tensor(1)
+
+                f_opt = torch.compile()(f)
+
+                code = run_and_get_cpp_code(f_opt, (inps[0], inps[1]))
+                FileCheck().check_not("void kernel").run(code)
+
+                self.assertEqual(
+                    f(*inps),
+                    f_opt(*inps),
+                )
+
+                # constant needs to be propagated on fallback
+                def f(x):
+                    return x[torch.tensor(1) :] * 2
+
+                f_opt = torch.compile()(f)
+                code = run_and_get_cpp_code(f_opt, (inps[0],))
+                FileCheck().check_not("void kernel").run(code)
+                self.assertEqual(f_opt(inps[0]), f(inps[0]))
 
         def test_redundant_to_node_elimination_bf16(self):
             def fn(x, y):
