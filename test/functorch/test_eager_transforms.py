@@ -9,7 +9,7 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE, freeze_rng_state,
+    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo,
 )
 import torch
 import torch.nn as nn
@@ -22,6 +22,7 @@ import warnings
 import math
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing import make_tensor
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
@@ -38,7 +39,7 @@ from torch._functorch.make_functional import (
 )
 from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._functorch.utils import enable_single_level_autograd_function
 import torch.autograd.forward_ad as fwAD
 from torch.func import functional_call, stack_module_state, linearize
@@ -2141,6 +2142,16 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all outputs"):
             jacfwd(fn)(x)
 
+    @jacrev_and_jacfwd
+    def test_jac_with_non_tensor_args(self, device, jacapi):
+        def f(t, int_x):
+            return t + int_x
+
+        t = torch.randn(3, 3, device=device)
+
+        actual = jacapi(f)(t, 3)
+        expected = torch.autograd.functional.jacobian(partial(f, int_x=3), t)
+        self.assertEqual(actual, expected)
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
@@ -2528,8 +2539,8 @@ class TestJvp(TestCase):
         # Should not error
         vmap(vmap(push_jvp, (0, None)))(dummy, x)
 
-
 class TestLinearize(TestCase):
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_basic(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2544,6 +2555,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_return(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2558,6 +2570,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_composition(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2576,6 +2589,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     def test_linearize_nested_input_nested_output(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2602,6 +2616,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @onlyCUDA
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     def test_linearize_errors(self):
         dtype = torch.float
         device = torch.device('cpu')
@@ -4024,6 +4039,7 @@ class TestExamplesCorrectness(TestCase):
         self.assertNotEqual(tuple(weight[0] for weight in result_weights),
                             tuple(weight[1] for weight in result_weights))
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     @parametrize('mechanism', ["make_functional", "functional_call"])
     def test_resnet18_per_sample_grads(self, device, mechanism):
@@ -4433,7 +4449,7 @@ def forward(self, x_1):
 
 
 def construct_sum_pyop():
-    mysum = PyOperator("mysum")
+    mysum = HigherOrderOperator("mysum")
 
     @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
     def mysum_batch_rule(interpreter, x, dim):
@@ -4487,7 +4503,7 @@ def construct_sum_pyop():
 
 sum_pyop = construct_sum_pyop()
 
-class TestPyOperatorInteraction(TestCase):
+class TestHigherOrderOperatorInteraction(TestCase):
 
     def test_basic_sum(self, device):
         x = torch.randn(2, 3, 4, device=device)
@@ -4603,7 +4619,7 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(
-    TestPyOperatorInteraction,
+    TestHigherOrderOperatorInteraction,
     globals(),
     only_for=only_for,
 )
