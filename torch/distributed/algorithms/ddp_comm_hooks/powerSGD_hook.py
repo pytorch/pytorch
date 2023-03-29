@@ -81,7 +81,7 @@ def _should_compress(
 
     The result of this function is a tuple of the form (compression_recommendation, uncompressed_el_count, compressed_el_count), where:
 
-    compresion_recommendation is true if the tensor is worth compressing, and false otherwise (see above);
+    compression_recommendation is true if the tensor is worth compressing, and false otherwise (see above);
 
     uncompressed_el_count is the uncompressed element count, i.e. ``num_rows`` * ``num_cols``; and,
 
@@ -258,7 +258,7 @@ class PowerSGDState:
             1, compression_stats_logging_frequency
         )
         self.next_stats_report = 0
-        # Batching tensors with same shape can increase parallelism in compressiom / decompression computation.
+        # Batching tensors with same shape can increase parallelism in compression / decompression computation.
         # This requires a larger bucket size to make more same-shaped tensor to appear in one bucket, however
         # this may reduce the overlap between computation and communication, and increase the memory footprint
         # due to stacking tensors.
@@ -827,7 +827,7 @@ def batched_powerSGD_hook(
         if state.use_error_feedback:
             # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
-        # Removing this seemingly unnecessary sync somehow may cause faliures.
+        # Removing this seemingly unnecessary sync somehow may cause failures.
         # See: https://github.com/pytorch/pytorch/pull/54838
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
