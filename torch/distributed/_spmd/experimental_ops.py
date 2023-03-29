@@ -101,7 +101,9 @@ def _refine_sharding(
                 mesh=s.mesh,  # type: ignore[attr-defined]
                 placements=s.placements,  # type: ignore[attr-defined]
                 tensor_meta=TensorMetadata(
-                    shape=torch.Size(s.shape[0:active_dim] + (1,) + s.shape[active_dim + 1 :])
+                    shape=torch.Size(
+                        s.shape[0:active_dim] + (1,) + s.shape[active_dim + 1 :]
+                    )
                     if active_dim is not None
                     else s.shape,
                     dtype=s.tensor_meta.dtype,
@@ -109,8 +111,8 @@ def _refine_sharding(
                     stride=s.tensor_meta.stride,
                     memory_format=s.tensor_meta.memory_format,
                     is_quantized=s.tensor_meta.is_quantized,
-                    qparams=s.tensor_meta.qparams
-                )
+                    qparams=s.tensor_meta.qparams,
+                ),
             )
         )
 

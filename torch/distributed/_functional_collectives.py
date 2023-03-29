@@ -56,7 +56,7 @@ We use this dictionary when AsyncCollectiveTensor is used to invoke Work::wait()
 Finally, we setup a finalizer against the tensor wrapper to observe it getting collected so we
 can clean up stale entries in the dictionary.
 
-To eliminate the possiblity of races we have a global version counter that is used by the finalizer.
+To eliminate the possibility of races we have a global version counter that is used by the finalizer.
 
 As a wise man said once: Don't cross the streams (https://www.youtube.com/watch?v=wyKQe_i9yyo)
 
