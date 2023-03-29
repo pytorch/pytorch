@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import dis
 import functools
@@ -557,7 +558,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            with TracingContext.current_loc(self.f_code.co_filename, self.lineno):
+            with TracingContext.current_loc(
+                self.f_code.co_filename, self.lineno, self.f_code.co_name
+            ):
                 getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
@@ -588,8 +591,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             [create_jump_absolute(continue_inst)] + self.instructions
         )
 
+    def run_ctx_mgr(self):
+        return contextlib.nullcontext()
+
     def run(self):
-        with TracingContext.current_frame(self.frame_summary()):
+        with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
                 while (
@@ -699,6 +705,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             else:
                 assert name in self.f_builtins
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
+
+        if inst.argval == "AssertionError":
+            unimplemented("assert with non-string message")
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
@@ -1466,6 +1475,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable(False))
 
+    def LOAD_ASSERTION_ERROR(self, inst):
+        unimplemented("assert with non-string message")
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)
@@ -2057,6 +2069,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @property
     def fake_mode(self):
         return self.parent.fake_mode
+
+    def run_ctx_mgr(self):
+        return TracingContext.current_frame(self.parent.frame_summary())
 
     def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:
