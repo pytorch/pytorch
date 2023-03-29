@@ -417,7 +417,7 @@ ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate(
 if (${tensor_name}_storage_saved.has_value() &&
     !at::impl::dispatch_mode_enabled() &&
     !at::impl::tensor_has_dispatch(${tensor_name}))
-  AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
+  TORCH_INTERNAL_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
 """
 )
 
@@ -434,7 +434,7 @@ ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate(
     """\
 for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
   if (${tensorlist_name}_storage_saved[i].has_value() && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
-    AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
+    TORCH_INTERNAL_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
 }
 """
 )
@@ -452,7 +452,7 @@ ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
     """\
 for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
   if (${tensorlist_name}_storage_saved[i].has_value() && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
-    AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
+    TORCH_INTERNAL_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
         static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
 }
 """
@@ -468,21 +468,21 @@ if (${tensor_name}.defined()) ${tensor_name}_impl_saved = ${tensor_name}.getIntr
 ENFORCE_SAME_TENSOR_IMPL = CodeTemplate(
     """\
 if (${tensor_name}_impl_saved && !at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name}))
-  AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
+  TORCH_INTERNAL_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
 """
 )
 
 ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE = CodeTemplate(
     """\
 if (!at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name}))
-  AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
+  TORCH_INTERNAL_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
 """
 )
 
 ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate(
     """\
 if (${tensor_name}.has_storage() && !at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name})) {
-  AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+  TORCH_INTERNAL_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
 }
 """
 )
@@ -499,7 +499,7 @@ ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate(
     """\
 for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
   if (${tensorlist_name}_impl_saved[i] && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
-    AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
+    TORCH_INTERNAL_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
 }
 """
 )
@@ -518,7 +518,8 @@ ENFORCE_SAME_OPTIONALTENSORLIST_IMPL = CodeTemplate(
     """\
 for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
   if (${tensorlist_name}_impl_saved[i])
-    AT_ASSERT(${tensorlist_name}_impl_saved[i] == static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->getIntrusivePtr());
+    TORCH_INTERNAL_ASSERT(
+      {tensorlist_name}_impl_saved[i] == static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->getIntrusivePtr());
 }
 """
 )
@@ -571,6 +572,12 @@ std::shared_ptr<${op}> grad_fn;
 """
 )
 
+DECLARE_VECTOR_OF_GRAD_FN = CodeTemplate(
+    """\
+std::vector<std::shared_ptr<${op}>> grad_fn;
+"""
+)
+
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate(
     """\
 auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
@@ -599,6 +606,16 @@ ASSIGN_GRAD_FN = CodeTemplate(
     """\
 grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
+"""
+)
+
+ASSIGN_VECTOR_OF_GRAD_FN = CodeTemplate(
+    """\
+for (const auto& i : c10::irange( ${irange} )) {
+    auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+    grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
+    grad_fns.push_back(grad_fn);
+}
 """
 )
 
@@ -646,6 +663,17 @@ SET_HISTORY = CodeTemplate(
     """\
 if (grad_fn) {
     ${fn}_history(${differentiable_outputs}, grad_fn);
+}
+"""
+)
+
+SET_HISTORY_FOR_VECTOR_OF_GRAD_FN = CodeTemplate(
+    """\
+if (!grad_fns.empty()) {
+    auto differentiable_outputs = ${differentiable_outputs};
+    for (const auto& i : c10::irange(differentiable_outputs.size())) {
+        ${fn}_history(differentiable_outputs[i], grad_fns[i]);
+    }
 }
 """
 )
@@ -944,6 +972,26 @@ def emit_body(
     base_name = get_base_name(f)
     view_info = get_view_info(f)
 
+    foreacharg2refarg: Dict[Argument, Argument] = {}
+    if (
+        f.func.name.name.base.startswith("_foreach")
+        and f.func.kind() == SchemaKind.inplace
+    ):
+        if info is not None:
+            for foreach_arg, reference_arg in zip(
+                f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
+            ):
+                pass
+            for foreach_arg, ref_arg in zip(
+                f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
+            ):
+                if foreach_arg.name != ref_arg.name:
+                    foreach_arg_type = getattr(
+                        foreach_arg.type, "elem", foreach_arg.type
+                    )
+                    assert foreach_arg_type == ref_arg.type
+                    foreacharg2refarg[foreach_arg] = ref_arg
+
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
     ) -> Optional[DifferentiableInput]:
@@ -966,12 +1014,26 @@ def emit_body(
 
     @with_native_function
     def gen_differentiable_inputs(f: NativeFunction) -> List[DifferentiableInput]:
-        return list(mapMaybe(gen_differentiable_input, f.func.arguments.non_out))
+        arguments = list(f.func.arguments.non_out)
+        if foreacharg2refarg:
+            for arg in f.func.arguments.flat_non_out:
+                if arg in foreacharg2refarg:
+                    mapped_arg = foreacharg2refarg[arg]
+                    arguments.append(
+                        Argument(
+                            mapped_arg.name,
+                            mapped_arg.type,
+                            mapped_arg.default,
+                            mapped_arg.annotation,
+                        )
+                    )
+        return list(mapMaybe(gen_differentiable_input, arguments))
 
     def find_args_with_derivatives(
         differentiable_inputs: List[DifferentiableInput],
     ) -> List[DifferentiableInput]:
         """Find arguments that have derivative definitions"""
+        assert differentiable_inputs is not None
         if info is None or not info.has_derivatives:
             return differentiable_inputs
         names = {name for d in info.derivatives for name in d.var_names}
@@ -979,7 +1041,8 @@ def emit_body(
         if len(differentiable) != len(names):
             missing = names - {arg.name for arg in differentiable}
             raise RuntimeError(
-                f"Missing arguments for derivatives: {missing} in {info.name}"
+                f"Missing arguments for derivatives: {missing} in {info.name}, "
+                f"{names = }, {differentiable = }, "
             )
         return differentiable
 
