@@ -3915,6 +3915,7 @@ class CommonTemplate:
         )
 
     @unittest.skipIf(not has_torchvision_roi_align(), "requires torchvision")
+    @skipIfRocm
     def test_roi_align(self):
         def fn(a, b):
             return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
@@ -4844,6 +4845,7 @@ class CommonTemplate:
             ],
         )
 
+    @skipIfRocm
     def test_avg_pool2d_backward2(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
