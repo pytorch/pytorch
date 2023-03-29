@@ -571,8 +571,17 @@ class TORCH_API TensorBase {
     return this->unsafeGetTensorImpl()->mutable_data();
   }
 
+  // TODO(#97856) Make this return a const pointer. This is currently
+  //              const because of the vast number of clients that
+  //              rely on this.
   template <typename T>
-  T * data_ptr() const;
+  T* data_ptr() const;
+
+  // TODO(#97856) Make this a non-const method. This is currently
+  //              const because of the vast number of clients that
+  //              mutate const at::Tensor& values.
+  template <typename T>
+  T* mutable_data_ptr() const;
 
   // Purposely not defined here to avoid inlining
   void print() const;
@@ -583,7 +592,7 @@ class TORCH_API TensorBase {
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
-    return TensorAccessor<T,N>(data_ptr<T>(),sizes().data(),strides().data());
+    return TensorAccessor<T,N>(mutable_data_ptr<T>(),sizes().data(),strides().data());
   }
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;

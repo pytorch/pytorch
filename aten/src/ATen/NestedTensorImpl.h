@@ -226,7 +226,7 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
   }
   const Tensor &sizemat = nt->get_nested_sizes(),
                &stridemat = nt->get_nested_strides();
-  int64_t* offsets_ptr = nt->get_storage_offsets().data_ptr<int64_t>();
+  const int64_t* offsets_ptr = nt->get_storage_offsets().data_ptr<int64_t>();
   int64_t orig_dim = sizemat.size(1);
   // nesting scalars
   if (orig_dim == 0) {

@@ -3,9 +3,14 @@
 
 namespace at {
 
+template <typename T>
+const T* TensorBase::data_ptr() const {
+  return mutable_data_ptr<T>();
+}
+
 #define DEFINE_CAST(T, name)                                         \
    template <>                                                       \
-   TORCH_API T* TensorBase::data_ptr() const {                       \
+   TORCH_API T* TensorBase::mutable_data_ptr() const {               \
      TORCH_CHECK(                                                    \
          scalar_type() == ScalarType::name                           \
          || (isQIntType(scalar_type())                               \

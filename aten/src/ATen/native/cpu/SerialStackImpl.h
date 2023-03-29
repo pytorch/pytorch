@@ -32,7 +32,7 @@ void stack_serial_kernel_impl(Tensor& result, TensorListType tensors, int64_t di
       "dim out of range in stack_serial_kernel_impl");
   int64_t outer =
       result.numel() / (result.sizes()[dim] * result.strides()[dim]);
-  scalar_t* result_data = result.data_ptr<scalar_t>();
+  scalar_t* result_data = result.mutable_data_ptr<scalar_t>();
   int64_t ninputs = tensors.size();
   std::vector<InputMeta> inputs;
   inputs.reserve(ninputs);
