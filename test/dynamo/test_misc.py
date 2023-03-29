@@ -4218,6 +4218,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f(), torch.zeros(2, 2))
         self.assertEqual(opt_f(), torch.ones(2, 2))
 
+    def test_torch_generator_set_state(self):
+        def fn():
+            default_state = torch.default_generator.get_state()
+            x = torch.rand([2, 3])
+            torch._dynamo.graph_break()
+            torch.default_generator.set_state(default_state)
+            y = torch.rand([2, 3])
+            return x, y
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        x, y = opt_fn()
+        self.assertEqual(x, y)
+
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1
