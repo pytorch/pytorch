@@ -857,6 +857,30 @@ Tensor _nested_view_from_buffer(
     storage_offsets);
 }
 
+Tensor _nested_view_from_buffer_cont(
+    const Tensor& buffer,
+    const Tensor& nested_sizes) {
+  TORCH_INTERNAL_ASSERT(
+      !buffer.is_nested(),
+      "Can only a create Nested Tensor from a normal tensor buffer");
+  TORCH_INTERNAL_ASSERT(buffer.dim() == 1, "The input buffer must be flat");
+  TORCH_INTERNAL_ASSERT(nested_sizes.dim() == 2, "Expected the nested size tensor to be two dimensional.");
+  uint64_t num_elements_nested_size = at::prod(nested_sizes, 1).sum().item<int64_t>();
+  uint64_t buffer_storage_size = buffer.storage().nbytes()/buffer.dtype().itemsize();
+  TORCH_INTERNAL_ASSERT(
+      buffer_storage_size == num_elements_nested_size,
+      "The number of elements in the buffer must equal the nested tensor size but buffer size: ",
+      buffer_storage_size,
+      " and nested tensor size: ",
+      num_elements_nested_size,
+      ".");
+
+  return at::detail::make_tensor<NestedTensorImpl>(
+    c10::TensorImpl::VIEW,
+    buffer,
+    nested_sizes);
+}
+
 // See Note [Special size rule for nested tensor]
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(

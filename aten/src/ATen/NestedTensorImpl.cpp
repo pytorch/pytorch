@@ -236,6 +236,22 @@ NestedTensorImpl::NestedTensorImpl(
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
+NestedTensorImpl::NestedTensorImpl(
+    c10::TensorImpl::ImplType impl_type,
+    const at::Tensor& base_tensor,
+    at::Tensor nested_sizes)
+    : NestedTensorImpl(
+          impl_type,
+          base_tensor,
+          nested_sizes,
+          construct_nested_strides(nested_sizes),
+          construct_offsets(nested_sizes)) {
+  validate_nested_tensor_metadata(
+      nested_sizes_, nested_strides_, storage_offsets_);
+  refresh_dim();
+  set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
+}
+
 void NestedTensorImpl::refresh_dim() {
   const auto my_dim = nested_sizes_.dim() ? nested_sizes_.sizes()[1] + 1 : 1;
   sizes_and_strides_.resize(my_dim);
