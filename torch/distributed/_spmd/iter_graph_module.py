@@ -571,6 +571,8 @@ class IterGraph(fx.Graph):
         # the optimizer call. This method has strong assumption of the optimizer
         # and may not always be working. This method is intended be a temporary
         # solution only.
+
+        # TODO: remove this API after DCE is removed
         for node in reversed(self.nodes):
             if node.name.startswith("output"):
                 output_node = node
@@ -586,20 +588,21 @@ class IterGraph(fx.Graph):
                 self.node_add_user(step_node, optim_node)
 
     def defunctionalize_optim(self) -> None:
-        for i, node in enumerate(reversed(self.nodes)):
-            if node.name.startswith("output"):
-                output_node = node
-            elif node.name.startswith(
-                "_fused_adam_",
-            ):
-                optim_node = node
-            elif node.name.startswith(
-                "_foreach_add_",
-            ):
-                step_node = node
-                self.node_add_user(step_node, optim_node)
-                self.node_remove_user(optim_node, output_node)
-                self.node_remove_user(step_node, optim_node)
+        # TODO: remove this API after DCE is not used with IterGraph
+        for graph in self._all_graphs:
+            for node in reversed(graph.nodes):
+                if node.name.startswith("output"):
+                    output_node = node
+                elif node.name.startswith(
+                    "_fused_adam_",
+                ):
+                    optim_node = node
+                elif node.name.startswith(
+                    "_foreach_add_",
+                ):
+                    step_node = node
+                    optim_node.users.pop(output_node, None)
+                    step_node.users.pop(optim_node, None)
 
     def freeze_cross_iter_movement(self) -> None:
         self._freeze_cross_iter_movement = True

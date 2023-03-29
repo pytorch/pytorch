@@ -89,9 +89,9 @@ class IterGraphModuleTest(DTensorTestBase):
                         self.fake_optimizer, (wait_node,)
                     )
                 # mimic the real use case when tracing the whole graph
-                output = next(iter(reversed(gm.graph.nodes)))
-                gm.graph.node_add_user(optimizer_node, output)
-                gm.graph.node_add_user(step_node, optimizer_node)
+                optimizer_node.name = "_fused_adam_"
+                step_node.name = "_foreach_add_"
+                gm.graph.functionalize_optim()
 
                 gm.graph.keep_unused_nodes()
                 for target_node in gm.graph.nodes:
@@ -102,10 +102,9 @@ class IterGraphModuleTest(DTensorTestBase):
                         [all_reduce_node, wait_node, step_node, optimizer_node],
                         target_node,
                     )
-                # Not calling eliminate_dead_code ensures that nodes won't be
-                # removed from the graph.
-                gm.graph.lint()
+                gm.graph.eliminate_dead_code()
                 gm.recompile()
+                gm.graph.defunctionalize_optim()
 
         def _compile_bwd(
             gm: fx.GraphModule, inps: List[torch.Tensor]
