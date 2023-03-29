@@ -1072,7 +1072,6 @@ class TestOperators(TestCase):
         xfail('lu'),
         xfail('cumprod'),
         xfail('masked_fill'),
-        xfail('copysign'),
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
@@ -1139,7 +1138,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('view_as_complex'),
-        xfail('copysign'),
         xfail('cummax'),
         xfail('cummin'),
         xfail('fill'),
