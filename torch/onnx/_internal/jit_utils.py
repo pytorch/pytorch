@@ -310,8 +310,7 @@ def _create_node(
 @_beartype.beartype
 def _is_onnx_list(value):
     return (
-        not isinstance(value, (str, bytes))
-        and not isinstance(value, torch.Tensor)
+        not isinstance(value, (str, bytes, torch.Tensor))
         and isinstance(value, Iterable)
     )
 
