@@ -1746,24 +1746,41 @@ class ShapeEnv:
 
     @_lru_cache
     def maybe_simplify_floordiv(self, expr: "sympy.Expr") -> "sympy.Expr":
+        # a // b == expr
+        # => a >= (b * expr) and a < ((b + 1) * expr)
         if isinstance(expr, sympy.Eq) and isinstance(expr.lhs, FloorDiv):
             numerator, denominator = expr.lhs.args
             expr = sympy.And(
-                sympy.Ge(numerator - (expr.rhs * denominator), 0),  # type: ignore
-                sympy.Lt(numerator - ((expr.rhs + 1) * denominator), 0)  # type: ignore
+                sympy.Ge(numerator, (expr.rhs * denominator)),  # type: ignore
+                sympy.Lt(numerator, ((expr.rhs + 1) * denominator))  # type: ignore
             )
+        # a // b != expr
+        # => a < (b * expr) or a >= ((b + 1) * expr)
         if isinstance(expr, sympy.Ne) and isinstance(expr.lhs, FloorDiv):
             numerator, denominator = expr.lhs.args
             expr = sympy.Or(
-                sympy.Lt(numerator - (expr.rhs * denominator), 0),  # type: ignore
-                sympy.Ge(numerator - ((expr.rhs + 1) * denominator), 0)  # type: ignore
+                sympy.Lt(numerator, (expr.rhs * denominator)),  # type: ignore
+                sympy.Ge(numerator, ((expr.rhs + 1) * denominator))  # type: ignore
             )
-        if isinstance(expr, (sympy.Gt, sympy.Ge)) and isinstance(expr.lhs, FloorDiv):
+
+        # The transformations below only work if b is positive.
+        # Note: we only have this information for constants.
+        def is_floordiv_with_positive_denominator(e) -> bool:
+            if not isinstance(e, FloorDiv):
+                return False
+            number = e.args[1]
+            return isinstance(number, sympy.Integer) and bool(number > 0)
+
+        # a // b > expr  => a >= (b + 1) * expr
+        # a // b >= expr => a >= b * expr
+        if isinstance(expr, (sympy.Gt, sympy.Ge)) and is_floordiv_with_positive_denominator(expr.lhs):
             quotient = expr.rhs if isinstance(expr, sympy.Ge) else (expr.rhs + 1)  # type: ignore
-            expr = sympy.Ge(expr.lhs.args[0] - (quotient * expr.lhs.args[1]), 0)  # type: ignore
-        if isinstance(expr, (sympy.Lt, sympy.Le)) and isinstance(expr.lhs, FloorDiv):
+            expr = sympy.Ge(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore
+        # a // b < expr  => a < b * expr
+        # a // b <= expr => a < (b + 1) * expr
+        if isinstance(expr, (sympy.Lt, sympy.Le)) and is_floordiv_with_positive_denominator(expr.lhs):
             quotient = expr.rhs if isinstance(expr, sympy.Lt) else (expr.rhs + 1)  # type: ignore
-            expr = sympy.Lt(expr.lhs.args[0] - (quotient * expr.lhs.args[1]), 0)  # type: ignore
+            expr = sympy.Lt(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore
 
         return expr
 
@@ -2048,6 +2065,10 @@ class ShapeEnv:
                 or not isinstance(expr.lhs, sympy.Symbol)
                 or expr.lhs not in self.var_to_range
             ):
+                continue
+
+            # Use only univariate functions.
+            if len(expr.rhs.free_symbols) > 0:
                 continue
 
             # Update the value range of the left-hand side, if the
