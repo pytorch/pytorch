@@ -315,8 +315,10 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
             # and use DTensor to expand operators, where DTensor's shape is the
             # global shape.
             with _enable_compile():
-                # FIXME: functionalize crashes with
-                # "UnsupportedFakeTensorException: meta converter nyi"
+                # FIXME(@mrshenli): functionalization does not work for our use
+                # case yet. Use explicit decompositions for foreach ops.
+                # Remove this when the following issue is addressed.
+                # Issue: https://github.com/pytorch/pytorch/issues/97852
                 gm = make_fx(
                     partial(stateless_func, func),
                     tracing_mode="symbolic",
