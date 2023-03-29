@@ -91,30 +91,47 @@ int64_t get_nnz(Tensor nestedtensor) {
     const Tensor& tensor_strides = tensor->get_nested_strides();
 
     const int64_t n_tensors = tensor_strides.size(0);
-    const int64_t n_dims = tensor_strides.size(1);
+    constexpr int64_t n_dims = 3;
+    // This is safe since head_dim is assured to be consistent
+    const int64_t num_heads = tensor -> opt_size(2).value();
+    const int64_t tensor_stride_0 = tensor_strides.stride(0);
 
     if (n_tensors <= 1) {
       return true;
     }
 
     int64_t* previous_tensor_stride = tensor_strides.data_ptr<int64_t>();
-    // Check initially that they are in strictly descending order
-    for (int i{1}; i < n_dims; i++) {
-      if (previous_tensor_stride[i - 1] <= previous_tensor_stride[i]) {
+
+    // Check initially that the first tensor's strides
+    // are in strictly descending order
+    // NOTE: If num_heads is equal to 1 then we skip stride[0]
+    // Why you may ask? This is because we if n_heads == 1 then
+    // then as long as the last stride == 1 it does not matter
+    // what the strides are for the other dimensions.
+    //
+    if (num_heads == 1) {
+      if (previous_tensor_stride[0] <= previous_tensor_stride[2]) {
+        // This would mean that the last stride is greater than the seq_len
+        // stride
         return false;
       }
-    }
-    // Check that each tensor i in the nested tensor has the same strides
-    auto tensor_stride_0 = tensor_strides.stride(0);
-
-    for (int i{1}; i < n_tensors; i++) {
-      for (const int64_t j : c10::irange(n_dims)) {
-        if (previous_tensor_stride[j] !=
-            previous_tensor_stride[i * tensor_stride_0 + j]) {
+    } else {
+      for (int i{1}; i < n_dims; i++) {
+        if (previous_tensor_stride[i - 1] <= previous_tensor_stride[i]) {
           return false;
         }
       }
+      // Check that each tensor i in the nested tensor has the same strides
+      for (int i{1}; i < n_tensors; i++) {
+        for (const int64_t j : c10::irange(n_dims)) {
+          if (previous_tensor_stride[j] !=
+              previous_tensor_stride[i * tensor_stride_0 + j]) {
+            return false;
+          }
+        }
+      }
     }
+
     // Check the offsets are a constant multiple from the previous numels
     const int64_t* tensor_size_ptr = tensor_sizes.data_ptr<int64_t>();
     const int64_t* tensor_stride_ptr = tensor_strides.data_ptr<int64_t>();
@@ -466,21 +483,19 @@ sdpa_nested_preprocessing_backward(
     const Tensor& cumulative_sequence_length_kv,
     const int64_t max_seqlen_batch_q,
     const int64_t max_seqlen_batch_kv) {
-//   const int64_t q_batch_size = query.size(0);
-//   const int64_t k_batch_size = key.size(0);
-  // TODO FIX ME!
+  const int64_t q_batch_size = query.size(0);
+  const int64_t k_batch_size = key.size(0);
 
-  // const int64_t v_batch_size = value.size(0);
+  const int64_t v_batch_size = value.size(0);
 
-  // const int64_t q_num_heads = query.size(1);
-  // const int64_t k_num_heads = key.size(1);
-  // const int64_t v_num_heads = value.size(1);
+  const int64_t q_num_heads = query.size(1);
+  const int64_t k_num_heads = key.size(1);
+  const int64_t v_num_heads = value.size(1);
 
-  // if (!(q_batch_size == k_batch_size && q_batch_size == v_batch_size) ||
-  //     !(q_num_heads == k_num_heads && k_num_heads == v_num_heads)) {
-  //       TORCH_CHECK(false, "lets not think about this path right now");
-  //   return sdpa_nested_preprocessing_with_broadcast(query, key, value);
-  // }
+  if (!(q_batch_size == k_batch_size && q_batch_size == v_batch_size) ||
+      !(q_num_heads == k_num_heads && k_num_heads == v_num_heads)) {
+        TORCH_CHECK(false, "Broadcasted NestedTensor inputs is currently not supported for backwards.");
+  }
 
   const int64_t num_heads = query.size(1);
   const int64_t head_dim_qk = query.size(3);

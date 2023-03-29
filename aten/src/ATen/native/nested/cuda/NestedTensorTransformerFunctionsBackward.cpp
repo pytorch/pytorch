@@ -18,8 +18,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    const int64_t philox_seed,
-    const int64_t philox_offset,
+    const at::Tensor& philox_seed,
+    const at::Tensor& philox_offset,
     c10::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});

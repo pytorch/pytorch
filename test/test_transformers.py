@@ -2844,28 +2844,34 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=1e-3, rtol=1e-2)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
-    @parametrize("batch_size", [8])
-    @parametrize("max_seq_len", [32])
-    @parametrize("head_dim", [8, 16])
-    @parametrize("dropout_p", [0.0])
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
+    @parametrize("batch_size", [8, 32])
+    @parametrize("max_seq_len_q", [32, 256])
+    @parametrize("max_seq_len_kv", [32, 256])
+    @parametrize("head_dim", [8, 64])
+    @parametrize("dropout_p", [0.0, 0.1])
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
-    def test_flash_attention_vs_math_ref_grads_nestedtensor(self, batch_size: int, max_seq_len: int,
+    def test_flash_attention_vs_math_ref_grads_nestedtensor(self, device, batch_size: int, max_seq_len_q: int, max_seq_len_kv: int,
                                                             head_dim: int, dropout_p: float, dtype: torch.dtype,
                                                             scale: str):
 
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
-        seq_lens = torch.randint(low=1, high=max_seq_len, size=(batch_size,))
+        seq_lens_q = torch.randint(low=1, high=max_seq_len_q, size=(batch_size,))
+        # Set one entry to max length
+        seq_lens_q[torch.randint(0, batch_size, size=(1,))] = max_seq_len_q
+        seq_lens_kv = torch.randint(low=1, high=max_seq_len_kv, size=(batch_size,))
+        seq_lens_kv[torch.randint(0, batch_size, size=(1,))] = max_seq_len_kv
 
         def rand_nt(sequence_list, num_heads, head_dim):
             tensors = [torch.rand((num_heads, seq_len, head_dim)) for seq_len in sequence_list]
-            return torch.nested.nested_tensor(tensors, requires_grad=True, device="cuda", dtype=dtype)
+            return torch.nested.nested_tensor(tensors, requires_grad=True, device=device, dtype=dtype)
 
-        query = rand_nt(seq_lens, n_heads, head_dim)
-        key = rand_nt(seq_lens, n_heads, head_dim)
-        value = rand_nt(seq_lens, n_heads, head_dim)
+        query = rand_nt(seq_lens_q, n_heads, head_dim)
+        key = rand_nt(seq_lens_kv, n_heads, head_dim)
+        value = rand_nt(seq_lens_kv, n_heads, head_dim)
 
         # Run the math kernel on low precision references
         query_ref_lp = query.clone().detach().requires_grad_(True)
@@ -2878,24 +2884,9 @@ class TestSDPACudaOnly(NNTestCase):
 
         is_dropout = dropout_p > 0.0
 
-        # Create real output
-        output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
-            query, key, value, dropout_p=dropout_p, is_causal=False,
-            scale=scale, return_debug_mask=True)
-        # out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
-        out = output_tuple[0]
-        dbug_mask = output_tuple[-1]
-
-        # query_padding_mask = torch.ones(
-        #     1, seq_len_q, device="cuda", dtype=torch.bool)
-        # key_padding_mask = torch.ones(
-        #     1, seq_len_k, device="cuda", dtype=torch.bool)
-
-        # softmax_mask = self.convert_flash_attn_S_to_softmax(
-        #     dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=False)
-        # dropout_mask = softmax_mask >= 0
-
         if not is_dropout:
+            with sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=False, scale=scale)
             with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
                 # High Precision Math Reference
                 out_ref = F.scaled_dot_product_attention(
@@ -2903,17 +2894,45 @@ class TestSDPACudaOnly(NNTestCase):
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
                     query_ref_lp, key_ref_lp, value_ref_lp, is_causal=False, scale=scale)
-        # else:
-        #     # High Precision Math Reference
-        #     out_ref = torch.ops.aten._scaled_dot_product_attention_math(
-        #         query_ref, key_ref, value_ref, dropout_p=dropout_p,
-        # is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
-        #     # Low Precision Math Reference
-        #     out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-        #         query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
-        #         dropout_mask=dropout_mask)[0]
+        else:
+            # Create real output
+            output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
+                query, key, value, dropout_p=dropout_p, is_causal=False,
+                scale=scale, return_debug_mask=is_dropout)
+            out = output_tuple[0]
+            dbug_mask = output_tuple[-1]
 
-        # upstream_grad = torch.rand_like(out, requires_grad=False)
+            query_padding_mask = torch.arange(max_seq_len_q).unsqueeze(0).expand(
+                batch_size, max_seq_len_q
+            ) < seq_lens_q.unsqueeze(-1)
+            query_padding_mask = query_padding_mask.to("cuda")
+
+            key_padding_mask = torch.arange(max_seq_len_kv).unsqueeze(0).expand(
+                batch_size, max_seq_len_kv
+            ) < seq_lens_kv.unsqueeze(-1)
+            key_padding_mask = key_padding_mask.to("cuda")
+
+            softmax_mask = self.convert_flash_attn_S_to_softmax(
+                dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=False)
+            dropout_mask = softmax_mask >= 0
+            nt_stack = []
+            for tensor_component in range(batch_size):
+                batch_stack = []
+                for head in range(n_heads):
+                    batch_stack.append(dropout_mask[tensor_component, head,
+                                                    0:seq_lens_q[tensor_component],
+                                                    0:seq_lens_kv[tensor_component]].unsqueeze(0))
+                nt_stack.append(torch.cat(batch_stack))
+            nested_dropout_mask = torch.nested.nested_tensor(nt_stack)
+            # High Precision Math Reference
+            out_ref = torch.ops.aten._scaled_dot_product_attention_math(
+                query_ref, key_ref, value_ref, dropout_p=dropout_p,
+                is_causal=False, scale=scale, dropout_mask=nested_dropout_mask)[0]
+            # Low Precision Math Reference
+            out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
+                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=False, scale=scale,
+                dropout_mask=nested_dropout_mask)[0]
+
         upstream_grad = out.detach().clone().contiguous()
 
         out.backward(upstream_grad)
