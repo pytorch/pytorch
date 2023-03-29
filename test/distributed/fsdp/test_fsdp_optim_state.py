@@ -284,6 +284,24 @@ class NestedModel(torch.nn.Module):
         return list(self.block2.parameters()) + list(self.block0.parameters())
 
 
+# Simple and boring model to test interface and some corner cases that do not
+# require complicated wrapping strategy.
+class TestDummyModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        torch.manual_seed(0)
+        self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
+        self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
+        self.net3 = nn.Linear(32, 64)
+        self.net4 = nn.Sequential(nn.ReLU(), nn.Linear(64, 8))
+
+    def forward(self, x):
+        return self.net4(self.net3(self.net2(self.net1(x))))
+
+    def get_input(self):
+        return torch.rand(8, 8, device="cuda")
+
+
 class TestFSDPOptimState(FSDPTest):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -340,7 +358,7 @@ class TestFSDPOptimState(FSDPTest):
             # Keep these as arguments for parity with `_init_nested_model()`;
             # these settings are not implemented since the transformer is
             # wrapped with FSDP at the top-level, which means that there is
-            # only a single flattened parameter, making these booleans vacuous
+            # only a single flat parameter, making these booleans vacuous
             raise NotImplementedError()
         if group is None:
             group = dist.distributed_c10d._get_default_group()
@@ -436,7 +454,7 @@ class TestFSDPOptimState(FSDPTest):
             fsdp_osd_param_ids = set(fsdp_osd_state.keys())
             self.assertTrue(
                 ref_osd_param_ids == fsdp_osd_param_ids,
-                (ref_osd_param_ids, fsdp_osd_param_ids),
+                f"Rank {self.rank}: {(ref_osd_param_ids, fsdp_osd_param_ids)}",
             )
             # Check state values are the same
             for param_id, param_state in fsdp_osd_state.items():
@@ -1079,8 +1097,8 @@ class TestFSDPOptimState(FSDPTest):
                 optim=optim2,
             )
         elif osd_comm_method == _OSDCommMethod.OPTIM_STATE_DICT:
-            sharded_osd1 = FSDP.optim_state_dict_to_load(fsdp_osd1, model2, optim2)
-            sharded_osd2 = FSDP.optim_state_dict_to_load(fsdp_osd2, model2, optim2)
+            sharded_osd1 = FSDP.optim_state_dict_to_load(model2, optim2, fsdp_osd1)
+            sharded_osd2 = FSDP.optim_state_dict_to_load(model2, optim2, fsdp_osd2)
 
         # As a sanity check, check that sharding the second model's full/sharded
         # optimizer state dict according to itself is equivalent to its local
@@ -1128,8 +1146,8 @@ class TestFSDPOptimState(FSDPTest):
           - If ``add_to_fsdp_module=True``, then the unmanaged parameters are
           added to a module to be wrapped with FSDP, in which case there should
           be an error since we require that all unflattened parameter
-          comprising a flattened parameter have the same scalar state (e.g.
-          Adam "step") but the added parameter is missing its entry.
+          comprising a flat parameter have the same scalar state (e.g. Adam
+          "step") but the added parameter is missing its entry.
           - If ``add_to_fsdp_module=False``, then the unmanaged parameters are
           added to a module not to be wrapped with FSDP, in which case there
           should be no error (emulating model parallel use cases where some
@@ -1181,13 +1199,13 @@ class TestFSDPOptimState(FSDPTest):
         optim = torch.optim.Adam(optim_input, lr=1e-3)
         if add_to_fsdp_module:
             # If we add the unmanaged parameters to a module wrapped with FSDP,
-            # then the flattened parameter will be comprised of some
-            # unflattened parameters with zero-dimensional tensor state (i.e.
-            # Adam "step") and others without (i.e. the unmanaged parameters),
-            # which triggers an error that we have to ensure correctness
+            # then the flat parameter will be comprised of some unflattened
+            # parameters with zero-dimensional tensor state (i.e. Adam "step")
+            # and others without (i.e. the unmanaged parameters), which
+            # triggers an error that we have to ensure correctness
             error_prefix = (
                 "^(All unflattened parameters comprising a "
-                "single flattened parameter must have scalar state with the "
+                "single flat parameter must have scalar state with the "
                 "same value and dtype)"
             )
             with self.assertRaisesRegex(ValueError, error_prefix):
@@ -1638,7 +1656,7 @@ class TestFSDPOptimState(FSDPTest):
 
         # Load the state back to see if load_optim_state_dict works.
         state_dict_to_load = FSDP.optim_state_dict_to_load(
-            state_dicts[1], models[1], optims[1], is_named_optimizer=True
+            models[1], optims[1], state_dicts[1], is_named_optimizer=True
         )
         optims[1].load_state_dict(state_dict_to_load)
         state_dicts[1] = FSDP.optim_state_dict(models[1], optims[1])
@@ -1652,18 +1670,6 @@ class TestFSDPOptimState(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_with_empty_optimizer_state(self):
-        class TestDummyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                torch.manual_seed(0)
-                self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
-                self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
-                self.net3 = nn.Linear(32, 64)
-                self.net4 = nn.Sequential(nn.ReLU(), nn.Linear(64, 8))
-
-            def forward(self, x):
-                return self.net4(self.net3(self.net2(self.net1(x))))
-
         model = FSDP(TestDummyModel().cuda())
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         state_dict = optim.state_dict()
@@ -1737,10 +1743,10 @@ class TestFSDPOptimState(FSDPTest):
         # according to the second model and (2) for the second model according
         # to the second model
         sharded_osd1 = FSDP.optim_state_dict_to_load(
-            fsdp_osd1, model2, optim2, group=new_group
+            model2, optim2, fsdp_osd1, group=new_group
         )
         sharded_osd2 = FSDP.optim_state_dict_to_load(
-            fsdp_osd2, model2, optim2, group=new_group
+            model2, optim2, fsdp_osd2, group=new_group
         )
 
         # As a sanity check, check that sharding the second model's full/sharded
@@ -1773,6 +1779,33 @@ class TestFSDPOptimState(FSDPTest):
         # As a sanity check, check that we can load and run a few iterations
         optim2.load_state_dict(sharded_osd2)
         self._step_model(model2, optim2, num_iters=num_iters)
+
+    @skip_if_lt_x_gpu(2)
+    def test_interface_arguments(self):
+        model = FSDP(TestDummyModel().cuda())
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        def step():
+            loss = model(model.get_input())
+            loss.backward(loss)
+            optim.step()
+
+        step()
+        original_osd = deepcopy(optim.state_dict())
+        osd = FSDP.optim_state_dict(model, optim, optim_state_dict=original_osd)
+        self._check_same_state(
+            FSDP.optim_state_dict(model, optim), osd, check_same_param_keys=True
+        )
+        step()
+        osd_to_load = FSDP.optim_state_dict_to_load(
+            model, optim, osd, load_directly=True
+        )
+        self._check_same_state(
+            optim.state_dict(), original_osd, check_same_param_keys=True
+        )
+
+        # TODO: add local/sharded/full state_dict and CPU offloading and rank0
+        # interface test here, https://github.com/pytorch/pytorch/issues/97163
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)

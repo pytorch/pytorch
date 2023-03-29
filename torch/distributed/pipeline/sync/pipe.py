@@ -297,7 +297,7 @@ class Pipe(Module):
         will be expanded to support inter-node pipelining in the future.
         The forward function returns an :class:`~torch.distributed.rpc.RRef`
         to allow for inter-node pipelining in the future, where the output
-        might be on a remote host. For intra-node pipelinining you can use
+        might be on a remote host. For intra-node pipelining you can use
         :meth:`~torch.distributed.rpc.RRef.local_value` to retrieve the
         output locally.
 
