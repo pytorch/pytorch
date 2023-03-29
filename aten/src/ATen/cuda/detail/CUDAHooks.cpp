@@ -15,6 +15,7 @@
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
 
 #if AT_CUDNN_ENABLED()
@@ -223,7 +224,7 @@ const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
 
 int64_t current_device() {
   int device;
-  cudaError_t err = cudaGetDevice(&device);
+  cudaError_t err = c10::cuda::GetDevice(&device);
   if (err == cudaSuccess) {
     return device;
   }
