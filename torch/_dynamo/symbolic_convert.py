@@ -402,7 +402,6 @@ def break_graph_if_unsupported(*, push):
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = self.kw_names.value if self.kw_names is not None else ()
                 if len(kw_names) > 0:
-                    PyCodegen.maybe_upd_consts(self.code_options, kw_names)
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
@@ -577,10 +576,17 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             entry = inst.exn_tab_entry
             if not (
                 # still in the same block
-                self.block_stack and entry and self.block_stack[-1].target is entry.target
+                self.block_stack
+                and entry
+                and self.block_stack[-1].target is entry.target
             ):
                 # entry is outside of most recent block
-                if not entry or len(self.block_stack) > 1 and entry and self.block_stack[-2].target is entry.target:
+                if (
+                    not entry
+                    or len(self.block_stack) > 1
+                    and entry
+                    and self.block_stack[-2].target is entry.target
+                ):
                     # inst in previous block or no longer in a block - pop the current block
                     if self.block_stack:
                         self.block_stack.pop()
@@ -922,9 +928,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.guards.update(ctx.guards)
 
         if isinstance(self, InstructionTranslator):
-            self.block_stack.append(
-                BlockStackEntry(inst.target, len(self.stack), ctx)
-            )
+            self.block_stack.append(BlockStackEntry(inst.target, len(self.stack), ctx))
         else:
             # can't restore this while inlining
             self.block_stack.append(BlockStackEntry(inst.target))
@@ -1645,9 +1649,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         # 3.11 no longer uses a block stack, but we still keep track of one
         # so that we know which contexts are currently active.
         if isinstance(self, InstructionTranslator):
-            self.block_stack.append(
-                BlockStackEntry(inst.target, len(self.stack), ctx)
-            )
+            self.block_stack.append(BlockStackEntry(inst.target, len(self.stack), ctx))
         else:
             # can't restore this while inlining
             self.block_stack.append(BlockStackEntry(inst.target))
