@@ -5548,8 +5548,16 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(clamp_result, clamp_result_cpu)
 
             # test strided min_t, max_t
-            clamp_result = torch.clamp(x.movedim(0, -1).clone(memory_format=torch.contiguous_format), min=min_t.movedim(0, -1), max=max_t.movedim(0, -1))
-            clamp_result_cpu = torch.clamp(cpu_x.movedim(0, -1).clone(memory_format=torch.contiguous_format), min=cpu_min_t.movedim(0, -1), max=cpu_max_t.movedim(0, -1))
+            clamp_result = torch.clamp(
+                x.movedim(0, -1).clone(memory_format=torch.contiguous_format),
+                min=min_t.movedim(0, -1),
+                max=max_t.movedim(0, -1)
+            )
+            clamp_result_cpu = torch.clamp(
+                cpu_x.movedim(0, -1).clone(memory_format=torch.contiguous_format),
+                min=cpu_min_t.movedim(0, -1),
+                max=cpu_max_t.movedim(0, -1)
+            )
             self.assertEqual(clamp_result, clamp_result_cpu)
 
             # test inplace clamping
