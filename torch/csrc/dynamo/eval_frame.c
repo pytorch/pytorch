@@ -606,16 +606,53 @@ inline static PyObject* eval_custom_code(
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
   #endif
   if (shadow == NULL) {
+    Py_DECREF(shadow_obj);
     return NULL;
   }
 
   #if IS_PYTHON_3_11_PLUS
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
+
+  // copy from old fastlocals to new fastlocals:
+  // for i, name in enumerate(localsplusnames_new):
+  //   name_to_idx[name] = i
+  // for i, name in enumerate(localsplusnames_old):
+  //   fastlocals_new[name_to_idx[name]] = fastlocals_old[i]
+  PyObject* name_to_idx = PyDict_New();
+  if (name_to_idx == NULL) {
+    DEBUG_TRACE0("unable to create localsplus name dict");
+    Py_DECREF(shadow_obj);
+    return NULL;
+  }
+
+  for (Py_ssize_t i = 0; i < code->co_nlocalsplus; i++) {
+    PyObject *name = PyTuple_GET_ITEM(code->co_localsplusnames, i);
+    PyObject *idx = PyLong_FromSsize_t(i);
+    if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
+      Py_DECREF(shadow_obj);
+      Py_DECREF(name_to_idx);
+      return NULL;
+    }
+  }
+
+  for (Py_ssize_t i = 0; i < frame->f_code->co_nlocalsplus; i++) {
+    PyObject *name = PyTuple_GET_ITEM(frame->f_code->co_localsplusnames, i);
+    PyObject *idx = PyDict_GetItem(name_to_idx, name);
+    Py_ssize_t new_i = PyLong_AsSsize_t(idx);
+    if (name == NULL || idx == NULL || (new_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
+      Py_DECREF(shadow_obj);
+      Py_DECREF(name_to_idx);
+      return NULL;
+    }
+    Py_XINCREF(fastlocals_old[i]);
+    fastlocals_new[new_i] = fastlocals_old[i];
+  }
+
+  Py_DECREF(name_to_idx);
   #else
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
-  #endif
 
   for (Py_ssize_t i = 0; i < nlocals_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
@@ -626,6 +663,7 @@ inline static PyObject* eval_custom_code(
     Py_XINCREF(fastlocals_old[nlocals_old + i]);
     fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
+  #endif
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
   Py_DECREF(shadow_obj);
