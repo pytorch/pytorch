@@ -480,7 +480,7 @@ class f(torch.nn.Module):
         sym_size_2: Sym(s1) = torch.ops.aten.sym_size(a_1, 1)
         sym_size_3: Sym(s1) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
         add_1: Sym(2*s1) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
-        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
+        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
         getitem: f32[s0 + s2, 2*s1] = native_dropout[0]
         getitem_1: b8[s0 + s2, 2*s1] = native_dropout[1];  native_dropout = None

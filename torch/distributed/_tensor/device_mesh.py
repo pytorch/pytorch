@@ -1,25 +1,28 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import numpy.typing as npt
 import warnings
-from typing import List, Optional, Sequence, TypeVar, Union
+from typing import List, Optional, Union
 
 import torch
 from torch.distributed.distributed_c10d import (
+    Backend,
+    GroupMember,
+    ProcessGroup,
+    ReduceOp,
+    Work,
     _get_default_group,
     all_gather,
     all_to_all,
     broadcast,
+    get_backend,
     get_global_rank,
     get_rank,
     get_world_size,
-    GroupMember,
     init_process_group,
     is_initialized,
     new_group,
-    ProcessGroup,
     reduce_scatter,
-    ReduceOp,
     scatter,
-    Work,
 )
 
 import torch.distributed.distributed_c10d as c10d
@@ -39,20 +42,7 @@ def set_global_device_mesh(mesh: Optional["DeviceMesh"]) -> None:
     _global_device_mesh = mesh
 
 
-# We want a type for "can be passed to torch.as_tensor()";
-# this is a recursive sequence type, which isn't fully supported
-# yet in python. This construct simulates that up to depth 7.
-T = TypeVar("T")
-_L = Union[T, Sequence[T]]
-NDIntList = _L[_L[_L[_L[_L[_L[_L[int]]]]]]]
-
-MeshExprT = Union[
-    torch.Tensor,
-    NDIntList,
-]
-
-
-class DeviceMesh:
+class DeviceMesh(object):
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
     represented as a n-d dimension array, and each value of the n-d dimensional
@@ -103,7 +93,7 @@ class DeviceMesh:
     def __init__(
         self,
         device_type: str,
-        mesh: MeshExprT,
+        mesh: Union[torch.Tensor, npt.ArrayLike],
         *,
         _init_process_groups: bool = True,
     ) -> None:
@@ -121,32 +111,37 @@ class DeviceMesh:
             self._dim_groups = self._init_process_groups()
 
     def _get_or_create_default_group(self):
-        self._backend = "gloo" if self.device_type == "cpu" else "nccl"
-        if not is_initialized():
+        self._backend = Backend.GLOO if self.device_type == "cpu" else Backend.NCCL
+        default_initialized = is_initialized()
+        if not default_initialized:
             init_process_group(backend=self._backend)
-        else:
-            world_size = get_world_size()
-            if self.mesh.numel() > world_size:
-                raise RuntimeError(
-                    f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
-                )
+
+        world_size = get_world_size()
+        if self.mesh.numel() > world_size:
+            raise RuntimeError(
+                f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
+            )
 
         # TODO: we should do allgather the mesh tensor to ensure every rank have the same mesh value
         # TODO: if user want to pass pg_options, offer a way to do it
-        # check default pg backend, should support device_type
+        world_backend = get_backend()
         if self.device_type == "cpu":
-            assert (
-                self._backend == "gloo" or self._backend == "threaded"
-            ), f"ProcessGroup backend: {self._backend} not supporting CPU!"
+            cpu_backends = ["gloo", "threaded"]
+            assert world_backend in cpu_backends, f"Default PG backend: {world_backend} not supporting CPU!"
         elif self.device_type == "cuda":
-            if self._backend == "gloo":
+            cuda_backends = ["nccl", "gloo", "threaded"]
+            if world_backend == "gloo":
                 warnings.warn(
                     "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
                 )
-            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "threaded"
+            assert world_backend in cuda_backends, f"Default PG backend: {world_backend} not supporting CUDA!"
+            if not default_initialized:
+                # automatically set the current cuda device base on num of gpu devices available in each host
+                # NOTE: This device selection would only work for homogenous hardware.
+                torch.cuda.set_device(get_rank() % torch.cuda.device_count())
         else:
             raise RuntimeError(
-                f"DeviceMesh only support cpu or cuda device type, but got {self.device_type}"
+                f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"
             )
 
         # calculate the coordinates of the current global rank on the mesh
@@ -169,9 +164,9 @@ class DeviceMesh:
         # one valid process group per rank
         dim_groups: List[ProcessGroup] = []
 
-        if self.mesh.ndim == 1 and len(unique_mesh_values) == get_world_size() - 1:
+        if self.mesh.ndim == 1 and len(unique_mesh_values) == get_world_size():
             # if the mesh is the same as world_pg, we just append the default
-            # pg to the first dim goups, as new_group cannot have the exact
+            # pg to the first dim groups, as new_group cannot have the exact
             # same ranks as world
             dim_groups.append(default_pg)
         else:

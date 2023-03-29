@@ -1,4 +1,4 @@
-merge_base_with = "master"
+merge_base_with = "origin/master"
 
 [[linter]]
 code = 'FLAKE8'
@@ -33,15 +33,15 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'flake8==3.8.2',
-    'flake8-bugbear==20.1.4',
-    'flake8-comprehensions==3.3.0',
-    'flake8-executable==2.0.4',
+    'flake8==6.0.0',
+    'flake8-bugbear==23.3.23',
+    'flake8-comprehensions==3.11.1',
+    'flake8-executable==2.1.3',
     'flake8-logging-format==0.9.0',
-    'flake8-pyi==20.5.0',
-    'mccabe==0.6.1',
-    'pycodestyle==2.6.0',
-    'pyflakes==2.2.0',
+    'flake8-pyi==23.3.1',
+    'mccabe==0.7.0',
+    'pycodestyle==2.10.0',
+    'pyflakes==3.0.1',
 ]
 
 
@@ -679,7 +679,6 @@ exclude_patterns = [
     'cmake/Modules_CUDA_fix/**',
     'cmake/Caffe2Config.cmake.in',
     'aten/src/ATen/ATenConfig.cmake.in',
-    'cmake/Caffe2ConfigVersion.cmake.in',
     'cmake/TorchConfig.cmake.in',
     'cmake/TorchConfigVersion.cmake.in',
     'cmake/cmake_uninstall.cmake.i',
@@ -827,6 +826,8 @@ init_command = [
 [[linter]]
 code = 'UFMT'
 include_patterns = [
+    '.github/**/*.py',
+    'test/run_test.py',
     'test/onnx/**/*.py',
     'test/test_dynamo_cudagraphs.py',
     'tools/**/*.py',
