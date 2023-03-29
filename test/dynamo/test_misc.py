@@ -5157,6 +5157,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(seen_frames[1].name, "uwu_inline_me")
         self.assertEqual(seen_frames[2].line, "r2 = uwu_inline_me_deep(y, z)")
 
+    def test_error_on_recompile(self):
+        @torch._dynamo.optimize("eager")
+        def fn(a, b):
+            return a + b
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            with self.assertRaises(torch._dynamo.exc.RecompileError):
+                fn(torch.rand(2, 3), torch.rand(2, 3))
+                fn(torch.rand(2, 3), (1, 2, 3))
+
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
