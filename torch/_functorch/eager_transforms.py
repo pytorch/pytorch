@@ -344,7 +344,7 @@ def _safe_zero_index(x):
 def error_if_complex(func_name, args, is_input):
     flat_args, _ = tree_flatten(args)
     for idx, arg in enumerate(flat_args):
-        if arg.dtype.is_complex:
+        if isinstance(arg, torch.Tensor) and arg.dtype.is_complex:
             input_or_output = ("inputs" if is_input else "outputs")
             err_msg = (f"{func_name}: Expected all {input_or_output} "
                        f"to be real but received complex tensor at flattened input idx: {idx}")

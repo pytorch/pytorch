@@ -22,7 +22,7 @@ from .._functorch.partitioners import default_partition
 from ..fx import Transformer
 from . import config, ir
 from .decomposition import select_decomp_table
-from .lowering import lowerings as L
+from .lowering import fallback_node_due_to_unsupported_type, lowerings as L
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -159,6 +159,9 @@ class KeywordArg(PatternExpr):
         super().__init__()
         self.name = name
 
+    def __repr__(self):
+        return f"KeywordArg({self.name!r})"
+
     def _match(self, node: NodeOrConstant, ctx: MatchContext):
         return Match(self, kwargs={self.name: node})  # matches anything
 
@@ -230,7 +233,9 @@ class CallFunction(PatternExpr):
             return FailedMatch("function_mismatch")
 
         if self not in ctx.outputs and len(node.users) != self.users:
-            return FailedMatch("multiple_users")
+            return FailedMatch(
+                f"users_mismatch: {node} {len(node.users)}!={self.users}"
+            )
 
         node_items, node_spec = self.flatten(node.args, node.kwargs)
         self_items, self_spec = self.flat_args_kwargs
@@ -243,10 +248,10 @@ class CallFunction(PatternExpr):
             if isinstance(pattern, PatternExpr):
                 child_match = ctx.match(pattern, child_node)
                 if not child_match:
-                    return FailedMatch(f"arg[{i}]: {child_match}")
+                    return child_match
                 m.extend(child_match)
             elif isinstance(child_node, torch.fx.Node) or child_node != pattern:
-                return FailedMatch("constant_args")
+                return FailedMatch(f"constant_args: {node} {child_node!r}!={pattern!r}")
         m.nodes.append(node)
         m.targets[self] = node.target
         return m
@@ -427,11 +432,7 @@ def _return_true(match):
 
 
 def register_replacement(
-    search_fn,
-    replace_fn,
-    example_inputs,
-    trace_fn,
-    pass_dict,
+    search_fn, replace_fn, example_inputs, trace_fn, pass_dict, *, scalar_workaround=()
 ):
     """
     Create a replacement rule based on example functions that get traces to create patterns.
@@ -490,7 +491,10 @@ def register_replacement(
     ]
     search_gm = trace_fn(search_fn, example_inputs)
     pattern = fx_to_pattern(
-        search_gm, ignore_types=(int, torch.device, torch.dtype), argnames=argnames
+        search_gm,
+        ignore_types=(int, float, torch.device, torch.dtype),
+        argnames=argnames,
+        scalar_workaround=scalar_workaround,
     )
     assert repr(pattern) not in _seen_patterns
     _seen_patterns.add(repr(pattern))
@@ -538,6 +542,12 @@ class PatternMatcherPass:
         count = 0
         for node in reversed(graph.nodes):
             if node.op == "call_function" and node.target in self.patterns:
+                # conservatively not applying pattern for cpu input,
+                # since some of the patterns induce codegen and split nodes.
+                # Note: we will only skip cpu compute if disable_cpp_codegen=True
+                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
+                    continue
+
                 for entry in self.patterns[node.target]:
                     if node._erased:
                         break
@@ -568,16 +578,24 @@ def reorder_for_locality(graph: torch.fx.Graph):
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
-def fx_to_pattern(gm, ignore_types=(), argnames=()):
+def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
     """
     Convert an FX graph into a PatternExpr.  This is useful for simple
     patterns that can only match single functions and fixed length lists.
     """
 
+    # scalar_workaround is a hack to capture dropout_p
+    # see https://github.com/pytorch/pytorch/issues/97894
+    scalar_workaround = scalar_workaround or {}
+    inv_scalar_workaround = {v: k for k, v in scalar_workaround.items()}
+    assert len(inv_scalar_workaround) == len(scalar_workaround)
+
     def not_implemented(*args, **kwargs):
         raise NotImplementedError()
 
-    def maybe_ignore(x):
+    def process_arg(x):
+        if isinstance(x, (float, int)) and x in inv_scalar_workaround:
+            return KeywordArg(inv_scalar_workaround[x])
         if type(x) in ignore_types:
             return Ignored()
         return x
@@ -601,7 +619,7 @@ def fx_to_pattern(gm, ignore_types=(), argnames=()):
                 return KeywordArg(target)
 
         def call_function(self, target, args, kwargs):
-            args, kwargs = pytree.tree_map(maybe_ignore, (args, kwargs))
+            args, kwargs = pytree.tree_map(process_arg, (args, kwargs))
             return CallFunction(target, *args, **kwargs)
 
         def run_node(self, n):
@@ -618,7 +636,10 @@ def fx_to_pattern(gm, ignore_types=(), argnames=()):
 @torch.no_grad()
 def inference_graph(fn, args):
     """Build a normalized inference graph, for use with fx_to_pattern"""
-    return make_fx(fn, select_decomp_table())(*args)
+    gm = make_fx(fn, select_decomp_table())(*args)
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+    return gm
 
 
 @torch.enable_grad()
@@ -642,6 +663,7 @@ def training_graph(fn, args):
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()
+    gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
 
@@ -658,6 +680,7 @@ def clone_graph(input_graph):
 
 
 _seen_patterns = set()
+# First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
     PatternMatcherPass(),  # pass 0
     PatternMatcherPass(),  # pass 1
