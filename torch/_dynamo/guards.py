@@ -639,7 +639,7 @@ class CheckFunctionManager:
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
-                and "hooks" not in guard.name
+                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
             ):
                 continue
             guard.create(local_builder, global_builder)
