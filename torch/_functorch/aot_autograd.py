@@ -23,7 +23,7 @@ from torch._logging import getArtifactLogger
 from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from . import config

@@ -2279,9 +2279,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         constraints = [dynamic_dim(y, 0)]
-        self.assertFalse(torch._dynamo.has_dynamic_dims(y))
         torch._dynamo.export(my_dyn_fn, y, constraints=constraints)
-        self.assertFalse(torch._dynamo.has_dynamic_dims(y))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

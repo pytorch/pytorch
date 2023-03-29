@@ -4936,27 +4936,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_py_guards_mark_dynamic(self):
-        x = torch.randn([3, 3, 3])
-
         def my_dyn_fn(a):
             if a.shape[0] > 2:
                 return a.cos()
             return a.sin()
 
-        torch._dynamo.mark_dynamic(x, 0)
         counter = CompileCounter()
-        # Run with dynamic
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
-        self.assertEqual(counter.frame_count, 1)
-        torch._dynamo.clear_dynamic(x, 0)
 
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        # Run with dynamic
+        x0 = torch.randn([3, 3, 3])
+        torch._dynamo.mark_dynamic(x0, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x0)
+        self.assertEqual(counter.frame_count, 1)
+
         # Run without dynamic, no recompile
+        x = torch.randn([3, 3, 3])
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         self.assertEqual(counter.frame_count, 1)
 
         # Mark a new dim, 1, as dynamic
-        torch._dynamo.mark_dynamic(x, 1)
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        x1 = torch.randn([3, 3, 3])
+        torch._dynamo.mark_dynamic(x1, 1)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x1)
         # Recompile triggered because we marked a new dym as dynamic
         self.assertEqual(counter.frame_count, 2)
 
@@ -4964,28 +4965,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         # Reset counter
         counter = CompileCounter()
-        # Clear dynamic
-        torch._dynamo.clear_dynamic(x, 1)
 
         # Run with dynamic 1
-        torch._dynamo.mark_dynamic(x, 1)
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x1)
         self.assertEqual(counter.frame_count, 1)
 
-        # Clear dynamic
-        torch._dynamo.clear_dynamic(x, 1)
         # Run with dynamic 0, not subset
-        torch._dynamo.mark_dynamic(x, 0)
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x0)
         self.assertEqual(counter.frame_count, 2)
 
-        # Clear dynamic
-        torch._dynamo.clear_dynamic(x, 0)
         # Run with dynamic 0, 1, 2, not subset
-        torch._dynamo.mark_dynamic(x, 0)
-        torch._dynamo.mark_dynamic(x, 1)
-        torch._dynamo.mark_dynamic(x, 2)
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        x012 = torch.randn([3, 3, 3])
+        torch._dynamo.mark_dynamic(x012, 0)
+        torch._dynamo.mark_dynamic(x012, 1)
+        torch._dynamo.mark_dynamic(x012, 2)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x012)
         self.assertEqual(counter.frame_count, 3)
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
