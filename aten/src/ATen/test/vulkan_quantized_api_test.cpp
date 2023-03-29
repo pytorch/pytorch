@@ -5,6 +5,7 @@
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Factory.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
@@ -2915,6 +2916,126 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_random_params_int8_int32) {
       /* padding */ {0, 0},
       /* dilation */ {1, 1},
       /* groups */ 1);
+}
+
+void test_convert_qconv2d_context(
+    const bool random_quantization_params,
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef weight_shape,
+    const at::IntArrayRef bias_shape,
+    double in_scale = 0.13,
+    int in_zero_point = 11,
+    double w_scale = 0.29,
+    int w_zero_point = 19,
+    double out_scale = 0.15,
+    int out_zero_point = 10) {
+  c10::InferenceMode mode;
+
+  std::vector<int64_t> stride{2, 2};
+  std::vector<int64_t> padding{1, 1};
+  std::vector<int64_t> dilation{1, 1};
+  int64_t groups = 1;
+
+  if (random_quantization_params) {
+    // compute appropiate scale and zero point for input, weight and bias
+    in_scale = produce_random_scale(0.001, 1.2);
+    w_scale = produce_random_scale(0.001, 1.2);
+    out_scale = produce_random_scale(0.001, 1.2);
+    in_zero_point = produce_random_zero_point(c10::ScalarType::QUInt8);
+    w_zero_point = produce_random_zero_point(c10::ScalarType::QInt8);
+    out_zero_point = produce_random_zero_point(c10::ScalarType::QUInt8);
+  }
+
+  const float a = 1.26;
+  const float b = 5.97;
+  const float c = 0.59;
+
+  at::Tensor input_cpu = produce_random_tensor(input_shape, a, b, c);
+
+  at::Tensor input_vk = input_cpu.vulkan();
+  at::Tensor input_cpu_q = at::quantize_per_tensor(
+      input_cpu, in_scale, in_zero_point, c10::ScalarType::QUInt8);
+  at::Tensor input_vk_q = at::quantize_per_tensor(
+      input_vk, in_scale, in_zero_point, c10::ScalarType::QUInt8);
+
+  at::Tensor weight_cpu = produce_random_tensor(weight_shape, a, b, c);
+  at::Tensor weight_cpu_q = at::quantize_per_tensor(
+      weight_cpu, w_scale, w_zero_point, c10::ScalarType::QInt8);
+
+  at::Tensor bias_cpu = produce_random_tensor(bias_shape, a, b, c);
+
+  at::globalContext().setReleaseWeightsWhenPrepacking(false);
+
+  const auto prepack_cpu = callOpByName(
+      "quantized::conv2d_prepack",
+      "",
+      weight_cpu_q,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups)[0];
+
+  at::Tensor output_cpu_q = callOpByName(
+                                "quantized::conv2d",
+                                "",
+                                input_cpu_q,
+                                prepack_cpu,
+                                stride,
+                                padding,
+                                dilation,
+                                groups,
+                                out_scale,
+                                out_zero_point)[0]
+                                .toTensor();
+
+  at::Tensor output_cpu_deq = at::dequantize(output_cpu_q);
+
+  // convert quantized context
+  const auto prepack_vulkan = at::native::vulkan::ops::convert_qconv2d_context(
+      prepack_cpu.toCustomClass<ConvPackedParamsBase<2>>(),
+      c10::nullopt,
+      c10::nullopt);
+
+  // run vulkan quantized conv2d
+  const auto vulkan_output = callOpByName(
+      "vulkan_prepack::run_qconv2d_context",
+      "",
+      input_vk_q,
+      out_scale,
+      out_zero_point,
+      prepack_vulkan);
+
+  at::Tensor output_vk_q = vulkan_output[0].toTensor();
+  at::Tensor output_vk_deq = at::dequantize(output_vk_q);
+  at::Tensor output_vk_deq_cpu = output_vk_deq.cpu();
+
+  // check
+  const auto check = almostEqual(
+      output_cpu_deq, output_vk_deq_cpu, safe_downcast<float>(out_scale));
+  if (!check) {
+    const auto vk_q_error =
+        at::abs(output_vk_deq_cpu - output_cpu_deq).max().item<double>();
+    std::cout << "Failed with shapes: input " << input_shape << " weight "
+              << weight_shape << " bias " << bias_shape
+              << " and params: in_scale " << in_scale << " weight_scale "
+              << w_scale << " out_scale " << out_scale << " in_zero_point "
+              << in_zero_point << " w_zero_point " << w_zero_point
+              << " out_zero_point " << out_zero_point << std::endl;
+    std::cout << "error: " << vk_q_error << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, convert_qconv2d_context) {
+  test_convert_qconv2d_context(false, {1, 3, 8, 8}, {1, 3, 3, 3}, {1});
+  test_convert_qconv2d_context(false, {1, 4, 224, 128}, {16, 4, 3, 3}, {16});
+
+  for (int i = 0; i < 10; i += 1) {
+    test_convert_qconv2d_context(true, {1, 3, 8, 8}, {1, 3, 3, 3}, {1});
+    test_convert_qconv2d_context(true, {1, 4, 224, 128}, {16, 4, 3, 3}, {16});
+  }
 }
 
 } // namespace
