@@ -5772,6 +5772,46 @@ class CommonTemplate:
             [x],
         )
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_negative_arange_dynamic_shapes(self):
+        # Repro from alibi relative encodings
+        def fn(enc_out, dec_in):
+            padmask = dec_in == 0
+            dec_mask = padmask.unsqueeze(-1) == padmask.unsqueeze(-2)
+            dec_mask = dec_mask.to(dtype=torch.float32)
+            dec_mask = dec_mask.tril(diagonal=0)
+            
+            nheads = 16
+            start = math.log2(0.5)
+            end = math.log2(1 / (2**8))
+            scales = 2 ** torch.arange(start, end + 1e-6 * np.sign(end - start), (end - start) / (nheads - 1)).view(1, nheads, 1, 1)
+            q_pos = torch.arange(dec_in.size(1), dtype=torch.long)
+            k_pos = torch.arange(dec_in.size(1), dtype=torch.long)
+            rel_pos = k_pos[None, :] - q_pos[:, None]
+            values = rel_pos.abs().neg().unsqueeze(0).unsqueeze(0)
+            dec_bias = values * scales
+            dec_bias.tril_(diagonal=0)
+
+            dec_mask = dec_mask + dec_bias[0]
+
+            emb = nn.Embedding(1024, 256)
+            out = emb(dec_in)
+
+            dec_layer = nn.TransformerDecoderLayer(256, 16, 512, batch_first=True, norm_first=True)
+            out = dec_layer(out, enc_out, tgt_mask=dec_mask)
+
+            head = nn.Linear(256, 1024)
+            return head(out)
+
+        enc_out = torch.rand(1, 512, 256)
+        dec_inputs = [torch.randint(0, 512, (1, i), dtype=torch.long) for i in range(8)]
+        for dec_inp in dec_inputs:
+            self.common(
+                fn,
+                [enc_out, dec_inp],
+            )
+
+
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):
         def fn(x, y):
