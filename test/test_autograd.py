@@ -2399,7 +2399,7 @@ class TestAutograd(TestCase):
             MyFunction.apply(x, y).sum().backward()
 
             has_deprecated = ('deprecated' in str(warn) and
-                                 'saved_variables' in str(warn) for warn in warns)
+                              'saved_variables' in str(warn) for warn in warns)
             has_deprecated = reduce(lambda x, y: x or y, has_deprecated)
             self.assertTrue(has_deprecated)
 
