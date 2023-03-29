@@ -4806,10 +4806,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
             self.assertEqual(dummy_opt(), test[3])
 
-    def test_get_const_index(self):
-        code_options = {"co_consts": (None, -0.0, 0.0)}
-        self.assertEqual(bytecode_transformation.get_const_index(code_options, 0.0), 2)
-
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
 

@@ -14,7 +14,6 @@ from .bytecode_transformation import (
     transform_code_object,
     unique_id,
 )
-from .codegen import PyCodegen
 from .utils import ExactWeakKeyDictionary
 
 # taken from code.h in cpython
@@ -40,8 +39,6 @@ class ReenterWith:
     def try_except(self, code_options, cleanup: List[Instruction]):
         load_args = []
         if self.target_values:
-            for val in self.target_values:
-                PyCodegen.maybe_upd_consts(code_options, val)
             load_args = [
                 create_instruction("LOAD_CONST", argval=val)
                 for val in self.target_values
@@ -71,7 +68,6 @@ class ReenterWith:
                 create_instruction("SETUP_FINALLY", target=except_jump_target)
             )
 
-        PyCodegen.maybe_upd_consts(code_options, None)
         reset = [
             create_instruction("LOAD_FAST", argval=ctx_name),
             create_instruction("LOAD_METHOD", argval="__exit__"),
@@ -106,8 +102,6 @@ class ReenterWith:
     def __call__(self, code_options, cleanup):
         load_args = []
         if self.target_values:
-            for val in self.target_values:
-                PyCodegen.maybe_upd_consts(code_options, val)
             load_args = [
                 create_instruction("LOAD_CONST", argval=val)
                 for val in self.target_values
@@ -135,7 +129,6 @@ class ReenterWith:
 
             cleanup_complete_jump_target = create_instruction("NOP")
 
-            PyCodegen.maybe_upd_consts(code_options, None)
             cleanup[:] = [
                 create_instruction("POP_BLOCK"),
                 create_instruction("LOAD_CONST", argval=None),
@@ -166,8 +159,6 @@ class ReenterWith:
         else:
             pop_top_after_with_except_start = create_instruction("POP_TOP")
             cleanup_complete_jump_target = create_instruction("NOP")
-
-            PyCodegen.maybe_upd_consts(code_options, None)
 
             def create_load_none():
                 return create_instruction("LOAD_CONST", argval=None)
@@ -317,7 +308,6 @@ class ContinueExecutionCache:
     @staticmethod
     def unreachable_codes(code_options):
         """Codegen a `raise None` to make analysis work for unreachable code"""
-        PyCodegen.maybe_upd_consts(code_options, None)
         return [
             create_instruction("LOAD_CONST", argval=None),
             create_instruction("RAISE_VARARGS", 1),
