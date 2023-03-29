@@ -85,7 +85,7 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: huydhn/test-infra/.github/actions/setup-nvidia@new-nvidia-driver
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         if: ${{ inputs.cuda-version != 'cpu' }}
 
       - name: Output disk space left
