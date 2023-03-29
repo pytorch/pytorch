@@ -8,7 +8,7 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
-
+#include <ATen/OpMathType.h>
 namespace at::native {
 
 namespace {
@@ -873,11 +873,8 @@ void max_pool2d_kernel_impl(
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d", [&] {
-        if (input.scalar_type() == ScalarType::BFloat16) {
-          cpu_max_pool<BFloat16, /*accscalar_t*/float>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
-        } else {
-          cpu_max_pool<scalar_t, scalar_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
-        }
+        using param_t = at::opmath_type<scalar_t>;
+        cpu_max_pool<scalar_t, /*accscalar_t*/param_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
       });
       break;
     }
@@ -903,25 +900,16 @@ void max_pool3d_kernel_impl(
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool3d", [&] {
-        if (input.scalar_type() == ScalarType::BFloat16) {
-          cpu_max_pool_3d<BFloat16, /*accscalar_t*/float>(output, indices, input,
-              kW, kH, kD, dW, dH, dD, padW, padH, padD, dilationW, dilationH, dilationD);
-        } else {
-          cpu_max_pool_3d<scalar_t, scalar_t>(output, indices, input,
-              kW, kH, kD, dW, dH, dD, padW, padH, padD, dilationW, dilationH, dilationD);
-        }
+        using param_t = at::opmath_type<scalar_t>;
+        cpu_max_pool_3d<scalar_t, /*accscalar_t*/param_t>(output, indices, input,
+            kW, kH, kD, dW, dH, dD, padW, padH, padD, dilationW, dilationH, dilationD);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast3d: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool3d_channels_last", [&] {
-        if (input.scalar_type() == ScalarType::BFloat16) {
-          cpu_max_pool_channels_last_3d<BFloat16>(output, indices, input,
-            kW, kH, kD, dW, dH, dD, padW, padH, padD, dilationW, dilationH, dilationD);
-        } else {
-          cpu_max_pool_channels_last_3d<scalar_t>(output, indices, input,
-            kW, kH, kD, dW, dH, dD, padW, padH, padD, dilationW, dilationH, dilationD);
-        }
+        cpu_max_pool_channels_last_3d<scalar_t>(output, indices, input,
+          kW, kH, kD, dW, dH, dD, padW, padH, padD, dilationW, dilationH, dilationD);
       });
       break;
     }
