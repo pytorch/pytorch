@@ -93,6 +93,9 @@ comment_origin = False
 # Convert 1x1 convs into matmuls
 conv_1x1_as_mm = False
 
+# Only save random seed for backwards rather than full mask
+lowmem_dropout = False
+
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -156,6 +159,8 @@ _raise_error_for_testing = False
 _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
+
+disable_cpp_codegen = is_fbcode()
 
 
 # config specific to codegen/cpp.pp

@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
 import warnings
-from typing import Callable, cast, Dict, Optional, Sequence, Tuple
+from typing import Callable, cast, Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
@@ -156,13 +156,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # rules, keyed by aten op name, value is propagation func
     _propagator: ShardingPropagator = ShardingPropagator()
 
-    # class attribute that handles custom registered ops, all handled
-    # custom ops should appear in this table, and overriding the default
-    # operators that's been covered by _op_to_rules or fallbacks.
-    # (custom operator is the highest priority when dispatching).
-    # pyre-fixme[24]: Generic type `Callable` expects 2 type parameters.
-    _custom_dispatch_ops: Dict[str, Callable] = {}
-
     @staticmethod
     def __new__(
         cls,
@@ -247,7 +240,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             args,
             kwargs,
             DTensor._propagator,
-            DTensor._custom_dispatch_ops,
         )
 
     @classmethod
