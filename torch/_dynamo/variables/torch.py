@@ -590,11 +590,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
                 **options,
             )
-            is_inplace_func = False
-            if fn_.__name__[-1] == "_" or (
+            is_inplace_func = fn_.__name__[-1] == "_" or (
                 hasattr(fn_, "_name") and fn_._name[-1] == "_"
-            ):
-                is_inplace_func = True
+            )
             if is_inplace_func and not has_same_metadata(tensor_variable, args[0]):
                 tx.update_locals_and_stack_ex(args[0], tensor_variable)
 
