@@ -9,27 +9,23 @@ from . import external_utils
 
 from .logging import get_loggers_level, set_loggers_level
 
-# log level (levels print what it says + all levels listed below it)
-# logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
-# logging.WARN print warnings (including graph breaks)
-# logging.ERROR print exceptions (and what user code was being processed when it occurred)
+
+# Note (mlazos): This is deprecated and will be removed very soon
+# to configure logging for dynamo, aot, and inductor
+# use the following API in the torch._logging module
+# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
+# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
+# see this design doc for more detailed info
+# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 log_level = property(
     lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
 )
-
-# log compiled function + graphs at level INFO
-output_code = False
 
 # the name of a file to write the logs to
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
-
-# If true, traced graph outputs will be outputted as Python GraphModule code.
-# If false, traced graph outputs will be outputted in tabular form.
-output_graph_code = False
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -59,6 +55,9 @@ constant_functions = {
     torch._utils.is_compiling: True,
 }
 
+# Here for bw compat, will be removed (mlazos)
+# see above notes for log_level on how to configure the new logging system
+output_code = None
 
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
@@ -188,6 +187,14 @@ enforce_cond_guards_match = True
 # about optimize_ddp behavior.
 optimize_ddp = True
 
+# Whether to skip guarding on FSDP-managed modules
+skip_fsdp_guards = True
+
+# Make dynamo skip guarding on hooks on nn modules
+# Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
+# dynamo will not notice and will execute whichever version you first compiled.
+skip_nnmodule_hook_guards = False
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -203,6 +210,10 @@ error_on_nested_fx_trace = True
 
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
+
+# If true, error if we try to compile a function that has
+# been seen before.
+error_on_recompile = False
 
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))

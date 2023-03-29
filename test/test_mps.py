@@ -6516,7 +6516,9 @@ class TestNLLLoss(TestCaseMPS):
 
             self.assertEqual(idx_result, idx_result_cpu)
 
-        helper(22, 0, [])
+        helper(22, 0, [0])
+        with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
+            helper(22, 0, [])
 
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
@@ -6837,7 +6839,7 @@ class TestNLLLoss(TestCaseMPS):
 
             self.assertEqual(result, cpu_result)
 
-        for dtype in [torch.float32, torch.int32, torch.int64]:
+        for dtype in [torch.bool, torch.float16, torch.float32, torch.uint8, torch.int16, torch.int32, torch.int64]:
             helper(2, 2, dtype)
             helper(2, 3, dtype)
             helper(0, 2, dtype)
