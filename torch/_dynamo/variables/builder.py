@@ -64,12 +64,12 @@ from .dicts import (
 )
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lists import (
-    ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
     SizeVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .misc import (
@@ -611,7 +611,9 @@ class VariableBuilder:
             ).add_guards(guards)
             for i in range(tuple_iterator_len(value))
         ]
-        return ListIteratorVariable(output, mutable_local=MutableLocal(), guards=guards)
+        return TupleIteratorVariable(
+            output, mutable_local=MutableLocal(), guards=guards
+        )
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
