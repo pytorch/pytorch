@@ -1,7 +1,6 @@
 import dataclasses
 import dis
 import itertools
-import math
 import sys
 import types
 from typing import Any, Dict, List, Optional, Tuple
@@ -471,31 +470,16 @@ HAS_FREE = set(dis.hasfree)
 HAS_CONST = set(dis.hasconst)
 
 
-def _equal(v1, v2):
-    # NOTE: it is possible for 2 const values to compare equal in Python
-    # but have different semantics. Corner cases are handled here.
-    if type(v1) != type(v2):
-        return False
-    if hasattr(v1, "__iter__") and hasattr(v2, "__iter__"):
-        if len(v1) != len(v2):
-            return False
-        for x1, x2 in zip(v1, v2):
-            if not _equal(x1, x2):
-                return False
-    else:
-        if v1 != v2:
-            return False
-        # case 0.0 == -0.0
-        if v1 == 0.0 and math.copysign(1, v1) != math.copysign(1, v2):
-            return False
-    return True
-
-
 def get_const_index(code_options, val):
     for i, v in enumerate(code_options["co_consts"]):
-        if _equal(val, v):
+        # NOTE: stronger comparison is required, since we have
+        # examples where two values compare equal but have
+        # different semantic meaning in some cases, e.g.
+        # 0.0 == -0.0 but have different effects in torch.copysign.
+        if val is v:
             return i
-    return -1
+    code_options["co_consts"] += (val,)
+    return len(code_options["co_consts"]) - 1
 
 
 def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=None):
@@ -550,7 +534,9 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             if should_compute_arg():
                 instructions[i].arg = freenames[instructions[i].argval]
         elif instructions[i].opcode in HAS_CONST:
-            if should_compute_arg():
+            # NOTE: only update argval if arg is not provided. This assumes
+            # that any additions to co_consts are appended.
+            if instructions[i].arg is None:
                 # cannot use a dictionary since consts may not be hashable
                 instructions[i].arg = get_const_index(
                     code_options, instructions[i].argval
