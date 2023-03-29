@@ -161,10 +161,10 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   //    && nesting in ascending order
   const at::Tensor storage_offsets_;
   // NOTE: -1 here means the size is missing
-  // Optional to allow it to be computed lazily from nested
+  // Optional to allow it to be computed lazily from nested.
   // TODO: maybe we can remove this metadata since
   //       we can compute it from `nested_sizes_`
-  c10::optional<std::vector<int64_t>> opt_sizes_;
+  mutable c10::optional<std::vector<int64_t>> opt_sizes_;
 
   template <typename VariableVersion>
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
