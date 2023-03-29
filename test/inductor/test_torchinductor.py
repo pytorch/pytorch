@@ -5741,7 +5741,8 @@ class CommonTemplate:
             func = getattr(self, test_name)
             assert callable(func), "not a callable"
             code = run_and_get_cpp_code(func, [])
-            self.assertEqual("load_inline" in code, supported)
+            print(code)
+            self.assertEqual("CppWrapperCodeCache" in code, supported)
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):

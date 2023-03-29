@@ -704,38 +704,42 @@ class CppWrapperCodeCache:
         name = f"inline_extension_{key}"
         EXT = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{EXT}")
-        # TODO: what about key?
-        if not os.path.exists(filepath):
-            # TODO: Filelock
-            if not os.path.exists(cpp_wrapper_dir):
-                os.mkdir(cpp_wrapper_dir)
-            print("not in cache")
-            shared = get_shared()
-            warning_all_flag = get_warning_all_flag()
-            ipaths, lpaths, libs, macros = get_include_and_linking_paths()
+        log.debug("Cpp wrapper code path %s", filepath)
+        if key not in cls.cache:
+            log.debug("Cpp wrapper cache miss for %s", filepath)
+            if not os.path.exists(filepath):
+                # TODO: Filelock
+                if not os.path.exists(cpp_wrapper_dir):
+                    os.mkdir(cpp_wrapper_dir)
+                log.debug("Cpp wrapper building %s", filepath)
+                shared = get_shared()
+                warning_all_flag = get_warning_all_flag()
+                ipaths, lpaths, libs, macros = get_include_and_linking_paths()
 
-            extra_cflags = f"{cpp_flags()} {optimization_flags()} {warning_all_flag} {macros} {use_custom_generated_macros()}"
-            extra_ldflags = f"{shared} {lpaths} {libs}"
-            extra_include_paths = f"{ipaths}"
+                extra_cflags = f"{cpp_flags()} {optimization_flags()} {warning_all_flag} {macros} {use_custom_generated_macros()}"
+                extra_ldflags = f"{shared} {lpaths} {libs}"
+                extra_include_paths = f"{ipaths}"
 
-            mod = torch.utils.cpp_extension.load_inline(
-                name=name,
-                build_directory=cpp_wrapper_dir,
-                cpp_sources=[source_code],
-                functions=[func_name],
-                extra_cflags=[extra_cflags],
-                extra_ldflags=[extra_ldflags],
-                extra_include_paths=[extra_include_paths],
-            )
+                mod = torch.utils.cpp_extension.load_inline(
+                    name=name,
+                    build_directory=cpp_wrapper_dir,
+                    cpp_sources=[source_code],
+                    functions=[func_name],
+                    extra_cflags=[extra_cflags],
+                    extra_ldflags=[extra_ldflags],
+                    extra_include_paths=[extra_include_paths],
+                )
+                log.debug("Cpp wrapper done building %s", filepath)
+            else:
+                log.debug("Found target .so, cpp wrapper loading %s", filepath)
+                spec = importlib.util.spec_from_file_location(name, filepath)
+                assert spec is not None
+                mod = importlib.util.module_from_spec(spec)
+                assert isinstance(spec.loader, importlib.abc.Loader)
+                spec.loader.exec_module(mod)
+                log.debug("Cpp wrapper done loading %s", filepath)
             cls.cache[key] = mod
-        else:
-            print("in cache, directly load")
-            spec = importlib.util.spec_from_file_location(name, filepath)
-            assert spec is not None
-            mod = importlib.util.module_from_spec(spec)
-            assert isinstance(spec.loader, importlib.abc.Loader)
-            spec.loader.exec_module(mod)
-            cls.cache[key] = mod
+        
         return cls.cache[key]
 
 
