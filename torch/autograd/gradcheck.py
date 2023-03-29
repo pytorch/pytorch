@@ -1034,11 +1034,13 @@ def _test_batched_grad(input, output, output_idx) -> bool:
     return True
 
 
-def _test_backward_mul_by_grad_output(outputs, inputs) -> bool:
+def _test_backward_mul_by_grad_output(outputs, inputs, masked) -> bool:
     # Tests that backward is multiplied by grad_output
     diff_input_list: List[torch.Tensor] = list(_iter_tensors(inputs, True))
     if not diff_input_list:
         raise GradcheckError("no Tensors requiring grad found in input")
+    if not masked:
+        diff_input_list = _densify(diff_input_list)
     grads_input = torch.autograd.grad(outputs, diff_input_list,
                                       _zeros_like(outputs),
                                       allow_unused=True)
@@ -1675,7 +1677,7 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, nondet_tol, check_undefined
         if check_batched_grad:
             _test_batched_grad(tupled_inputs, o, i)
 
-    _test_backward_mul_by_grad_output(outputs, tupled_inputs)
+    _test_backward_mul_by_grad_output(outputs, tupled_inputs, masked)
 
     if check_undefined_grad and check_backward_ad:
         _test_undefined_backward_mode(func, outputs, tupled_inputs)

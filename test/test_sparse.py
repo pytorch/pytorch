@@ -67,6 +67,26 @@ def gradcheck_semantics(test_name='gradcheck'):
         subtest(gradcheck_sparse, name='non_masked'),
         subtest(gradcheck_masked, name='masked')])
 
+def gradcheck_input_func_wrappers(test_name='input_func_wrapper'):
+    # decorator that provides wrappers to gradcheck input functions
+
+    def gradcheck_nop_wrapper(func, **params):
+        return func
+
+    def gradcheck_to_dense_wrapper(func, **params):
+
+        def func_wrapped(*args, **kwargs):
+            return func(*args, **kwargs).to_dense(**params)
+
+        return func_wrapped
+
+    gradcheck_nop_wrapper.returns_to_dense = False
+    gradcheck_to_dense_wrapper.returns_to_dense = True
+
+    return parametrize(test_name, [
+        subtest(gradcheck_nop_wrapper, name='return_as_is'),
+        subtest(gradcheck_to_dense_wrapper, name='return_to_dense')])
+
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
@@ -956,7 +976,12 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double, torch.cdouble)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
-    def test_permute(self, device, dtype, coalesced, gradcheck):
+    @gradcheck_input_func_wrappers()
+    def test_permute(self, device, dtype, coalesced, gradcheck, input_func_wrapper):
+        if not input_func_wrapper.returns_to_dense and dtype.is_complex:
+            # NotImplementedError: Could not run 'aten::view_as_real' with arguments from the ... backend.
+            self.skipTest('NOT IMPL: aten::view_as_real')
+
         # trivial checks
         s = torch.rand(3, 3, 3, device=device, dtype=dtype).to_sparse()
         with self.assertRaisesRegex(RuntimeError, "does not match the length"):
@@ -988,7 +1013,8 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_())
+                    gradcheck(input_func_wrapper(lambda t: t.permute(dims), masked_grad=gradcheck.masked),
+                              s.requires_grad_())
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
@@ -1640,24 +1666,22 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
-    def test_sparse_mul(self, device, dtype, coalesced, gradcheck):
+    @gradcheck_input_func_wrappers()
+    def test_sparse_mul(self, device, dtype, coalesced, gradcheck, input_func_wrapper):
         # https://github.com/pytorch/pytorch/issues/79914
         a = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
         b = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
-        gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(masked_grad=gradcheck.masked), [a, b])
+        gradcheck(input_func_wrapper(lambda x, y: torch.sparse.sum(x * y), masked_grad=gradcheck.masked), [a, b])
 
         def test_shape(sparse_dims, nnz, with_shape):
             a = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
             b = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
+            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense())
+            gradcheck(input_func_wrapper(lambda x, y: (x * y), masked_grad=gradcheck.masked), [a, b])
+            gradcheck(input_func_wrapper(lambda x, y: torch.sparse.sum(x * y), masked_grad=gradcheck.masked), [a, b])
 
-            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense(), masked=True)
-            gradcheck(lambda x, y: (x * y).to_dense(), [a, b])
-            # Issues with 0-dim indices/values
-            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True)
-
-        # TODO: Re-enable these
-        # test_shape(2, 3, [2, 3, 4, 5])
-        # test_shape(2, 3, [2, 2, 0])
+        test_shape(2, 3, [2, 3, 4, 5])
+        test_shape(2, 3, [2, 2, 0])
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -1818,7 +1842,8 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "fallback triggers cuda device error")
-    def test_sparse_sum(self, device, dtype, coalesced):
+    @gradcheck_input_func_wrappers()
+    def test_sparse_sum(self, device, dtype, coalesced, input_func_wrapper):
 
         def run_tests(S, td=None):
             D = S.coalesce().to_dense().detach().requires_grad_(True)
@@ -1829,16 +1854,15 @@ class TestSparse(TestSparseBase):
 
                 def fn(S):
                     return torch.sparse.sum(S)
-                gradcheck(fn, (S,), masked=True)
+                gradcheck(input_func_wrapper(fn, masked_grad=True), (S,), masked=True)
             else:
                 S_sum = torch.sparse.sum(S, td)
                 D_sum = D.sum(td)
-                self.assertEqual(S_sum.to_dense() if S_sum.is_sparse else S_sum, D_sum)
+                self.assertEqual(S_sum.to_dense(), D_sum)
 
                 def fn(S):
-                    res = torch.sparse.sum(S, td)
-                    return res.to_dense(masked_grad=True)
-                gradcheck(fn, (S,), masked=True)
+                    return torch.sparse.sum(S, td)
+                gradcheck(input_func_wrapper(fn, masked_grad=True), (S,), masked=True)
 
         nnz = 10
         sparse_dims = 2
