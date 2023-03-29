@@ -26,7 +26,6 @@ from torch.distributed._spmd.distribute import (
     Schema,
 )
 from torch.distributed._spmd.distributed_graph import DistributedGraph
-from torch.distributed._spmd.graph_utils import OP
 from torch.distributed._tensor import (
     DeviceMesh,
     Placement,
@@ -208,69 +207,6 @@ def _rematerialize_optimizer(
 
 aten = torch.ops.aten  # pyre-ignore
 
-FOREACH_OP_MAP = {
-    aten._foreach_add_.List: aten._foreach_add.List,
-}
-
-
-def getitem(l, i):
-    return l[i]
-
-
-def _functionalize_and_reinplace_foreach_ops(
-    gm: fx.GraphModule,
-) -> fx.GraphModule:
-    # inplace foreach ops been replaced
-    inplace_updated: Dict[fx.Node, fx.Node] = {}
-    # skip newly inserted nodes
-    skip_nodes: Set[fx.Node] = set()
-
-    for node in gm.graph.nodes:
-        if node in skip_nodes:
-            continue
-
-        flat_args, spec = pytree.tree_flatten(node.args)
-        updated_args = [inplace_updated.get(a, a) for a in flat_args]
-        # set node args to potentially updated ones
-        node.args = pytree.tree_unflatten(updated_args, spec)
-
-        # Only functionalize aten._foreach_* ops.
-        if node.op == OP.CALL_FUNCTION and node.target in FOREACH_OP_MAP:
-            with gm.graph.inserting_after(node):
-                # N.B.: inplace foreach does not return anything, so its output
-                # is not connected to any subsequent nodes anyway. It's safe to
-                # create a out of place version and remove the inplace one.
-                new_node = gm.graph.call_function(
-                    FOREACH_OP_MAP[node.target],
-                    args=node.args,
-                    kwargs=node.kwargs,
-                )
-            skip_nodes.add(new_node)
-            getitems: Dict[fx.Node, fx.Node] = {}
-            # need another inserting_after, otherwise new ones are always
-            # inserted immediately after ``node``
-            with gm.graph.inserting_after(new_node):
-                # use getitem to retrieve individual tensors
-                for i, a in enumerate(node.args[0]):
-                    getitems[a] = gm.graph.call_function(
-                        getitem, args=(new_node, i)
-                    )
-
-            # Copy output of place foreach results back to its first arguments,
-            # so that the graph will still update parameter inplace.
-            # FIXME(@mrshenli): we need inductor to optimize away this copy.
-            for orig, updated in getitems.items():
-                with gm.graph.inserting_after(updated):
-                    copy_node = gm.graph.call_function(
-                        aten.copy_, args=(orig, updated)
-                    )
-                    skip_nodes.add(copy_node)
-                    inplace_updated[orig] = copy_node
-
-            gm.graph.erase_node(node)
-
-    return gm
-
 
 @contextmanager
 def _enable_compile():
@@ -286,6 +222,12 @@ def _enable_compile():
         yield
     finally:
         torch._utils.is_compiling.__code__ = orig_is_compiling_code
+
+
+def _foreach_add_decomp(self, other, alpha=1):
+    self_updated = aten._foreach_add.List(self, other, alpha=alpha)
+    for s, s_u in zip(self, self_updated):
+        s.copy_(s_u)
 
 
 def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
@@ -379,19 +321,23 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
                 gm = make_fx(
                     partial(stateless_func, func),
                     tracing_mode="symbolic",
+                    decomposition_table={
+                        aten._foreach_add_.List: _foreach_add_decomp
+                    },
                     _allow_non_fake_inputs=False,
                 )(args, kwargs, named_states, params_and_buffers)
 
-            # FIXME(@mrshenli): functionalization does not work for our use case
-            # yet. I so implemented a mini-functionalization just for foreach
-            # ops. Remove this when the following issue is addressed.
-            # Issue: https://github.com/pytorch/pytorch/issues/97852
-            gm = _functionalize_and_reinplace_foreach_ops(gm)
+            if torch.distributed.get_rank() == 0:
+                gm.graph.eliminate_dead_code()
+                gm.graph.print_tabular()
 
             # 4. Use DTensor to insert collectives
             gm, name_to_spec = _dtensor_expand(
                 gm, args, kwargs, named_states, params_and_buffers
             )
+
+            if torch.distributed.get_rank() == 0:
+                gm.graph.print_tabular()
 
             # 5. Replace previously inserted dummy ones with real graphs.
             if module_override:
