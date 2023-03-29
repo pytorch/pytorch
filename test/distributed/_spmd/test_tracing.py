@@ -10,6 +10,7 @@ import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
 from torch.distributed._spmd.api import (
+    COMPILED_OBJECT_KEY,
     Override,
     Schema,
     SPMD,
@@ -641,6 +642,44 @@ class TraceTrainStepTest(DTensorTestBase):
             transform_targets,
             [torch.ops.dummy.ddm.default, torch.ops.dummy.ddm_backward.default],
         )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_gm_cache_and_transformation(self):
+        class GraphOptimization:
+            def __init__(self):
+                self.call_count = 0
+
+            def __call__(self, gm: fx.GraphModule) -> fx.GraphModule:
+                self.call_count += 1
+                return gm
+
+        graph_optimization = GraphOptimization()
+
+        @compile(gm_transformation=graph_optimization)
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        rank = torch.distributed.get_rank()
+        torch.manual_seed(0)
+        mod = nn.Linear(10, 10, bias=False).cuda(rank)
+        opt = torch.optim.Adam(
+            mod.parameters(), lr=0.01, foreach=False, capturable=True
+        )
+        inp = torch.randn(2, 10).cuda(rank)
+
+        # materialize optimizer states
+        mod(inp).sum().backward()
+        opt.step()
+        opt.zero_grad()
+
+        train_step(mod, opt, inp)
+        self.assertEqual(graph_optimization.call_count, 1)
+        gm = train_step.__dict__[COMPILED_OBJECT_KEY].gm
+        train_step(mod, opt, inp)
+        self.assertEqual(id(gm), id(train_step.__dict__[COMPILED_OBJECT_KEY].gm))
+        self.assertEqual(graph_optimization.call_count, 1)
 
 
 if __name__ == "__main__":

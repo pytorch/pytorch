@@ -1802,8 +1802,9 @@ def merge(
     elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
         raise RuntimeError(
             f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
-            "Please rebase and try again. You can rebase by leaving the following comment on this PR:\n"
-            "`@pytorchbot rebase`"
+            "Please rebase and try again. You can rebase and merge by leaving the following comment on this PR:\n"
+            "`@pytorchbot merge -r`\n"
+            "Or just rebase by leaving `@pytorchbot rebase` comment"
         )
 
     start_time = time.time()
