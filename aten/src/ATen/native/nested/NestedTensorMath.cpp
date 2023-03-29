@@ -13,6 +13,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include <ATen/NamedTensorUtils.h>
 
 #include <tuple>
 
@@ -936,6 +937,41 @@ Tensor& normal_nested_(Tensor& self, double mean, double std, c10::optional<Gene
   const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
   self_buf.normal_(mean, std, gen);
   return self;
+}
+
+static Tensor cat_nested_impl(
+    const MaterializedITensorListRef& tensors,
+    int64_t dim) {
+  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].get().dim());
+  TORCH_CHECK(
+      wrapped == 0,
+      "NestedTensors can only be concatenated along dimension 0. Got ",
+      dim,
+      " instead.");
+  std::vector<at::Tensor> buffers;
+  std::vector<at::Tensor> sizes;
+  for (const auto i : c10::irange(tensors.size())) {
+    const Tensor& t = tensors[i];
+    TORCH_CHECK(
+        t.is_nested(), "Expected each tensor in given list to be nested.");
+    TORCH_CHECK(
+        t.is_contiguous(),
+        "Expected each tensor in given list to be contiguous.");
+    auto t_ptr = get_nested_tensor_impl(t);
+    buffers.push_back(t_ptr->get_buffer().view({-1}));
+    sizes.push_back(t_ptr->get_nested_sizes());
+  }
+  return at::detail::make_tensor<NestedTensorImpl>(
+      at::cat(buffers).view({-1}), at::cat(sizes, 0));
+}
+
+Tensor cat_nested(const ITensorListRef& tensors, int64_t dim) {
+  auto materialized = tensors.materialize();
+  auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
+  auto result =
+      cat_nested_impl(materialized, at::legacy_cat_wrap_dim(dim, materialized));
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  return result;
 }
 
 } // namespace native
