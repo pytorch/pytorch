@@ -590,6 +590,8 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 triton_config_reduction(size_hints, 8, 512),
                 # improve 1.121x for https://gist.github.com/shunting314/6267da87c6524dab29a3e33f14ff91db
                 Config({"XBLOCK": 1, "RBLOCK": 4096}, num_warps=8, num_stages=1),
+                # improve 1.074x for https://gist.github.com/shunting314/bb36b37a3d049a29ff6bada9dbe18fb8
+                Config({"XBLOCK": 2, "RBLOCK": 2048}, num_warps=8, num_stages=1),
             ],
             meta=meta,
             filename=filename,
