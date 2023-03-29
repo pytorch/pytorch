@@ -31,9 +31,8 @@ import torch.distributed._functional_collectives as funcol
 if TYPE_CHECKING:
     try:
         from numpy.typing import ArrayLike
-        NDArrayType = ArrayLike
     except ImportError:
-        NDArrayType = "ArrayLike"
+        warnings.warn("DeviceMesh requires numpy >= 1.21 to be installed for type checking")
 
 
 _global_device_mesh: Optional["DeviceMesh"] = None
@@ -101,7 +100,7 @@ class DeviceMesh(object):
     def __init__(
         self,
         device_type: str,
-        mesh: Union[torch.Tensor, NDArrayType],
+        mesh: Union[torch.Tensor, "ArrayLike"],
         *,
         _init_process_groups: bool = True,
     ) -> None:
