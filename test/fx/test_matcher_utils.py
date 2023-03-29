@@ -76,12 +76,13 @@ class TestMatcher(JitTestCase):
 
     def test_subgraph_matcher_ignore_literals(self):
         def original(x):
-            return torch.nn.Linear(3, 3).eval()(x)
+            return x + 1
+
         original_graph = make_fx(original)(torch.ones(3, 3)).graph
         original_graph.eliminate_dead_code()
 
         def pattern(x):
-            return torch.nn.Linear(4, 5).eval()(x)
+            return x + 2
         pattern_graph = make_fx(pattern)(torch.ones(4, 4)).graph
         pattern_graph.eliminate_dead_code()
 
