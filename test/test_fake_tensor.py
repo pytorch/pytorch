@@ -500,13 +500,16 @@ class FakeTensorTest(TestCase):
             self.assertRaises(Exception, run_meta)
 
     def test_clone_preserve_strides_storage(self):
-        with FakeTensorMode():
-            x = torch.rand([4])
-            z = x.clone_preserve_strides_storage()
+        for requires_grad in [True, False]:
+            with FakeTensorMode():
+                x = torch.rand([4])
+                x.requires_grad = requires_grad
+                z = x.clone_preserve_strides_storage()
 
-        assert x.untyped_storage()._cdata == z.untyped_storage()._cdata
-        assert x.device == z.device
-        assert x.requires_grad == z.requires_grad
+            assert x.size() == z.size() and x.stride() == z.stride()
+            assert x.untyped_storage()._cdata == z.untyped_storage()._cdata
+            assert x.device == z.device and x.dtype == z.dtype
+            assert x.requires_grad == z.requires_grad
 
 
 class FakeTensorConstHandling(TestCase):
