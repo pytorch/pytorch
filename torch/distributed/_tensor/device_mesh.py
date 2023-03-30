@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
-from typing import List, Optional, Sequence, TypeVar, Union
+from typing import List, Optional, Union, TYPE_CHECKING
 
 import torch
 from torch.distributed.distributed_c10d import (
@@ -27,6 +27,14 @@ from torch.distributed.distributed_c10d import (
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._functional_collectives as funcol
 
+# only import numpy typing when type checking
+if TYPE_CHECKING:
+    try:
+        from numpy.typing import ArrayLike
+    except ImportError:
+        warnings.warn("DeviceMesh requires numpy >= 1.21 to be installed for type checking")
+
+
 _global_device_mesh: Optional["DeviceMesh"] = None
 
 
@@ -39,19 +47,6 @@ def get_global_device_mesh() -> "DeviceMesh":
 def set_global_device_mesh(mesh: Optional["DeviceMesh"]) -> None:
     global _global_device_mesh
     _global_device_mesh = mesh
-
-
-# We want a type for "can be passed to torch.as_tensor()";
-# this is a recursive sequence type, which isn't fully supported
-# yet in python. This construct simulates that up to depth 7.
-T = TypeVar("T")
-_L = Union[T, Sequence[T]]
-NDIntList = _L[_L[_L[_L[_L[_L[_L[int]]]]]]]
-
-MeshExprT = Union[
-    torch.Tensor,
-    NDIntList,
-]
 
 
 class DeviceMesh(object):
@@ -105,7 +100,7 @@ class DeviceMesh(object):
     def __init__(
         self,
         device_type: str,
-        mesh: MeshExprT,
+        mesh: Union[torch.Tensor, "ArrayLike"],
         *,
         _init_process_groups: bool = True,
     ) -> None:
