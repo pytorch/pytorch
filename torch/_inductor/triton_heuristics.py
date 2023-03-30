@@ -447,6 +447,7 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     # want at least 4 warps if there's enough elements per thread
     # given that this is a rare situation, don't expect this to affect perf
     # in general
+    # see https://github.com/pytorch/pytorch/pull/97950
     num_warps = max(num_warps, 4) if conditional_product(x, y, z) >= 128 else num_warps
     xnumel = size_hints[0]
     ynumel = size_hints[1] if y else None
