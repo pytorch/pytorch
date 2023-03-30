@@ -18,8 +18,8 @@ device = "cuda"
 torch.set_printoptions(
     precision=3,
     threshold=None,
-    edgeitems=4,
-    linewidth=460,
+    edgeitems=32,
+    linewidth=480,
     profile=None,
     sci_mode=False,
 )
@@ -38,13 +38,15 @@ class Model(nn.Module):
 
 # compare different dtypes
 def compare_dtype(m, k, n, batch_size, dtype):
-    weight = torch.ones(m, k, dtype=dtype).cuda()
-    # input_tensor = torch.ones(1, n, k, dtype=dtype).cuda()
-    input_tensor = torch.randint(2, (1, n, k), dtype=dtype).cuda()
-    print("input")
-    print(input_tensor)
-    bias = torch.zeros(n, dtype=dtype).cuda()
 
+    model = Model(m, k).cuda().eval()
+    input_tensor = torch.ones(1, n, k, dtype=dtype).cuda()
+    # input_tensor = torch.randint(2, (n, k), dtype=dtype).cuda()
+    bias = torch.zeros(model.linear.bias.data.shape, dtype=dtype).cuda()
+
+
+    # generate mask
+    mask_id_sequence = []
     def random_mask_choice(i=None):
         import random
         choices = [
@@ -57,38 +59,81 @@ def compare_dtype(m, k, n, batch_size, dtype):
         ]
         if i is None:
             i = random.randint(0, len(choices) - 1)
+        mask_id_sequence.append(i)
         return choices[i]
 
     mask_entries = []
     for i in range(m * (k // 4)):
-        mask_entries += random_mask_choice()
-    mask = torch.tensor(mask_entries, dtype=dtype).view(m, k).contiguous()
-    mask = mask.cuda()
+        choice = None if i <= 33 else 0
+        mask_entries += random_mask_choice(i=choice)
 
-    weight = weight * mask
-    print("weight")
+    weight = torch.tensor(mask_entries, dtype=dtype, device=device).view(m, k).cuda()
     print(weight)
 
-    res = torch.matmul(weight.float(), input_tensor.mT.float()) + bias.float()
+
+    def make_mask(mask_id_sequence):
+        lookup = {
+            0: "0100",
+            1: "1000",
+            2: "1100",
+            3: "1001",
+            4: "1101",
+            5: "1110",
+        }
+
+        my_mask = []
+        small_buf  = []
+        for mask_id in mask_id_sequence:
+            small_buf.insert(0,lookup[mask_id])
+
+            if len(small_buf) == 2:
+                string = "".join(small_buf)
+                sign = -1 if string[0] == "1" else 1
+                mask_val = sign * int(string[1:], 2)
+                my_mask.append(mask_val)
+
+                small_buf = []
+        return my_mask
+
+    my_mask = make_mask(mask_id_sequence)
+
+
     num_bytes = weight.nelement() * weight.element_size()
-    compressed_size = num_bytes * 10 // 16 
-    weight_compressed = torch.empty((compressed_size // weight.element_size(), ), 
-                                    dtype=weight.dtype, 
+    compressed_size= num_bytes * 10 // 16 
+    # compressed_size = 1536
+    weight_compressed = torch.zeros((compressed_size // weight.element_size(), ), 
+                                    dtype=dtype, 
                                     device=device)
+
     cslt = torch.classes.cusparselt.CusparseLtLinear(weight_compressed,
                                                      bias)
     cslt.set_compressed(weight)
 
     print("W_c")
-    print(weight_compressed)
+    print(compressed_size, m*k//2, compressed_size-(m*k//2))
+    print(weight_compressed[m*k//2:compressed_size].view(m, k // 8))
 
-    s_res = cslt.masked_mm(input_tensor.mT)
+    # print(len(my_mask))
+    assert len(my_mask) == len(range(m*k//2, compressed_size))
+    # for i, val in zip(range(m*k//2, compressed_size), my_mask):
+    #     weight_compressed[i] = val
 
-    print("s_res")
-    print(s_res.float())
+    # weight_compressed[m*k//2+5+6]  = 78
+    # print(weight_compressed[m*k//2:compressed_size].view(m, k // 8))
+    s_res = cslt.masked_mm(input_tensor.T).T
 
-    print("res")
-    print(res)
+    # print(s_res.float())
+
+    model.linear.weight.data = weight.float()
+    model.linear.bias.data = bias.float()
+    res = (torch.matmul(weight.float(), input_tensor.T.float()) + bias.float()).T
+    # print(res)
+
+    model_res = model(input_tensor.float())
+    # print(model_res)
+
+    print(torch.allclose(model_res, res))
+    print(res-s_res)
 
     assert torch.allclose(
         s_res.float(), res, rtol=1e-3, atol=1e-3

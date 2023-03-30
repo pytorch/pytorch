@@ -25,7 +25,7 @@ class cuSPARSELtLinear(nn.Linear):
         print(mod.weight.data.shape)
         num_bytes = mod.weight.data.nelement() * mod.weight.data.element_size()
         # print("num byte = ", num_bytes)
-        compressed_size = num_bytes // 16 * 9
+        compressed_size = num_bytes // 16 * (9 if mod.weight.dtype == torch.float16 else 10)
         # print("compresseds", compressed_size)
         cusparselt.weight.data = torch.empty((compressed_size // mod.weight.data.element_size(), ), 
                                         dtype=mod.weight.data.dtype, 
