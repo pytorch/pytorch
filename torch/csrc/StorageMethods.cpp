@@ -272,7 +272,7 @@ static PyObject* THPStorage_fromBuffer(
       /*resizable=*/true);
 
   if (scalar_type == at::kByte || scalar_type == at::kChar) {
-    memcpy(storage->data(), src + offset, count);
+    memcpy(storage->mutable_data(), src + offset, count);
   } else if (scalar_type == at::kBool) {
     // Because of ASAN checks, that are failing whenever
     // we are trying to get a value which is not 0 or 1, we have to manually
