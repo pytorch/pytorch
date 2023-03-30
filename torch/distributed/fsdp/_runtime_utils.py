@@ -629,7 +629,10 @@ def _pre_backward_hook(
             # call `_unshard()` again
             if not state._handles_prefetched.get(_handles_key, False):
                 _unshard(
-                    state, _handles, state._streams["unshard"], state._streams["pre_unshard"]
+                    state,
+                    _handles,
+                    state._streams["unshard"],
+                    state._streams["pre_unshard"],
                 )
             torch.cuda.current_stream().wait_stream(state._streams["unshard"])
 
