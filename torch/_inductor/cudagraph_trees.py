@@ -417,7 +417,7 @@ class CUDAWarmupNode:
     def run(self, new_inputs):
         assert not self.has_run, "Wrapped function should never be run twice"
 
-        # See: output_is_alias_of_static_inputs below. We should only be returning freshly created
+        # See: output_is_alias_of_persistent_static_inputs below. We should only be returning freshly created
         # storages in path_live_weakrefs.
         existing_path_data_ptrs = {
             t.data_ptr() for t in self.path_live_weakrefs() if t()
@@ -571,7 +571,7 @@ class CUDAGraphNode:
         # of CUDAGraphNodes. We should not be freeing parameters, not do we need to account for
         # their liveness (they are static), so we need to compute which outputs are aliases of
         # parameters
-        self.output_is_alias_of_static_inputs: OutputList[int] = []
+        self.output_is_alias_of_persistent_static_inputs: OutputList[int] = []
 
         # precompute expanded dims to avoid computing in the hot path
         self.expanded_dims: List[List[int]] = [
@@ -604,7 +604,7 @@ class CUDAGraphNode:
             self.recorded_liveness_before_graph = curr_liveness
             self.expected_dead_indices_before_graph = different_indices
 
-        recording_inputs = self._allocate_recording_inputs(inputs)
+        recording_inputs = self._allocate_and_copy_recording_inputs(inputs)
         # recording inputs will copy over memory, so we can free non recording inputs
         inputs.clear()
         del inputs
@@ -716,7 +716,11 @@ class CUDAGraphNode:
     def _record(self, model, inputs):
         "Record the model"
 
-        static_input_non_cudagraph_storage_ptrs: Set[int] = {
+        # NB: some static inputs are saved tensors from the forward that die in the backward.
+        # Their locations are static but lifetimes are not. We only include the persistent static
+        # data ptrs below because the non persistent data ptrs may be outputs of this record and 
+        # fresh allocations.
+        static_input_persistent_storage_ptrs: Set[int] = {
             inputs[i].untyped_storage().data_ptr()
             for i in self.wrapped_function.static_input_idxs
             if not self._is_cuda_graph_recorded_tensor(inputs[i])
@@ -748,11 +752,11 @@ class CUDAGraphNode:
         if not isinstance(static_outputs, (list, tuple)):
             static_outputs = (static_outputs,)
 
-        self._add_first_outputs(static_outputs, static_input_non_cudagraph_storage_ptrs)
+        self._add_first_outputs(static_outputs, static_input_persistent_storage_ptrs)
 
         return static_outputs
 
-    def _add_first_outputs(self, outputs, static_input_non_cudagraph_storage_ptrs):
+    def _add_first_outputs(self, outputs, static_input_persistent_storage_ptrs):
         "Add the outputs from the first invocation of the node and set up metadata"
 
         # getting liveness before we have added the outputs to path, so the length
@@ -765,10 +769,10 @@ class CUDAGraphNode:
 
         assert len(self.outputs_weakrefs) == 0
         for i, o in enumerate(outputs):
-            self.output_is_alias_of_static_inputs.append(
+            self.output_is_alias_of_persistent_static_inputs.append(
                 o is not None
                 and o.untyped_storage().data_ptr()
-                in static_input_non_cudagraph_storage_ptrs
+                in static_input_persistent_storage_ptrs
             )
 
         if self.stack_traces is None:
@@ -797,7 +801,7 @@ class CUDAGraphNode:
 
     def _add_replayed_outputs(self, outputs):
         self.outputs_weakrefs.clear()
-        for out, is_alias in zip(outputs, self.output_is_alias_of_static_inputs):
+        for out, is_alias in zip(outputs, self.output_is_alias_of_persistent_static_inputs):
             self.outputs_weakrefs.append(map_to_ref(out) if not is_alias else None)
 
     @property
@@ -971,8 +975,11 @@ class CUDAGraphNode:
         )
         return t
 
-    def _allocate_recording_inputs(self, inputs):
-        "Allocate inputs for non static, non cudagraph managraphed managed tensors in the memory pool"
+    def _allocate_and_copy_recording_inputs(self, inputs):
+        """
+        Allocate inputs for non static, non cudagraph managraphed managed tensors in the memory pool
+        and copy over the tensor values.
+        """
 
         torch.cuda.synchronize()
         self.stream.wait_stream(torch.cuda.current_stream())
@@ -989,6 +996,7 @@ class CUDAGraphNode:
                 if i not in self.static_input_idxs:
                     # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
+                    # copy over and clear non recording input
                     self._copy_input(i, recording_inputs[-1], inp)
                     inputs[i] = None
                     del inp
