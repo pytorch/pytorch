@@ -1196,6 +1196,7 @@ def get_fake_value(node, tx):
             # the pre-hooks which initialize it
             nnmodule._infer_parameters(nnmodule, args)
 
+        # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
     try:

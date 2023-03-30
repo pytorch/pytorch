@@ -257,13 +257,14 @@ class NNModuleVariable(VariableTracker):
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
                 elif is_lazy:
+                    # Initialize lazy module eagerly to reduce graph breaks.
                     assert len(kwargs) == 0
                     input = [
                         get_fake_value(x.node, tx)
                         for x in proxy_args_kwargs(args, {})[0]
                     ]
                     mod._infer_parameters(mod, input)
-                    fn = mod.forward
+                    fn = mod.__call__
                 else:
                     fn = mod.__call__
                 fn_source = AttrSource(self.source, "__call__")

@@ -467,6 +467,20 @@ class LazyModule(LazyModuleMixin, MaterializedModule):
         self.param.materialize(x.shape)
 
 
+class LazyMLP(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.LazyLinear(10)
+        self.relu1 = torch.nn.ReLU()
+        self.fc2 = torch.nn.LazyLinear(1)
+        self.relu2 = torch.nn.ReLU()
+
+    def forward(self, input):
+        x = self.relu1(self.fc1(input))
+        y = self.relu2(self.fc2(x))
+        return y
+
+
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
     requires_grad = any([p.requires_grad for p in module.parameters(recurse)])
     return requires_grad
@@ -964,7 +978,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
-    def test_lazy_module(self):
+    def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -974,6 +988,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             module(input)
 
+        # test no graph break
         opt_test_static_module = torch._dynamo.optimize(cnt, nopython=True)(
             test_static_module
         )
@@ -1016,6 +1031,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             return module(input)  # fully materialized
 
+        # test no graph break
         opt_test_torch_static = torch._dynamo.optimize(cnt, nopython=True)(
             test_torch_static
         )
@@ -1029,6 +1045,17 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             "Module should be transformed to an instance of BatchNorm3d.",
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
+
+    def test_lazy_module2(self):
+        # Test FX graph 'call_module' works well if argument is lazy module
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        # We should run compile mode firstly, otherwise the module
+        # would be initialized when running eager mode.
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
