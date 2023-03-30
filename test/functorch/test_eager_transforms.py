@@ -2184,7 +2184,6 @@ class TestJac(TestCase):
         # With chunk_size=1, we shouldn't `vmap` and hence not be limited
         # by it's constraints.
         x = torch.randn(3, 3, device=device)
-        chunk_size = 1
 
         # Function with Dynamic Op in Backward.
         # This should cause jacrev/vmap(vjp) to fail.
@@ -2206,11 +2205,13 @@ class TestJac(TestCase):
         def f(x):
             return IdentityWithDynamicBackwardOp.apply(x)
 
-        jacfn = jacrev(f, chunk_size=chunk_size, _preallocate_and_copy=_preallocate_and_copy)
+        # With `chunk_size=1`, we don't use vmap. So the following should work.
+        jacfn = jacrev(f, chunk_size=1, _preallocate_and_copy=_preallocate_and_copy)
         actual = jacfn(x)
         expected = torch.autograd.functional.jacobian(f, x, vectorize=False)
         self.assertEqual(actual, expected)
 
+        # Should fail with `chunk_size=2`.
         msg = r"vmap: We do not support batching operators that can output dynamic shape."
         with self.assertRaisesRegex(RuntimeError, msg):
             jacrev(f, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x)
