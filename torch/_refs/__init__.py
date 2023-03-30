@@ -4568,7 +4568,7 @@ def meshgrid(
     # This ref simultaneously handles two overloads (see stubs above)
     # The `indexing` argument is currently optional for torch.meshgrid, but we
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
-    if isinstance(tensors[0], list) or isinstance(tensors[0], tuple):
+    if isinstance(tensors[0], (list, tuple)):
         assert len(tensors) == 1
         tensors = tuple(tensors[0])
 
