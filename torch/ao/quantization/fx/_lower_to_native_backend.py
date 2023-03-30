@@ -837,6 +837,7 @@ def _lower_static_weighted_ref_functional(
         else:
             func_node.target = q_func
         func_node.args = (input_dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
+        # kwargs for func_node has been moved to kwargs for prepack op
         func_node.kwargs = {}
         q_node.replace_all_uses_with(func_node)
         # Move func_node after output_zp_node in the graph
