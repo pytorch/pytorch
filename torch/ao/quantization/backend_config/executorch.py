@@ -224,6 +224,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         torch.nn.AdaptiveAvgPool2d,
         torch.nn.Hardtanh,
         torch.squeeze,
+        "mean",
         "permute",
         "reshape",
         "relu",
