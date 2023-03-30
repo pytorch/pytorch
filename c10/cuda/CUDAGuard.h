@@ -77,11 +77,7 @@ struct CUDAGuard {
 /// CUDAGuard for when you can use this.
 struct OptionalCUDAGuard {
   /// Create an uninitialized OptionalCUDAGuard.
-  explicit OptionalCUDAGuard() : guard_() {
-    // This constructor initializes CUDA context on current device.
-    // For more info see comment in CUDAFunctions.cpp
-    c10::cuda::SetTargetDevice();
-  }
+  explicit OptionalCUDAGuard() : guard_() {}
 
   /// Set the current CUDA device to the passed Device, if it is not nullopt.
   explicit OptionalCUDAGuard(optional<Device> device_opt)
@@ -213,11 +209,7 @@ struct CUDAStreamGuard {
 /// CUDAGuard for when you can use this.
 struct OptionalCUDAStreamGuard {
   /// Create an uninitialized guard.
-  explicit OptionalCUDAStreamGuard() : guard_() {
-    // This constructor initializes CUDA context on current device.
-    // For more info see comment in CUDAFunctions.cpp
-    c10::cuda::SetTargetDevice();
-  }
+  explicit OptionalCUDAStreamGuard() : guard_() {}
 
   /// Set the current CUDA device to the device associated with the passed
   /// stream, and set the current CUDA stream on that device to the passed

@@ -615,6 +615,8 @@ if (C10_UNLIKELY(current_device.has_value())) {
   guard_.reset_device(options.device());
 }
 """
+            if self.backend_index.dispatch_key == DispatchKey.CUDA:
+                maybe_set_guard = "c10::cuda::SetTargetDevice();" + maybe_set_guard
             maybe_set_guard_line = maybe_set_guard + "\n"
         else:
             maybe_set_guard_line = maybe_set_guard = ""
