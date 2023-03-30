@@ -1,15 +1,16 @@
-import sys
+import logging
 import os
 import re
-import pandas as pd
-import numpy as np
-import click
-import logging
-from tabulate import tabulate
 from collections import defaultdict
 
+import click
+import pandas as pd
+from tabulate import tabulate
+
+
 def gmean(s):
-    return s.product() ** (1/len(s))
+    return s.product() ** (1 / len(s))
+
 
 def find_csv_files(path):
     """
@@ -19,12 +20,13 @@ def find_csv_files(path):
     csv_files = []
     for root, dirs, files in os.walk(path):
         for file in files:
-            if file.endswith('_performance.csv'):
+            if file.endswith("_performance.csv"):
                 csv_files.append(os.path.join(root, file))
     return csv_files
 
+
 @click.command()
-@click.argument('directory', default='artifacts')
+@click.argument("directory", default="artifacts")
 @click.option("--amp", is_flag=True)
 @click.option("--float32", is_flag=True)
 def main(directory, amp, float32):
@@ -51,28 +53,25 @@ def main(directory, amp, float32):
     for f in find_csv_files(directory):
         try:
             dfs[os.path.basename(f)].append(pd.read_csv(f))
-        except:
+        except Exception:
             logging.warning("failed parsing %s", f)
             raise
 
     # dtype -> statistic -> benchmark -> compiler -> value
     results = defaultdict(  # dtype
         lambda: defaultdict(  # statistic
-            lambda: defaultdict(  # benchmark
-                dict  # compiler -> value
-            )
+            lambda: defaultdict(dict)  # benchmark  # compiler -> value
         )
     )
 
     for k, v in sorted(dfs.items()):
-
         regex = (
-            '(inductor_with_cudagraphs|inductor_no_cudagraphs|inductor_dynamic)_'
-            '(torchbench|huggingface|timm_models)_'
-            '(float32|amp)_'
-            'training_'
-            'cuda_'
-            r'performance\.csv'
+            "(inductor_with_cudagraphs|inductor_no_cudagraphs|inductor_dynamic)_"
+            "(torchbench|huggingface|timm_models)_"
+            "(float32|amp)_"
+            "training_"
+            "cuda_"
+            r"performance\.csv"
         )
         m = re.match(regex, k)
         assert m is not None, k
@@ -81,21 +80,21 @@ def main(directory, amp, float32):
         dtype = m.group(3)
 
         df = pd.concat(v)
-        df = df.dropna().query('speedup != 0')
+        df = df.dropna().query("speedup != 0")
 
         statistics = {
-            'speedup': gmean(df['speedup']),
-            'comptime': df['compilation_latency'].mean(),
-            'memory': gmean(df['compression_ratio']),
+            "speedup": gmean(df["speedup"]),
+            "comptime": df["compilation_latency"].mean(),
+            "memory": gmean(df["compression_ratio"]),
         }
 
         for statistic, v in statistics.items():
             results[dtype][statistic][benchmark][compiler] = v
 
     descriptions = {
-        'speedup': 'Geometric mean speedup',
-        'comptime': 'Mean compilation time',
-        'memory': 'Peak memory compression ratio',
+        "speedup": "Geometric mean speedup",
+        "comptime": "Mean compilation time",
+        "memory": "Peak memory compression ratio",
     }
 
     for dtype in dtypes:
@@ -114,5 +113,6 @@ def main(directory, amp, float32):
             headers = list(data.keys())
             print(tabulate(table, headers=headers))
             print()
+
 
 main()
