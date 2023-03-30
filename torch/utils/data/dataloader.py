@@ -1045,6 +1045,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
             if self._pin_memory_device == "xpu":
                 current_device = torch.xpu.current_device()  # type: ignore[attr-defined]
+            elif self._pin_memory_device == torch._C._get_privateuse1_backend_name():
+                custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name())
+                current_device = custom_device_mod.current_device()
             else:
                 current_device = torch.cuda.current_device()  # choose cuda for default
             pin_memory_thread = threading.Thread(
