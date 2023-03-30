@@ -223,6 +223,9 @@ class BackwardHook:
                             raise RuntimeError("Backward hook for Modules where no input requires "
                                                "gradient should always return None or None for all gradients.")
                     self.grad_outputs = None
+
+                return self.grad_outputs
+
             grad_fn.register_hook(hook)
 
         is_tuple = True
