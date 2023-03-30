@@ -208,6 +208,11 @@ def convert_frame_assert(
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         increment_frame()
         code = frame.f_code
+
+        if code in input_codes and config.error_on_recompile:
+            raise exc.RecompileError(
+                f"Recompiled function {code.co_name} in {code.co_filename}"
+            )
         input_codes.add(code)
         if code in output_codes:
             return None

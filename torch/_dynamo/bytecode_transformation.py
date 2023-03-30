@@ -349,6 +349,28 @@ def remove_load_call_method(instructions: List[Instruction]):
     return instructions
 
 
+def remove_jump_if_none(instructions: List[Instruction]):
+    new_insts = []
+    for inst in instructions:
+        new_insts.append(inst)
+        if "_NONE" in inst.opname:
+            is_op = create_instruction("IS_OP", arg=int("NOT" in inst.opname))
+            is_op.argval = is_op.arg
+            jump_op = create_instruction(
+                "POP_JUMP_FORWARD_IF_TRUE"
+                if "FORWARD" in inst.opname
+                else "POP_JUMP_BACKWARD_IF_TRUE",
+                target=inst.target,
+            )
+            # modify inst in-place to preserve jump target
+            inst.opcode = dis.opmap["LOAD_CONST"]
+            inst.opname = "LOAD_CONST"
+            inst.arg = None
+            inst.argval = None
+            new_insts.extend([is_op, jump_op])
+    instructions[:] = new_insts
+
+
 def explicit_super(code: types.CodeType, instructions: List[Instruction]):
     """convert super() with no args into explicit arg form"""
     cell_and_free = (code.co_cellvars or tuple()) + (code.co_freevars or tuple())
@@ -642,6 +664,10 @@ def cleaned_instructions(code, safe=False):
     if not safe:
         if sys.version_info < (3, 11):
             remove_load_call_method(instructions)
+        else:
+            remove_jump_if_none(instructions)
+            update_offsets(instructions)
+            devirtualize_jumps(instructions)
         explicit_super(code, instructions)
     return instructions
 
