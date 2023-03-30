@@ -265,6 +265,11 @@ class ContinueExecutionCache:
             (target,) = [i for i in instructions if i.offset == offset]
 
             prefix = []
+            if sys.version_info >= (3, 11):
+                if freevars:
+                    prefix.append(create_instruction("COPY_FREE_VARS", len(freevars)))
+                prefix.append(create_instruction("RESUME", 0))
+
             cleanup = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
             null_idxes_i = 0
