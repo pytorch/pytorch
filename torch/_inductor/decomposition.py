@@ -371,6 +371,13 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
+@register_decomposition([aten.cat.default])
+def cat(tensors, dim=0):
+    if len(tensors) == 1:
+        return tensors[0].clone()
+    return NotImplemented
+
+
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
