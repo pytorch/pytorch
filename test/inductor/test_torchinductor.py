@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import importlib
 import itertools
+import math
 import os
 import random
 import sys
@@ -35,6 +36,7 @@ from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
@@ -4529,6 +4531,22 @@ class CommonTemplate:
             ),
         )
 
+    def test_index_put_deterministic_fallback(self):
+        with DeterministicGuard(True):
+
+            def fn(a, b, c):
+                return torch.index_put(a, [b], c, True)
+
+            self.common(
+                fn,
+                [
+                    torch.randn([100, 32]),
+                    torch.randint(0, 100, size=[600], dtype=torch.int64),
+                    torch.randn([600, 32]),
+                ],
+                check_lowp=False,
+            )
+
     def test_index_put_index(self):
         def fn(ind, x, src):
             y = torch.ops.aten.index_put.default(x, [ind], src)
@@ -5687,6 +5705,72 @@ class CommonTemplate:
 
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_index_dynamic_shapes(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("index dynamic shapes only supports cpu")
+
+        # Repro from vision_maskrcnn
+        def fn(arg0_1):
+            unsqueeze = arg0_1.unsqueeze(0)
+            sym_size = arg0_1.size(1)
+            ceil = math.ceil(sym_size * 1.8735363483428955)
+            iota = torch.ops.prims.iota.default(
+                ceil,
+                start=0,
+                step=1,
+                dtype=torch.int64,
+                device="cpu",
+                requires_grad=False,
+            )
+            convert_element_type_1 = iota.to(torch.float32)
+            sym_size_1 = arg0_1.size(2)
+            floor_1 = math.floor(sym_size_1 * 1.8735363483428955)
+            ceil_1 = math.ceil(floor_1)
+            iota_1 = torch.ops.prims.iota.default(
+                ceil_1,
+                start=0,
+                step=1,
+                dtype=torch.int64,
+                device="cpu",
+                requires_grad=False,
+            )
+            convert_element_type_3 = iota_1.to(torch.float32)
+            sub_2 = (convert_element_type_1 + 0.5) * (sym_size / ceil) - 0.5
+            clamp_min = sub_2.clamp_min(0.0)
+            sub_3 = (convert_element_type_3 + 0.5) * (sym_size_1 / floor_1) - 0.5
+            clamp_min_1 = sub_3.clamp_min(0.0)
+            convert_element_type_4 = clamp_min.to(torch.int64)
+            sub_4 = sym_size - 1
+            clamp_max = clamp_min.ceil().clamp_max(sub_4)
+            convert_element_type_5 = clamp_max.to(torch.int64)
+            convert_element_type_6 = clamp_min_1.to(torch.int64)
+            unsqueeze_2 = convert_element_type_4.unsqueeze(1)
+            index = torch.ops.aten.index.Tensor(
+                unsqueeze, [None, None, unsqueeze_2, convert_element_type_6]
+            )
+            index_1 = torch.ops.aten.index.Tensor(
+                unsqueeze,
+                [
+                    None,
+                    None,
+                    convert_element_type_5.unsqueeze(1),
+                    convert_element_type_6,
+                ],
+            )
+            sub_6 = clamp_min.unsqueeze(1) - unsqueeze_2
+            mul_10 = (index * (1.0 - sub_6) + index_1 * (sub_6)) * (
+                1.0 - (clamp_min_1 - convert_element_type_6)
+            )
+            select = torch.ops.aten.select.int(mul_10, 0, 0)
+            return (select,)
+
+        x = torch.randn(15, 20, 3)
+        self.common(
+            fn,
+            [x],
+        )
 
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):
@@ -7509,6 +7593,49 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             fn_optimized = torch._dynamo.optimize("inductor")(fn)
             assert same(fn(a, b), fn_optimized(a, b))
+
+        @requires_cuda()
+        def test_issue97695_1input(self):
+            def fn(arg3_1, relu, permute_1):
+                addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+                cat_2 = torch.ops.aten.cat.default([addmm_1], 1)
+                return (cat_2,)
+
+            args = [
+                ((96,), (1,), torch.float32, "cuda"),
+                ((10, 256), (256, 1), torch.float32, "cuda"),
+                ((256, 96), (1, 256), torch.float32, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            correct = fn(*args)
+
+            mod = make_fx(fn, tracing_mode="real")(*args)
+            compiled = compile_fx_inner(mod, args)
+            ref = compiled(list(args))
+            assert same(ref, correct)
+
+            ref = torch.compile(fn, fullgraph=True)(*args)
+            assert same(ref, correct)
+
+        @requires_cuda()
+        def test_issue97695_2input(self):
+            def fn(arg3_1, arg3_2, relu, permute_1):
+                addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+                addmm_2 = torch.ops.aten.addmm.default(arg3_2, relu, permute_1)
+                cat_2 = torch.ops.aten.cat.default([addmm_1, addmm_2], 1)
+                return (cat_2,)
+
+            args = [
+                ((96,), (1,), torch.float32, "cuda"),
+                ((96,), (1,), torch.float32, "cuda"),
+                ((10, 256), (256, 1), torch.float32, "cuda"),
+                ((256, 96), (1, 256), torch.float32, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            correct = fn(*args)
+
+            ref = torch.compile(fn, fullgraph=True)(*args)
+            assert same(ref, correct)
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_heuristics import CachingAutotuner

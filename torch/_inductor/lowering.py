@@ -2041,6 +2041,10 @@ def index_put_(self, indices, values, accumulate=False):
             mask = unsqueeze(mask, -1)
         return index_put_as_masked_fill(self, [mask], values, accumulate)
 
+    # Fallback in torch deterministic mode
+    if torch.are_deterministic_algorithms_enabled():
+        return index_put_fallback(self, indices, values, accumulate)
+
     # Fallback if there is a boolean index
     for index in indices:
         if index is not None and index.get_dtype() in {torch.bool, torch.uint8}:

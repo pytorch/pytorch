@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import numpy.typing as npt
 import warnings
-from typing import List, Optional, Union
+from typing import List, Optional, Union, TYPE_CHECKING
 
 import torch
 from torch.distributed.distributed_c10d import (
@@ -27,6 +26,14 @@ from torch.distributed.distributed_c10d import (
 
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._functional_collectives as funcol
+
+# only import numpy typing when type checking
+if TYPE_CHECKING:
+    try:
+        from numpy.typing import ArrayLike
+    except ImportError:
+        warnings.warn("DeviceMesh requires numpy >= 1.21 to be installed for type checking")
+
 
 _global_device_mesh: Optional["DeviceMesh"] = None
 
@@ -93,7 +100,7 @@ class DeviceMesh(object):
     def __init__(
         self,
         device_type: str,
-        mesh: Union[torch.Tensor, npt.ArrayLike],
+        mesh: Union[torch.Tensor, "ArrayLike"],
         *,
         _init_process_groups: bool = True,
     ) -> None:
