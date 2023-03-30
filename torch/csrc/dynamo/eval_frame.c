@@ -482,8 +482,8 @@ static PyObject* call_guard_fail_hook(
       5,
       e->check_fn,
       e->code,
-      PyLong_FromSize_t(index),
       f_locals,
+      PyLong_FromSize_t(index),
       (e->next == NULL ? Py_True : Py_False));
   if (args == NULL) return NULL;
   PyObject* result = PyObject_CallObject(hook, args);

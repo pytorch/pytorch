@@ -87,8 +87,9 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
         user_scope: Optional[Dict[str, object]],
-        local: bool,
         check_fn_manager: "CheckFunctionManager",
+        *,
+        local: bool,
     ):
         self.id_ref = id_ref
         self.source_ref = source_ref
@@ -620,10 +621,12 @@ class CheckFunctionManager:
             self.id_ref,
             source_ref,
             combine_scopes(f_globals, f_locals),
-            True,
             self,
+            local=True,
         )
-        global_builder = GuardBuilder(self.id_ref, source_ref, f_globals, False, self)
+        global_builder = GuardBuilder(
+            self.id_ref, source_ref, f_globals, self, local=False
+        )
         # We need to transplant a copy here, because some guards
         # might get a cross ref between local and global, like L['mod_name'][G['some_key']]
         # the inverse is illegal.
@@ -763,8 +766,8 @@ stashed_first_fail_reason = None
 def guard_fail_hook(
     guard_fn: GuardFn,
     code: types.CodeType,
-    index: int,
     f_locals: Dict[str, object],
+    index: int,
     last: bool,
 ) -> None:
     """
@@ -819,8 +822,8 @@ def guard_fail_hook(
 def guard_error_hook(
     guard_fn: GuardFn,
     code: types.CodeType,
-    index: int,
     f_locals: Dict[str, object],
+    index: int,
     last: bool,
 ):
     print(

@@ -197,7 +197,8 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             opt_func = torch._dynamo.optimize("eager")(func)
             opt_func(a, 1)
         self.assert_single_log_contains(
-            logs, "expected type of 'b' to be a tensor type, ' but found <class 'int'>"
+            logs,
+            "expected type of 'L['b']' to be a tensor type, ' but found <class 'int'>",
         )
 
 

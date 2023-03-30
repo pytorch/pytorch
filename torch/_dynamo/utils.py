@@ -798,9 +798,7 @@ def dict_const_keys_repr(const_keys):
         # by calling enum_repr and removing quotes to render enum in guard code.
         const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
-        ).replace(
-            "!", "'"
-        )  # lol
+        )
     else:
         const_keys_str = f"{const_keys!r}"
     return const_keys_str
