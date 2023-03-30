@@ -8,7 +8,7 @@ void THPPointer<PyObject>::free() {
     Py_DECREF(ptr);
 }
 
-template class THPPointer<PyObject>;
+template class TORCH_PYTHON_API THPPointer<PyObject>;
 
 template <>
 void THPPointer<PyCodeObject>::free() {

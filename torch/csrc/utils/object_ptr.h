@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
 
 template <class T>
@@ -49,7 +50,7 @@ class THPPointer {
   }
 
  private:
-  void free();
+  TORCH_PYTHON_API void free();
   T* ptr = nullptr;
 };
 

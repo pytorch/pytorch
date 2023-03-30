@@ -177,7 +177,7 @@ void THPPointer<THPGenerator>::free() {
     Py_DECREF(ptr);
 }
 
-template class THPPointer<THPGenerator>;
+template class TORCH_PYTHON_API THPPointer<THPGenerator>;
 
 static bool backCompatBroadcastWarn = false;
 
@@ -239,7 +239,7 @@ uint8_t storage_get(at::Storage self, ptrdiff_t idx) {
   return self_t[idx].item<uint8_t>();
 }
 
-template class THPPointer<THPStorage>;
+template class TORCH_PYTHON_API THPPointer<THPStorage>;
 
 namespace torch {
 namespace gdb {
