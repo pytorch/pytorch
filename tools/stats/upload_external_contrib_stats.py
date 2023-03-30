@@ -93,7 +93,6 @@ def get_external_pr_data(
                 "date": str(period_begin_date),
                 "pr_count": pr_count,
                 "user_count": len(users),
-                "users": list(users),
             }
         )
         period_begin_date = period_end_date + datetime.timedelta(days=1)

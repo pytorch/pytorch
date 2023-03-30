@@ -35,7 +35,7 @@ jobs:
             echo "Uploading external contribution stats for" "$(date -d yesterday '+%Y-%m-%d')"
             python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d yesterday '+%Y-%m-%d')"
 
-  upload-contribution-stats:
+  upload-testing-stats-aggregates:
     runs-on: [self-hosted, linux.2xlarge]
     steps:
       - name: Checkout PyTorch
