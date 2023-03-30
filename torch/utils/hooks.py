@@ -224,7 +224,8 @@ class BackwardHook:
                                                "gradient should always return None or None for all gradients.")
                     self.grad_outputs = None
 
-                return self.grad_outputs
+                if self.grad_outputs is not None:
+                    return tuple(self.grad_outputs[i] for i in self.output_tensors_index)
 
             grad_fn.register_hook(hook)
 
