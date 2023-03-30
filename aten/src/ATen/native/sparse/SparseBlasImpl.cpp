@@ -224,16 +224,18 @@ void addmv_sparse_csr(
     const idx_t* col_index,
     const int64_t mat_rows,
     const scalar_t* vec,
+    const size_t vec_stride,
     const scalar_t alpha,
     const scalar_t beta,
-    scalar_t* result) {
+    scalar_t* result,
+    const size_t result_stride) {
   at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
     for(const auto row: c10::irange(rstart, rend)) {
       scalar_t acc(0);
       for(const auto idx: c10::irange(crow_index[row], crow_index[row + 1])) {
-        acc += mat_values[idx] * vec[col_index[idx]];
+        acc += mat_values[idx] * vec[col_index[idx] * vec_stride];
       }
-      result[row] = acc * alpha + result[row] * beta;
+      result[row * result_stride] = acc * alpha + result[row * result_stride] * beta;
     }
   });
 }
@@ -247,9 +249,11 @@ void addmv_sparse_bsr(
     const int64_t blocksize_rows,
     const int64_t blocksize_cols,
     const scalar_t* vec,
+    const size_t vec_stride,
     const scalar_t alpha,
     const scalar_t beta,
-    scalar_t* result) {
+    scalar_t* result,
+    const size_t result_stride) {
   at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
     for(const auto row: c10::irange(rstart, rend)) {
       const auto block_row = row / blocksize_rows;
@@ -259,10 +263,10 @@ void addmv_sparse_bsr(
         const auto block_offs = (block_idx * blocksize_rows + block_row_offset) * blocksize_cols;
         const auto vec_offs = col_index[block_idx]* blocksize_cols;
         for(const auto idx: c10::irange(blocksize_cols)) {
-          acc += mat_values[block_offs + idx] * vec[vec_offs + idx];
+          acc += mat_values[block_offs + idx] * vec[(vec_offs + idx) * vec_stride];
         }
       }
-      result[row] = acc * alpha + result[row] * beta;
+      result[row * result_stride] = acc * alpha + result[row * result_stride] * beta;
     }
   });
 }
@@ -283,18 +287,22 @@ void addmv_out_sparse_csr(
         mat.values().size(1),
         mat.values().size(2),
         vec.data_ptr<scalar_t>(),
+        vec.stride(0),
         alpha.to<scalar_t>(),
         beta.to<scalar_t>(),
-        result.data_ptr<scalar_t>());
+        result.data_ptr<scalar_t>(),
+        result.stride(0));
   } else {
     addmv_sparse_csr(cont_values.data_ptr<scalar_t>(),
         mat.crow_indices().data_ptr<idx_t>(),
         mat.col_indices().data_ptr<idx_t>(),
         mat.size(0),
         vec.data_ptr<scalar_t>(),
+        vec.stride(0),
         alpha.to<scalar_t>(),
         beta.to<scalar_t>(),
-        result.data_ptr<scalar_t>());
+        result.data_ptr<scalar_t>(),
+        result.stride(0));
   }
 }
 } // anonymous namespace
