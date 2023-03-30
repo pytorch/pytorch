@@ -869,9 +869,9 @@ class NumpyVariable(VariableTracker):
 
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         # lookup method name in torch_np
-        if self.value.__name__ in torch_np._detail.implementations.__dict__:
+        if hasattr(torch_np._detail, self.value.__name__):
 
-            func = getattr(torch_np._detail.implementations, self.value.__name__)
+            func = getattr(torch_np._detail, self.value.__name__)
 
             return wrap_fx_proxy_cls(
                 target_cls=NumpyTensorVariable,
