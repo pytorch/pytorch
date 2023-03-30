@@ -302,7 +302,7 @@ test_perf_for_dashboard() {
         --accuracy --"$dtype" --backend "$backend" "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_accuracy.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$dtype" --backend "$backend" --dynamic-shapes --disable-cudagraphs "$@" \
+        --accuracy --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_training_cuda_accuracy.csv"
 
     # Run performance test
@@ -316,7 +316,7 @@ test_perf_for_dashboard() {
         --performance --cold-start-latency --"$dtype" --backend "$backend" "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$dtype" --backend "$backend" --dynamic-shapes --disable-cudagraphs "$@" \
+        --performance --cold-start-latency --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_training_cuda_performance.csv"
   done
 }
@@ -593,9 +593,7 @@ test_distributed() {
     "$TORCH_BIN_DIR"/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
     MPIEXEC=$(command -v mpiexec)
-    # TODO: this is disabled on GitHub Actions until this issue is resolved
-    # https://github.com/pytorch/pytorch/issues/60756
-    if [[ -n "$MPIEXEC" ]] && [[ -z "$GITHUB_ACTIONS" ]]; then
+    if [[ -n "$MPIEXEC" ]]; then
       MPICMD="${MPIEXEC} -np 2 $TORCH_BIN_DIR/ProcessGroupMPITest"
       eval "$MPICMD"
     fi

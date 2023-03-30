@@ -36,7 +36,7 @@ from copy import deepcopy
 from collections import namedtuple
 
 from torch.fx.proxy import TraceError
-from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMATIBLITY
+from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY
 
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
@@ -3883,7 +3883,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                 if isinstance(v, types.ModuleType):
                     check_symbols_have_bc_designation(v, prefix + [k])
                 elif isinstance(v, (type, types.FunctionType)):
-                    if v not in _MARKED_WITH_COMATIBLITY:
+                    if v not in _MARKED_WITH_COMPATIBILITY:
                         non_back_compat_objects.setdefault(v)
 
         check_symbols_have_bc_designation(torch.fx, ['torch', 'fx'])

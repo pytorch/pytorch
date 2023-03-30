@@ -98,15 +98,17 @@ KNOWN_TYPES = tuple(
 
 @contextmanager
 def preserve_rng_state():
-    rng_state = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+    with torch.utils._python_dispatch._disable_current_modes():
+        rng_state = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
     finally:
-        torch.random.set_rng_state(rng_state)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng_state)
+        with torch.utils._python_dispatch._disable_current_modes():
+            torch.random.set_rng_state(rng_state)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
 
 
 # Set up hooks so that during backward the fx's stack_trace is properly set
@@ -2376,7 +2378,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
                 )
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
+                ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
                     [
@@ -2388,7 +2390,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             else:
                 tensors_saved_for_backwards = fw_outs[num_forward_returns:]
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
+                ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 ctx.symints = []
 
             raw_returns = fw_outs[0:num_forward_returns]
@@ -2675,12 +2677,17 @@ def create_aot_dispatcher_function(
                     if shape_env is not None:
                         from torch._dynamo.source import ConstantSource
                         if isinstance(x, int):
-                            return shape_env.create_symintnode(shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")), hint=x)
+                            return shape_env.create_symintnode(
+                                shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
+                                hint=x
+                            )
                     if not isinstance(x, torch.Tensor):
                         return x
                     if isinstance(x, FakeTensor):
                         assert x.fake_mode is fake_mode
                         return x
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
                     if (
                         idx < aot_config.num_params_buffers
                         and config.static_weight_shapes

@@ -24,7 +24,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.nn.utils.rnn import PackedSequence
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
 from functorch import (
@@ -405,7 +405,7 @@ class TestAOTAutograd(AOTTestCase):
 
         self.verify_aot_autograd(F(), inp)
 
-    def test_embedding_bag_view(self):
+    def test_embedding_bag_view_dynamic(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.
 
@@ -419,7 +419,10 @@ class TestAOTAutograd(AOTTestCase):
 
         x = torch.arange(3)
         y = torch.arange(3)
+        self.verify_aot_autograd(F(), [x, y], dynamic=False)
         self.verify_aot_autograd(F(), [x, y], dynamic=True)
+
+
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_simple(self):
@@ -1930,7 +1933,7 @@ def forward(self, arg0_1):
             def forward(self, x):
                 y = self.buffer.add_(3)
                 y.resize_([20])
-                assert(y.shape == self.buffer.shape)
+                assert y.shape == self.buffer.shape
                 return x.sum() + self.buffer.sum()
 
         m = M().eval()
@@ -2495,6 +2498,8 @@ aot_autograd_failures = {
     skip('linalg.householder_product'),  # flaky
     decorate('matmul', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
     decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
+    # overrides atol=1e-4, rtol=1e-5 would do as well
+    decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
 }
 
 symbolic_aot_autograd_failures = {
