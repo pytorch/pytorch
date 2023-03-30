@@ -144,6 +144,9 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return out
 
+    def wait(self):
+        return wait_tensor(self.elem)
+
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
     reduceOp = reduceOp.upper()
     op = dist.ReduceOp.RedOpType.__members__.get(reduceOp)
