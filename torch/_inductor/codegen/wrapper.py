@@ -614,7 +614,9 @@ class WrapperCodeGen(CodeGen):
         if isinstance(layout, ir.MutationLayout):
             return
         if isinstance(layout, ir.AliasedLayout):
-            assert isinstance(layout.view, ir.ReinterpretView)
+            assert isinstance(
+                layout.view, ir.ReinterpretView
+            ), f"unexpected {type(layout.view)}: {layout.view}"
             if not layout.maybe_guard_aligned():
                 V.graph.unaligned_buffers.add(name)
             self.codegen_allocation(layout.view.data)
