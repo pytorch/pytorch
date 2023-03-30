@@ -142,8 +142,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     .. warning::
         The optimizer must be initialized *after* the module has been wrapped
         with FSDP since FSDP will shard and transform the module's parameters
-        in a way that may preserve the original parameter variables. Thus, the
-        previously initialized optimizer may have stale references to the
+        in a way that may not preserve the original parameter variables. Thus,
+        the previously initialized optimizer may have stale references to the
         parameters.
 
     .. warning::
@@ -169,8 +169,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     .. warning::
         Passing in the ``sync_module_states=True`` flag requires ``module`` to
         be on GPU or to use the ``device_id`` argument to specify a CUDA device
-        that FSDP will move module to in the FSDP constructor. This is because
-        ``sync_module_states=True`` requires GPU communication.
+        that FSDP will move ``module`` to in the FSDP constructor. This is
+        because ``sync_module_states=True`` requires GPU communication.
 
     .. warning::
         As of PyTorch 1.12, FSDP only offers limited support for shared parameters
@@ -189,9 +189,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         resolve this, please wrap the submodule in its own FSDP unit.
 
     .. note::
-        Inputs into FSDP ``forward`` function will be moved to compute device
-        (same device FSDP module is on) before running ``forward``, so the user
-        does not have to manually move inputs from CPU to GPU.
+        FSDP moves input tensors to the ``forward`` method to the GPU compute
+        device, so the user does not need to manually move them from CPU.
 
     .. warning::
         The user should not modify the parameters between forward and backward
