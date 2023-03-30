@@ -40,7 +40,7 @@ def strip_end(s, suffix):
 def show_guards(gm):
     names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
     return "\n".join(
-        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True)
+        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True, constraint_inputs=None)
     )
 
 
@@ -144,6 +144,22 @@ class TestGenericProxyTensor(TestCase):
         r1 = fx_f(*new_inps)
         r2 = f(*new_inps)
         self.assertEqual(r1, r2)
+
+    def test_pre_autograd_mode_stack(self):
+        def f(a):
+            b = torch.ones(4, 4)
+            return torch.matmul(a, b)
+        # We expect to see matmul in the trace - it should NOT be decomposed into mm.
+        # Also, torch.ones() doesn't show up in the trace.
+        # This is annoying but expected: ones() never dispatches to the Autograd dispatch key,
+        # so our mode never sees it - it goes directly to the BackendSelect key.
+        fx_g = make_fx(f, pre_autograd=True)(torch.ones(4, 4))
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, a_1):
+    ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
+    matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
+    return matmul""")
+
 
     def test_make_fx_simple(self):
         def f(x):
@@ -270,6 +286,16 @@ class TestGenericProxyTensor(TestCase):
         self.assertFalse(is_any_sum(traced))
         self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
         self.assertTrue(is_any_digamma(traced))
+
+    # See https://github.com/pytorch/pytorch/issues/97541
+    def test_empty_like_doesnt_burn_in_defaults(self):
+        def f(x):
+            return torch.empty_like(x)
+        out = make_fx(f)(torch.randn(3))
+        self.assertExpectedInline(out.code.strip(), """\
+def forward(self, x_1):
+    empty_like = torch.ops.aten.empty_like.default(x_1, pin_memory = False);  x_1 = None
+    return empty_like""")
 
     def test_proxy_tensor_mode_with_decomp_table_preserves_proxy(self):
         def f(x):
@@ -622,7 +648,7 @@ def forward(self, x_1):
                 return NotImplemented
             return beta * a + alpha * (b @ c)
 
-        decomposed_fx = make_fx(f, {aten.addmm.default: addmm})(*inps)
+        decomposed_fx = make_fx(f, decomposition_table={aten.addmm.default: addmm})(*inps)
 
         self.assertEqual(fx_g(*inps), decomposed_fx(*inps))
         self.assertEqual(len([n for n in fx_g.graph.nodes if n.target == aten.addmm.default]), 2)
@@ -1196,7 +1222,9 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         from torch._dynamo.source import LocalSource
         self.assertExpectedInline(
-            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")])),
+            str(fx_g.shape_env.produce_guards(
+                fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")],
+                constraint_inputs=[None, None])),
             """['a.size()[0] == 2*b.size()[0]', 'a.stride()[0] == 1', 'a.storage_offset() == 0', 'b.stride()[0] == 1', 'b.storage_offset() == 0', '2 <= b.size()[0]']"""  # noqa: B950
         )
 
