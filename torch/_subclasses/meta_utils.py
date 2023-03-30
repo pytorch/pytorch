@@ -1,4 +1,6 @@
 import contextlib
+
+import sys
 import warnings
 import weakref
 from typing import ContextManager, Optional
@@ -253,33 +255,29 @@ class MetaConverter:
                     ), "Dynamic shapes must be enabled for nested tensors"
                     is_leaf = safe_is_leaf(t)
 
-                    # TODO: Fix the source for the metadata
-
                     sizes = t._nested_tensor_size()
                     sizes = self.meta_tensor(
-                        sizes, shape_env=shape_env, callback=callback, source=source
+                        sizes,
+                        shape_env=shape_env,
+                        callback=callback,
+                        source=AttrSource(source, "_nested_tensor_size"),
                     )
 
                     strides = t._nested_tensor_strides()
                     strides = self.meta_tensor(
-                        strides, shape_env=shape_env, callback=callback, source=source
+                        strides,
+                        shape_env=shape_env,
+                        callback=callback,
+                        source=AttrSource(source, "_nested_tensor_strides"),
                     )
 
                     offsets = t._nested_tensor_storage_offsets()
                     offsets = self.meta_tensor(
-                        offsets, shape_env=shape_env, callback=callback, source=source
+                        offsets,
+                        shape_env=shape_env,
+                        callback=callback,
+                        source=AttrSource(source, "_nested_tensor_storage_offsets"),
                     )
-
-                    # TODO: Figure out if it matters that the same symbolic var could be used
-                    # for both the batch size and rank of components?
-
-                    # TODO: Figure out if we care that the buffer size is derived from the
-                    # symbolic sizes of the metadata?
-                    # product over sizes[1]
-                    # sum over sizes[0]
-                    # numel = sizes.prod(dim=1).sum(dim=0)
-
-                    import sys
 
                     from torch.fx.experimental.symbolic_shapes import constrain_range
 

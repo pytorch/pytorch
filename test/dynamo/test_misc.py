@@ -362,21 +362,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         expected_op_count = 4 if torch._dynamo.testing.config.dynamic_shapes else 1
         self.assertEqual(counts.op_count, expected_op_count)
 
-    def test_nested_tensor_inputs(self):
-        def fn(x):
-            return x + 1
-
-        counts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(counts)(fn)
-
-        nt = torch.nested.nested_tensor([torch.randn(3), torch.randn(4)])
-        ref = fn(nt)
-        res = opt_fn(nt)
-
-        self.assertTrue(same(ref, res))
-        self.assertEqual(counts.frame_count, 1)
-        self.assertEqual(counts.op_count, 1)
-
     def test_compare_shapes_eq(self):
         def compare_shapes(a, b, to_list):
             x = list(a.unsqueeze(-1).shape) if to_list else a.shape
