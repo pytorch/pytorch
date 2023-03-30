@@ -7,6 +7,7 @@ import torch.distributed._functional_collectives as ft_c
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
 
+from torch.testing import FileCheck
 from functorch import make_fx
 
 if not dist.is_available():
@@ -260,10 +261,9 @@ class TestMakeFx(MultiThreadedTestCase):
             return ft_c.all_reduce(input, "sum", group=[0, 1]) + 1
 
         graph = make_fx(allred)(torch.rand(4))
-        nodes = list(graph.graph.nodes)
-
-        self.assertEqual("aten::all_reduce", nodes[1].target.name())
-        self.assertEqual("aten::wait_tensor", nodes[2].target.name())
+        FileCheck()  \
+            .check("all_reduce")  \
+            .check("wait_tensor").run(str(graph.graph))
 
         mesh = dt.DeviceMesh("cpu", torch.arange(self.world_size))
 
@@ -271,36 +271,35 @@ class TestMakeFx(MultiThreadedTestCase):
             return ft_c.all_reduce(input, "sum", mesh) + 1
 
         mesh_graph = make_fx(allred_mesh)(torch.rand(4))
-        nodes = list(mesh_graph.graph.nodes)
-        # no getattr should appear in the graph
-        for node in nodes:
-            self.assertNotEqual("get_attr", str(node.op))
+        FileCheck()  \
+            .check_not("get_attr")  \
+            .check("wait_tensor").run(str(mesh_graph.graph))
 
         def allred_mesh_dim(input):
             return ft_c.all_reduce(input, "sum", (mesh, 0)) + 1
 
         mesh_dim_graph = make_fx(allred_mesh_dim)(torch.rand(4))
-        # no getattr should appear in the graph
-        nodes = list(mesh_dim_graph.graph.nodes)
-        for node in nodes:
-            self.assertNotEqual("get_attr", str(node.op))
+        FileCheck()  \
+            .check_not("get_attr")  \
+            .check("wait_tensor").run(str(mesh_dim_graph.graph))
 
     def test_all_reduce_tracing_wait(self):
         def allred_alone_no_wait(input):
             return ft_c.all_reduce(input, "sum", group=[0, 1])
 
         graph = make_fx(allred_alone_no_wait)(torch.rand(4))
-        nodes = list(graph.graph.nodes)
-        self.assertEqual("get_attr", str(nodes[-2].op))
+        FileCheck()  \
+            .check("all_reduce")  \
+            .check("get_attr").run(str(graph.graph))
 
         def allred_alone_with_wait(input):
             return ft_c.all_reduce(input, "sum", group=[0, 1]).wait()
 
         graph = make_fx(allred_alone_with_wait)(torch.rand(4))
-        nodes = list(graph.graph.nodes)
-        # no getattr should appear in the graph
-        for node in nodes:
-            self.assertNotEqual("get_attr", str(node.op))
+        FileCheck()  \
+            .check("all_reduce")  \
+            .check_not("get_attr")  \
+            .check("wait").run(str(graph.graph))
 
 
 if __name__ == "__main__":

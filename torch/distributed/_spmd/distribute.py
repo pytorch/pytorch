@@ -88,7 +88,7 @@ def _dispatch_with_local_tensors(
 
     def redistribute(arg: object) -> object:
         return (
-            _redistribute_with_local_tensor(arg, *specs[arg]).wait()  # type: ignore[index]
+            _redistribute_with_local_tensor(arg, *specs[arg]).wait()  # type: ignore[index, attr-defined]
             if isinstance(arg, torch.Tensor) and arg in specs  # type: ignore[operator]
             else arg
         )
