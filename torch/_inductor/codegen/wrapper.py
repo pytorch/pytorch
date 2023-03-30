@@ -375,8 +375,12 @@ class WrapperCodeGen(CodeGen):
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
                     line.codegen(self.wrapper_call)
-                elif isinstance(line, EnterCudaDeviceContextManagerLine) or isinstance(
-                    line, ExitCudaDeviceContextManagerLine
+                elif isinstance(
+                    line,
+                    (
+                        EnterCudaDeviceContextManagerLine,
+                        ExitCudaDeviceContextManagerLine,
+                    ),
                 ):
                     line.codegen(self.wrapper_call, device_cm_stack)
                 else:

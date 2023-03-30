@@ -494,6 +494,7 @@ def compile_fx_aot(
                     decompositions,
                 )
                 compiled(inputs_copy)
+                del module_copy, inputs_copy
 
             new_config_patches.update(
                 {
