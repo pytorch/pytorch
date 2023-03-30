@@ -220,5 +220,34 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
             for i in range(self.world_size):
                 self.assertEqual(gather_list[i], torch.ones(3, 3) * i)
 
+class TestLargeWorld(MultiThreadedTestCase):
+    @property
+    def world_size(self):
+        return 64
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    def test_gloo_init(self):
+        groups = []
+        num_ports_used = 0
+        num_groups = 4
+        # create multiple gloo groups with 64 ranks
+        for i in range(num_groups):
+            group = dist.new_group(backend="gloo")
+            groups.append(group)
+
+        # tear down gloo groups
+        for i in range(num_groups):
+            dist.destroy_process_group(groups[i])
+        groups.clear()
+        self.assertEqual(len(groups), 0)
+
+        # create multiple gloo groups with 64 ranks
+        for i in range(num_groups):
+            group = dist.new_group(backend="gloo")
+            groups.append(group)
+
 if __name__ == "__main__":
     run_tests()

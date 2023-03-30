@@ -638,6 +638,24 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
   struct addrinfo* rp = nullptr;
   for (rp = result; rp != nullptr; rp = rp->ai_next) {
     auto fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+
+    // Set SO_REUSEADDR to signal that reuse of the listening port is OK.
+    int on = 1;
+    rv = setsockopt(
+        fd,
+        SOL_SOCKET,
+        SO_REUSEADDR,
+        reinterpret_cast<const char*>(&on),
+        sizeof(on));
+    if (rv == -1) {
+#ifdef _WIN32
+      closesocket(fd);
+#else
+      close(fd);
+#endif
+      logAndThrow("setsockopt: ", strerror(errno));
+    }
+
     if (fd == -1) {
       continue;
     }
