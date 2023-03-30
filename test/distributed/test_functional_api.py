@@ -291,11 +291,16 @@ class TestMakeFx(MultiThreadedTestCase):
 
         graph = make_fx(allred_alone_no_wait)(torch.rand(4))
         nodes = list(graph.graph.nodes)
-        self.assertEqual("getattr", str(nodes[-2].op))
+        self.assertEqual("get_attr", str(nodes[-2].op))
 
-        # # no getattr should appear in the graph
-        # for node in nodes:
-        #     self.assertNotEqual("getattr", str(node.op))
+        def allred_alone_with_wait(input):
+            return ft_c.all_reduce(input, "sum", group=[0, 1]).wait()
+
+        graph = make_fx(allred_alone_with_wait)(torch.rand(4))
+        nodes = list(graph.graph.nodes)
+        # no getattr should appear in the graph
+        for node in nodes:
+            self.assertNotEqual("get_attr", str(node.op))
 
 
 if __name__ == "__main__":
