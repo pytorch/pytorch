@@ -96,7 +96,7 @@ def find_graph_variable(args):
     for arg in var_types.keys():
         if ',' in args[arg]:
             if args.get('x_axis_name'):
-                raise("Only 1 x axis graph variable allowed")
+                raise ValueError("Only 1 x axis graph variable allowed")
             args[arg] = list(map(var_types[arg], args[arg].split(',')))  # convert , separated str to list
             args['x_axis_name'] = arg
         else:

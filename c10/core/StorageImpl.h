@@ -120,7 +120,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return resizable_;
   };
 
-  at::DataPtr& mutable_data_ptr() {
+  at::DataPtr& data_ptr() {
     return data_ptr_;
   };
 

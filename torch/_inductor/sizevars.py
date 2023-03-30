@@ -1,4 +1,3 @@
-import dataclasses
 import functools
 import itertools
 import logging
@@ -15,16 +14,6 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass
-class PositiveGuard:
-    """
-    An expression we should check for > 0
-    Guards are currently not checked.  Plan to add this later.
-    """
-
-    expr: Expr
-
-
 class SizeVarAllocator:
     def __init__(self, shape_env=None):
         super().__init__()
@@ -32,7 +21,6 @@ class SizeVarAllocator:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
-        self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
         # maps of dynamic sizes that have to be precomputed on the host to the kernel args
         self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
@@ -276,9 +264,7 @@ class SizeVarAllocator:
         assert self.size_hint(expr) > 0
         if len(expr.free_symbols) == 0:
             return
-        if "-" in str(expr):
-            # all vars are positive, so needs a minus sign to get negative values
-            self.guards.append(PositiveGuard(expr))
+        assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
     def guard_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""

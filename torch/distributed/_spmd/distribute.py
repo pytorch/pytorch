@@ -240,8 +240,6 @@ def _build_dummy_add_graph(
         call_functions[0], node_to_obj
     )
 
-    traced_dispatch.graph.lint()
-
     # TODO(anj): This depends on the call function node -> actual DTensor output
     # mapping that we want to avoid for SPMD expansion
     return traced_dispatch, node_to_obj[call_functions[0]]
@@ -282,7 +280,6 @@ def _convert_output(
 
         # remove add node and replace it with wait node
         add[0].replace_all_uses_with(wait[0])
-        traced_dispatch.graph.lint()
         traced_dispatch.graph.eliminate_dead_code()
         # also update the actual DTensor corresponding to the node
         # TODO(anj): We require mapping of the final DTensor output to the wait
@@ -390,7 +387,6 @@ def _rebuild_graph(
                     )
 
     gm.graph.eliminate_dead_code()
-    gm.graph.lint()
     gm.recompile()
 
 
