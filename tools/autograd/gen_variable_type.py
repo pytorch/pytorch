@@ -609,11 +609,9 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """
 )
 
-# TODO(crcrpar): Remove `(void)i;` to suppress `-Wunused-variable`
 ASSIGN_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
 for (const auto& i : c10::irange( ${irange} )) {
-  (void)i;
   auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
   grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
   grad_fns.push_back(grad_fn);
@@ -977,16 +975,13 @@ def emit_body(
     is_inplace_foreach = name.startswith("_foreach") and inplace
 
     foreacharg2refarg: Dict[Argument, Argument] = {}
-    if is_inplace_foreach:
-        if info is not None:
-            for foreach_arg, ref_arg in zip(
-                f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
-            ):
-                foreach_arg_type = getattr(
-                    foreach_arg.type, "elem", foreach_arg.type
-                )
-                assert foreach_arg_type == ref_arg.type
-                foreacharg2refarg[foreach_arg] = ref_arg
+    if is_inplace_foreach and info is not None:
+        for foreach_arg, ref_arg in zip(
+            f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
+        ):
+            foreach_arg_type = getattr(foreach_arg.type, "elem", foreach_arg.type)
+            assert foreach_arg_type == ref_arg.type
+            foreacharg2refarg[foreach_arg] = ref_arg
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -1202,18 +1197,26 @@ def emit_body(
                 ).split("\n")
             )
         else:
-            list_like_arg = ""
-            for arg in f.func.arguments.flat_non_out:
-                if isinstance(arg.type, ListType):
-                    list_like_arg = arg.name
-                    break
+            # note(crcrpar): Assuming in-place foreach function's self_arg is always TensorList.
+            list_like_arg = "self"
+            args = [arg.name for arg in args_with_derivatives]
+            for i, arg in enumerate(args):
+                if foreacharg2refarg:
+                    for foreach_arg, ref_arg in foreacharg2refarg.items():
+                        if arg == ref_arg.name:
+                            args[i] = foreach_arg.name + (
+                                "[i]" if hasattr(foreach_arg.type, "elem") else ""
+                            )
+                else:
+                    if arg == list_like_arg:
+                        args[i] = arg + "[i]"
             setup.extend(
                 ASSIGN_VECTOR_OF_GRAD_FN.substitute(
                     op=op,
                     op_ctor=""
                     if info is not None and info.has_derivatives
                     else f'"{cpp.name(f.func)}"',
-                    args_with_derivatives=[arg.name for arg in args_with_derivatives],
+                    args_with_derivatives=args,
                     irange=f"{list_like_arg}.size()",
                 ).split("\n")
             )
@@ -1297,6 +1300,17 @@ def emit_body(
                 if isinstance(arg.nctype.name, SpecialArgName)
                 else arg.nctype.name
             )
+            foreacharg: Optional[Argument] = None
+            is_foreacharg_list_type: bool = False
+            remove_underscore_before_replace: bool = False
+            if foreacharg2refarg:
+                for _foreacharg, refarg in foreacharg2refarg.items():
+                    if refarg.name == name or (
+                        refarg.name in name and "scalar_type" in name
+                    ):
+                        is_foreacharg_list_type = hasattr(_foreacharg.type, "elem")
+                        foreacharg = _foreacharg
+                        break
             type = arg.nctype.type
             expr = arg.expr
             stmts_prepend = None
@@ -1317,11 +1331,17 @@ def emit_body(
                         var = "original_selfs[i].value()"
                     assert not is_output
                 if inplace and is_output:
-                    var = "self"
+                    # TODO(crcrpar): Handle this case with `foreacharg2refarg`
+                    if name == "result_" and is_inplace_foreach:
+                        var = "self[i]"
+                    else:
+                        var = "self" + ("[i]" if is_foreacharg_list_type else "")
                     is_inplace_view = f"{var}.is_view()"
                     expr = f"SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})"
                 else:
+                    var_ = var + ("[i]" if is_foreacharg_list_type else "")
                     expr = f"SavedVariable({var}, {str(is_output).lower()})"
+                remove_underscore_before_replace |= True and "self" not in var
             elif (
                 type == BaseCType(tensorListT)
                 or type == ListCType(OptionalCType(BaseCType(tensorT)))
@@ -1329,6 +1349,7 @@ def emit_body(
             ):
                 expr = f"make_saved_variable_list({name})"
                 name += "_"
+                remove_underscore_before_replace |= True
             elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
             elif type == BaseCType(symIntArrayRefT):
@@ -1341,6 +1362,19 @@ def emit_body(
                 elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
             ):
                 expr = expr + ".vec()"
+
+            if foreacharg is not None:
+                name_in_expr = (
+                    f"{foreacharg.name}{'[i]' if is_foreacharg_list_type else ''}"
+                )
+                src_name = name
+                if remove_underscore_before_replace:
+                    src_name = src_name[:-1]
+                if "_scalar_type" in src_name:
+                    split_src_name = src_name.split("_scalar_type")
+                    assert len(split_src_name) == 2
+                    src_name = split_src_name[0]
+                expr = expr.replace(src_name, name_in_expr)
             guard = guard_for(arg)
             if guard is None:
                 if stmts_prepend:
@@ -1612,12 +1646,30 @@ def emit_body(
         if info and info.output_differentiability_conditions:
             assert len(info.output_differentiability_conditions) == 1
             extra_condition = f"_any_requires_grad &= ({info.output_differentiability_conditions[0]});"
-        return [
-            SETUP_ANY_REQUIRES_GRAD.substitute(
-                args_with_derivatives=[arg.name for arg in args_with_derivatives],
-                extra_differentiability_conditions=extra_condition,
+        if not is_inplace_foreach:
+            return [
+                SETUP_ANY_REQUIRES_GRAD.substitute(
+                    args_with_derivatives=[arg.name for arg in args_with_derivatives],
+                    extra_differentiability_conditions=extra_condition,
+                )
+            ]
+        else:
+            args = [arg.name for arg in args_with_derivatives]
+            if foreacharg2refarg:
+                for i, arg in enumerate(args):
+                    for f_arg, r_arg in foreacharg2refarg.items():
+                        if arg == r_arg.name:
+                            args[i] = f_arg.name
+            return (
+                [
+                    "auto _any_requires_grad = false;",
+                ]
+                + [
+                    f"_any_requires_grad |= compute_requires_grad( {arg} );"
+                    for arg in args
+                ]
+                + [extra_condition, "(void)_any_requires_grad;"]
             )
-        ]
 
     def get_any_has_forward_grad_name(var_names: Tuple[str, ...]) -> str:
         if len(var_names) == 1:
