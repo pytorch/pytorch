@@ -237,11 +237,6 @@ void THPStorage_writeFileRaw(
     data = self->mutable_unsafe_data<uint8_t>();
   } else {
     // Here we use a tensor.to() to impl D2H for all non-CPU device.
-    //
-    // We are not mutating data, but unfortunately at::from_blob()
-    // takes a mutable data pointer. This could theoretically be
-    // resolved if we had an immutable tensor type that we could
-    // produce instead.
     auto device_tensor = at::from_blob(
         self->mutable_unsafe_data<void>(),
         {size_bytes},
