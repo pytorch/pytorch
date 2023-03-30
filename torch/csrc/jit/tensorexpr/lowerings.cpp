@@ -1982,7 +1982,7 @@ int nnc_lowerings_lazy_registration() {
       computeQuantizedCat);
 
   RegisterNNCLoweringsFunction aten_upsample_nearest2d(
-      {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)"},
+      {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors, bool round_with_scale_factor=False) -> (Tensor)"},
       computeUpsampleNearest2dExternalCall);
 
   return 0;
