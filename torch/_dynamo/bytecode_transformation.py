@@ -201,13 +201,13 @@ def lnotab_writer(lineno, byteno=0):
     return lnotab, update
 
 
-def linetable_writer(first_lineno):
+def linetable_310_writer(first_lineno):
     """
     Used to create typing.CodeType.co_linetable
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
-    This is the internal format of the line number table if Python >= 3.10
+    This is the internal format of the line number table for Python 3.10
     """
-    assert sys.version_info >= (3, 10)
+    assert sys.version_info >= (3, 10) and sys.version_info < (3, 11)
     linetable = []
     lineno = first_lineno
     lineno_delta = 0
@@ -236,25 +236,92 @@ def linetable_writer(first_lineno):
     return linetable, update, end
 
 
+def encode_varint(n):
+    """
+    6-bit chunk encoding of an unsigned integer
+    See https://github.com/python/cpython/blob/3.11/Objects/locations.md
+    """
+    assert n >= 0
+    b = [n & 63]
+    n >>= 6
+    while n > 0:
+        b[-1] |= 64
+        b.append(n & 63)
+        n >>= 6
+    return b
+
+
+def linetable_311_writer(first_lineno):
+    """
+    Used to create typing.CodeType.co_linetable
+    See https://github.com/python/cpython/blob/3.11/Objects/locations.md
+    This is the internal format of the line number table for Python 3.11
+    """
+    assert sys.version_info >= (3, 11)
+    linetable = []
+    lineno = first_lineno
+
+    def update(lineno_new, inst_size):
+        nonlocal lineno
+
+        def _update(delta, size):
+            assert 0 < size <= 8
+            # first byte - always use no column info code (13)
+            linetable.append(0b1_1101_000 + size - 1)
+            # encode signed int
+            if delta < 0:
+                delta = ((-delta) << 1) | 1
+            else:
+                delta <<= 1
+            # encode unsigned int
+            linetable.extend(encode_varint(delta))
+
+        if lineno_new is None:
+            lineno_delta = 0
+        else:
+            lineno_delta = lineno_new - lineno
+            lineno = lineno_new
+        while inst_size > 8:
+            _update(lineno_delta, 8)
+            inst_size -= 8
+        _update(lineno_delta, inst_size)
+
+    return linetable, update
+
+
 def assemble(instructions: List[Instruction], firstlineno):
     """Do the opposite of dis.get_instructions()"""
     code = []
-    if sys.version_info < (3, 10):
-        lnotab, update_lineno = lnotab_writer(firstlineno)
-    else:
-        lnotab, update_lineno, end = linetable_writer(firstlineno)
-
-    for inst in instructions:
-        if inst.starts_line is not None:
-            update_lineno(inst.starts_line, len(code))
-        arg = inst.arg or 0
-        code.extend((inst.opcode, arg & 0xFF))
-        if sys.version_info >= (3, 11):
+    if sys.version_info >= (3, 11):
+        lnotab, update_lineno = linetable_311_writer(firstlineno)
+        num_ext = 0
+        for inst in instructions:
+            if inst.opname == "EXTENDED_ARG":
+                inst_size = 1
+                num_ext += 1
+            else:
+                inst_size = instruction_size(inst) // 2 + num_ext
+                num_ext = 0
+            update_lineno(inst.starts_line, inst_size)
+            num_ext = 0
+            arg = inst.arg or 0
+            code.extend((inst.opcode, arg & 0xFF))
             for _ in range(instruction_size(inst) // 2 - 1):
                 code.extend((0, 0))
+    else:
+        if sys.version_info < (3, 10):
+            lnotab, update_lineno = lnotab_writer(firstlineno)
+        else:
+            lnotab, update_lineno, end = linetable_310_writer(firstlineno)
 
-    if sys.version_info >= (3, 10):
-        end(len(code))
+        for inst in instructions:
+            if inst.starts_line is not None:
+                update_lineno(inst.starts_line, len(code))
+            arg = inst.arg or 0
+            code.extend((inst.opcode, arg & 0xFF))
+
+        if sys.version_info >= (3, 10):
+            end(len(code))
 
     return bytes(code), bytes(lnotab)
 
@@ -566,7 +633,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 assert instructions[i].arg >= 0
 
 
-def transform_code_object(code, transformations, safe=False):
+def get_code_keys():
     # Python 3.11 changes to code keys are not fully documented.
     # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
     # for new format.
@@ -602,6 +669,11 @@ def transform_code_object(code, transformations, safe=False):
             "co_cellvars",
         ]
     )
+    return keys
+
+
+def transform_code_object(code, transformations, safe=False):
+    keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
