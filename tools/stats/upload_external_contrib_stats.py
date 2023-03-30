@@ -55,7 +55,6 @@ def fetch_json(
     )
 
 
-
 def get_external_pr_data(
     start_date: datetime.date, end_date: datetime.date, period_length: int = 1
 ) -> List[Dict[str, Any]]:
