@@ -325,3 +325,12 @@ jobs:
               .github/scripts/stop_runner_service.sh
             fi
           done
+
+      - name: DEBUG
+        if: always()
+        shell: bash
+        env:
+          RUNNER_WORKSPACE: ${{ runner.workspace }}
+        run: |
+          set +e
+          .github/scripts/stop_runner_service.sh
