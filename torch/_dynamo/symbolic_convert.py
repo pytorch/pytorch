@@ -555,6 +555,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if self.empty_checkpoint():
                 raise
             log.debug("step triggered compile", exc_info=True)
+            reason = str(exc)
         except Exception as exc:
             real_stack = getattr(exc, "real_stack", [])
             real_stack.append(self.frame_summary())
@@ -569,7 +570,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.compile_subgraph(
             self,
             partial_convert=True,
-            reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
+            reason=GraphCompileReason(reason, [self.frame_summary()]),
         )
         self.output.add_output_instructions(
             [create_jump_absolute(continue_inst)] + self.instructions
@@ -1751,10 +1752,13 @@ class InstructionTranslator(InstructionTranslatorBase):
         compiler_fn,
         one_graph,
         export,
+        export_constraints,
         mutated_closure_cell_contents: Set[str],
     ):
         super().__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn, self, export),
+            output=OutputGraph(
+                f_globals, code_options, compiler_fn, self, export, export_constraints
+            ),
             instructions=instructions,
             f_locals=f_locals,
             f_globals=f_globals,
@@ -1832,7 +1836,11 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
-        _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
+        _step_logger()(
+            logging.INFO,
+            "torchdynamo start tracing file "
+            f"\"{self.f_code.co_filename}\", line {self.f_code.co_firstlineno}, in {self.f_code.co_name}"
+        )
         super().run()
 
     def match_nested_cell(self, name, cell):

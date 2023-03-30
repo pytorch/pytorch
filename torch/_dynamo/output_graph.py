@@ -188,19 +188,19 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         compiler_fn: CompilerFn,
         root_tx,
         export: bool,
+        export_constraints,
     ):
         super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
         self.export = export
+        self.export_constraints = export_constraints
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                strict_mark_dyn=export,
-                assume_static_by_default=config.assume_static_by_default,
             )
             if config.dynamic_shapes
             else None,
@@ -518,37 +518,41 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         import torch._dynamo.symbolic_convert as symbolic_convert
         from .eval_frame import disable
 
-        user_stack = reason.user_stack
-        frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+        # NB: This has to be done lazily, because if we don't actually end
+        # up compiling anything, we shouldn't report a graph break.  This
+        # should be called whenever we call compile_and_call_fx_graph
+        def report_graph_break():
+            user_stack = reason.user_stack
+            frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
 
-        # Suppress these warnings when explain is on: torch._dynamo.explain()
-        # formats this a little nicer, and presents a slightly more actionable
-        # user code pointer
-        if (
-            graph_break
-            and config.print_graph_breaks
-            and not symbolic_convert.explain
-            and graph_break_dup_warning_checker.add(frame_loc)
-            and log.isEnabledFor(logging.WARNING)
-        ):
-            user_stack_formatted = "".join(traceback.format_list(user_stack))
-            log.warning(
-                "Graph break: %s from user code at:\n%s",
-                reason.reason,
-                user_stack_formatted,
-            )
+            # Suppress these warnings when explain is on: torch._dynamo.explain()
+            # formats this a little nicer, and presents a slightly more actionable
+            # user code pointer
+            if (
+                graph_break
+                and config.print_graph_breaks
+                and not symbolic_convert.explain
+                and graph_break_dup_warning_checker.add(frame_loc)
+                and log.isEnabledFor(logging.WARNING)
+            ):
+                user_stack_formatted = "".join(traceback.format_list(user_stack))
+                log.warning(
+                    "Graph break: %s from user code at:\n%s",
+                    reason.reason,
+                    user_stack_formatted,
+                )
 
-        # Don't record graph_break counters if this is just a plain return
-        if graph_break:
-            counters["graph_break"][reason.reason] += 1
+            # Don't record graph_break counters if this is just a plain return
+            if graph_break:
+                counters["graph_break"][reason.reason] += 1
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
 
-        log.debug(f"COMPILING GRAPH due to {reason}")
-
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
+
+        log.debug(f"COMPILING GRAPH due to {reason}")
 
         for block in reversed(tx.block_stack):
             block.exit(tx)
@@ -610,6 +614,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             and self.side_effects.is_empty()
         ):
             # optimization to generate better code in a common case
+            report_graph_break()
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
@@ -634,6 +639,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
+                report_graph_break()
                 output.extend(
                     self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
                 )
@@ -667,7 +673,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.remove_unused_graphargs()
         ncalls = count_calls(self.graph)
         counters["stats"]["calls_captured"] += ncalls
-        counters["stats"]["fusions_possible"] += ncalls - 1
 
         # free a bit of memory
         for node in self.graph.nodes:
