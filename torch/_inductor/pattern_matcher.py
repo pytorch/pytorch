@@ -470,6 +470,9 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     Memory planning to remove cat.  We can't use the stock memory
     planner since autotuning matmauls needs to know the output layout.
     """
+    if len(inputs) == 1:
+        return op(*inputs[0])
+
     # TODO(jansel): rewrite this as a bmm?
     if dim < 0:
         dim += len(shape_of(*inputs[0]))
