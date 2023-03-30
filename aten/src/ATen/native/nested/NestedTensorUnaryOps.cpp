@@ -42,6 +42,18 @@ Tensor& NestedTensor_sgn_(Tensor& self) {
   return self;
 }
 
+Tensor& NestedTensor_logical_not_(Tensor& self){
+  auto self_ptr = get_nested_tensor_impl(self);
+  check_numel_equals_buffer_size(self_ptr);
+  auto buffer = self_ptr->get_buffer();
+  buffer.logical_not_();
+  return self;
+}
+
+Tensor NestedTensor_logical_not(const Tensor& self) {
+  return map_nt(self, at::logical_not);
+}
+
 Tensor& NestedTensor_relu_(Tensor& self) {
   auto self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
