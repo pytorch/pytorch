@@ -1138,8 +1138,7 @@ class TestTypePromotion(TestCase):
             exp_type = expected_type(inp, min_v, max_v)
             if exp_type != torch.bool:
                 actual = torch.clamp(inp, min_v, max_v)
-                inps = list(map(lambda x: x.to(exp_type) if isinstance(x, torch.Tensor) else x,
-                            (inp, min_v, max_v)))
+                inps = [x.to(exp_type) if isinstance(x, torch.Tensor) else x for x in (inp, min_v, max_v)]
                 expected = torch.clamp(inps[0], inps[1], inps[2])
                 self.assertEqual(actual, expected)
                 if inp.dtype in floating_types() or exp_type == inp.dtype:
@@ -1151,8 +1150,7 @@ class TestTypePromotion(TestCase):
             exp_type = expected_type(inp, val)
             if exp_type != torch.bool:
                 actual = torch.clamp_min(inp, val)
-                inps = list(map(lambda x: x.to(exp_type) if isinstance(x, torch.Tensor) else x,
-                            (inp, val)))
+                inps = [x.to(exp_type) if isinstance(x, torch.Tensor) else x for x in (inp, val)]
                 expected = torch.clamp_min(inps[0], inps[1])
                 self.assertEqual(actual.dtype, exp_type)
                 self.assertEqual(actual, expected)

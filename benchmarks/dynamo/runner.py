@@ -351,7 +351,7 @@ def get_skip_tests(suite):
     if hasattr(module, "SKIP_TRAIN"):
         skip_tests.update(module.SKIP_TRAIN)
 
-    skip_tests = map(lambda name: f"-x {name}", skip_tests)
+    skip_tests = (f"-x {name}" for name in skip_tests)
     skip_str = " ".join(skip_tests)
     return skip_str
 
