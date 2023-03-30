@@ -16,7 +16,7 @@ from torch._dynamo.utils import counters
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config, ir
-from .lowering import lowerings as L
+from .lowering import fallback_node_due_to_unsupported_type, lowerings as L
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -203,7 +203,7 @@ class CallFunction(PatternExpr):
         node_items, node_spec = self.flatten(node.args, node.kwargs)
         self_items, self_spec = self.flat_args_kwargs
         if node_spec != self_spec:
-            return FailedMatch(f"args_stucture {node_spec} {self_spec}")
+            return FailedMatch(f"args_structure {node_spec} {self_spec}")
         assert len(node_items) == len(self_items)
 
         m = Match(self)
@@ -245,6 +245,7 @@ class ListOf(PatternExpr):
         return m.bundle()
 
 
+# First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
     defaultdict(list),
     defaultdict(list),
@@ -369,6 +370,12 @@ def replace_matched_patterns(graph: torch.fx.Graph):
             continue
         for node in reversed(graph.nodes):
             if node.op == "call_function" and node.target in patterns:
+                # conservatively not applying pattern for cpu input,
+                # since some of the patterns induce codegen and split nodes.
+                # Note: we will only skip cpu compute if disable_cpp_codegen=True
+                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
+                    continue
+
                 for entry in patterns[node.target]:
                     if node._erased:
                         break
@@ -431,16 +438,17 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
+def shape_of_mm(a, b):
+    m, _ = a.get_size()
+    _, n = b.get_size()
+    return [m, n]
+
+
 @register_lowering_pattern(
     CallFunction(aten.cat, ListOf(CallFunction(aten.mm, Arg(), Arg())), Arg()),
 )
 def cat_mm(match, inputs, dim):
-    def shape_of(a, b):
-        m, _ = a.get_size()
-        _, n = b.get_size()
-        return [m, n]
-
-    return cat_tuned_op(match, inputs, dim, op=L[aten.mm], shape_of=shape_of)
+    return cat_tuned_op(match, inputs, dim, op=L[aten.mm], shape_of=shape_of_mm)
 
 
 @register_lowering_pattern(
@@ -462,6 +470,9 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     Memory planning to remove cat.  We can't use the stock memory
     planner since autotuning matmauls needs to know the output layout.
     """
+    if len(inputs) == 1:
+        return op(*inputs[0])
+
     # TODO(jansel): rewrite this as a bmm?
     if dim < 0:
         dim += len(shape_of(*inputs[0]))
@@ -566,24 +577,35 @@ def cat_slice_cat(match, cat_input, size, dim=1):
         )
 
 
-@register_replacement_pattern(
+@register_lowering_pattern(
     CallFunction(
         aten.add,
         CallFunction(aten.mm, Arg(), Arg()),
-        KeywordArg("added"),
+        KeywordArg("inp"),
     ),
     pass_number=2,
 )
-@register_replacement_pattern(
+@register_lowering_pattern(
     CallFunction(
         aten.add,
-        KeywordArg("added"),
+        KeywordArg("inp"),
         CallFunction(aten.mm, Arg(), Arg()),
     ),
     pass_number=2,
 )
-def addmm(mat1, mat2, added):
-    return aten.addmm(added, mat1, mat2)
+def addmm(match, mat1, mat2, inp):
+    if isinstance(inp, ir.TensorBox):
+        inp_shape = inp.get_size()
+        matched = len(inp_shape) <= 2
+        mm_shape = shape_of_mm(mat1, mat2)
+        for i, m in zip(inp_shape, mm_shape):
+            matched &= i == 1 or i == m
+    else:  # inp is a Number
+        matched = False
+    if matched:
+        return L[aten.addmm](inp, mat1, mat2)
+    else:
+        return L[aten.add](inp, L[aten.mm](mat1, mat2))
 
 
 # This slows things down:

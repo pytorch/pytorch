@@ -40,7 +40,7 @@ def strip_end(s, suffix):
 def show_guards(gm):
     names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
     return "\n".join(
-        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True)
+        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True, constraint_inputs=None)
     )
 
 
@@ -144,6 +144,22 @@ class TestGenericProxyTensor(TestCase):
         r1 = fx_f(*new_inps)
         r2 = f(*new_inps)
         self.assertEqual(r1, r2)
+
+    def test_pre_autograd_mode_stack(self):
+        def f(a):
+            b = torch.ones(4, 4)
+            return torch.matmul(a, b)
+        # We expect to see matmul in the trace - it should NOT be decomposed into mm.
+        # Also, torch.ones() doesn't show up in the trace.
+        # This is annoying but expected: ones() never dispatches to the Autograd dispatch key,
+        # so our mode never sees it - it goes directly to the BackendSelect key.
+        fx_g = make_fx(f, pre_autograd=True)(torch.ones(4, 4))
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, a_1):
+    ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
+    matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
+    return matmul""")
+
 
     def test_make_fx_simple(self):
         def f(x):
@@ -270,6 +286,16 @@ class TestGenericProxyTensor(TestCase):
         self.assertFalse(is_any_sum(traced))
         self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
         self.assertTrue(is_any_digamma(traced))
+
+    # See https://github.com/pytorch/pytorch/issues/97541
+    def test_empty_like_doesnt_burn_in_defaults(self):
+        def f(x):
+            return torch.empty_like(x)
+        out = make_fx(f)(torch.randn(3))
+        self.assertExpectedInline(out.code.strip(), """\
+def forward(self, x_1):
+    empty_like = torch.ops.aten.empty_like.default(x_1, pin_memory = False);  x_1 = None
+    return empty_like""")
 
     def test_proxy_tensor_mode_with_decomp_table_preserves_proxy(self):
         def f(x):
@@ -622,7 +648,7 @@ def forward(self, x_1):
                 return NotImplemented
             return beta * a + alpha * (b @ c)
 
-        decomposed_fx = make_fx(f, {aten.addmm.default: addmm})(*inps)
+        decomposed_fx = make_fx(f, decomposition_table={aten.addmm.default: addmm})(*inps)
 
         self.assertEqual(fx_g(*inps), decomposed_fx(*inps))
         self.assertEqual(len([n for n in fx_g.graph.nodes if n.target == aten.addmm.default]), 2)
@@ -899,7 +925,7 @@ def forward(self, a_1):
     def test_item_to_constructor(self):
         def f(a):
             r = a.item()
-            constrain_range(r, min=0)
+            constrain_range(r, min=2)
             return torch.empty(r)
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
@@ -969,6 +995,16 @@ def forward(self, crop_camera_1, mask_1):
     view_2 = torch.ops.aten.view.default(mm_1, [sym_size, 3, 3]);  mm_1 = sym_size = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_2);  crop_camera_1 = mask_1 = view_2 = None
     return None""")
+
+    def test_unbacked_slice(self):
+        def f(x, m):
+            x = x[m]
+            return x[slice(None, None, None), slice(None, None, None), slice(None, 2, None)]
+
+        make_fx(f, tracing_mode="symbolic")(
+            torch.randn((12, 3, 3)),
+            torch.randint(0, 2, (12,), dtype=torch.bool)
+        )
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_unbacked_batch_resnet(self):
@@ -1186,7 +1222,9 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         from torch._dynamo.source import LocalSource
         self.assertExpectedInline(
-            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")])),
+            str(fx_g.shape_env.produce_guards(
+                fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")],
+                constraint_inputs=[None, None])),
             """['a.size()[0] == 2*b.size()[0]', 'a.stride()[0] == 1', 'a.storage_offset() == 0', 'b.stride()[0] == 1', 'b.storage_offset() == 0', '2 <= b.size()[0]']"""  # noqa: B950
         )
 
@@ -1322,9 +1360,6 @@ symbolic_tensor_failures = {
     xfail('linalg.eigvals'),
     skip('masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
     xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
-    xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
-    xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
@@ -1357,7 +1392,6 @@ symbolic_tensor_failures = {
     xfail('fft.rfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.rfft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.rfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('unflatten', ''),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shapes...
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1406,7 +1440,6 @@ symbolic_tensor_failures = {
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decomposition
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decomposition
     xfail('median', ''),  # Could not run 'aten::median' with arguments from the 'Meta' backend. This could be becau...
-    xfail('min', 'reduction_with_dim'),  # aten.min.dim - couldn't find symbolic meta function/decomposition
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1471,7 +1504,6 @@ symbolic_tensor_failures = {
     xfail('special.scaled_modified_bessel_k0', ''),  # aten.special_scaled_modified_bessel_k0.default - couldn't find symbo...
     xfail('special.scaled_modified_bessel_k1', ''),  # aten.special_scaled_modified_bessel_k1.default - couldn't find symbo...
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
-    xfail('sum_to_size', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('svd_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition

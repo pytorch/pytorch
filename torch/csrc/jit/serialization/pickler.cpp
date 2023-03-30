@@ -600,9 +600,9 @@ void Pickler::endTypeTag(const IValue& ivalue) {
   TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
 
   // Push the dict type
-  TORCH_INTERNAL_ASSERT(ivalue.type());
-
   auto type = ivalue.type();
+  TORCH_INTERNAL_ASSERT(type);
+
   auto annot_str = type->annotation_str(type_printer);
   pushString(annot_str);
 

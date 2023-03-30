@@ -432,6 +432,7 @@ Tensor internal_new_from_data(
   // to dispatch to it.
   // TODO: arguably it should have an autograd implementation that noops
   at::AutoDispatchBelowADInplaceOrView guard;
+
   return at::lift_fresh(tensor);
 }
 
@@ -487,6 +488,7 @@ void check_base_legacy_new(
         c10::DispatchKey::HPU,
         c10::DispatchKey::MPS,
         c10::DispatchKey::Meta,
+        c10::DispatchKey::PrivateUse1,
     });
     TORCH_CHECK(
         expected_key_set.has(dispatch_key),
@@ -1633,7 +1635,10 @@ Tensor asarray(
       THPObjectPtr ptr;
       auto arr = obj;
 
-      if (is_numpy_scalar) {
+      // PyArray_CheckScalar is true for both scalars and 0-dim arrays, per
+      // https://numpy.org/devdocs/reference/c-api/array.html#c.PyArray_CheckScalar
+      // But for 0-dim arrays no `PyArray_FromScalar` call is needed
+      if (is_numpy_scalar && !is_numpy_array) {
         TORCH_CHECK(
             !force_alias,
             "can't alias NumPy scalars. ",

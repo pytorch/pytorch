@@ -20,6 +20,7 @@ if __name__ == '__main__':
 # XXX: still in prototype
 class TestSymbolicShapeAnalysis(JitTestCase):
     def setUp(self):
+        super(JitTestCase, self).setUp()
         self.prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
         torch._C._jit_set_symbolic_shapes_test_mode(True)
 
@@ -162,7 +163,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inputs[1].setType(inputs[1].type().with_sizes(size_2))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
-            break
 
     def test_binary_shape_fns_inplace(self):
         def div_inplace_tensor(x: torch.Tensor, y: torch.Tensor):

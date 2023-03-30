@@ -166,9 +166,10 @@ class CodeGen::CallArg {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CallArg(void* ptr) : data_(ptr) {}
 
-#define ARG_TYPE_CTOR(Type, Name)     \
-  CallArg(Type v) {                   \
-    memcpy(&data_, &v, sizeof(Type)); \
+#define ARG_TYPE_CTOR(Type, Name)      \
+  CallArg(Type v) {                    \
+    memcpy(buffer_, &v, sizeof(Type)); \
+    data_ = (void*)buffer_;            \
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_TYPE_CTOR);
@@ -178,9 +179,29 @@ class CodeGen::CallArg {
     return data_;
   }
 
-#define ARG_PTR_DEFINE(Type, Name) \
-  Type* Name##Ptr() const {        \
-    return (Type*)&data_;          \
+  CallArg(const CallArg& rhs) {
+    if (rhs.data_ == rhs.buffer_) {
+      memcpy(this->buffer_, rhs.buffer_, sizeof(rhs.buffer_));
+      this->data_ = (void*)(this->buffer_);
+    } else {
+      this->data_ = rhs.data_;
+    }
+  }
+
+  CallArg& operator=(const CallArg& rhs) {
+    if (rhs.data_ == rhs.buffer_) {
+      memcpy(this->buffer_, rhs.buffer_, sizeof(rhs.buffer_));
+      this->data_ = (void*)(this->buffer_);
+    } else {
+      this->data_ = rhs.data_;
+    }
+    return *this;
+  }
+
+#define ARG_PTR_DEFINE(Type, Name)                  \
+  Type* Name##Ptr() const {                         \
+    TORCH_INTERNAL_ASSERT(data_ == (void*)buffer_); \
+    return (Type*)data_;                            \
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_PTR_DEFINE);
@@ -188,6 +209,12 @@ class CodeGen::CallArg {
 
  private:
   void* data_;
+  // Regarding a scalar value, CallArg uses void**=&data_ to store it. But the
+  // bit width of a pointer is 32bit on a 32bit platform. It cannot store the
+  // scalar if the bit width of the scalar is larger than 32bit, such as double
+  // and long. Hence, we add 8 bytes buffer dedicated to storing the scalar
+  // value regardless its bit width is less or greater than 32bits.
+  char buffer_[8] = {0}; // 64bits
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)

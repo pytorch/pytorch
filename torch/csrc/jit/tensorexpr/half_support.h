@@ -9,7 +9,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-// Walk the Statment looking for Half size loads/stores.
+// Walk the Statement looking for Half size loads/stores.
 class HalfChecker : public IRVisitor {
  public:
   HalfChecker(const std::vector<CodeGen::BufferArg>& args) {

@@ -65,9 +65,6 @@ class ValueRanges:
     def __init__(self, lower, upper):
         lower = simple_sympify(lower)
         upper = simple_sympify(upper)
-        # We don't support point-ranges on floating point inf
-        assert lower != sympy.oo
-        assert upper != -sympy.oo
         # TODO: when the bounds have free variables, this may be
         # nontrivial to actually verify
         assert sympy_generic_le(lower, upper)
@@ -79,6 +76,10 @@ class ValueRanges:
     def __contains__(self, x):
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
+
+    # Intersection
+    def __and__(self, other):
+        return ValueRanges(lower=max(self.lower, other.lower), upper=min(self.upper, other.upper))
 
     def is_singleton(self) -> bool:
         return self.lower == self.upper
