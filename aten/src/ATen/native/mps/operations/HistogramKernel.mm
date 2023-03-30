@@ -22,10 +22,10 @@ enum BIN_SELECTION_ALGORITHM {
 };
 
 // Re-implementation of std::upper_bound with some modifications.
-template<typename T>
-int64_t upper_bound(constant T * arr, int64_t first, int64_t len, T val) {
-  int64_t middle;
-  int64_t half_;
+template<typename T, typename U>
+U upper_bound(constant T * arr, U first, U len, T val) {
+  U middle;
+  U half_;
 
   while (len > 0) {
     half_ = len >> 1;
@@ -64,7 +64,7 @@ kernel void histogramdd(constant T  * input_            [[buffer(0)]],
   int64_t bin_seq_offset = 0;
 
   for (size_t dim = 0; dim < num_dims; dim++) {
-    T element = input_[(size_t)offsets[tid * num_dims + dim]];
+    T element = input_[offsets[tid * num_dims + dim]];
 
     // Skips elements which fall outside the specified bins and NaN elements
     // Adding an eps to the edges to eliminate precision issues that cause elements accidentally skipped,
