@@ -7391,7 +7391,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 padmask = dec_in == 0
                 dec_mask = padmask.unsqueeze(-1) == padmask.unsqueeze(-2)
                 dec_mask = dec_mask.to(dtype=torch.float32)
-                dec_mask = dec_mask.tril(diagonal=0)
+                dec_mask = dec_mask.tril(diagonal=0).cuda()
 
                 nheads = 16
                 start = math.log2(0.5)
@@ -7400,9 +7400,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     start,
                     end + 1e-6 * np.sign(end - start),
                     (end - start) / (nheads - 1),
-                ).view(1, nheads, 1, 1)
-                q_pos = torch.arange(dec_in.size(1), dtype=torch.long)
-                k_pos = torch.arange(dec_in.size(1), dtype=torch.long)
+                ).view(1, nheads, 1, 1).cuda()
+                q_pos = torch.arange(dec_in.size(1), dtype=torch.long).cuda()
+                k_pos = torch.arange(dec_in.size(1), dtype=torch.long).cuda()
                 rel_pos = k_pos[None, :] - q_pos[:, None]
                 values = rel_pos.abs().neg().unsqueeze(0).unsqueeze(0)
                 dec_bias = values * scales
