@@ -1048,7 +1048,7 @@ lt = _make_elementwise_binary_prim(
 )
 
 
-# Note: the following impls are because torch.maximum and torch.mininum do not support scalar inputs
+# Note: the following impls are because torch.maximum and torch.minimum do not support scalar inputs
 def _maximum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
@@ -2153,14 +2153,14 @@ def _minimum_value_aten(dtype: torch.dtype):
 
 
 _minimum_value_doc = """
-    Return the mimimum finite value for a dtype.
+    Return the minimum finite value for a dtype.
 """
 
 # TODO: create a new return type for scalars?
 # FIXME: currently returns integers for boolean tensors
 # https://github.com/pytorch/pytorch/issues/78071
 minimum_value = _make_prim(
-    schema="minium_value(ScalarType dtype) -> Scalar",
+    schema="minimum_value(ScalarType dtype) -> Scalar",
     meta=_minimum_value_meta,
     impl_aten=_minimum_value_aten,
     return_type=RETURN_TYPE.NEW,
