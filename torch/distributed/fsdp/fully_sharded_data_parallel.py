@@ -367,9 +367,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         super().__init__()
         _init_ignored_module_states(self, module, ignored_modules, ignored_parameters)
 
-        # Add module annotations for Dynamo support (see function for details)
-        _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
-
         # Initializes self.process_group, along with rank and world size. This will
         # also set another attribute, _inter_node_pg, to control the process group
         # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
@@ -407,6 +404,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 fsdp_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
 
             _auto_wrap(auto_wrap_kwargs, fsdp_kwargs, FullyShardedDataParallel)
+
+        # Add module annotations for Dynamo support (see function for details)
+        _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
 
         backward_prefetch_limit = 1
         forward_prefetch_limit = 1
