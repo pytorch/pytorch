@@ -850,7 +850,7 @@ class DeviceCachingAllocator {
       bool alloc_trace_record_context) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     record_history = enabled;
-    context_recorder_.store(context_recorder);
+    context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_trace_max_entries_ = std::max(size_t(1), alloc_trace_max_entries);
     alloc_trace_record_context_ = alloc_trace_record_context;
     alloc_trace_next = 0;
@@ -1392,7 +1392,7 @@ class DeviceCachingAllocator {
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
-      Block* curr_block = alloc_found_block(
+      curr_block = alloc_found_block(
           std::move(params), block_state.size, context, split);
 
       TORCH_CHECK(curr_block->ptr == block_state.ptr);
