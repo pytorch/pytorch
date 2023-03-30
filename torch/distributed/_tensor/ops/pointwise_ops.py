@@ -151,7 +151,6 @@ pointwise_ops = [
     aten.eq.Tensor_out,
     aten.eq.Scalar,
     aten.eq.Scalar_out,
-    aten.equal.default,
     aten.erf.default,
     aten.erf.out,
     aten.erf_.default,

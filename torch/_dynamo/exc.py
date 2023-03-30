@@ -28,6 +28,13 @@ class TorchRuntimeError(TorchDynamoException):
     pass
 
 
+class InvalidBackend(TorchDynamoException):
+    def __init__(self, name):
+        super().__init__(
+            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
+        )
+
+
 class ResetRequired(TorchDynamoException):
     def __init__(self):
         super().__init__(
@@ -64,6 +71,10 @@ class Unsupported(TorchDynamoException):
     def add_to_stats(self, category="unimplemented"):
         self.category = category
         counters[category][self.msg] += 1
+
+
+class RecompileError(TorchDynamoException):
+    pass
 
 
 def unimplemented(msg: str):
