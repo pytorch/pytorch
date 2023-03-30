@@ -4,7 +4,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -21,7 +21,7 @@ from torch.utils._pytree import tree_flatten
 from ._cond import _has_potential_branch_input_alias, _has_potential_branch_input_mutation, UnsupportedAliasMutationException
 
 
-map = PyOperator("map")
+map = HigherOrderOperator("map")
 
 
 def trace_map(proxy_mode, func_overload, f, xs, *args):
@@ -91,12 +91,6 @@ def map_fake_tensor_mode(f, xs, *args):
     outs = [f(x, *args) for x in xs]
     return outs[0].new_empty([xs.shape[0], *outs[0].shape])
 
-# We cannot directly call fallthrough here due to issue #89037.
-@map.py_impl(DispatchKey.PythonDispatcher)
-def map_python_dispatcher(*args):
-    _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.PythonDispatcher))
-    return map(*args)
-
 @map.py_impl(torch._C._functorch.TransformType.Functionalize)
 def map_functionalize(interpreter, f, xs, *args):
     """
@@ -128,6 +122,7 @@ def map_functionalize(interpreter, f, xs, *args):
         return _wrap_all_tensors_to_functional(map_return, level=interpreter.level())
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm
+map.fallthrough(DispatchKey.PythonDispatcher)
 map.fallthrough(DispatchKey.PythonTLSSnapshot)
 map.fallthrough(DispatchKey.ADInplaceOrView)
 map.fallthrough(DispatchKey.BackendSelect)

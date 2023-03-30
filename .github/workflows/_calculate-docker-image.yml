@@ -16,7 +16,7 @@ on:
 jobs:
   calculate-docker-image:
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.large]
+    runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 30
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
