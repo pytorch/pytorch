@@ -520,12 +520,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     return Py_None;
   }
   PyObject *f_locals = frame->f_locals;
-  // TODO: In Python 3.9 can optimize this to PyObject_CallOneArg
-  PyObject* args_tuple = PyTuple_Pack(1, f_locals);
-  if (args_tuple == NULL) {
-    return NULL;
-  }
-  PyObject* valid = PyObject_Call(e->check_fn, args_tuple, NULL);
+  PyObject* valid = PyObject_CallOneArg(e->check_fn, f_locals);
   if (unlikely(valid == NULL)) {
     if (guard_error_hook != NULL) {
       PyObject *type, *value, *traceback;
@@ -539,7 +534,6 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     }
     return NULL;
   }
-  Py_DECREF(args_tuple);
   Py_DECREF(valid);
   if (valid == Py_True) {
     // Keep the head as the most recently used cache entry.

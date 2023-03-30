@@ -97,7 +97,7 @@ class GuardBuilder(GuardBuilderBase):
             scope = {"L" if local else "G": user_scope}
         else:
             scope = {"L" if local else "G": dict()}
-        self.scope: Dict[str, object] = scope
+        self.scope: Dict[str, Dict[str, object]] = scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,

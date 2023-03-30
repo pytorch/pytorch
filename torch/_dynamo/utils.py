@@ -15,7 +15,6 @@ import math
 import operator
 import os
 import pstats
-import re
 import sys
 import textwrap
 import time
