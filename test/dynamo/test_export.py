@@ -1634,6 +1634,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(gm(*inp), f(*inp))
 
+    @config.patch(assume_static_by_default=False)
     def test_export_symbolic_shape(self):
         def f(x: torch.Tensor) -> torch.Tensor:
             return torch.empty(x.shape[0] * 2)
