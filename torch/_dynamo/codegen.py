@@ -251,11 +251,11 @@ class PyCodegen:
         except AttributeError:
             # desired rotate bytecode doesn't exist, generate equivalent bytecode
             return [
-                create_instruction("BUILD_TUPLE", n),
+                create_instruction("BUILD_TUPLE", arg=n),
                 self._create_load_const(rot_n_helper(n)),
                 *create_rot_n(2),
-                create_instruction("CALL_FUNCTION_EX", 0),
-                create_instruction("UNPACK_SEQUENCE", n),
+                create_instruction("CALL_FUNCTION_EX", arg=0),
+                create_instruction("UNPACK_SEQUENCE", arg=n),
             ]
 
     def pop_null(self):
@@ -280,11 +280,11 @@ class PyCodegen:
         for var in freevars:
             assert var in self.cell_and_freevars()
             output.append(create_instruction("LOAD_CLOSURE", argval=var))
-        output.append(create_instruction("BUILD_TUPLE", len(freevars)))
+        output.append(create_instruction("BUILD_TUPLE", arg=len(freevars)))
         output.append(self.create_load_const(code))
         if sys.version_info < (3, 11):
             output.append(self.create_load_const(fn_name))
-        output.append(create_instruction("MAKE_FUNCTION", 0x08))
+        output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()
 
@@ -337,5 +337,5 @@ class PyCodegen:
             return output
         return [
             self.create_load_const(kw_names),
-            create_instruction("CALL_FUNCTION_KW", nargs),
+            create_instruction("CALL_FUNCTION_KW", arg=nargs),
         ]

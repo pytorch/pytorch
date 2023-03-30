@@ -536,7 +536,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 elif inst.opname == "COPY_FREE_VARS":
                     prefix_insts.append(
                         create_instruction(
-                            "COPY_FREE_VARS", len(tx.code_options["co_freevars"])
+                            "COPY_FREE_VARS", arg=len(tx.code_options["co_freevars"])
                         )
                     )
                 else:
@@ -610,7 +610,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
-                + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
+                + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
         else:
             graph_output_var = self.new_var("graph_out")
