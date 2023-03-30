@@ -274,7 +274,7 @@ class TestMakeFx(MultiThreadedTestCase):
         nodes = list(mesh_graph.graph.nodes)
         # no getattr should appear in the graph
         for node in nodes:
-            self.assertNotEqual("getattr", str(node.op))
+            self.assertNotEqual("get_attr", str(node.op))
 
         def allred_mesh_dim(input):
             return ft_c.all_reduce(input, "sum", (mesh, 0)) + 1
@@ -283,7 +283,7 @@ class TestMakeFx(MultiThreadedTestCase):
         # no getattr should appear in the graph
         nodes = list(mesh_dim_graph.graph.nodes)
         for node in nodes:
-            self.assertNotEqual("getattr", str(node.op))
+            self.assertNotEqual("get_attr", str(node.op))
 
 
 if __name__ == "__main__":
