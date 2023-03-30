@@ -8,6 +8,7 @@ from typing import Optional, List, Callable, Union, Any, cast
 from tabulate import tabulate
 
 _warned_tensor_cores = False
+_default_float_32_precision = torch.get_float32_matmul_precision()
 
 
 def _enable_tensor_cores():
@@ -22,7 +23,7 @@ def _enable_tensor_cores():
                 _warned_tensor_cores = True
 
 def _disable_tensor_cores():
-    torch.set_float32_matmul_precision("highest")
+    torch.set_float32_matmul_precision(_default_float_32_precision)
 
 def bench_loop(
     model: Union[torch.nn.Module, Callable],
@@ -112,7 +113,6 @@ def bench_all(
     | Inference         | Eager           | -               | -                     |            0.000146246 | -                  |
     | Inference         | aot_ts_nvfuser  | -               | 0.014810323715209961  |            0.000166035 | 0.8808156232050546 |
     | Inference         | cudagraphs      | -               | 0.013611078262329102  |            0.000135565 | 1.0787900105522334 |
-    | Inference         | inductor        | default         | 0.0026526451110839844 |            0.000137377 | 1.06456091634849   |
     | Inference         | inductor        | reduce-overhead | 0.002624988555908203  |            0.000135946 | 1.07576289021396   |
     | Inference         | inductor        | max-autotune    | 0.0026438236236572266 |            0.000134993 | 1.0833627693394559 |
     | Inference         | inductor        |                 | 0.0025985240936279297 |            0.00013566  | 1.0780316344463972 |
@@ -145,6 +145,8 @@ def bench_all(
         if backend == "inductor":
             mode_options = cast(List[Optional[str]], list(torch._inductor.list_mode_options().keys())) + [None]
             for mode in mode_options:
+                if mode == "default":
+                    continue
                 torch._dynamo.reset()
                 try:
                     if torch.cuda.is_available():
