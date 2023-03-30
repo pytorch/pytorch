@@ -12767,6 +12767,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
+           supports_gradgrad=True,
            sample_inputs_func=sample_inputs_linear,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),

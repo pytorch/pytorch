@@ -1463,7 +1463,7 @@ class TestAutograd(TestCase):
             mean.retain_grad()
             # node has two retains_grad hooks
             var.mul_(2)
-            # the retain_grad hook multi-output node refers shoudl now be a nullptr
+            # the retain_grad hook multi-output node refers should now be a nullptr
             (var + mean).sum().backward()
             gvar = var.grad
             gmean = mean.grad
