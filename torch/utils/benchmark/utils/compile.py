@@ -2,59 +2,35 @@ import torch
 
 __all__ = ["bench_all", "benchmark_compile"]
 
-import torch
-import torch._dynamo as torchdynamo
+import torch._dynamo
 import time
-import warnings
-from typing import Optional, List
+from typing import Optional, List, Callable, Union, Any, cast
+from tabulate import tabulate
 
-# Added this otherwise all the warnings from each backend will be printed
-# Not sure if this warning will propgate if user is not using this config
-warnings.filterwarnings("ignore")
+_warned_tensor_cores = False
 
 
+def _enable_tensor_cores():
+    global _warned_tensor_cores
 
-class SimpleTable:
-    """
-    This is a simple table class that can be used to print a table of data.
-    The primary reason it's here is to avoid taking an external dependency.
-    If it's useful, it can be moved to a more general location.
-    """
-    def __init__(self, field_names : List[str]):
-        self.field_names = field_names
-        self.rows = []
+    if torch.cuda.is_available():
+        if torch.backends.cuda.matmul.allow_tf32 is False and torch.cuda.get_device_capability() >= (8, 0):
+            torch.set_float32_matmul_precision("high")
+            if not _warned_tensor_cores:
+                print("Your GPU supports tensor cores")
+                print("we will enable it automatically by setting `torch.set_float32_matmul_precision('high')`")
+                _warned_tensor_cores = True
 
-    def add_row(self, row):
-        self.rows.append(row)
+def _disable_tensor_cores():
+    torch.set_float32_matmul_precision("highest")
 
-    def __str__(self):
-        if not self.field_names or not self.rows:
-            return ""
-
-        formatted_rows = []
-        for row in self.rows:
-            formatted_row = []
-            for cell in row:
-                if isinstance(cell, float):
-                    formatted_cell = f"{cell:10.4f}"
-                else:
-                    formatted_cell = str(cell)
-                formatted_row.append(formatted_cell)
-            formatted_rows.append(formatted_row)
-
-        # Find the maximum width for each column
-        column_widths = [max([len(cell) for cell in column] + [len(header)]) for header, column in zip(self.field_names, zip(*formatted_rows))]
-
-        header = " | ".join([f"{str(field_name).ljust(width)}" for field_name, width in zip(self.field_names, column_widths)])
-        separator = "-+-".join(["-" * width for width in column_widths])
-
-        rows = []
-        for row in formatted_rows:
-            rows.append(" | ".join([f"{cell.ljust(width)}" for cell, width in zip(row, column_widths)]))
-
-        return f"{header}\n{separator}\n" + "\n".join(rows)
-
-def bench_loop(model : torch.nn.Module, sample_input : torch.Tensor, num_iters : int, is_training : bool =False, optimizer : torch.optim.Optimizer = None):
+def bench_loop(
+    model: Union[torch.nn.Module, Callable],
+    sample_input: Union[torch.Tensor, Any],
+    num_iters: int,
+    optimizer: torch.optim.Optimizer = None,
+    loss_fn: Callable = None,
+):
     """
     This is a simple loop that can be used to benchmark a model for either training or inference
     It takes care of taking several measurements and averaging them
@@ -63,37 +39,46 @@ def bench_loop(model : torch.nn.Module, sample_input : torch.Tensor, num_iters :
     durations = []
     for _ in range(num_iters):
         start = time.time()
-        
-        if is_training and optimizer:
+
+        if optimizer:
             optimizer.zero_grad()
             output = model(sample_input)
-            loss = output.sum()
+            loss = loss_fn(output) if loss_fn else output.sum()
             loss.backward()
             optimizer.step()
         else:
             model(sample_input)
-        
-        end = time.time()
 
-        if sample_input.get_device() >= 0:
+        # Synchronize CUDA operations before measuring the end time
+        if torch.cuda.is_available():
             torch.cuda.synchronize()
 
+        end = time.time()
         durations.append(end - start)
-    
+
     return sum(durations) / num_iters
 
-def benchmark_compile(model: torch.nn.Module, sample_input: torch.Tensor, num_iters: int = 5, backend: Optional[str] = None, mode="default", is_training=False, optimizer=None):
+def benchmark_compile(
+    model: Union[torch.nn.Module, Callable],
+    sample_input: Union[torch.Tensor, Any],
+    num_iters: int = 5,
+    backend: Optional[str] = None,
+    mode: Optional[str] = "default",
+    optimizer: torch.optim.Optimizer = None,
+    loss_fn : Union[torch.nn.Module, Callable] = None,
+):
     """
     Use this utility to benchmark torch.compile
     """
     if backend:
         try:
             opt_model = torch.compile(model, backend=backend, mode=mode)
-            
-            # Compilation only happens after the first inference
-            compilation_time = bench_loop(opt_model, sample_input, 1, is_training, optimizer)
 
-        except:
+            # Compilation only happens after the first inference
+            compilation_time = bench_loop(opt_model, sample_input, 1, optimizer, loss_fn)
+
+        except BaseException as e:
+            print(e)
             print(f"Failed to compile {backend} with mode {mode}")
             return None, None
     else:
@@ -101,73 +86,98 @@ def benchmark_compile(model: torch.nn.Module, sample_input: torch.Tensor, num_it
         compilation_time = None
 
     # Benchmark
-    running_time = bench_loop(opt_model, sample_input, num_iters, is_training, optimizer)
-    
+    running_time = bench_loop(opt_model, sample_input, num_iters, optimizer, loss_fn)
+
     return compilation_time, running_time
 
-    
-def bench_all(model : torch.nn.Module, sample_input : torch.Tensor, num_iters : int=2, is_training : bool =False, optimizer: Optional[torch.optim.Optimizer]=None):
+
+def bench_all(
+    model : Union[torch.nn.Module, Callable],
+    sample_input: Union[torch.Tensor, Any],
+    num_iters : int = 5,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    loss_fn : Union[torch.nn.Module, Callable] = None,
+):
     """
     This is a simple utility that can be used to benchmark torch.compile
     In particular it ensures that your GPU is setup to use tensor cores if it supports its
     It also tries out all the main backends and prints a table of results so you can easily compare them all
     Many of the backendds have their own optional dependencies so please pip install them seperately
-    
-    The tables will look like
-    Train/Inference | Backend        | Mode | Compilation Time | Average Running Time | Speedup   
-    ----------------+----------------+------+------------------+----------------------+-----------
-    Training        | Eager          | -    | -                |     0.0005           | -         
-    Training        | aot_ts_nvfuser | -    |     0.5023       |     0.0006           |    -0.3070
-    Training        | cudagraphs     | -    |     0.0242       |     0.0259           |   -51.4658
+
+    The tables will look like the below, one for inference and one for training
+    If you'd like to leverage this utility for training make sure to pass in a torch.optim.Optimizer
+
+    | Train/Inference   | Backend         | Mode            | Compilation Time      |   Average Running Time | Speedup            |
+    |-------------------|-----------------|-----------------|-----------------------|------------------------|--------------------|
+    | Inference         | Eager           | -               | -                     |            0.000146246 | -                  |
+    | Inference         | aot_ts_nvfuser  | -               | 0.014810323715209961  |            0.000166035 | 0.8808156232050546 |
+    | Inference         | cudagraphs      | -               | 0.013611078262329102  |            0.000135565 | 1.0787900105522334 |
+    | Inference         | inductor        | default         | 0.0026526451110839844 |            0.000137377 | 1.06456091634849   |
+    | Inference         | inductor        | reduce-overhead | 0.002624988555908203  |            0.000135946 | 1.07576289021396   |
+    | Inference         | inductor        | max-autotune    | 0.0026438236236572266 |            0.000134993 | 1.0833627693394559 |
+    | Inference         | inductor        |                 | 0.0025985240936279297 |            0.00013566  | 1.0780316344463972 |
+    | Inference         | ipex            | -               | 0.0026051998138427734 |            0.000132751 | 1.1016522988505748 |
+    | Inference         | nvprims_nvfuser | -               | 0.002631664276123047  |            0.000132751 | 1.1016522988505748 |
+    | Inference         | onnxrt          | -               | 0.0026395320892333984 |            0.000138378 | 1.0568573397656789 |
+    | Inference         | tvm             | -               | 0.0026519298553466797 |            0.000141668 | 1.032312352743184  |
 
     The important warnings are
-    Your model is loaded on GPU
-    Your GPU supports tensor cores, we will enable it automatically by setting `torch.set_float32_matmul_precision('high')`
+    Your GPU supports tensor cores
+    we will enable it automatically by setting `torch.set_float32_matmul_precision('high')`
 
-    If a compilation fails for any reason including the dependency not being included then we will print Failed to compile {backend} with mode {mode}
+    If a compilation fails for any reason including the dependency not being included
+    then we will print Failed to compile {backend} with mode {mode}
 
 
     """
-    if next(model.parameters()).is_cuda:
-        print("Your model is loaded on GPU")
-        if torch.backends.cuda.matmul.allow_tf32 is False and torch.cuda.get_device_capability() >= (8, 0):
-            print("Your GPU supports tensor cores, we will enable it automatically by setting `torch.set_float32_matmul_precision('high')`")
-            torch.set_float32_matmul_precision("high")
-
-
-    table = SimpleTable(field_names = ["Train/Inference", "Backend", "Mode", "Compilation Time", "Average Running Time", "Speedup"])
+    field_names = ["Train/Inference", "Backend", "Mode", "Compilation Time", "Average Running Time", "Speedup"]
+    table = []
 
 
     eager_time = None
-    torchdynamo.reset()
-    _, eager_time = benchmark_compile(model, sample_input, num_iters, None, None, is_training, optimizer)
-    table.add_row([("Training" if is_training else "Inference"), "Eager", "-", "-", eager_time, "-"])
+    torch._dynamo.reset()
+    _, eager_time = benchmark_compile(model, sample_input, num_iters, None, None, optimizer)
+    table.append(
+        [("Training" if optimizer else "Inference"), "Eager", "-", "-", eager_time, "-"])
 
-    for backend in torchdynamo.list_backends():
-        if backend == "ipex":  # ipex has an annoying import error it prints
-            continue
+    for backend in torch._dynamo.list_backends():
 
         if backend == "inductor":
-            for mode in list(torch._inductor.list_mode_options().keys()) + [None]:
-                if mode == "default":
-                    continue
-                torchdynamo.reset()
-                compilation_time, running_time = benchmark_compile(model, sample_input, num_iters, backend, mode, is_training, optimizer)
-                if running_time is not None:
-                    speedup = (eager_time - running_time) / eager_time if eager_time else None
-                    table.add_row([("Training" if is_training else "Inference"), backend, mode or "-", compilation_time or "-", running_time, speedup or "-"])
-        else:
-            torchdynamo.reset()
-            compilation_time, running_time = benchmark_compile(model, sample_input, num_iters, backend, None, is_training, optimizer)
-            if running_time is not None:
-                speedup = (eager_time - running_time) / eager_time if eager_time else None
-                table.add_row([("Training" if is_training else "Inference"), backend, "-", compilation_time or "-", running_time, speedup or "-"])
+            mode_options = cast(List[Optional[str]], list(torch._inductor.list_mode_options().keys())) + [None]
+            for mode in mode_options:
+                torch._dynamo.reset()
+                try:
+                    if torch.cuda.is_available():
+                        _enable_tensor_cores()
+                    compilation_time, running_time = benchmark_compile(
+                        model, sample_input, num_iters, backend, mode, optimizer, loss_fn)
+                finally:
+                    if torch.cuda.is_available():
+                        _disable_tensor_cores()
+                        if running_time is not None:
+                            speedup = eager_time / running_time
+                            table.append([
+                                ("Training" if optimizer else "Inference"),
+                                backend, mode, compilation_time or "-", running_time, speedup or "-"
+                            ])
 
-    return table
+        else:
+            torch._dynamo.reset()
+            compilation_time, running_time = benchmark_compile(model, sample_input, num_iters, backend, None, optimizer, loss_fn)
+
+            if running_time is not None:
+                speedup = eager_time / running_time
+                table.append([
+                    ("Training" if optimizer else "Inference"),
+                    backend, "-", compilation_time or "-", running_time, speedup or "-"
+                ])
+
+
+    return tabulate(table, headers=field_names, tablefmt="github")
 
 if __name__ == "__main__":
-    torchdynamo.reset()
-    
+    torch._dynamo.reset()
+
     class ToyModel(torch.nn.Module):
         def __init__(self):
             super(ToyModel, self).__init__()
@@ -180,13 +190,11 @@ if __name__ == "__main__":
 
     print("===== Inference =====")
     inference_table = bench_all(model, torch.ones(1024, 2, 2).cuda(), 5)
-    assert(inference_table.rows[0][0] == "Inference")
-    assert(inference_table.rows[0][1] == "Eager")
-    assert(inference_table.rows[0][2] == "-")
+    assert("Inference" in inference_table) and "Eager" in inference_table and "-" in inference_table
+
     print(inference_table)
     print("\n===== Training =====")
-    training_table = bench_all(model, torch.ones(1024, 2, 2).cuda(), 5, is_training=True, optimizer=torch.optim.SGD(model.parameters(), lr=0.01))
-    assert(training_table.rows[0][0] == "Training")
-    assert(training_table.rows[0][1] == "Eager")
-    assert(training_table.rows[0][2] == "-")
+    training_table = bench_all(model, torch.ones(1024, 2, 2).cuda(), 5,
+                               optimizer=torch.optim.SGD(model.parameters(), lr=0.01))
+    assert("Training" in training_table) and "Eager" in training_table and "-" in training_table
     print(training_table)

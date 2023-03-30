@@ -1,3 +1,5 @@
+# Owner(s): ["module: dynamo"]
+
 import torch
 import torch._dynamo as torchdynamo
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -20,19 +22,16 @@ class TestCompileBenchmarkUtil(TestCase):
 
             def forward(self, x):
                 return x * self.weight
-                
+
         torchdynamo.reset()
         model = ToyModel().cuda()
 
-        print("===== Inference =====")
         inference_table = bench_all(model, torch.ones(1024, 2, 2).cuda(), 5)
-        assert(inference_table.rows[0][0] == "Inference")
-        assert(inference_table.rows[0][1] == "Eager")
-        assert(inference_table.rows[0][2] == "-")
-        training_table = bench_all(model, torch.ones(1024, 2, 2).cuda(), 5, is_training=True, optimizer=torch.optim.SGD(model.parameters(), lr=0.01))
-        assert(training_table.rows[0][0] == "Training")
-        assert(training_table.rows[0][1] == "Eager")
-        assert(training_table.rows[0][2] == "-")
+        assert("Training" in inference_table) and "Eager" in inference_table and "-" in inference_table
+
+        training_table = bench_all(model, torch.ones(1024, 2, 2).cuda(), 5, optimizer=torch.optim.SGD(model.parameters(), lr=0.01))
+        assert("Training" in training_table) and "Eager" in training_table and "-" in training_table
+
 
 if __name__ == '__main__':
     run_tests()
