@@ -284,14 +284,17 @@ class FakeTensorConverter:
         return out
 
     # If you specify the device, it MUST be a meta tensor.
-    def from_meta_and_device(self, fake_mode, t, device):
+    def from_meta_and_device(self, fake_mode, t, device, keep_leafness=False):
         assert (
             t.device.type == "meta"
         ), f"tensor's device must be `meta`, got {t.device.type} instead"
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        out = FakeTensor(fake_mode, t, device)
+        if keep_leafness and not t.is_leaf:
+            out = FakeTensor(fake_mode, t, device).clone()
+        else:
+            out = FakeTensor(fake_mode, t, device)
         self.set_tensor_memo(t, out)
         return out
 
@@ -906,13 +909,23 @@ class FakeTensor(torch.Tensor):
         return fake_mode.from_tensor(t)
 
     def clone_preserve_strides_storage(self):
-        storage = self.untyped_storage()
-        with no_dispatch():
-            new_tensor = torch.tensor([], dtype=self.dtype, device=storage.device)
-            new_tensor.set_(storage, self.storage_offset(), self.size(), self.stride())
-            new_tensor.requires_grad = self.requires_grad
+        with in_kernel_invocation_manager(self.fake_mode), torch.no_grad():
+            new_tensor = torch._prims.utils.clone_preserve_strides(self)
+            if self.requires_grad:
+                new_tensor.requires_grad = self.requires_grad
+                if not self.is_leaf:
+                    with torch.enable_grad():
+                        new_tensor = torch._prims.utils.clone_preserve_strides(self)
+                if self.grad is not None:
+                    self.grap = self.grad.clone_preserve_strides_storage()
+            new_tensor.set_(
+                self.untyped_storage(),
+                self.storage_offset(),
+                self.size(),
+                self.stride(),
+            )
         return self.fake_mode.fake_tensor_converter.from_meta_and_device(
-            self.fake_mode, new_tensor, self.device
+            self.fake_mode, new_tensor, self.device, True
         )
 
     # TODO: resolve error in default __repr__

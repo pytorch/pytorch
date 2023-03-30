@@ -14,6 +14,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
 )
+from torch._subclasses.meta_utils import assert_metadata_eq, assert_eq
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
@@ -506,10 +507,8 @@ class FakeTensorTest(TestCase):
                 x.requires_grad = requires_grad
                 z = x.clone_preserve_strides_storage()
 
-            assert x.size() == z.size() and x.stride() == z.stride()
-            assert x.untyped_storage()._cdata == z.untyped_storage()._cdata
-            assert x.device == z.device and x.dtype == z.dtype
-            assert x.requires_grad == z.requires_grad
+            self.assertEqual(x.untyped_storage()._cdata, z.untyped_storage()._cdata)
+            assert_metadata_eq(assert_eq, x, z)
 
 
 class FakeTensorConstHandling(TestCase):
