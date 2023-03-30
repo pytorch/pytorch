@@ -1360,6 +1360,7 @@ class CppTile2DKernel(CppVecKernel):
 
     def gen_transposed_tile_load_store(self, name, var, index, is_store):
         # transposed tile load/store outside the kernel inner loop
+        dtype = V.graph.get_dtype(name)
         factor = self.tiling_factor
         new_index = self.scale_index_with_offset(index, factor, itervar_idx=-1)
         new_index = self.scale_index_with_offset(
@@ -1375,7 +1376,7 @@ class CppTile2DKernel(CppVecKernel):
             ld_src, ld_dst = ld_dst, ld_src
 
         need_define = True
-        load_or_store = f"at::vec::transpose_mxn<float,{factor},{factor}>({src}, {ld_src}, {dst}, {ld_dst});"
+        load_or_store = f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{factor},{factor}>({src}, {ld_src}, {dst}, {ld_dst});"
         if is_store:
             tile_var = self.cse.newvar()
         elif load_or_store not in self.cse.cache:
@@ -1385,7 +1386,7 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"float {tile_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
+            define_line = f"{DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -1397,6 +1398,7 @@ class CppTile2DKernel(CppVecKernel):
         return tile_var
 
     def load(self, name: str, index: sympy.Expr):
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
@@ -1407,7 +1409,15 @@ class CppTile2DKernel(CppVecKernel):
                 name, var, expanded_index, is_store=False
             )
             # vector load inside the kernel inner loop
-            line = f"at::vec::Vectorized<float>::loadu({tile_var} + {cexpr_index(inner * self.tiling_factor)})"
+            loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
+            if V.graph.get_dtype(name) in [torch.bfloat16]:
+                if opt_ctx.is_load_bf16_as_fp32:
+                    line = f"load_bf16_as_float({loadbuf})"
+                else:
+                    assert opt_ctx.is_bf16_mem_copy
+                    line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            else:
+                line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
         else:
             new_index = self.scale_index_with_offset(
@@ -1420,6 +1430,7 @@ class CppTile2DKernel(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
 
         inner = self.inner_itervar()
@@ -1432,7 +1443,15 @@ class CppTile2DKernel(CppVecKernel):
                 name, var, expanded_index, is_store=True
             )
             # vector store inside the kernel inner loop
-            line = f"{value}.store({tile_var} + {cexpr_index(inner * self.tiling_factor)});"
+            storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
+            if V.graph.get_dtype(name) in [torch.bfloat16]:
+                if opt_ctx.is_store_fp32_as_bf16:
+                    line = f"store_float_as_bf16({storebuf}, {value})"
+                else:
+                    assert opt_ctx.is_bf16_mem_copy
+                    line = f"{value}.store({storebuf}, {self.tiling_factor})"
+            else:
+                line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
         else:
             new_index = self.scale_index_with_offset(

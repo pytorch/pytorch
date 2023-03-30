@@ -7026,22 +7026,23 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
             for simdlen in (None, 256, 1):
                 with config.patch({"cpp.simdlen": simdlen}):
-                    for shape in (
-                        (7, 7),
-                        (8, 8),
-                        (9, 9),
-                        (16, 16),
-                        (17, 17),
-                        (32, 32),
-                        (33, 33),
-                    ):
-                        torch._dynamo.reset()
-                        metrics.reset()
-                        x = torch.randn(shape)
-                        opt_fn = torch._dynamo.optimize("inductor")(fn)
-                        same(fn(x), opt_fn(x))
-                        if simdlen != 1:
-                            assert metrics.generated_cpp_vec_kernel_count == 2
+                    for dtype in (torch.float, torch.bfloat16):
+                        for shape in (
+                            (7, 7),
+                            (8, 8),
+                            (9, 9),
+                            (16, 16),
+                            (17, 17),
+                            (32, 32),
+                            (33, 33),
+                        ):
+                            torch._dynamo.reset()
+                            metrics.reset()
+                            x = torch.randn(shape, dtype=dtype)
+                            opt_fn = torch._dynamo.optimize("inductor")(fn)
+                            assert same(fn(x), opt_fn(x))
+                            if simdlen != 1:
+                                assert metrics.generated_cpp_vec_kernel_count == 2
 
         def test_transpose_non_contiguous(self):
             def fn(a):
