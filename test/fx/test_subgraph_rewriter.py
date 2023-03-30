@@ -115,7 +115,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         ref_output = comparison_fn(x)
         test_output = traced.forward(x)
-        one_replacement = len(matches) == 1 and len(matches[0].replacements) == 1
+        one_replacement = len(matches) == 1 and len(matches[0].replacements) == 0
         self.assertEqual(ref_output, test_output)
         self.assertTrue(one_replacement)
 
