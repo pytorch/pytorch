@@ -479,6 +479,7 @@ class HuggingfaceRunner(BenchmarkRunner):
     def compute_loss(self, pred):
         return pred[0]
 
+    @torch._dynamo.skip
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast():
             return mod(**inputs)

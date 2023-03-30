@@ -358,6 +358,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def compute_loss(self, pred):
         return reduce_to_scalar_loss(pred)
 
+    @torch._dynamo.skip
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast():
             return mod(*inputs)
