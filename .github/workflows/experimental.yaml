@@ -1,4 +1,4 @@
-name: pull
+name: experimental-thing
 
 on:
   pull_request:
@@ -8,20 +8,21 @@ on:
       - main
       - release/*
       - landchecks/*
-  workflow_dispatch:
-  schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
-  cancel-in-progress: t
 jobs:
-
-  the-test:
+  test:
     name: the-test
-    uses: jitterbit/get-changed-files@v1
-    run: |
-      echo ${{ steps.files.outputs.all }}
-      for changed_file in ${{ steps.files.outputs.all }}; do
-        echo "Do something with this ${changed_file}."
-      done
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v35
+
+      - name: List all changed files
+        run: |
+          echo "<<<<<<<< start >>>>>>>>>"
+          echo "${{ steps.changed-files.outputs.all_changed_files }}"
+          echo "<<<<<<<< end >>>>>>>>>"
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            echo "$file was changed"
+          done
