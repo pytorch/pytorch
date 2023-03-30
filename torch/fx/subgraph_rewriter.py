@@ -301,6 +301,9 @@ def _replace_pattern(
         replacement_nodes = []
 
         def get_replacement_nodes(curr_node: Node):
+            if curr_node in match.placeholder_nodes:
+                return
+
             nonlocal replacement_nodes
             for arg in curr_node.args:
                 if isinstance(arg, Node):

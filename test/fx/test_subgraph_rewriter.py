@@ -384,7 +384,12 @@ class TestSubgraphRewriter(JitTestCase):
 
         x = torch.randn(3, 4)
 
-        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+        matches = subgraph_rewriter.replace_pattern_with_filters(traced, pattern, replacement, [])
+
+        # There should be no replacement nodes since we did not add any new
+        # nodes in the graph
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(len(matches[0].replacements), 0)
 
         traced.graph.lint()
 
