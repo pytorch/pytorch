@@ -147,7 +147,7 @@ jobs:
       - name: Test
         id: test
         # Time out the test phase after 3.5 hours
-        timeout-minutes: 1
+        timeout-minutes: 210
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
