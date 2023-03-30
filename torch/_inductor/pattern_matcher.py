@@ -435,7 +435,9 @@ def register_replacement(
     search_fn, replace_fn, example_inputs, trace_fn, pass_dict, *, scalar_workaround=()
 ):
     """
-    Create a replacement rule based on example functions that get traces to create patterns.
+    Create a replacement rule based on example functions that get traced
+    to create patterns.  This supports both training an inference when
+    run on a joint foward+backward graph.
 
     Args:
         search_fn: traced to give original pattern
@@ -470,8 +472,8 @@ def register_replacement(
 
         specific_graph = trace_fn(search_fn, args)
         specific_pattern = fx_to_pattern(specific_graph, argnames=argnames)
-        m = specific_pattern.match(match.output_nodes()[0])
-        if m:
+        if specific_pattern.match(match.output_nodes()[0]):
+            # trace the pattern using the shapes form the user program
             match.replacement_graph = trace_fn(replace_fn, args)
             return True
         return False
@@ -578,20 +580,20 @@ def reorder_for_locality(graph: torch.fx.Graph):
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
+def _not_implemented(*args, **kwargs):
+    raise NotImplementedError()
+
+
 def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
     """
     Convert an FX graph into a PatternExpr.  This is useful for simple
     patterns that can only match single functions and fixed length lists.
     """
-
     # scalar_workaround is a hack to capture dropout_p
     # see https://github.com/pytorch/pytorch/issues/97894
     scalar_workaround = scalar_workaround or {}
     inv_scalar_workaround = {v: k for k, v in scalar_workaround.items()}
     assert len(inv_scalar_workaround) == len(scalar_workaround)
-
-    def not_implemented(*args, **kwargs):
-        raise NotImplementedError()
 
     def process_arg(x):
         if isinstance(x, (float, int)) and x in inv_scalar_workaround:
@@ -603,9 +605,9 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
     argnum = itertools.count()
 
     class Converter(torch.fx.Interpreter):
-        call_method = not_implemented
-        call_module = not_implemented
-        get_attr = not_implemented
+        call_method = _not_implemented
+        call_module = _not_implemented
+        get_attr = _not_implemented
 
         def placeholder(self, target, args, kwargs):
             n = next(argnum)
@@ -682,12 +684,13 @@ def clone_graph(input_graph):
 _seen_patterns = set()
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
-    PatternMatcherPass(),  # pass 0
-    PatternMatcherPass(),  # pass 1
-    PatternMatcherPass(),  # pass 2
+    PatternMatcherPass(),
+    PatternMatcherPass(),
+    PatternMatcherPass(),
 ]
 
 
+# TODO(janse): move the rest of this file to fx_passes/post_grad.py
 def post_grad_passes(gm: torch.fx.GraphModule):
     if config.dce:
         # has some issues with mutation in inference mode
