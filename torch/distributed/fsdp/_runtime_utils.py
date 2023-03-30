@@ -307,7 +307,7 @@ def _unshard(
     forced to full precision.
 
     Postcondition: Each handle's ``FlatParameter`` 's data is the padded
-    unsharded flattened parameter on the compute device.
+    unsharded flat parameter on the compute device.
     """
     if not handles:
         return
@@ -337,8 +337,7 @@ def _reshard(
     """
     Reshards the handles in ``handles``. ``free_unsharded_flat_params`` should
     have the same length as ``handles``, and each element should give whether
-    the corresponding handle should free its padded unsharded flattened
-    parameter.
+    the corresponding handle should free its padded unsharded flat parameter.
     """
     if not handles:
         return
@@ -463,14 +462,14 @@ def _post_forward(
         output (Any): Forward pass output; pre-backward hooks are registered on
             the tensors that require gradients in this output.
 
-    Postcondition: Each ``FlatParameter`` 's data points to the sharded
-    flattened parameter.
+    Postcondition: Each ``FlatParameter`` 's data points to the sharded flat
+    parameter.
     """
     state._exec_order_data.record_post_forward(handles)
     if reshard_fn is not None:
         reshard_fn()
-    # Register pre-backward hooks to unshard the flattened parameters
-    # for the gradient computation (if needed)
+    # Register pre-backward hooks to unshard the flat parameters for the
+    # gradient computation (if needed)
     output = _register_pre_backward_hooks(state, module, output, handles)
     state.training_state = TrainingState.IDLE
     for handle in handles:
@@ -489,7 +488,6 @@ def _post_forward_reshard(
     # Do not free the root's parameters in the post-forward for `FULL_SHARD`
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
-
     free_unsharded_flat_params = [
         not state._is_root
         and handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
@@ -806,16 +804,17 @@ def _should_free_in_backward(
     handle: FlatParamHandle,
 ) -> bool:
     """
-    Returns whether FSDP should free the unsharded flattened parameter in the
+    Returns whether FSDP should free the unsharded flat parameter in the
     post-backward or not.
     """
-    # We always free if we are syncing gradients (i.e. not in no_sync) and parameters
-    # are sharded.
-    free_unsharded = state._sync_gradients and handle.uses_sharded_strategy
-    # For NO_SHARD we don't need to free full parameters, for ZeRO-2 strategies, we skip
-    # freeing in backward.
-    return free_unsharded or (
-        handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
+    if not handle.uses_sharded_strategy:
+        return False
+    # If not syncing gradients, then we do not free for strategies that do not
+    # reshard after forward as a *heuristic* to tradeoff higher memory for
+    # higher throughput.
+    return (
+        state._sync_gradients
+        or handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
     )
 
 
