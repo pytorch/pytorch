@@ -425,7 +425,7 @@ Tensor conv_depthwise3d_cuda(
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
-      kBfloat16,
+      kBFloat16,
       input.scalar_type(),
       "conv_depthwise3d",
       [&]{
@@ -555,7 +555,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
     const Tensor weight_ = weight.contiguous();
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf,
-        kBfloat16,
+        kBFloat16,
         grad_output.scalar_type(),
         "conv_depthwise3d",
         [&] {
@@ -592,7 +592,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
     const Tensor input_ = input.contiguous();
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf,
-        kBfloat16,
+        kBFloat16,
         grad_output.scalar_type(),
         "conv_depthwise3d",
         [&] {
