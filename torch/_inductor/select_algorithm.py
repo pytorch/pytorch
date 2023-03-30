@@ -136,7 +136,7 @@ class TritonTemplateKernel(TritonKernel):
             [
                 "import triton.language as tl",
                 "import triton",
-                "from torch._inductor.triton_ops.autotune import template",
+                "from torch._inductor.triton_heuristics import template",
                 "from torch._inductor.utils import instance_descriptor",
                 "",
                 self.jit_line(),
@@ -269,10 +269,9 @@ class TritonTemplateKernel(TritonKernel):
         result, *mask = super().indexing(
             index,
             dense_indexing=False,
-            copy_shape=copy_shape,
+            copy_shape=self.template_mask,
             override_mask=self.template_mask,
         )
-        result += f" + tl.zeros({self.template_mask}.shape, tl.int32)"
         return (result, *mask)
 
     def initialize_range_tree(self, pid_cache):
@@ -808,12 +807,14 @@ class AlgorithmSelectorCache(PersistentCache):
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
+            sys.stderr.write(
+                f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
+            )
 
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse} seconds\n")
+        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse:.4f} seconds\n")
 
     @staticmethod
     def benchmark_example_value(node):
