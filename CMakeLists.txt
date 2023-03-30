@@ -92,7 +92,7 @@ if(APPLE)
 
   # Get clang version on macOS
   execute_process( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
-  string(REGEX REPLACE "Apple LLVM version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
+  string(REGEX REPLACE "Apple (.*) version ([0-9]+\\.[0-9]+).*" "\\2" CLANG_VERSION_STRING ${clang_full_version_string})
   message( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
 
 
