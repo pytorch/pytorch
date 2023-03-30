@@ -1025,7 +1025,6 @@ def emit_body(
         differentiable_inputs: List[DifferentiableInput],
     ) -> List[DifferentiableInput]:
         """Find arguments that have derivative definitions"""
-        assert differentiable_inputs is not None
         if info is None or not info.has_derivatives:
             return differentiable_inputs
         names = {name for d in info.derivatives for name in d.var_names}
@@ -1033,8 +1032,7 @@ def emit_body(
         if len(differentiable) != len(names):
             missing = names - {arg.name for arg in differentiable}
             raise RuntimeError(
-                f"Missing arguments for derivatives: {missing} in {info.name}, "
-                f"{names = }, {differentiable = }, "
+                f"Missing arguments for derivatives: {missing} in {info.name}"
             )
         return differentiable
 
