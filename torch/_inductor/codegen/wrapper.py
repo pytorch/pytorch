@@ -700,7 +700,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.ending = ";"
         self.comment = "//"
         self.namespace = "at::"
-        self.extern_call_ops = dict()
+        self.extern_call_ops = set()
 
     def seed(self):
         """
@@ -938,7 +938,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         .typed<{cpp_op_schema}>();
             """
             )
-            self.extern_call_ops[cpp_kernel_key] = True
+            self.extern_call_ops.add(cpp_kernel_key)
 
         self.writeline(
             f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
