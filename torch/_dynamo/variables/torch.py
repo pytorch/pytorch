@@ -379,7 +379,7 @@ class TorchVariable(VariableTracker):
             # GenerateStrateSource.
             device = "cpu" if self.value is torch.random.get_rng_state else "cuda"
             seed = (
-                torch.initial_seed() if device == "cuda" else torch.cuda.initial_seed()
+                torch.initial_seed() if device == "cpu" else torch.cuda.initial_seed()
             )
             source = GeneratorStateSource(device, seed)
 
