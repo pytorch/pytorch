@@ -218,9 +218,11 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     ]
     share_qparams_ops = [
         F.adaptive_avg_pool2d,
+        F.hardtanh,
         F.relu,
         F.relu6,
         torch.nn.AdaptiveAvgPool2d,
+        torch.nn.Hardtanh,
         torch.squeeze,
         "permute",
         "reshape",
