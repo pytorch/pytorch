@@ -582,12 +582,12 @@ class TraceTrainStepTest(DTensorTestBase):
         mod = nn.Linear(10, 10, bias=False).cuda(rank)
         # FIXME(@mrshenli): we have to enable foreach to get better perf
         opt = torch.optim.Adam(
-            mod.parameters(), lr=0.01, foreach=False, capturable=True
+            mod.parameters(), lr=0.01, foreach=True, capturable=True
         )
         inp = torch.randn(2, 10).cuda(rank)
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
-        ddp_opt = torch.optim.Adam(ddp_mod.parameters(), lr=0.01, foreach=False)
+        ddp_opt = torch.optim.Adam(ddp_mod.parameters(), lr=0.01, foreach=True)
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
 
     @skip_if_lt_x_gpu(2)
