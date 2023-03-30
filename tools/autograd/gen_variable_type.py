@@ -574,7 +574,7 @@ std::shared_ptr<${op}> grad_fn;
 
 DECLARE_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
-std::vector<std::shared_ptr<${op}>> grad_fn;
+std::vector<std::shared_ptr<${op}>> grad_fns;
 """
 )
 
@@ -609,12 +609,14 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """
 )
 
+# TODO(crcrpar): Remove `(void)i;` to suppress `-Wunused-variable`
 ASSIGN_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
 for (const auto& i : c10::irange( ${irange} )) {
-    auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
-    grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
-    grad_fns.push_back(grad_fn);
+  (void)i;
+  auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+  grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
+  grad_fns.push_back(grad_fn);
 }
 """
 )
@@ -972,25 +974,19 @@ def emit_body(
     base_name = get_base_name(f)
     view_info = get_view_info(f)
 
+    is_inplace_foreach = name.startswith("_foreach") and inplace
+
     foreacharg2refarg: Dict[Argument, Argument] = {}
-    if (
-        f.func.name.name.base.startswith("_foreach")
-        and f.func.kind() == SchemaKind.inplace
-    ):
+    if is_inplace_foreach:
         if info is not None:
-            for foreach_arg, reference_arg in zip(
-                f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
-            ):
-                pass
             for foreach_arg, ref_arg in zip(
                 f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
             ):
-                if foreach_arg.name != ref_arg.name:
-                    foreach_arg_type = getattr(
-                        foreach_arg.type, "elem", foreach_arg.type
-                    )
-                    assert foreach_arg_type == ref_arg.type
-                    foreacharg2refarg[foreach_arg] = ref_arg
+                foreach_arg_type = getattr(
+                    foreach_arg.type, "elem", foreach_arg.type
+                )
+                assert foreach_arg_type == ref_arg.type
+                foreacharg2refarg[foreach_arg] = ref_arg
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -1019,14 +1015,15 @@ def emit_body(
             for arg in f.func.arguments.flat_non_out:
                 if arg in foreacharg2refarg:
                     mapped_arg = foreacharg2refarg[arg]
-                    arguments.append(
-                        Argument(
-                            mapped_arg.name,
-                            mapped_arg.type,
-                            mapped_arg.default,
-                            mapped_arg.annotation,
+                    if arg.name != mapped_arg.name:
+                        arguments.append(
+                            Argument(
+                                mapped_arg.name,
+                                mapped_arg.type,
+                                mapped_arg.default,
+                                mapped_arg.annotation,
+                            )
                         )
-                    )
         return list(mapMaybe(gen_differentiable_input, arguments))
 
     def find_args_with_derivatives(
@@ -1057,7 +1054,11 @@ def emit_body(
     requires_derivative = (
         (not undifferentiable)
         and (len(differentiable_inputs) > 0)
-        and (len(differentiable_outputs) > 0)
+        and (
+            (len(differentiable_outputs) > 0)
+            # note(crcrpar): In-place foreach functions are a void function.
+            or is_inplace_foreach
+        )
     )
 
     if (
@@ -1073,15 +1074,20 @@ def emit_body(
         )
 
     if requires_derivative and len(fw_derivatives) > 0:
-        assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(
-            differentiable_outputs
-        ), (
-            "Expected the number of forward derivatives implemented to match the "
-            "number of differentiable outputs. NB: This only applies when at least "
-            "one forward derivative is implemented. Not implementing any forward "
-            "derivatives is also okay, and we would require inputs to the op to "
-            "not have associated tangents in that case."
-        )
+        # note(crcrpar): In-place foreach functions do not support forward AD
+        # but their `info` is the same as their reference native function
+        # thus it's (for now) necessary to skip this check.
+        if (not is_inplace_foreach) and sum(
+            len(derivative.var_names) for derivative in fw_derivatives
+        ) != len(differentiable_outputs):
+            raise RuntimeError(
+                "Expected the number of forward derivatives implemented to match the "
+                "number of differentiable outputs. NB: This only applies when at least "
+                "one forward derivative is implemented. Not implementing any forward "
+                "derivatives is also okay, and we would require inputs to the op to "
+                "not have associated tangents in that case."
+            )
+
     try_jit_decomposition = (
         requires_derivative
         and len(fw_derivatives) == 0
@@ -1145,11 +1151,23 @@ def emit_body(
 
             return f"grad_fn->should_compute_output({edge_off})"
 
-        setup.extend(save_variables(info.all_saved_inputs, False, guard_for))
+        if is_inplace_foreach:
+            setup.append("for (const auto& i : c10::irange(grad_fns.size())) {")
+            setup.append("  auto grad_fn = grad_fns[i];")
+            setup.extend(
+                [
+                    f"  {stmt}"
+                    for stmt in save_variables(info.all_saved_inputs, False, guard_for)
+                ]
+            )
+        else:
+            setup.extend(save_variables(info.all_saved_inputs, False, guard_for))
         for arg in args_with_derivatives:
-            if is_tensor_list_type(arg.type):
+            if is_tensor_list_type(arg.type) and not is_inplace_foreach:
                 setup.append(f"grad_fn->{arg.name}_size_ = {arg.name}.size();")
 
+        if is_inplace_foreach:
+            setup.append("}")
         return setup
 
     def setup_derivative(differentiable_inputs: List[DifferentiableInput]) -> List[str]:
@@ -1173,21 +1191,41 @@ def emit_body(
 
         op = info.op if info is not None and info.has_derivatives else "NotImplemented"
         setup = []
-        setup.extend(
-            ASSIGN_GRAD_FN.substitute(
-                op=op,
-                op_ctor=""
-                if info is not None and info.has_derivatives
-                else f'"{cpp.name(f.func)}"',
-                args_with_derivatives=[arg.name for arg in args_with_derivatives],
-            ).split("\n")
-        )
+        if not is_inplace_foreach:
+            setup.extend(
+                ASSIGN_GRAD_FN.substitute(
+                    op=op,
+                    op_ctor=""
+                    if info is not None and info.has_derivatives
+                    else f'"{cpp.name(f.func)}"',
+                    args_with_derivatives=[arg.name for arg in args_with_derivatives],
+                ).split("\n")
+            )
+        else:
+            list_like_arg = ""
+            for arg in f.func.arguments.flat_non_out:
+                if isinstance(arg.type, ListType):
+                    list_like_arg = arg.name
+                    break
+            setup.extend(
+                ASSIGN_VECTOR_OF_GRAD_FN.substitute(
+                    op=op,
+                    op_ctor=""
+                    if info is not None and info.has_derivatives
+                    else f'"{cpp.name(f.func)}"',
+                    args_with_derivatives=[arg.name for arg in args_with_derivatives],
+                    irange=f"{list_like_arg}.size()",
+                ).split("\n")
+            )
         setup.extend(emit_save_inputs())
 
         body.extend(
             emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives)
         )
-        body.append(DECLARE_GRAD_FN.substitute(op=op))
+        declare_grad_fn_template = (
+            DECLARE_GRAD_FN if not is_inplace_foreach else DECLARE_VECTOR_OF_GRAD_FN
+        )
+        body.append(declare_grad_fn_template.substitute(op=op))
         body.append(SETUP_DERIVATIVE.substitute(setup=setup))
         return body
 
@@ -1224,14 +1262,20 @@ def emit_body(
     def emit_original_self_definition() -> List[str]:
         body: List[str] = []
         if inplace:
-            body.append("c10::optional<at::Tensor> original_self;")
+            if is_inplace_foreach:
+                body.append(
+                    "std::vector<c10::optional<at::Tensor>> original_selfs(self.size());"
+                )
+            else:
+                body.append("c10::optional<at::Tensor> original_self;")
 
             all_forward_grad_cond = []
-            for derivative in fw_derivatives:
-                if derivative.required_original_self_value:
-                    all_forward_grad_cond.append(
-                        get_any_has_forward_grad_name(derivative.var_names)
-                    )
+            if not is_inplace_foreach:
+                for derivative in fw_derivatives:
+                    if derivative.required_original_self_value:
+                        all_forward_grad_cond.append(
+                            get_any_has_forward_grad_name(derivative.var_names)
+                        )
 
             if all_forward_grad_cond:
                 body.append(f'if ({" || ".join(all_forward_grad_cond)}) {{')
@@ -1265,10 +1309,12 @@ def emit_body(
                 var = name
                 name += "_"
                 if var == "self" and inplace:
-                    stmts_prepend = (
-                        "if (!original_self.has_value()) original_self = self.clone()"
-                    )
-                    var = "original_self.value()"
+                    if not is_inplace_foreach:
+                        stmts_prepend = "if (!original_self.has_value()) original_self = self.clone()"
+                        var = "original_self.value()"
+                    else:
+                        stmts_prepend = "if (!original_selfs[i].has_value()) original_selfs[i] = self[i].clone()"
+                        var = "original_selfs[i].value()"
                     assert not is_output
                 if inplace and is_output:
                     var = "self"
@@ -1532,7 +1578,10 @@ def emit_body(
         outs = CodeTemplate("flatten_tensor_args( ${outs} )").substitute(
             outs=output_names
         )
-        return SET_HISTORY.substitute(fn=fn, differentiable_outputs=outs)
+        set_history_template = (
+            SET_HISTORY if not is_inplace_foreach else SET_HISTORY_FOR_VECTOR_OF_GRAD_FN
+        )
+        return set_history_template.substitute(fn=fn, differentiable_outputs=outs)
 
     def emit_save_outputs() -> str:
         if is_out_fn:
@@ -1542,7 +1591,20 @@ def emit_body(
             stmts = save_variables(info.all_saved_outputs, True)
             if len(stmts) == 0:
                 return ""
-            return CONDITIONAL.substitute(cond="grad_fn", statements=stmts)
+            if not is_inplace_foreach:
+                return CONDITIONAL.substitute(cond="grad_fn", statements=stmts)
+            else:
+                stmts = (
+                    [
+                        "for (const auto& i : c10::irange(grad_fns.size())) {",
+                        "  auto grad_fn = grad_fns[i];",
+                    ]
+                    + [f"  {s}" for s in stmts]
+                    + ["}"]
+                )
+                return CONDITIONAL.substitute(
+                    cond="!grad_fns.empty()", statements=stmts
+                )
         return ""
 
     def emit_any_requires_grad() -> List[str]:
@@ -1564,6 +1626,8 @@ def emit_body(
             return f'_any_has_forward_grad_{"_".join(var_names)}'
 
     def emit_any_has_forward_grad() -> List[str]:
+        if is_inplace_foreach:
+            return []
         content: List[str] = []
         for derivative in fw_derivatives:
             requires_fw_grad = get_any_has_fw_grad_cond(derivative=derivative)
@@ -1585,6 +1649,8 @@ def emit_body(
         ]
 
     def emit_fw_derivatives() -> List[str]:
+        if is_inplace_foreach:
+            return []
         content: List[str] = []
         fw_grad_setters: List[str] = []
         for derivative in fw_derivatives:
