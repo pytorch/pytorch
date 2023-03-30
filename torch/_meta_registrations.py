@@ -1262,7 +1262,7 @@ def meta__foreach_binop_list(self, other):
         aten._foreach_sub_.Scalar,
     ]
 )
-def meta__foreach_binop__scalar(self, scalar):
+def meta__foreach_binop__scalar(self, scalar=1):
     check(
         isinstance(self, List),
         lambda: f"The first argument of must be List[Tensor], but got {type(self)}.",
@@ -1277,7 +1277,7 @@ def meta__foreach_binop__scalar(self, scalar):
         aten._foreach_sub.Scalar,
     ]
 )
-def meta__foreach_binop_scalar(self, scalar):
+def meta__foreach_binop_scalar(self, scalar=1):
     check(
         isinstance(self, List),
         lambda: f"The first argument of must be List[Tensor], but got {type(self)}.",

@@ -204,9 +204,6 @@ def _get_dtensor_dispatch_graph(
         # call_function  _to_copy           aten._to_copy.default     (view_1,)
         gm.graph.eliminate_dead_code()
 
-        if torch.distributed.get_rank() == 0:
-            gm.graph.print_tabular()
-
         return gm
 
 
@@ -481,7 +478,6 @@ def _convert_to_distributed(
             )
 
         elif isinstance(node.target, torch._ops.OpOverload):
-            logger.info("in OpOverload")
             node_replacements[node] = _get_dtensor_dispatch_graph(
                 node, node_to_obj
             )
@@ -505,7 +501,6 @@ def _convert_to_distributed(
                         )
 
         elif node.op == OP.CALL_FUNCTION:
-            logger.info("in CALL_FUNCTION")
 
             def _remap_arg(arg: object) -> object:
                 if isinstance(arg, torch.fx.Node):

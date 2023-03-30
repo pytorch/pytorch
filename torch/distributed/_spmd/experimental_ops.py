@@ -29,7 +29,7 @@ def _prop__foreach_unaop(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(self, list) and all(
         [isinstance(s, DTensorSpec) for s in self]
     )
-    # FIXME(@mrshenli): for sqrt, this is only mathmatically correct for
+    # FIXME(@mrshenli): for sqrt, this is only mathematically correct for
     # Replicate and Shard tensor.
     return OutputSharding(output_spec=self)
 
@@ -88,11 +88,11 @@ def _prop__foreach_binop_list(op_schema: OpSchema) -> OutputSharding:
     ]
 )
 def _prop__foreach_binop_scalar(op_schema: OpSchema) -> OutputSharding:
-    self, other = op_schema.args_schema
+    self, scalar = op_schema.args_schema
     assert isinstance(self, list) and all(
         [isinstance(s, DTensorSpec) for s in self]
     )
-    assert not isinstance(other, list)
+    assert not isinstance(scalar, list)
     return OutputSharding(output_spec=self)
 
 
