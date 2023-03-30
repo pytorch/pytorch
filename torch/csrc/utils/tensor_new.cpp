@@ -369,10 +369,15 @@ Tensor internal_new_from_data(
       at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
       if (isStorage(data)) {
-        ScalarType storage_scalar_type{ScalarType::Undefined};
         bool is_typed_storage = false;
-        Storage storage =
-            createStorageGetType(data, storage_scalar_type, is_typed_storage);
+        ScalarType storage_scalar_type{ScalarType::Undefined};
+        Storage storage;
+        std::tie(storage, storage_scalar_type, is_typed_storage) =
+            createStorageGetType(data);
+
+        PyObject* storage_pyobj = storage.unsafeGetStorageImpl()
+                                      ->pyobj_slot()
+                                      ->_unchecked_untagged_pyobj();
         TORCH_CHECK(
             !is_typed_storage || storage_scalar_type == scalar_type,
             "Expected a Storage of type ",
@@ -680,6 +685,7 @@ Tensor legacy_tensor_generic_ctor_new(
   } else if (r.idx == 1) {
     at::ScalarType storage_scalar_type{at::ScalarType::Undefined};
     bool is_typed_storage = false;
+    // TODO: Check that this reuses the same StorageImpl
     at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
     if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
       TORCH_CHECK(
@@ -1635,7 +1641,10 @@ Tensor asarray(
       THPObjectPtr ptr;
       auto arr = obj;
 
-      if (is_numpy_scalar) {
+      // PyArray_CheckScalar is true for both scalars and 0-dim arrays, per
+      // https://numpy.org/devdocs/reference/c-api/array.html#c.PyArray_CheckScalar
+      // But for 0-dim arrays no `PyArray_FromScalar` call is needed
+      if (is_numpy_scalar && !is_numpy_array) {
         TORCH_CHECK(
             !force_alias,
             "can't alias NumPy scalars. ",

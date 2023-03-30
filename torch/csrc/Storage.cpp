@@ -116,10 +116,7 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
       status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
     }
   }
-  return THPStorage_NewWithStorage(
-      THPStorageClass,
-      std::move(storage),
-      c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+  return THPStorage_NewWithStorage(THPStorageClass, std::move(storage), status);
 }
 
 static void clear_slots(PyTypeObject* type, PyObject* self) {
@@ -173,27 +170,75 @@ static bool THPStorage_tryPreserve(THPStorage* self) {
   Py_INCREF(self);
 
   self->cdata = c10::MaybeOwned<c10::Storage>::borrowed(storage);
-
   return true;
 }
 
 static void THPStorage_subclass_dealloc(PyObject* self) {
   THPStorage* _self = (THPStorage*)self;
 
-  if (THPStorage_tryPreserve(_self))
+  if (THPStorage_tryPreserve(_self)) {
     return;
+  }
 
-  // Some subclass of StorageBase are GC-tracked objects even
-  // though the base class is not.
+  // Some subclass of StorageBase could be GC-tracked objects even
+  // though the base class is not
   auto* type = Py_TYPE(self);
   if (PyType_HasFeature(type, Py_TPFLAGS_HAVE_GC) != 0) {
     PyObject_GC_UnTrack(self);
   }
 
+  bool has_finalizer = type->tp_finalize || type->tp_del;
+
+  if (type->tp_finalize) {
+    PyObject_GC_Track(self);
+    if (PyObject_CallFinalizerFromDealloc(self) < 0) {
+      // The finalizer has resurrected the PyObject and there is a new Python
+      // reference to it, so we can just stop deallocating. Read about
+      // resurrection from `__del__` here:
+      // https://docs.python.org/3/reference/datamodel.html#object.__del__
+      return;
+    }
+    PyObject_GC_UnTrack(self);
+  }
+
+  // base test is unnecessary as THPStorae does not set this
+  if (type->tp_weaklistoffset) {
+    PyObject_ClearWeakRefs(self);
+  }
+
+  if (type->tp_del) {
+    PyObject_GC_Track(self);
+    type->tp_del(self);
+    if (self->ob_refcnt > 0) {
+      // Resurrected (see above comment about resurrection from `__del__`)
+      return;
+    }
+    PyObject_GC_UnTrack(self);
+  }
+
+  if (has_finalizer) {
+    /* New weakrefs could be created during the finalizer call.
+       If this occurs, clear them out without calling their
+       finalizers since they might rely on part of the object
+       being finalized that has already been destroyed. */
+    if (type->tp_weaklistoffset) {
+      /* Modeled after GET_WEAKREFS_LISTPTR() */
+      PyWeakReference** list =
+          (PyWeakReference**)PyObject_GET_WEAKREFS_LISTPTR(self);
+      while (*list)
+        _PyWeakref_ClearRef(*list);
+    }
+  }
+
   // Clear slots
   {
-    if (Py_SIZE(&THPStorageType)) {
-      clear_slots(&THPStorageType, self);
+    PyTypeObject* base = type;
+    while (base != &THPStorageType) {
+      if (Py_SIZE(base)) {
+        clear_slots(base, self);
+      }
+      base = base->tp_base;
+      TORCH_INTERNAL_ASSERT(base);
     }
   }
 
@@ -209,8 +254,13 @@ static void THPStorage_subclass_dealloc(PyObject* self) {
     }
   }
 
+  TORCH_INTERNAL_ASSERT(Py_TYPE(self) == type);
+
   _self->cdata.~MaybeOwned<c10::Storage>();
   Py_TYPE(_self)->tp_free(self);
+
+  TORCH_INTERNAL_ASSERT(type->tp_flags & Py_TPFLAGS_HEAPTYPE);
+  Py_DECREF(type);
 }
 
 static PyObject* THPStorage_pynew(

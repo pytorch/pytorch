@@ -113,14 +113,33 @@ bool isStorage(PyObject* obj) {
   if (PyObject_TypeCheck(obj, getTypedStorageTypeObject())) {
     return true;
   }
-  auto obj_type = Py_TYPE(obj);
-  return THPStorage_CheckExact(obj);
+  // TODO: Find look at the call sites of isStorage to find out if this change
+  // could break any of them
+  return THPStorage_Check(obj);
 }
 
-at::Storage createStorageGetType(
-    PyObject* obj,
-    at::ScalarType& scalar_type,
-    bool& is_typed_storage) {
+at::ScalarType getStorageType(PyObject* obj, bool& is_typed_storage) {
+  at::ScalarType scalar_type{at::ScalarType::Undefined};
+  is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
+
+  if (is_typed_storage) {
+    PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
+    TORCH_INTERNAL_ASSERT(dtype_obj);
+    Py_DECREF(dtype_obj);
+
+    TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_obj));
+    scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
+  } else {
+    scalar_type = at::kByte;
+  }
+  return scalar_type;
+}
+
+std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
+    PyObject* obj) {
+  at::ScalarType scalar_type;
+  bool is_typed_storage;
+
   is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
   PyObject* untyped_storage_obj;
 
@@ -144,21 +163,18 @@ at::Storage createStorageGetType(
     untyped_storage_obj = obj;
   }
 
-  if (!THPStorage_CheckExact(untyped_storage_obj)) {
-    throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
-  }
+  TORCH_CHECK(
+      THPStorage_Check(untyped_storage_obj),
+      "not a storage '",
+      Py_TYPE(obj)->tp_name,
+      "'");
 
-  const auto& storage = THPStorage_Unpack(untyped_storage_obj);
-  c10::DeviceType device_type = storage.device().type();
-  auto type_properties = get_type_properties(device_type, at::kByte);
-  return type_properties->unsafeStorageFromTH(
-      storage.unsafeGetStorageImpl(), true);
+  auto storage = THPStorage_Unpack(untyped_storage_obj);
+  return std::make_tuple(storage, scalar_type, is_typed_storage);
 }
 
 at::Storage createStorage(PyObject* obj) {
-  at::ScalarType scalar_type;
-  bool is_typed_storage = false;
-  return createStorageGetType(obj, scalar_type, is_typed_storage);
+  return std::get<0>(createStorageGetType(obj));
 }
 
 } // namespace torch

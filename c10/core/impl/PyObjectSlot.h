@@ -14,7 +14,9 @@ struct C10_API PyObjectSlot {
  public:
   PyObjectSlot();
 
-  void destroy_pyobj_if_needed();
+  ~PyObjectSlot();
+
+  void maybe_destroy_pyobj();
 
   // Associate the TensorImpl with the specified PyObject, and, if necessary,
   // also tag the interpreter.

@@ -582,7 +582,6 @@ PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
       THPUtils_checkLong(arg), "_new_with_weak_ptr(): arg must be an 'int'");
   c10::StorageImpl* weak_storage = (c10::StorageImpl*)PyLong_AsVoidPtr(arg);
   if (auto* storage = c10::raw::weak_intrusive_ptr::lock(weak_storage)) {
-    // TODO: idk about this
     return THPStorage_Wrap(
         c10::intrusive_ptr<c10::StorageImpl>::reclaim(storage));
   }
