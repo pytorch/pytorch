@@ -861,7 +861,7 @@ def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
                       BinConstraintD(0, my_output, op_leq)])
             return [c], counter
 
-    elif isinstance(n.args[1], Node) and (isinstance(n.args[0], int) or isinstance(n.args[1], float)):
+    elif isinstance(n.args[1], Node) and isinstance(n.args[0], (int, float)):
         if isinstance(symbols[n.args[1]], TVar):
             my_output, counter = gen_tvar(counter)
             symbols[n] = my_output
