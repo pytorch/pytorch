@@ -23,7 +23,6 @@ import torch._dynamo
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
-from torch._inductor.codegen.cpp import CppVecKernelChecker
 from torch._inductor.utils import run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
@@ -55,7 +54,7 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from functorch.compile import config as functorch_config
-from torch._inductor import config, metrics, test_operators
+from torch._inductor import config, test_operators
 
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import has_torchvision_roi_align
