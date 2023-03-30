@@ -3405,50 +3405,13 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         inputs,
         constant_args=(),
         kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
-        cpp_kernel="mkldnn::_convolution_pointwise_",
-        cpp_constant_args=(),
     ):
-        # TODO: fix me
-        # Due to constrain of op.call, other (Tensor&) should be at input[0]
-        reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
-        super().__init__(
-            kernel_layout, reordered_inputs, constant_args, None, kernel, cpp_kernel
-        )
-        self.cpp_kernel_overlad_name = "binary"
-        self.cpp_kernel_key = "convolution_pointwise_binary_"
-        # TODO: op.call: input[0] should be at::Tensor&
-        self.cpp_op_schema = """
-            at::Tensor&(
-                at::Tensor& other_t,
-                const at::Tensor& input_t,
-                const at::Tensor& weight_t,
-                const c10::optional<at::Tensor>& bias_opt,
-                at::IntArrayRef padding,
-                at::IntArrayRef stride,
-                at::IntArrayRef dilation,
-                int64_t groups,
-                c10::string_view binary_attr,
-                c10::optional<at::Scalar> alpha,
-                c10::optional<c10::string_view> unary_attr,
-                torch::List<c10::optional<at::Scalar>> unary_scalars,
-                c10::optional<c10::string_view> unary_algorithm)"""
-        self.cpp_constant_args = cpp_constant_args
+        super().__init__(kernel_layout, inputs, constant_args)
+        self.kernel = kernel
 
     def codegen(self, wrapper):
-        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
-
-        if isinstance(wrapper, CppWrapperCodeGen):
-            args = self.cpp_wrapper_codegen_args()
-        else:
-            args = self.codegen_args()
-        wrapper.generate_fusion_ops_code(
-            self.get_name(),
-            self.kernel,
-            self.cpp_kernel,
-            args,
-            self.cpp_op_schema,
-            self.cpp_kernel_key,
-            self.cpp_kernel_overlad_name,
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
 
     def get_mutation_names(self):
@@ -3492,19 +3455,11 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             unary_scalars,
             unary_algorithm,
         ]
-        cpp_constant_args = cpp_constant_args + [
-            f'"{binary_attr}"',
-            str(binary_alpha) if binary_alpha else str(1.0),  # TODO: optional(float)
-            f'"{unary_attr}"' if unary_attr else '""',
-            _string(unary_scalars) if unary_scalars else "{-1}",  # TODO: optional(list)
-            unary_algorithm if unary_algorithm else '""',
-        ]
         return ConvolutionBinaryInplace(
             kernel_layout=MutationLayout(inputs[1]),
             inputs=inputs,
             constant_args=constant_args,
             kernel=kernel,
-            cpp_constant_args=cpp_constant_args,
         )
 
 
