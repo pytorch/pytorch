@@ -211,6 +211,10 @@ error_on_nested_fx_trace = True
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
+# If true, error if we try to compile a function that has
+# been seen before.
+error_on_recompile = False
+
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
