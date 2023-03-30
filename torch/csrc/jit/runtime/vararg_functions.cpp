@@ -18,7 +18,7 @@ void addFormattedArg(
     const IValue& ival,
     std::stringstream& ss,
     int precision = defaultPrecision) {
-  // TODO: Implement precison-based formatting
+  // TODO: Implement precision-based formatting
   std::stringstream tmp;
   switch (key) {
     case 'd':
