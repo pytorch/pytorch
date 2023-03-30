@@ -920,7 +920,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
             self.extern_call_ops[cpp_kernel_key] = True
 
-        # self.writeline("torch::List<c10::optional<at::Scalar>> scalars;")
         self.writeline(
             f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
