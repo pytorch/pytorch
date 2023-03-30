@@ -526,3 +526,7 @@ class ListIteratorVariable(VariableTracker):
             create_instruction("BUILD_TUPLE", len(remaining_items)),
             create_instruction("GET_ITER"),
         ]
+
+
+class TupleIteratorVariable(ListIteratorVariable):
+    pass
