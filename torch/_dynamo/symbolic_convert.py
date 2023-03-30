@@ -1839,7 +1839,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         _step_logger()(
             logging.INFO,
             "torchdynamo start tracing file "
-            f"\"{self.f_code.co_filename}\", line {self.f_code.co_firstlineno}, in {self.f_code.co_name}"
+            f'"{self.f_code.co_filename}", line {self.f_code.co_firstlineno}, in {self.f_code.co_name}',
         )
         super().run()
 

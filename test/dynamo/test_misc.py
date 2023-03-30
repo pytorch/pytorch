@@ -3308,7 +3308,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_duplicate_graph_break_warning(self):
         @torch._dynamo.optimize("eager")
         def f1(a, b):
-            f2(a, b)
+            c = a + b
+            return f2(a, b) + c
 
         def f2(a, b):
             c = a + b
@@ -3317,7 +3318,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.optimize("eager")
         def g1(a, b):
-            g2(a, b)
+            c = a + b
+            return g2(a, b) + c
 
         def g2(a, b):
             c = a + b

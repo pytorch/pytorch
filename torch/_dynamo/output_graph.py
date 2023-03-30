@@ -518,34 +518,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         import torch._dynamo.symbolic_convert as symbolic_convert
         from .eval_frame import disable
 
-        # NB: This has to be done lazily, because if we don't actually end
-        # up compiling anything, we shouldn't report a graph break.  This
-        # should be called whenever we call compile_and_call_fx_graph
-        def report_graph_break():
-            user_stack = reason.user_stack
-            frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-
-            # Suppress these warnings when explain is on: torch._dynamo.explain()
-            # formats this a little nicer, and presents a slightly more actionable
-            # user code pointer
-            if (
-                graph_break
-                and config.print_graph_breaks
-                and not symbolic_convert.explain
-                and graph_break_dup_warning_checker.add(frame_loc)
-                and log.isEnabledFor(logging.WARNING)
-            ):
-                user_stack_formatted = "".join(traceback.format_list(user_stack))
-                log.warning(
-                    "Graph break: %s from user code at:\n%s",
-                    reason.reason,
-                    user_stack_formatted,
-                )
-
-            # Don't record graph_break counters if this is just a plain return
-            if graph_break:
-                counters["graph_break"][reason.reason] += 1
-
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
 
@@ -553,6 +525,34 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             unimplemented("compile_subgraph with block_depth != 0")
 
         log.debug(f"COMPILING GRAPH due to {reason}")
+
+        # The logic for reporting graph breaks is a little tricky.  There may
+        # not be any graph we're breaking on, but we still want to report
+        # a graph break, as we're still rewriting bytecode and going to
+        # install guards for the rewritten bytecode.
+        user_stack = reason.user_stack
+        frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+
+        # Suppress these warnings when explain is on: torch._dynamo.explain()
+        # formats this a little nicer, and presents a slightly more actionable
+        # user code pointer
+        if (
+            graph_break
+            and config.print_graph_breaks
+            and not symbolic_convert.explain
+            and graph_break_dup_warning_checker.add(frame_loc)
+            and log.isEnabledFor(logging.WARNING)
+        ):
+            user_stack_formatted = "".join(traceback.format_list(user_stack))
+            log.warning(
+                "Graph break: %s from user code at:\n%s",
+                reason.reason,
+                user_stack_formatted,
+            )
+
+        # Don't record graph_break counters if this is just a plain return
+        if graph_break:
+            counters["graph_break"][reason.reason] += 1
 
         for block in reversed(tx.block_stack):
             block.exit(tx)
@@ -614,7 +614,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             and self.side_effects.is_empty()
         ):
             # optimization to generate better code in a common case
-            report_graph_break()
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
@@ -639,7 +638,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
-                report_graph_break()
                 output.extend(
                     self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
                 )
