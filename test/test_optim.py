@@ -777,16 +777,7 @@ class TestOptim(TestCase):
                 mt_p_state = mt_state[mt_p]
 
                 for k in st_p_state:
-                    actual = mt_p_state[k]
-                    # If `torch.optim.Adam` is `__init__`ed with either `fused=True` or `capturable=True`,
-                    # `step` Tensor is 1D while usually it's 0D.
-                    if (
-                        k == "step"
-                        and isinstance(actual, torch.Tensor)
-                        and actual.ndim == 1
-                    ):
-                        actual = actual[0]
-                    self.assertEqual(st_p_state[k], actual)
+                    self.assertEqual(st_p_state[k], mt_p_state[k])
 
     def test_multi_tensor_optimizers(self):
         optimizer_pairs_with_flags = [
@@ -1623,9 +1614,9 @@ class TestOptim(TestCase):
                 [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
             prev_params = [t.clone().detach() for t in params]
             max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
-            state_steps = [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
+            state_steps = [torch.ones((), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
             grad_scale = None if no_grad_scale else torch.ones((1,), dtype=torch.float32, device="cuda")
-            found_inf = torch.ones((1,), dtype=torch.float32, device="cuda")
+            found_inf = torch.ones((), dtype=torch.float32, device="cuda")
 
             functional_optim(
                 params,
@@ -1651,7 +1642,7 @@ class TestOptim(TestCase):
             self.assertEqual(
                 state_steps,
                 [
-                    torch.ones((1,), dtype=torch.float32, device="cuda")
+                    torch.ones((), dtype=torch.float32, device="cuda")
                     for _ in range(num_tensors)
                 ],
             )
@@ -4081,6 +4072,15 @@ class TestSWAUtils(TestCase):
         for p_swa, p_swa2 in zip(averaged_dnn.parameters(), averaged_dnn2.parameters()):
             self.assertEqual(p_swa, p_swa2)
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
+
+    def test_averaged_model_default_avg_fn_picklable(self):
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.BatchNorm2d(5),
+            torch.nn.Linear(5, 5),
+        )
+        averaged_dnn = AveragedModel(dnn)
+        pickle.dumps(averaged_dnn)
 
     def test_averaged_model_exponential(self):
         # Test AveragedModel with EMA as avg_fn

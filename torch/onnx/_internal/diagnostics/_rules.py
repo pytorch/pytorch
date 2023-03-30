@@ -343,6 +343,29 @@ class _FxFrontendDynamoMakeFx(infra.Rule):
         return self, level, self.format_message()
 
 
+class _FxPass(infra.Rule):
+    """FX graph transformation before ONNX export."""
+
+    def format_message(  # type: ignore[override]
+        self,
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self.message_default_template.format()
+
+    def format(  # type: ignore[override]
+        self,
+        level: infra.Level,
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self, level, self.format_message()
+
+
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
@@ -697,6 +720,31 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export."""
+
+    fx_pass: _FxPass = dataclasses.field(
+        default=_FxPass.from_sarif(
+            **{
+                "id": "FXE0010",
+                "name": "fx-pass",
+                "short_description": {
+                    "text": "FX graph transformation before ONNX export."
+                },
+                "full_description": {
+                    "text": "ToDo, experimenting diagnostics, placeholder text.",
+                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "ToDo, experimenting diagnostics, placeholder text."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """FX graph transformation before ONNX export."""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(
