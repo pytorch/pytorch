@@ -858,7 +858,7 @@ def forward(self, x_1, y_1):
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
         self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
-        self.assertExpectedInline(show_guards(gm), """x.size()[0] < 20""")
+        self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] < 20""")
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
