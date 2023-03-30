@@ -2353,7 +2353,8 @@ def run(runner, args, original_dir=None):
                         torch._dynamo.mark_dynamic(t, i)
                         break
 
-            tree_map(detect_and_mark_batch, example_inputs)
+            if args.dynamic_batch_only:
+                tree_map(detect_and_mark_batch, example_inputs)
 
             if args.log_operator_inputs:
                 log_operator_inputs(
