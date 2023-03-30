@@ -208,7 +208,7 @@ class ListVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_LIST", len(self.items))]
+        return [create_instruction("BUILD_LIST", arg=len(self.items))]
 
     def call_method(
         self,
@@ -299,7 +299,7 @@ class TupleVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_TUPLE", len(self.items))]
+        return [create_instruction("BUILD_TUPLE", arg=len(self.items))]
 
     def call_method(
         self,
@@ -374,7 +374,7 @@ class SizeVariable(TupleVariable):
         codegen.load_import_from("torch", "Size")
         codegen.foreach(self.items)
         build_torch_size = [
-            create_instruction("BUILD_TUPLE", len(self.items)),
+            create_instruction("BUILD_TUPLE", arg=len(self.items)),
         ] + create_call_function(1, True)
         return build_torch_size
 
@@ -432,7 +432,7 @@ class NamedTupleVariable(TupleVariable):
         codegen.append_output(codegen._create_load_const(create_fn))
         codegen.foreach(self.items)
         return [
-            create_instruction("BUILD_TUPLE", len(self.items)),
+            create_instruction("BUILD_TUPLE", arg=len(self.items)),
         ] + create_call_function(1, True)
 
     def var_getattr(self, tx, name):
@@ -479,7 +479,7 @@ class SliceVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_SLICE", len(self.items))]
+        return [create_instruction("BUILD_SLICE", arg=len(self.items))]
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -523,7 +523,7 @@ class ListIteratorVariable(VariableTracker):
         remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
         return [
-            create_instruction("BUILD_TUPLE", len(remaining_items)),
+            create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
             create_instruction("GET_ITER"),
         ]
 

@@ -54,12 +54,12 @@ class ConstDictVariable(VariableTracker):
         # BUILD_MAP and calling collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             return [
-                create_instruction("BUILD_MAP", len(self.items)),
+                create_instruction("BUILD_MAP", arg=len(self.items)),
                 *create_call_function(1, False),
             ]
         # BUILD_MAP only if user_cls is dict
         else:
-            return [create_instruction("BUILD_MAP", len(self.items))]
+            return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
         return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
