@@ -1086,10 +1086,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 raise
             log.debug("STORE_ATTR triggered compile", exc_info=True)
             self.restore_graphstate(prior)
+            reason = str(e)
 
         # break the graph
         self.output.compile_subgraph(
-            self, reason=GraphCompileReason("store_attr", [self.frame_summary()])
+            self, reason=GraphCompileReason(reason, [self.frame_summary()])
         )
         self.output.add_output_instructions([inst])
         self.popn(2)
