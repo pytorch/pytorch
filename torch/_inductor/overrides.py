@@ -20,8 +20,8 @@ from torch.overrides import TorchFunctionMode
 
 from . import config
 from .fx_utils import matches_module_function_pattern
-
 from .mkldnn import mkldnn_fuse_fx
+from .utils import is_cpu_device
 
 log = logging.getLogger(__name__)
 
@@ -31,8 +31,11 @@ class AutogradMonkeypatch(TorchFunctionMode):
         if not kwargs:
             kwargs = {}
         if func in replacements and not (
-            config.fallback_random
-            and replacements[func] in replacements_using_triton_random
+            (
+                config.fallback_random
+                and replacements[func] in replacements_using_triton_random
+            )
+            or (is_cpu_device(args) and func in fallback_cpu_random)
         ):
             return replacements[func](*args, **kwargs)
         return func(*args, **kwargs)
@@ -41,14 +44,16 @@ class AutogradMonkeypatch(TorchFunctionMode):
 patch_functions = AutogradMonkeypatch
 
 
-def replace_fx(gm: torch.fx.GraphModule):
+def replace_fx(gm: torch.fx.GraphModule, example_inputs):
     # Sometimes patch_functions() misses things already in the graph
+    is_cpu = is_cpu_device(example_inputs)
+
     for node in reversed(list(gm.graph.nodes)):
         if node.op == "call_function" and node.target in replacements:
             if (
                 config.fallback_random
                 and replacements[node.target] in replacements_using_triton_random
-            ):
+            ) or (is_cpu and node.target in fallback_cpu_random):
                 continue
             with gm.graph.inserting_before(node):
                 node.replace_all_uses_with(
@@ -63,11 +68,7 @@ def replace_fx(gm: torch.fx.GraphModule):
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
-    is_cpu = all(
-        example_input.device == torch.device("cpu")
-        for example_input in example_inputs
-        if isinstance(example_input, torch.Tensor)
-    )
+    is_cpu = is_cpu_device(example_inputs)
 
     fake_mode = fake_mode_from_tensors(example_inputs)
 
@@ -582,3 +583,5 @@ replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: ra
 # Keep track of any replacement functions that use triton random,
 # so they can be avoided when fallback_random is set
 replacements_using_triton_random = {lowmem_dropout, rand_like}
+
+fallback_cpu_random = {torch.nn.functional.dropout}

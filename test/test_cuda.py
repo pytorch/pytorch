@@ -1709,21 +1709,17 @@ except RuntimeError as e:
 
     def test_bincount_ext(self):
         # ensure CUDA code coverage
-        input_size = (5000,)
+        input_size = (100000,)
         w = torch.randn(input_size, dtype=torch.double, device='cuda')
         w_cpu = w.cpu()
         # test shared memory impl
         t = torch.randint(50, input_size, dtype=torch.int8, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
-        # test multi block memory impl
-        # see `THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM` in SummaryOps.cu
-        t = torch.randint(500, input_size, dtype=torch.int64, device='cuda')
-        self.assertEqual(t.cpu().bincount(), t.bincount())
-        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
         # test global memory impl
-        # see `THRESH_NUMBER_BINS_FOR_GLOBAL_MEM` in SummaryOps.cu
-        t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
+        #   see `CUDAHistogramMemoryType` in SummaryOps.cu
+        #   50000 * sizeof(int64_t) == 390 KiB, which should exceed smem of any known GPU
+        t = torch.randint(50000, input_size, dtype=torch.int64, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
 
@@ -2524,6 +2520,43 @@ torch.cuda.synchronize()
                     if k == "step":
                         actual = actual.squeeze()
                     self.assertEqual(state_control[k], actual)
+
+    def test_grads_invalidated_between_unscale_and_step(self):
+        for optimizer_ctor, optimizer_kwargs in product(
+            (torch.optim.Adam, torch.optim.AdamW),
+            (
+                {"foreach": False, "fused": False},
+                {"foreach": True, "fused": False},
+                {"foreach": False, "fused": True},
+            ),
+        ):
+            with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
+                self._test_grads_invalidated_between_unscale_and_step(optimizer_ctor, optimizer_kwargs)
+
+    def _test_grads_invalidated_between_unscale_and_step(self, optimizer_ctor, optimizer_kwargs):
+        model, _, optimizer, _, data, loss_fn, _ = self._create_scaling_case(
+            optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+        )
+        scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
+
+        orig_params = [p.clone().detach() for p in model.parameters()]
+
+        for i, (input, target) in enumerate(data):
+            optimizer.zero_grad()
+            with torch.autocast('cuda', enabled=True):
+                output = model(input)
+                loss = loss_fn(output, target)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+
+            # deliberately break grads
+            for j, param in enumerate(model.parameters()):
+                param.grad.copy_(torch.inf if j % 2 else torch.nan)
+
+            scaler.step(optimizer)
+            scaler.update()
+
+        self.assertEqual(orig_params, list(model.parameters()))
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -3350,7 +3383,7 @@ torch.cuda.synchronize()
                                     torch.nn.Linear(8, 8)).cuda()
         input = torch.rand((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
         with torch.autocast('cuda', ):
-            output = checkpoint_sequential(model, 2, input)
+            output = checkpoint_sequential(model, 2, input, use_reentrant=True)
         self.assertTrue(output.requires_grad)
         self.assertTrue(output.dtype is torch.float16)
         output.sum().backward()
@@ -4945,7 +4978,7 @@ class TestCudaComm(TestCase):
     def test_memory_snapshot(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True)
+            torch.cuda.memory._record_memory_history("state", stacks="python")
             x = torch.rand(311, 411, device='cuda')
 
             # create a bunch of tensors that all will tile into the
@@ -4983,7 +5016,7 @@ class TestCudaComm(TestCase):
             self.assertTrue(ss['device_traces'][0][-1]['action'] == 'segment_free')
 
         finally:
-            torch.cuda.memory._record_memory_history(False)
+            torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(not IS_LINUX, "linux only cpp unwinding")
     def test_direct_traceback(self):
@@ -4999,7 +5032,7 @@ class TestCudaComm(TestCase):
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True, record_context_cpp=True)
+            torch.cuda.memory._record_memory_history("state", stacks="all")
             x = torch.rand(311, 411, device='cuda')
 
             ss = torch.cuda.memory._snapshot()['segments']
@@ -5014,7 +5047,7 @@ class TestCudaComm(TestCase):
             self.assertTrue(found_it)
 
         finally:
-            torch.cuda.memory._record_memory_history(False)
+            torch.cuda.memory._record_memory_history(None)
 
 
     @skipIfRocm
@@ -5034,21 +5067,18 @@ class TestCudaComm(TestCase):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_plots(self):
-        for record_context, cpp in ((True, IS_LINUX), (True, False), (False, False)):
+        for context, stacks in (("all", "all" if IS_LINUX else "python"), ("all", "python"), (None, "python")):
             try:
                 torch.cuda.memory.empty_cache()
-                torch.cuda.memory._record_memory_history(
-                    True,
-                    record_context=record_context,
-                    trace_alloc_max_entries=1000000,
-                    trace_alloc_record_context=True,
-                    record_context_cpp=cpp)
+                torch.cuda.memory._record_memory_history("all", context=context, stacks=stacks)
 
                 def run():
                     x = torch.rand(128, 128, device='cuda')
                     x * x + x * x
 
                 run()
+                cpp = stacks == "all"
+                record_context = context is not None
                 ss = torch.cuda.memory._snapshot()
                 tplot = trace_plot(ss)
                 self.assertTrue(record_context == ("test_memory_plots" in tplot))
@@ -5059,15 +5089,15 @@ class TestCudaComm(TestCase):
                 self.assertTrue(record_context == ("test_memory_plots" in splot))
                 self.assertTrue(str(128 * 128 * 4) in splot)
                 self.assertTrue(cpp == ("::rand" in splot))
-                torch.cuda.memory._record_memory_history(False)
+                torch.cuda.memory._record_memory_history(None)
             finally:
-                torch.cuda.memory._record_memory_history(False)
+                torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot_script(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True)
+            torch.cuda.memory._record_memory_history("state", stacks="python")
 
             @torch.jit.script
             def foo():
@@ -5087,7 +5117,7 @@ class TestCudaComm(TestCase):
             self.assertTrue(found_it)
 
         finally:
-            torch.cuda.memory._record_memory_history(False)
+            torch.cuda.memory._record_memory_history(None)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
