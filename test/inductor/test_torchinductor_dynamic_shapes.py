@@ -51,8 +51,6 @@ test_failures = {
 }
 
 if TEST_WITH_ROCM:
-    # LLVM assertion error
-    test_failures["test_argmax_argmin1_dynamic_shapes"] = TestFailure(("cpu", "cuda"), is_skip=True)
     # Tensor-likes are not close
     test_failures["test_convolution1_dynamic_shapes"] = TestFailure(("cpu", "cuda"), is_skip=True)
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(("cuda"), is_skip=True)

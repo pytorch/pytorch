@@ -2131,7 +2131,6 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
     @skipIfRocm
     def test_convolution1(self):
         m = torch.nn.Sequential(
@@ -3376,7 +3375,6 @@ class CommonTemplate:
                 ),
             )
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3465
     @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
@@ -3915,7 +3913,6 @@ class CommonTemplate:
         )
 
     @unittest.skipIf(not has_torchvision_roi_align(), "requires torchvision")
-    @skipIfRocm
     def test_roi_align(self):
         def fn(a, b):
             return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
@@ -5035,7 +5032,6 @@ class CommonTemplate:
         b = torch.rand(2, 2, 1, 4, 1).int()
         self.common(fn, (a, b))
 
-    @skipIfRocm
     def test_argmax_argmin1(self):
         def fn(x):
             return (aten.argmax(x), aten.argmin(x))
@@ -5047,9 +5043,6 @@ class CommonTemplate:
             ],
         )
 
-    # FIXME: Tensors are not alike https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3849
-    @skipIfRocm
     def test_argmax_argmin2(self):
         def fn(x):
             return (

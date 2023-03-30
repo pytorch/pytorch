@@ -125,7 +125,6 @@ if COLLECT_EXPECT:
 # for the default test, and a tuple of two strings for variants
 
 inductor_skips = defaultdict(dict)
-inductor_skips_rocm = defaultdict(dict)
 
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -151,9 +150,6 @@ inductor_skips["cuda"] = {
 }
 
 if TEST_WITH_ROCM:
-    # LAPACK support
-    inductor_skips["cuda"][("linalg.pinv", "hermitian")] = {f16, f32, f64, b8, i32, i64}
-    inductor_skips["cuda"][("linalg.matrix_rank", "hermitian")] = {f16, f32, f64, b8, i32, i64}
     # Tensors are not alike
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
 
@@ -420,6 +416,7 @@ test_skips_or_fails = (
         inductor_gradient_expected_failures_single_sample, xfails=True
     )
 )
+
 
 def wrapper_set_seed(op, *args, **kwargs):
     """Wrapper to set seed manually for some functions like dropout
