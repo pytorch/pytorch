@@ -30,25 +30,6 @@ std::array<THPDtype*, static_cast<int>(at::ScalarType::NumOptions)>
 std::array<THPLayout*, static_cast<int>(at::Layout::NumOptions)>
     layout_registry = {};
 
-at::DeprecatedTypeProperties* get_type_properties(
-    at::DeviceType device_type,
-    at::ScalarType scalarType) {
-  at::Backend backend;
-  if (device_type == at::kCPU) {
-    backend = at::Backend::CPU;
-  } else if (device_type == at::kCUDA) {
-    backend = at::Backend::CUDA;
-  } else if (device_type == at::kXPU) {
-    backend = at::Backend::XPU;
-  } else if (device_type == at::kMPS) {
-    backend = at::Backend::MPS;
-  } else if (device_type == at::DeviceType::Meta) {
-    backend = at::Backend::Undefined;
-  } else {
-    TORCH_CHECK(false, "Invalid device for storage: ", device_type);
-  }
-  return &at::getDeprecatedTypeProperties(backend, scalarType);
-}
 } // namespace
 
 void registerDtypeObject(THPDtype* dtype, at::ScalarType scalarType) {

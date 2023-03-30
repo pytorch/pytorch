@@ -375,9 +375,6 @@ Tensor internal_new_from_data(
         std::tie(storage, storage_scalar_type, is_typed_storage) =
             createStorageGetType(data);
 
-        PyObject* storage_pyobj = storage.unsafeGetStorageImpl()
-                                      ->pyobj_slot()
-                                      ->_unchecked_untagged_pyobj();
         TORCH_CHECK(
             !is_typed_storage || storage_scalar_type == scalar_type,
             "Expected a Storage of type ",
