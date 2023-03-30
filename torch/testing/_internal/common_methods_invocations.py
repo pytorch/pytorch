@@ -4443,7 +4443,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
         args = []
 
         # dim. We handle the scalar case
-        dim = 1 if t.ndim == 2 else 0
+        dim = -1 if t.ndim == 2 else 0
         args.append(dim)
 
         idx = make_idx(t.shape[dim] if t.ndim != 0 else 1)
