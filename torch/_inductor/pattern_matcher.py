@@ -16,7 +16,7 @@ from torch._dynamo.utils import counters
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config, ir
-from .lowering import lowerings as L
+from .lowering import fallback_node_due_to_unsupported_type, lowerings as L
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -245,6 +245,7 @@ class ListOf(PatternExpr):
         return m.bundle()
 
 
+# First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
     defaultdict(list),
     defaultdict(list),
@@ -369,6 +370,12 @@ def replace_matched_patterns(graph: torch.fx.Graph):
             continue
         for node in reversed(graph.nodes):
             if node.op == "call_function" and node.target in patterns:
+                # conservatively not applying pattern for cpu input,
+                # since some of the patterns induce codegen and split nodes.
+                # Note: we will only skip cpu compute if disable_cpp_codegen=True
+                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
+                    continue
+
                 for entry in patterns[node.target]:
                     if node._erased:
                         break
@@ -463,6 +470,9 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     Memory planning to remove cat.  We can't use the stock memory
     planner since autotuning matmauls needs to know the output layout.
     """
+    if len(inputs) == 1:
+        return op(*inputs[0])
+
     # TODO(jansel): rewrite this as a bmm?
     if dim < 0:
         dim += len(shape_of(*inputs[0]))
@@ -598,24 +608,25 @@ def addmm(match, mat1, mat2, inp):
         return L[aten.add](inp, L[aten.mm](mat1, mat2))
 
 
+# TODO(XiaobingSuper): move it to fx_passes/mkldnn_fuse.py
+# after https://github.com/pytorch/pytorch/pull/97740
 if torch._C.has_mkldnn:
     mkldnn = torch.ops.mkldnn
-    # _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), KeywordArg('attr'), Arg(),  Arg(),)
     _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
     _linear_args = (Arg(), Arg(), Arg())
-    _user_1 = [
+    _computation_user_1 = [
         CallFunction(mkldnn._convolution, *_conv_args, _users=1),
         CallFunction(mkldnn._linear, *_linear_args, _users=1),
     ]
-    _user_2 = [
+    _computation_user_2 = [
         CallFunction(mkldnn._convolution, *_conv_args, _users=2),
         CallFunction(mkldnn._linear, *_linear_args, _users=2),
     ]
-    _user_3 = [
-        CallFunction(mkldnn._convolutionn, *_conv_args, _users=3),
+    _computation_user_3 = [
+        CallFunction(mkldnn._convolution, *_conv_args, _users=3),
         CallFunction(mkldnn._linear, *_linear_args, _users=3),
     ]
-    _user_4 = [
+    _computation_user_4 = [
         CallFunction(mkldnn._convolution, *_conv_args, _users=4),
         CallFunction(mkldnn._linear, *_linear_args, _users=4),
     ]
@@ -732,14 +743,18 @@ if torch._C.has_mkldnn:
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
     replacement_unary_fusion_patterns = {
-        UnaryAttr("gelu", algorithm_attr="tanh"): [gelu_fusion_2(u) for u in _user_4],
-        UnaryAttr("gelu", algorithm_attr="none"): [gelu_fusion_1(u) for u in _user_2],
-        UnaryAttr("hardswish"): [hardswish_fusion(u) for u in _user_2],
-        UnaryAttr("hardsigmoid"): [hardsigmoid_fusion(u) for u in _user_1],
-        UnaryAttr("swish"): [silu_fusion(u) for u in _user_2],
-        UnaryAttr("relu"): [relu_fusion(u) for u in _user_1],
-        UnaryAttr("sigmoid"): [sigmoid_fusion(u) for u in _user_1],
-        UnaryAttr("tanh"): [tanh_fusion(u) for u in _user_1],
+        UnaryAttr("gelu", algorithm_attr="tanh"): [
+            gelu_fusion_2(u) for u in _computation_user_4
+        ],
+        UnaryAttr("gelu", algorithm_attr="none"): [
+            gelu_fusion_1(u) for u in _computation_user_2
+        ],
+        UnaryAttr("hardswish"): [hardswish_fusion(u) for u in _computation_user_2],
+        UnaryAttr("hardsigmoid"): [hardsigmoid_fusion(u) for u in _computation_user_1],
+        UnaryAttr("swish"): [silu_fusion(u) for u in _computation_user_2],
+        UnaryAttr("relu"): [relu_fusion(u) for u in _computation_user_1],
+        UnaryAttr("sigmoid"): [sigmoid_fusion(u) for u in _computation_user_1],
+        UnaryAttr("tanh"): [tanh_fusion(u) for u in _computation_user_1],
     }
 
     def register_mkldnn_conv_replacement_pattern(unary_op, pattern):
@@ -755,7 +770,7 @@ if torch._C.has_mkldnn:
                 groups,
                 unary_op.op_name,
                 unary_op.scalars_attr,
-                unary_op.algorithm_attr
+                unary_op.algorithm_attr,
             )
 
         return fn
@@ -763,13 +778,13 @@ if torch._C.has_mkldnn:
     def register_mkldnn_linear_replacement_pattern(unary_op, pattern):
         @register_replacement_pattern(pattern)
         def fn(input, weight, bias):
-            return torch.ops.mkldnn._linear(
+            return torch.ops.mkldnn._linear_pointwise(
                 input,
                 weight,
                 bias,
                 unary_op.op_name,
                 unary_op.scalars_attr,
-                unary_op.algorithm_attr
+                unary_op.algorithm_attr,
             )
 
         return fn
@@ -801,7 +816,7 @@ if torch._C.has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = True
-            computation_args = [arg for arg in list(args)]
+            computation_args = list(args)
             if matched:
                 computation_args += ["leaky_relu", [negative_slope], ""]
                 return L[computation_op](*computation_args)
@@ -827,7 +842,7 @@ if torch._C.has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = True
-            computation_args = [arg for arg in list(args)]
+            computation_args = list(args)
             if matched:
                 computation_args += ["hardtanh", [min_value, max_value], ""]
                 return L[computation_op](*computation_args)
@@ -842,19 +857,19 @@ if torch._C.has_mkldnn:
 
     # conv_fusion lowering
     register_leaky_relu_fusion_lowering(
-        _user_3[0], torch.ops.mkldnn._convolution_pointwise.default
+        _computation_user_3[0], torch.ops.mkldnn._convolution_pointwise.default
     )
     register_hardtanh_fusion_lowering(
-        _user_1[0], torch.ops.mkldnn._convolution_pointwise.default
+        _computation_user_1[0], torch.ops.mkldnn._convolution_pointwise.default
     )
-    # TODO: add ConvTranspose lowering
     # linear_fusion lowering
     register_leaky_relu_fusion_lowering(
-        _user_3[1], torch.ops.mkldnn._linear_pointwise
+        _computation_user_3[1], torch.ops.mkldnn._linear_pointwise
     )
     register_hardtanh_fusion_lowering(
-        _user_1[1], torch.ops.mkldnn._linear_pointwise
+        _computation_user_3[1], torch.ops.mkldnn._linear_pointwise
     )
+    # TODO: add ConvTranspose lowering
 
 
 # This slows things down:

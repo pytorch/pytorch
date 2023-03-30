@@ -25,6 +25,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   OP_DECOMPOSE(feature_dropout_);
 }
 
+void unsupportedData(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+    TORCH_CHECK(false, "mutating directly with `.data` under vmap transform is not allowed.");
+}
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(__and__, Scalar);
   OP_DECOMPOSE2(__and__, Tensor);
@@ -117,6 +121,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(flipud);
   OP_DECOMPOSE2(float_power, Tensor_Tensor);
   OP_DECOMPOSE2(float_power, Tensor_Scalar);
+  OP_DECOMPOSE2(float_power, Scalar);
   OP_DECOMPOSE2(floor_divide, Scalar);
   OP_DECOMPOSE(gather_backward);
   OP_DECOMPOSE(ger);
@@ -279,6 +284,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(vstack);
   OP_DECOMPOSE2(where, ScalarOther);
   OP_DECOMPOSE2(where, ScalarSelf);
+  OP_DECOMPOSE2(where, Scalar);
   OP_DECOMPOSE(orgqr);
   m.impl("unflatten.int", native::unflatten_symint);
   m.impl("_convolution_double_backward", native::_convolution_double_backward);
@@ -324,7 +330,14 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
 
   OP_DECOMPOSE2(linalg_matrix_rank, atol_rtol_tensor);
   OP_DECOMPOSE2(linalg_matrix_rank, atol_rtol_float);
+  OP_DECOMPOSE(linalg_ldl_factor);
 
+  // comparison ops
+  OP_DECOMPOSE2(greater, Scalar);
+  OP_DECOMPOSE2(less_equal, Scalar);
+  OP_DECOMPOSE2(less, Scalar);
+  OP_DECOMPOSE2(not_equal, Scalar);
+  m.impl("_has_compatible_shallow_copy_type", torch::CppFunction::makeFromBoxedFunction<&unsupportedData>());
 }
 
 }}
