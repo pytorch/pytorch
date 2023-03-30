@@ -308,11 +308,6 @@ if __name__ == "__main__":
         help="which retry of the workflow this is",
     )
     parser.add_argument(
-        "--head-branch",
-        required=True,
-        help="Head branch of the workflow",
-    )
-    parser.add_argument(
         "--circleci",
         action="store_true",
         help="If this is being run through circleci",

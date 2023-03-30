@@ -761,7 +761,7 @@ jobs:
             export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
             export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
             # i dont know how to get the run attempt number for reruns so default to 1
-            python3 -m tools.stats.upload_test_stats --workflow-run-id "${CIRCLE_WORKFLOW_JOB_ID}" --workflow-run-attempt 1 --head-branch << pipeline.git.branch >> --circleci
+            python3 -m tools.stats.upload_test_stats --workflow-run-id "${CIRCLE_WORKFLOW_JOB_ID}" --workflow-run-attempt 1 --circleci
   pytorch_macos_10_13_py3_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
