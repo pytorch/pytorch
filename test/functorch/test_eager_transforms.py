@@ -39,7 +39,7 @@ from torch._functorch.make_functional import (
 )
 from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._functorch.utils import enable_single_level_autograd_function
 import torch.autograd.forward_ad as fwAD
 from torch.func import functional_call, stack_module_state, linearize
@@ -1035,6 +1035,84 @@ class TestAutogradFunction(TestCase):
         # grad differentiates w.r.t. arg 0 by default
         grad(f)(y, x)
         grad(grad(f))(y, x)
+
+    @parametrize("inner_requires_grad", [True, False])
+    @parametrize("save_for", ["jvp", "vjp"])
+    @parametrize("save_tensors", ["input", "output", "neither"])
+    @parametrize("mark_dirty", [True, False])
+    def test_function_returns_input(self, device, inner_requires_grad, save_for, save_tensors, mark_dirty):
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                if save_for == "jvp":
+                    save_fn = ctx.save_for_forward
+                else:
+                    save_fn = ctx.save_for_backward
+
+                if mark_dirty:
+                    ctx.mark_dirty(inputs[0])
+
+                if save_tensors == "input":
+                    save_fn(inputs[0])
+                elif save_tensors == "output":
+                    save_fn(output)
+                elif save_tensors == "neither":
+                    pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+            @staticmethod
+            def jvp(ctx, x_t):
+                # NB: the logic to check ctx.save_for_forward happens
+                #     before we reach this!
+                if mark_dirty:
+                    ret = x_t.add_(0)
+                else:
+                    ret = x_t.view_as(x_t)
+                return ret
+
+        def fn(x):
+            return A.apply(x.clone())
+
+        err_msg = "A input that has been returned as-is"
+
+        a = torch.tensor(2., device=device, requires_grad=inner_requires_grad)
+        a_t = torch.tensor(2., device=device, requires_grad=inner_requires_grad)
+        if save_tensors in ("input", "output") and not mark_dirty:
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                grad(fn)(a)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                jvp(fn, (a,), (a_t,))
+        else:
+            grad(fn)(a)
+            jvp(fn, (a,), (a_t,))
+
+        a = torch.tensor(2., device=device, requires_grad=inner_requires_grad).clone()
+        a_t = torch.tensor(2., device=device, requires_grad=inner_requires_grad).clone()
+
+        if save_tensors in ("input", "output") and not mark_dirty:
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                A.apply(a)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                with fwAD.dual_level():
+                    A.apply(fwAD.make_dual(a, a_t))
+        else:
+            b = A.apply(a)
+            if mark_dirty:
+                self.assertTrue(a is b)
+            if not (mark_dirty and save_for == "vjp" and save_tensors in ("input", "output")):
+                # TODO(soulitzer): https://github.com/pytorch/pytorch/issues/97827
+                with fwAD.dual_level():
+                    a_dual = fwAD.make_dual(a, a_t)
+                    b_dual = A.apply(a_dual)
+                if mark_dirty:
+                    self.assertTrue(a_dual is b_dual)
 
     def test_needs_input_grads(self, device):
         class A(torch.autograd.Function):
@@ -2142,6 +2220,16 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all outputs"):
             jacfwd(fn)(x)
 
+    @jacrev_and_jacfwd
+    def test_jac_with_non_tensor_args(self, device, jacapi):
+        def f(t, int_x):
+            return t + int_x
+
+        t = torch.randn(3, 3, device=device)
+
+        actual = jacapi(f)(t, 3)
+        expected = torch.autograd.functional.jacobian(partial(f, int_x=3), t)
+        self.assertEqual(actual, expected)
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
@@ -4439,7 +4527,7 @@ def forward(self, x_1):
 
 
 def construct_sum_pyop():
-    mysum = PyOperator("mysum")
+    mysum = HigherOrderOperator("mysum")
 
     @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
     def mysum_batch_rule(interpreter, x, dim):
@@ -4493,7 +4581,7 @@ def construct_sum_pyop():
 
 sum_pyop = construct_sum_pyop()
 
-class TestPyOperatorInteraction(TestCase):
+class TestHigherOrderOperatorInteraction(TestCase):
 
     def test_basic_sum(self, device):
         x = torch.randn(2, 3, 4, device=device)
@@ -4609,7 +4697,7 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(
-    TestPyOperatorInteraction,
+    TestHigherOrderOperatorInteraction,
     globals(),
     only_for=only_for,
 )
