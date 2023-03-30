@@ -16,6 +16,7 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config
+inductor_config = config
 from .codecache import cache_dir
 from .ir import ReductionHint, TileHint
 from .utils import (
@@ -276,11 +277,13 @@ class CachingAutotuner(KernelInterface):
                         best_launcher = launcher
                         break
                     else:
+                        print(f"  Drop {launcher.config} {timing}")
                         pass
 
         print(f"Improve from {baseline_config} {baseline_timing} -> {best_launcher.config} {best_timing}, {baseline_timing / best_timing:.3f}x")
 
-        if self.save_cache_hook:
+        # don't save cache for coordinate descent tuning for now
+        if not inductor_config.coordinate_descent_tuning and self.save_cache_hook:
             self.save_cache_hook(best_launcher.config, True)
 
         best_launcher.config.found_by_coordesc = True
@@ -291,7 +294,7 @@ class CachingAutotuner(KernelInterface):
         timings = self.benchmark_all_configs(*args, **kwargs)
         self.launchers = [builtins.min(timings, key=timings.get)]
 
-        if self.save_cache_hook:
+        if not inductor_config.coordinate_descent_tuning and self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
 
     def run(self, *args, grid, stream):
@@ -446,13 +449,8 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
 
-    # The autotune cache will simply replace the list of candidate configs with
-    # the best config cached. We don't want that when we benchmark triton kernels.
-    # We need the perf for each of the candidate config instead.
-    cache_autotune_result = not config.benchmark_kernel
-
     # on disk caching logic
-    if cache_autotune_result and filename is not None:
+    if filename is not None and len(configs) > 1:
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
         best_config = load_cached_autotuning(cache_filename, configs_hash, configs)
@@ -653,6 +651,10 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             configs.extend([
                 # improve 1.832x for https://gist.github.com/shunting314/69b5055193148ade349ac7e58c85d2d9 
                 Config({"XBLOCK": 256}, num_warps=8, num_stages=1),
+                # improve 1.031x for https://gist.github.com/shunting314/339dd078cb9711536e4539dbb50b9032
+                Config({"XBLOCK": 512}, num_warps=2, num_stages=1),
+                # improve 1.016x for https://gist.github.com/shunting314/a5e6ee5cf8700ad3d43ec6853db4b236
+                Config({"XBLOCK": 512}, num_warps=4, num_stages=1),
             ])
         return cached_autotune(configs, meta=meta, filename=filename)
     if len(size_hints) == 2:
@@ -724,6 +726,12 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 triton_config_reduction(size_hints, 8, 512),
                 # improve 1.121x for https://gist.github.com/shunting314/6267da87c6524dab29a3e33f14ff91db
                 Config({"XBLOCK": 1, "RBLOCK": 4096}, num_warps=8, num_stages=1),
+                # improve 1.074x for https://gist.github.com/shunting314/bb36b37a3d049a29ff6bada9dbe18fb8
+                Config({"XBLOCK": 2, "RBLOCK": 2048}, num_warps=8, num_stages=1),
+                # improve 1.143x for https://gist.github.com/shunting314/ae6a0d3c63409bed7759ee7bdcde01a8
+                Config({"XBLOCK": 1, "RBLOCK": 1024}, num_warps=16, num_stages=1),
+                # improve 1.033x for https://gist.github.com/shunting314/d1036afd5210e19da3144c24f3b475d8
+                Config({"XBLOCK": 1, "RBLOCK": 1024}, num_warps=8, num_stages=1),
             ],
             meta=meta,
             filename=filename,
