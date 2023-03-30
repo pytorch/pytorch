@@ -161,7 +161,7 @@ def bitwise_right_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.__lshift__.Scalar)
 def bitwise_left_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
-    return prims.shift_left_arithmetic(a, b)
+    return prims.shift_left(a, b)
 
 
 @register_decomposition(aten.hardsigmoid)
