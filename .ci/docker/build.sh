@@ -251,6 +251,8 @@ case "$image" in
       extract_version_from_image_name rocm ROCM_VERSION
       NINJA_VERSION=1.9.0
       TRITON=yes
+      # Need conda cmake to detect conda mkl and build with mkl support
+      CONDA_CMAKE=yes
     fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2
