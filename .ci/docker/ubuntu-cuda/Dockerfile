@@ -140,13 +140,14 @@ RUN if [ -h /usr/local/cuda-11.7/cuda-11.7 ]; then rm /usr/local/cuda-11.7/cuda-
 
 # Install benchmark suites (torchbench, timm, huggingface) for Torch Inductor
 ARG INDUCTOR_BENCH_SUITES
-COPY ./common/install_timm.sh install_timm.sh
+#COPY ./common/install_timm.sh install_timm.sh
 COPY ./common/install_torchbench.sh install_torchbench.sh
-COPY ./common/install_huggingface.sh install_huggingface.sh
-RUN if [ -n "${INDUCTOR_BENCH_SUITES}" ]; then bash ./install_timm.sh; fi
+#COPY ./common/install_huggingface.sh install_huggingface.sh
+#RUN if [ -n "${INDUCTOR_BENCH_SUITES}" ]; then bash ./install_timm.sh; fi
 RUN if [ -n "${INDUCTOR_BENCH_SUITES}" ]; then bash ./install_torchbench.sh; fi
-RUN if [ -n "${INDUCTOR_BENCH_SUITES}" ]; then bash ./install_huggingface.sh; fi
-RUN rm install_timm.sh install_torchbench.sh install_huggingface.sh
+#RUN if [ -n "${INDUCTOR_BENCH_SUITES}" ]; then bash ./install_huggingface.sh; fi
+#RUN rm install_timm.sh install_torchbench.sh install_huggingface.sh
+RUN rm install_torchbench.sh
 
 USER jenkins
 CMD ["bash"]
