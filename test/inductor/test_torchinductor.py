@@ -7397,11 +7397,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     start = math.log2(0.5)
                     end = math.log2(1 / (2**8))
 
-                    self.scales = 2 ** torch.arange(
-                        start,
-                        end + 1e-6 * sign(end - start),
-                        (end - start) / (nheads - 1),
-                    ).view(1, nheads, 1, 1)
+                    self.register_buffer(
+                        "scales",
+                        2
+                        ** torch.arange(
+                            start,
+                            end + 1e-6 * sign(end - start),
+                            (end - start) / (nheads - 1),
+                        ).view(1, nheads, 1, 1),
+                    )
                     self.emb = nn.Embedding(1024, 256)
                     self.dec_layer = nn.TransformerDecoderLayer(
                         256, 16, 512, batch_first=True, norm_first=True
