@@ -4219,18 +4219,26 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f(), torch.zeros(2, 2))
         self.assertEqual(opt_f(), torch.ones(2, 2))
 
-    def test_torch_generator_set_state(self):
-        def fn():
-            default_state = torch.default_generator.get_state()
-            x = torch.rand([2, 3])
-            torch._dynamo.graph_break()
-            torch.default_generator.set_state(default_state)
-            y = torch.rand([2, 3])
-            return x, y
+    # This test is commented because PyTorch users rarely use default
+    # generators.  So, why was this test case present in the first place?  We
+    # observed this error for a model where the parent function called
+    # get/set_rng_state but was skipped by TorchDynamo. TorchDynamo then
+    # subsequently started bytecode tracing get_rng_state and set_rng_state that
+    # deal with these generator objects. We can avoid this situation by
+    # disallowing TorchDynamo to analyze torch/random.py and
+    # torch/cuda/random.py files.
+    # def test_torch_generator_set_state(self):
+    #     def fn():
+    #         default_state = torch.default_generator.get_state()
+    #         x = torch.rand([2, 3])
+    #         torch._dynamo.graph_break()
+    #         torch.default_generator.set_state(default_state)
+    #         y = torch.rand([2, 3])
+    #         return x, y
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
-        x, y = opt_fn()
-        self.assertEqual(x, y)
+    #     opt_fn = torch._dynamo.optimize("eager")(fn)
+    #     x, y = opt_fn()
+    #     self.assertEqual(x + 1, y)
 
     def test_guard_failure_fn(self):
         def fn(x, y, k):
@@ -5229,6 +5237,76 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ).run(
                 prof.report()
             )
+
+    def test_rng_state_cpu(self):
+        def fn(x):
+            state = torch.get_rng_state()
+            y = torch.rand_like(x) * x
+            torch.set_rng_state(state)
+            return y
+
+        device = "cpu"
+        x = torch.rand(4, device=device)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+        # Check that Dynamo does not go inside set/get rng states. This checks
+        # that Dyanmo skips torch/random.py
+        torch._dynamo.reset()
+        new_fn = torch._dynamo.skip(fn)
+        x = torch.rand(4, device=device)
+        ref = new_fn(x)
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter, nopython=True)(new_fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(counter.frame_count, 0)
+
+    def test_rng_state_graph_break_cpu(self):
+        def fn(x):
+            state = torch.get_rng_state()
+            y = torch.rand_like(x) * x
+            torch._dynamo.graph_break()
+            torch.set_rng_state(state)
+            return y
+
+        device = "cpu"
+        x = torch.rand(4, device=device)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_rng_state_cuda(self):
+        def fn(x):
+            state = torch.cuda.get_rng_state()
+            y = torch.rand_like(x) * x
+            torch.cuda.set_rng_state(state)
+            return y
+
+        device = "cuda"
+        x = torch.rand(4, device=device)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        print(ref)
+        print(res)
+        self.assertTrue(same(ref, res))
+
+        # Check that Dynamo does not go inside set/get rng states. This checks
+        # that Dyanmo skips torch/random.py
+        torch._dynamo.reset()
+        new_fn = torch._dynamo.skip(fn)
+        x = torch.rand(4, device=device)
+        ref = new_fn(x)
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter, nopython=True)(new_fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(counter.frame_count, 0)
 
 
 class CustomFunc1(torch.autograd.Function):

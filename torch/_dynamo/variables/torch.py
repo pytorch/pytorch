@@ -367,50 +367,22 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(
                 torch.backends.cudnn.is_acceptable(tensor_inp), **options
             )
-        if (
-            self.value.__name__ == "get_state"
-            and hasattr(self.value, "__self__")
-            and isinstance(self.value.__self__, torch._C.Generator)
-        ):
+        elif self.value in (torch.random.get_rng_state, torch.cuda.get_rng_state):
+            # Insert the get rng state ops directly into the graphs. AOT
+            # Autograd during functionalization will use these ops to track the
+            # rng state and functionalize RNG ops.
+            example_value = self.value()
 
-            def get_state_from_generator():
-                return self.value()
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    get_state_from_generator,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                example_value=self.value(),
-                source=GeneratorStateSource(
-                    self.value.__self__.device.type, self.value.__self__.initial_seed()
-                ),
-                **options,
+            # Generate source - The tensor here is generated inside the program,
+            # so we don't have to get the source. But Dynamo logic assumes that
+            # each Tensor has a source. So, lets get a special source -
+            # GenerateStrateSource.
+            device = "cpu" if self.value is torch.random.get_rng_state else "cuda"
+            seed = (
+                torch.initial_seed() if device == "cuda" else torch.cuda.initial_seed()
             )
-        if (
-            self.value.__name__ == "set_state"
-            and hasattr(self.value, "__self__")
-            and isinstance(self.value.__self__, torch._C.Generator)
-        ) or self.value == torch.random.set_rng_state:
-            assert len(args) == 1
-            assert isinstance(args[0], TensorVariable)
+            source = GeneratorStateSource(device, seed)
 
-            unimplemented(
-                "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
-            )
-            # In fake tensor case, this state doesn't matter, but
-            # it needs to be valid to not segfault. Pull a real tensor out.
-            # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
-            # However, it is imperative to record the call_function in the graph with the true args
-            # (Not the fake example_value) - for the sake of graph correctness.
-            if self.value == torch.random.set_rng_state:
-                example_value = torch.random.get_rng_state()
-            else:
-                example_value = self.value.__self__.get_state()
-
-            self.value.__module__ = self.__module__
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -419,6 +391,20 @@ class TorchVariable(VariableTracker):
                     *proxy_args_kwargs(args, kwargs),
                 ),
                 example_value=example_value,
+                source=source,
+                **options,
+            )
+        elif self.value in (torch.random.set_rng_state, torch.cuda.set_rng_state):
+            # Insert the set rng state ops directly into the fx graphs. AOT
+            # Autograd during functionalization will use these ops to track the
+            # rng state and functionalize RNG ops.
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
                 **options,
             )
         elif (

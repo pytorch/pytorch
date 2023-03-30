@@ -970,6 +970,16 @@ def wrap_fx_proxy_cls(
 
         return value
 
+    if example_value is None and proxy.node.target in (
+        torch.random.set_rng_state,
+        torch.cuda.set_rng_state,
+    ):
+        # set_rng_state does not have an output. Skip trying to get fake_value,
+        # and specialize for set_rng_state
+        from . import TorchVariable
+
+        return TorchVariable(proxy.node.target)
+
     with preserve_rng_state():
         if example_value is None:
             example_value = get_fake_value(proxy.node, tx)
@@ -1025,15 +1035,6 @@ def wrap_fx_proxy_cls(
 
         options.update(specialized_props)
         return target_cls(proxy, **options)
-    elif (
-        hasattr(proxy.node.target, "__name__")
-        and proxy.node.target.__name__ == "set_state"
-        and isinstance(proxy.node.target.__self__, torch._C.Generator)
-        or proxy.node.target == torch.random.set_rng_state
-    ):
-        from . import TorchVariable
-
-        return TorchVariable(proxy.node.target)
     elif (
         proxy.node.target == torch._C._DisableFuncTorch
         or proxy.node.target == torch.cuda._is_in_bad_fork
