@@ -443,7 +443,7 @@ def _get_target_activation_dtype_for_node(
             "weight_obs_or_fq_ctr": qconfig.weight,
             "bias_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=bias_dtype),
             "output_act_obs_or_fq_ctr": qconfig.activation,
-            "reuse_input_obs_or_fq": _is_reuse_input_qconfig(qconfig)
+            "reuse_input_obs_or_fq": _is_reuse_input_qconfig(qconfig),
         }
     return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 

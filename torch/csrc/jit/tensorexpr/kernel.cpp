@@ -1309,7 +1309,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   TORCH_INTERNAL_ASSERT(
       bufs_.count(v),
       buildErrorMessage(
-          "Ouput tensor has no corresponding bufs in the fuser."));
+          "Output tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
   TORCH_INTERNAL_ASSERT(buf != nullptr);
   TORCH_INTERNAL_ASSERT(tt != nullptr);
@@ -1346,7 +1346,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
   TORCH_INTERNAL_ASSERT(
       bufs_.count(v),
       buildErrorMessage(
-          "Ouput tensor has no corresponding bufs in the fuser."));
+          "Output tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
 
   // No shape info is present in the graph
@@ -1576,7 +1576,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
 
 void TensorExprKernel::deduceMemoryLayoutPolicy() {
   // If the tensor is channels-last contiguous, the preferred memory layout
-  // propagation policy is to use channes-last. Otherwise, the preferred policy
+  // propagation policy is to use channels-last. Otherwise, the preferred policy
   // is to use contiguous.
   auto _prefer_symbolic_mem =
       [](const torch::jit::Value* val,
@@ -1650,7 +1650,7 @@ void TensorExprKernel::optimizeOwningGraph() {
   GRAPH_DUMP("TensorExprKernel graph (Before graph optimization):", graph_);
 
   // We may manipulate output pointers in graph manipulation. So we store the
-  // orignal outputs for symbolic strides information synchronization
+  // original outputs for symbolic strides information synchronization
   auto _orignal_graph_outputs = graph_->outputs().vec();
 
   // Get the graph device information first. The graph optimization
