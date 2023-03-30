@@ -692,12 +692,6 @@ class CUDAGraphNode:
         new_inputs.clear()
         self.graph.replay()
 
-        # outputs is not None on first execution
-        if self.recording_outputs is not None:
-            outputs = self.recording_outputs
-            self.recording_outputs = None
-            return outputs
-
         outputs = [
             (
                 self._reconstruct_from_tensor_metadata(metadata, storage_cache)
@@ -1076,7 +1070,8 @@ def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
 
     check(
         len(allocated_not_in_live_storages) == 0,
-        lambda: f"These live storage data ptrs are in the cudagraph pool but not accounted for as an output of cudagraph trees {allocated_not_in_live_storages}",
+        lambda: f"These live storage data ptrs are in the cudagraph pool but not "
+        f"accounted for as an output of cudagraph trees {allocated_not_in_live_storages}",
     )
 
 
