@@ -16,7 +16,7 @@ from torch._dynamo.utils import counters
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config, ir
-from .lowering import lowerings as L
+from .lowering import fallback_node_due_to_unsupported_type, lowerings as L
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -245,6 +245,7 @@ class ListOf(PatternExpr):
         return m.bundle()
 
 
+# First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
     defaultdict(list),
     defaultdict(list),
@@ -369,6 +370,12 @@ def replace_matched_patterns(graph: torch.fx.Graph):
             continue
         for node in reversed(graph.nodes):
             if node.op == "call_function" and node.target in patterns:
+                # conservatively not applying pattern for cpu input,
+                # since some of the patterns induce codegen and split nodes.
+                # Note: we will only skip cpu compute if disable_cpp_codegen=True
+                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
+                    continue
+
                 for entry in patterns[node.target]:
                     if node._erased:
                         break
