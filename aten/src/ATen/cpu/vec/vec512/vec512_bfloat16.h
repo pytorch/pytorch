@@ -110,12 +110,19 @@ template <> inline void cvt_to_fp32<Half>(const __m512i& a, __m512& o1, __m512& 
   cvtfp16_fp32(a, o1, o2);
 }
 
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+template <typename T, bool is_compare_op = false,
+          typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline __m512i cvt_from_fp32(const __m512& a, const __m512& b);
-template <> inline __m512i cvt_from_fp32<BFloat16>(const __m512& a, const __m512& b) {
+template <> inline __m512i cvt_from_fp32<BFloat16, false>(const __m512& a, const __m512& b) {
   return cvtfp32_bf16(a, b);
 }
-template <> inline __m512i cvt_from_fp32<Half>(const __m512& a, const __m512& b) {
+template <> inline __m512i cvt_from_fp32<BFloat16, true>(const __m512& a, const __m512& b) {
+  return merge_compare_result(a, b);
+}
+template <> inline __m512i cvt_from_fp32<Half, false>(const __m512& a, const __m512& b) {
+  return cvtfp32_fp16(a, b);
+}
+template <> inline __m512i cvt_from_fp32<Half, true>(const __m512& a, const __m512& b) {
   return cvtfp32_fp16(a, b);
 }
 
@@ -629,6 +636,61 @@ public:
     auto o2 = Sleef_powf16_u10(hi, b2);
     return cvt_from_fp32<T>(o1, o2);
   }
+private:
+  template<typename Op>
+  Vectorized<T> inline binary_compare(const Vectorized<T>& b, Op op) const {
+    __m512 a_lo, a_hi;
+    __m512 b_lo, b_hi;
+    cvt_to_fp32<T>(values, a_lo, a_hi);
+    cvt_to_fp32<T>(b.values, b_lo, b_hi);
+    auto o1 = op(a_lo, b_lo);
+    auto o2 = op(a_hi, b_hi);
+    return cvt_from_fp32<T, /*is_compare_op*/true>(o1, o2);
+  }
+
+public:
+  Vectorized<T> inline operator>(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m512 x, __m512 y) {
+      auto zero_vec = _mm512_set1_epi32(0);
+      auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_GT_OQ);
+      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+    });
+  }
+  Vectorized<T> inline operator<(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m512 x, __m512 y) {
+      auto zero_vec = _mm512_set1_epi32(0);
+      auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_LT_OQ);
+      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+    });
+  }
+  Vectorized<T> inline operator>=(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m512 x, __m512 y) {
+      auto zero_vec = _mm512_set1_epi32(0);
+      auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_GE_OQ);
+      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+    });
+  }
+  Vectorized<T> inline operator<=(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m512 x, __m512 y) {
+      auto zero_vec = _mm512_set1_epi32(0);
+      auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_LE_OQ);
+      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+    });
+  }
+  Vectorized<T> inline operator==(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m512 x, __m512 y) {
+      auto zero_vec = _mm512_set1_epi32(0);
+      auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_EQ_OQ);
+      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+    });
+  }
+  Vectorized<T> inline operator!=(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m512 x, __m512 y) {
+      auto zero_vec = _mm512_set1_epi32(0);
+      auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_NEQ_UQ);
+      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+    });
+  }
 };
 
 template<typename T, typename Op>
@@ -649,13 +711,6 @@ public:
 
   Vectorized<BFloat16> frac() const;
 
-  Vectorized<BFloat16> inline operator>(const Vectorized<BFloat16>& other) const;
-  Vectorized<BFloat16> inline operator<(const Vectorized<BFloat16>& other) const;
-  Vectorized<BFloat16> inline operator>=(const Vectorized<BFloat16>& other) const;
-  Vectorized<BFloat16> inline operator<=(const Vectorized<BFloat16>& other) const;
-  Vectorized<BFloat16> inline operator==(const Vectorized<BFloat16>& other) const;
-  Vectorized<BFloat16> inline operator!=(const Vectorized<BFloat16>& other) const;
-
   Vectorized<BFloat16> eq(const Vectorized<BFloat16>& other) const;
   Vectorized<BFloat16> ne(const Vectorized<BFloat16>& other) const;
   Vectorized<BFloat16> gt(const Vectorized<BFloat16>& other) const;
@@ -663,61 +718,6 @@ public:
   Vectorized<BFloat16> lt(const Vectorized<BFloat16>& other) const;
   Vectorized<BFloat16> le(const Vectorized<BFloat16>& other) const;
 };
-
-template<typename Op>
-Vectorized<BFloat16> static inline bfloat16_compare_as_fp32(const Vectorized<BFloat16>& a,
-                                                            const Vectorized<BFloat16>& b, Op op) {
-  __m512 a_lo, a_hi;
-  __m512 b_lo, b_hi;
-  cvtbf16_fp32(__m512i(a), a_lo, a_hi);
-  cvtbf16_fp32(__m512i(b), b_lo, b_hi);
-  auto o1 = op(a_lo, b_lo);
-  auto o2 = op(a_hi, b_hi);
-  return merge_compare_result(o1, o2);
-}
-
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_GT_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_LT_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>=(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_GE_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<=(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_LE_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_EQ_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator!=(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_NEQ_UQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
 
 Vectorized<BFloat16> inline operator+(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return binary_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_add_ps(x, y); });
@@ -731,7 +731,6 @@ Vectorized<BFloat16> inline operator*(const Vectorized<BFloat16>& a, const Vecto
 Vectorized<BFloat16> inline operator/(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return binary_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_div_ps(x, y); });
 }
-
 Vectorized<BFloat16> inline operator&(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return _mm512_and_si512(a, b);
 }
@@ -922,13 +921,6 @@ public:
 
   Vectorized<Half> frac() const;
 
-  Vectorized<Half> inline operator>(const Vectorized<Half>& other) const;
-  Vectorized<Half> inline operator<(const Vectorized<Half>& other) const;
-  Vectorized<Half> inline operator>=(const Vectorized<Half>& other) const;
-  Vectorized<Half> inline operator<=(const Vectorized<Half>& other) const;
-  Vectorized<Half> inline operator==(const Vectorized<Half>& other) const;
-  Vectorized<Half> inline operator!=(const Vectorized<Half>& other) const;
-
   Vectorized<Half> eq(const Vectorized<Half>& other) const;
   Vectorized<Half> ne(const Vectorized<Half>& other) const;
   Vectorized<Half> gt(const Vectorized<Half>& other) const;
@@ -936,49 +928,6 @@ public:
   Vectorized<Half> lt(const Vectorized<Half>& other) const;
   Vectorized<Half> le(const Vectorized<Half>& other) const;
 };
-
-Vectorized<Half> inline Vectorized<Half>::operator>(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_GT_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
-Vectorized<Half> inline Vectorized<Half>::operator<(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_LT_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
-Vectorized<Half> inline Vectorized<Half>::operator>=(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_GE_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
-Vectorized<Half> inline Vectorized<Half>::operator<=(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_LE_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
-Vectorized<Half> inline Vectorized<Half>::operator==(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_EQ_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
-Vectorized<Half> inline Vectorized<Half>::operator!=(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m512 x, __m512 y) {
-    auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_NEQ_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
-  });
-}
 
 Vectorized<Half> inline operator+(const Vectorized<Half>& a, const Vectorized<Half>& b) {
   return binary_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_add_ps(x, y); });
@@ -1259,5 +1208,4 @@ LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
 
 #endif
-
 }}}
