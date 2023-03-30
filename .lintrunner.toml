@@ -657,6 +657,7 @@ exclude_patterns = [
     'aten/src/ATen/native/sparse/cuda/SparseCUDATensorMath.cu',
     'c10/core/impl/InlineDeviceGuard.h',
     'c10/cuda/CUDAFunctions.cpp',
+    'c10/cuda/CUDAGuard.h',
     'c10/cuda/impl/CUDATest.cpp',
     'torch/csrc/cuda/nccl.cpp',
 ]

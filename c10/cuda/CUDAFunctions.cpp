@@ -223,7 +223,7 @@ cudaError_t SetDevice(int device) {
   if (device == cur_device) {
     return cudaSuccess;
   }
-  cudaError_t err cudaSetDevice(device);
+  cudaError_t err = cudaSetDevice(device);
   C10_CUDA_CHECK(cudaFree(0));
   return err;
 }

@@ -3,7 +3,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/impl/InlineDeviceGuard.h>
 #include <c10/core/impl/InlineStreamGuard.h>
-#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/impl/CUDAGuardImpl.h>
 
@@ -18,7 +17,7 @@ namespace cuda {
 /// A variant of DeviceGuard that is specialized for CUDA.  It accepts
 /// integer indices (interpreting them as CUDA devices) and is a little
 /// more efficient than DeviceGuard (it compiles to straight line
-/// SetDevice/GetDevice calls); however, it can only be used
+/// cudaSetDevice/cudaGetDevice calls); however, it can only be used
 /// from code that links against CUDA directly.
 struct CUDAGuard {
   /// No default constructor; see Note [Omitted default constructor from RAII]
