@@ -3,7 +3,7 @@ from typing import List
 
 import torch
 from .. import config, ir
-from ..ir import _string, TensorBox
+from ..ir import TensorBox
 
 from ..lowering import (
     add_layout_constraint,
@@ -319,26 +319,16 @@ def convolution(
     x = ir.ExternKernel.require_stride_order(x, req_stride_order)
     weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
-    cpp_constant_args = [
-        _string(stride),
-        _string(padding),
-        _string(dilation),
-        str(transposed).lower(),
-        _string(output_padding),
-        str(groups),
-    ]
-
     if bias is None:
         args = (x, weight)
         kwargs["bias"] = None
-        cpp_constant_args.insert(0, "at::Tensor()")
     else:
         args = (x, weight, bias)
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.guard_static_shapes(bias.get_size())
 
-    choices = [aten_convolution.bind(args, layout, cpp_constant_args, **kwargs)]
+    choices = [aten_convolution.bind(args, layout, **kwargs)]
     if (
         use_triton_template(layout)
         # templates only support these:
