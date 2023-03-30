@@ -108,12 +108,19 @@ template <> inline void cvt_to_fp32<Half>(const __m256i& a, __m256& o1, __m256& 
   cvtfp16_fp32(a, o1, o2);
 }
 
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+template <typename T, bool is_compare_op = false,
+          typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline __m256i cvt_from_fp32(const __m256& a, const __m256& b);
-template <> inline __m256i cvt_from_fp32<BFloat16>(const __m256& a, const __m256& b) {
+template <> inline __m256i cvt_from_fp32<BFloat16, false>(const __m256& a, const __m256& b) {
   return cvtfp32_bf16(a, b);
 }
-template <> inline __m256i cvt_from_fp32<Half>(const __m256& a, const __m256& b) {
+template <> inline __m256i cvt_from_fp32<BFloat16, true>(const __m256& a, const __m256& b) {
+  return merge_compare_result(a, b);
+}
+template <> inline __m256i cvt_from_fp32<Half, false>(const __m256& a, const __m256& b) {
+  return cvtfp32_fp16(a, b);
+}
+template <> inline __m256i cvt_from_fp32<Half, true>(const __m256& a, const __m256& b) {
   return cvtfp32_fp16(a, b);
 }
 
@@ -546,6 +553,37 @@ public:
     auto o2 = Sleef_powf8_u10(hi, b2);
     return cvt_from_fp32<T>(o1, o2);
   }
+private:
+  template<typename Op>
+  Vectorized<T> inline binary_compare(const Vectorized<T>& b, Op op) const {
+    __m256 a_lo, a_hi;
+    __m256 b_lo, b_hi;
+    cvt_to_fp32<T>(values, a_lo, a_hi);
+    cvt_to_fp32<T>(b.values, b_lo, b_hi);
+    auto o1 = op(a_lo, b_lo);
+    auto o2 = op(a_hi, b_hi);
+    return cvt_from_fp32<T, /*is_compare_op*/true>(o1, o2);
+  }
+
+public:
+  Vectorized<T> inline operator>(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_GT_OQ); });
+  }
+  Vectorized<T> inline operator<(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_LT_OQ); });
+  }
+  Vectorized<T> inline operator>=(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_GE_OQ); });
+  }
+  Vectorized<T> inline operator<=(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_LE_OQ); });
+  }
+  Vectorized<T> inline operator==(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_EQ_OQ); });
+  }
+  Vectorized<T> inline operator!=(const Vectorized<T>& other) const {
+    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ); });
+  }
 };
 
 template<typename T, typename Op>
@@ -566,13 +604,6 @@ public:
 
   Vectorized<BFloat16> frac() const;
 
-  Vectorized<BFloat16> inline operator>(const Vectorized<BFloat16>& other) const;
-  Vectorized<BFloat16> inline operator<(const Vectorized<BFloat16>& other) const;
-  Vectorized<BFloat16> inline operator>=(const Vectorized<BFloat16>& other) const;
-  Vectorized<BFloat16> inline operator<=(const Vectorized<BFloat16>& other) const;
-  Vectorized<BFloat16> inline operator==(const Vectorized<BFloat16>& other) const;
-  Vectorized<BFloat16> inline operator!=(const Vectorized<BFloat16>& other) const;
-
   Vectorized<BFloat16> eq(const Vectorized<BFloat16>& other) const;
   Vectorized<BFloat16> ne(const Vectorized<BFloat16>& other) const;
   Vectorized<BFloat16> gt(const Vectorized<BFloat16>& other) const;
@@ -580,48 +611,6 @@ public:
   Vectorized<BFloat16> lt(const Vectorized<BFloat16>& other) const;
   Vectorized<BFloat16> le(const Vectorized<BFloat16>& other) const;
 };
-
-template<typename Op>
-Vectorized<BFloat16> static inline bfloat16_compare_as_fp32(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b, Op op) {
-  __m256 a_lo, a_hi;
-  __m256 b_lo, b_hi;
-  cvtbf16_fp32(__m256i(a), a_lo, a_hi);
-  cvtbf16_fp32(__m256i(b), b_lo, b_hi);
-  auto o1 = op(a_lo, b_lo);
-  auto o2 = op(a_hi, b_hi);
-  return merge_compare_result(o1, o2);
-}
-
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_GT_OQ);
-  });
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_LT_OQ);
-  });
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>=(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_GE_OQ);
-  });
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<=(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_LE_OQ);
-  });
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_EQ_OQ);
-  });
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator!=(const Vectorized<BFloat16>& other) const {
-  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ);
-  });
-}
 
 Vectorized<BFloat16> inline operator+(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_add_ps(x, y); });
@@ -635,7 +624,6 @@ Vectorized<BFloat16> inline operator*(const Vectorized<BFloat16>& a, const Vecto
 Vectorized<BFloat16> inline operator/(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_div_ps(x, y); });
 }
-
 Vectorized<BFloat16> inline operator&(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return _mm256_and_si256(a, b);
 }
@@ -649,23 +637,18 @@ Vectorized<BFloat16> inline operator^(const Vectorized<BFloat16>& a, const Vecto
 inline Vectorized<BFloat16> Vectorized<BFloat16>::eq(const Vectorized<BFloat16>& other) const {
   return (*this == other) & Vectorized<BFloat16>(1.0f);
 }
-
 inline Vectorized<BFloat16> Vectorized<BFloat16>::ne(const Vectorized<BFloat16>& other) const {
   return (*this != other) & Vectorized<BFloat16>(1.0f);
 }
-
 inline Vectorized<BFloat16> Vectorized<BFloat16>::gt(const Vectorized<BFloat16>& other) const {
   return (*this > other) & Vectorized<BFloat16>(1.0f);
 }
-
 inline Vectorized<BFloat16> Vectorized<BFloat16>::ge(const Vectorized<BFloat16>& other) const {
   return (*this >= other) & Vectorized<BFloat16>(1.0f);
 }
-
 inline Vectorized<BFloat16> Vectorized<BFloat16>::lt(const Vectorized<BFloat16>& other) const {
   return (*this < other) & Vectorized<BFloat16>(1.0f);
 }
-
 inline Vectorized<BFloat16> Vectorized<BFloat16>::le(const Vectorized<BFloat16>& other) const {
   return (*this <= other) & Vectorized<BFloat16>(1.0f);
 }
@@ -819,13 +802,6 @@ public:
 
   Vectorized<Half> frac() const;
 
-  Vectorized<Half> inline operator>(const Vectorized<Half>& other) const;
-  Vectorized<Half> inline operator<(const Vectorized<Half>& other) const;
-  Vectorized<Half> inline operator>=(const Vectorized<Half>& other) const;
-  Vectorized<Half> inline operator<=(const Vectorized<Half>& other) const;
-  Vectorized<Half> inline operator==(const Vectorized<Half>& other) const;
-  Vectorized<Half> inline operator!=(const Vectorized<Half>& other) const;
-
   Vectorized<Half> eq(const Vectorized<Half>& other) const;
   Vectorized<Half> ne(const Vectorized<Half>& other) const;
   Vectorized<Half> gt(const Vectorized<Half>& other) const;
@@ -833,37 +809,6 @@ public:
   Vectorized<Half> lt(const Vectorized<Half>& other) const;
   Vectorized<Half> le(const Vectorized<Half>& other) const;
 };
-
-Vectorized<Half> inline Vectorized<Half>::operator>(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_GT_OQ);
-  });
-}
-Vectorized<Half> inline Vectorized<Half>::operator<(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_LT_OQ);
-  });
-}
-Vectorized<Half> inline Vectorized<Half>::operator>=(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_GE_OQ);
-  });
-}
-Vectorized<Half> inline Vectorized<Half>::operator<=(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_LE_OQ);
-  });
-}
-Vectorized<Half> inline Vectorized<Half>::operator==(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_EQ_OQ);
-  });
-}
-Vectorized<Half> inline Vectorized<Half>::operator!=(const Vectorized<Half>& other) const {
-  return binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ);
-  });
-}
 
 Vectorized<Half> inline operator+(const Vectorized<Half>& a, const Vectorized<Half>& b) {
   return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_add_ps(x, y); });
@@ -877,7 +822,6 @@ Vectorized<Half> inline operator*(const Vectorized<Half>& a, const Vectorized<Ha
 Vectorized<Half> inline operator/(const Vectorized<Half>& a, const Vectorized<Half>& b) {
   return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_div_ps(x, y); });
 }
-
 Vectorized<Half> inline operator&(const Vectorized<Half>& a, const Vectorized<Half>& b) {
   return _mm256_and_si256(a, b);
 }
@@ -891,23 +835,18 @@ Vectorized<Half> inline operator^(const Vectorized<Half>& a, const Vectorized<Ha
 inline Vectorized<Half> Vectorized<Half>::eq(const Vectorized<Half>& other) const {
   return (*this == other) & Vectorized<Half>(1.0f);
 }
-
 inline Vectorized<Half> Vectorized<Half>::ne(const Vectorized<Half>& other) const {
   return (*this != other) & Vectorized<Half>(1.0f);
 }
-
 inline Vectorized<Half> Vectorized<Half>::gt(const Vectorized<Half>& other) const {
   return (*this > other) & Vectorized<Half>(1.0f);
 }
-
 inline Vectorized<Half> Vectorized<Half>::ge(const Vectorized<Half>& other) const {
   return (*this >= other) & Vectorized<Half>(1.0f);
 }
-
 inline Vectorized<Half> Vectorized<Half>::lt(const Vectorized<Half>& other) const {
   return (*this < other) & Vectorized<Half>(1.0f);
 }
-
 inline Vectorized<Half> Vectorized<Half>::le(const Vectorized<Half>& other) const {
   return (*this <= other) & Vectorized<Half>(1.0f);
 }
@@ -1131,7 +1070,6 @@ LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
 
 #endif
-
 }}}
 
 #pragma GCC diagnostic pop
