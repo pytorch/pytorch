@@ -231,7 +231,6 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         mesh_pg = group.get_dim_groups()[0]
         rankset = dist.get_process_group_ranks(mesh_pg)
         group_size = len(rankset)
-        rankset = group.mesh.flatten().tolist()
         tag = tag or c10d._get_group_tag(mesh_pg)
     elif isinstance(group, tuple):
         if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
