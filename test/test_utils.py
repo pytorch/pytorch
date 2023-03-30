@@ -804,9 +804,6 @@ class DummyXPUModule:
     def get_amp_supported_dtype():
         return [torch.float16]
 
-    @staticmethod
-    def dummy_func(num, value, default_value=10):
-        return (num + value) * default_value
 
 class TestExtensionUtils(TestCase):
     def test_external_module_register(self):
@@ -849,17 +846,8 @@ class TestExtensionUtils(TestCase):
         with torch.autocast(device_type=custom_backend_name):
             pass
 
-        with self.assertRaisesRegex(AssertionError, "_func_name_ must be"):
-            torch.utils.run_custom_mod_func(torch.cuda)
-
-        with self.assertWarnsOnceRegex(UserWarning, 'Try to use torch.*._func_name'):
-            assert torch.utils.run_custom_mod_func("_func_name", "Not implemented").startswith("Not implemented")
-
-        with self.assertRaisesRegex(NotImplementedError, 'Try to use torch.foo._func_name'):
-            torch.utils.run_custom_mod_func("_func_name", _log_level_=1)
-
-        assert torch.utils.run_custom_mod_func("_func_name", _default_=True)
-        assert torch.utils.run_custom_mod_func("dummy_func", None, 1, 5, value=20) == 250
+        self.assertEqual(torch._utils._get_device_index('foo:1'), 1)
+        self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
 
 class TestDeviceUtils(TestCase):
     def test_basic(self):
