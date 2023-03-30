@@ -7390,54 +7390,61 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def sign(x):
                 return (x > 0) - (x < 0)
 
-            def fn(enc_out, dec_in):
-                padmask = dec_in == 0
-                dec_mask = padmask.unsqueeze(-1) == padmask.unsqueeze(-2)
-                dec_mask = dec_mask.to(dtype=torch.float32)
-                dec_mask = dec_mask.tril(diagonal=0).cuda()
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    nheads = 16
+                    start = math.log2(0.5)
+                    end = math.log2(1 / (2**8))
 
-                nheads = 16
-                start = math.log2(0.5)
-                end = math.log2(1 / (2**8))
-                scales = (
-                    2
-                    ** torch.arange(
+                    self.scales = 2 ** torch.arange(
                         start,
                         end + 1e-6 * sign(end - start),
                         (end - start) / (nheads - 1),
+                    ).view(1, nheads, 1, 1)
+                    self.emb = nn.Embedding(1024, 256)
+                    self.dec_layer = nn.TransformerDecoderLayer(
+                        256, 16, 512, batch_first=True, norm_first=True
                     )
-                    .view(1, nheads, 1, 1)
-                    .cuda()
-                )
-                q_pos = torch.arange(dec_in.size(1), dtype=torch.long).cuda()
-                k_pos = torch.arange(dec_in.size(1), dtype=torch.long).cuda()
-                rel_pos = k_pos[None, :] - q_pos[:, None]
-                values = rel_pos.abs().neg().unsqueeze(0).unsqueeze(0)
-                dec_bias = values * scales
-                dec_bias.tril_(diagonal=0)
+                    self.head = nn.Linear(256, 1024)
 
-                dec_mask = dec_mask + dec_bias[0]
+                def forward(self, enc_out: torch.Tensor, dec_in: torch.Tensor):
+                    padmask = dec_in == 0
+                    dec_mask = padmask.unsqueeze(-1) == padmask.unsqueeze(-2)
+                    dec_mask = dec_mask.to(dtype=torch.float32)
+                    dec_mask = dec_mask.tril(diagonal=0).cuda()
 
-                emb = nn.Embedding(1024, 256, device="cuda")
-                out = emb(dec_in)
+                    q_pos = torch.arange(
+                        dec_in.size(1), dtype=torch.long, device="cuda"
+                    )
+                    k_pos = torch.arange(
+                        dec_in.size(1), dtype=torch.long, device="cuda"
+                    )
+                    rel_pos = k_pos[None, :] - q_pos[:, None]
+                    values = rel_pos.abs().neg().unsqueeze(0).unsqueeze(0)
+                    dec_bias = values * self.scales
+                    dec_bias.tril_(diagonal=0)
 
-                dec_layer = nn.TransformerDecoderLayer(
-                    256, 16, 512, batch_first=True, norm_first=True, device="cuda"
-                )
-                out = dec_layer(out, enc_out, tgt_mask=dec_mask)
+                    dec_mask = dec_mask + dec_bias[0]
+                    out = self.emb(dec_in)
+                    out = self.dec_layer(out, enc_out, tgt_mask=dec_mask)
+                    return self.head(out)
 
-                head = nn.Linear(256, 1024, device="cuda")
-                return head(out)
+            mod = Repro().cuda()
+            opt_mod = torch._dynamo.optimize("inductor", dynamic=True)(mod)
+            mod.eval()
+            opt_mod.eval()
 
-            enc_out = torch.rand(1, 512, 256)
+            enc_out = torch.rand(1, 512, 256).cuda()
             dec_inputs = [
-                torch.randint(0, 512, (1, i + 1), dtype=torch.long) for i in range(8)
+                torch.randint(0, 512, (1, i + 1), dtype=torch.long).cuda()
+                for i in range(8)
             ]
+
             for dec_inp in dec_inputs:
-                self.common(
-                    fn,
-                    [enc_out, dec_inp],
-                )
+                assert same_two_models(
+                    mod, opt_mod, [enc_out, dec_inp], only_fwd=True
+                ), "Inductor with dynamic shapes failed"
 
         @config.patch({"triton.cudagraphs": True, "size_asserts": False})
         def test_expanded_inputs_cudagraphs_no_size_asserts(self):
