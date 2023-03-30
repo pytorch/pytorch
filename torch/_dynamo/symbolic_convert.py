@@ -379,12 +379,7 @@ def break_graph_if_unsupported(*, push):
                 kw_names = self.kw_names.value if self.kw_names is not None else ()
                 if len(kw_names) > 0:
                     self.output.add_output_instructions(
-                        [
-                            create_instruction(
-                                "KW_NAMES",
-                                PyCodegen.get_const_index(self.code_options, kw_names),
-                            ),
-                        ]
+                        [create_instruction("KW_NAMES", argval=kw_names)]
                     )
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
@@ -705,6 +700,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             else:
                 assert name in self.f_builtins
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
+
+        if inst.argval == "AssertionError":
+            unimplemented("assert with non-string message")
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
@@ -1472,6 +1470,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable(False))
 
+    def LOAD_ASSERTION_ERROR(self, inst):
+        unimplemented("assert with non-string message")
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)
@@ -1763,10 +1764,13 @@ class InstructionTranslator(InstructionTranslatorBase):
         compiler_fn,
         one_graph,
         export,
+        export_constraints,
         mutated_closure_cell_contents: Set[str],
     ):
         super().__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn, self, export),
+            output=OutputGraph(
+                f_globals, code_options, compiler_fn, self, export, export_constraints
+            ),
             instructions=instructions,
             f_locals=f_locals,
             f_globals=f_globals,

@@ -4,13 +4,15 @@ import dataclasses
 import functools
 import importlib
 import itertools
+import math
 import os
 import random
 import sys
+import time
 import typing
 import unittest
 import weakref
-from typing import Callable
+from typing import Callable, Tuple
 from unittest.mock import patch
 
 import numpy as np
@@ -31,9 +33,10 @@ from torch._inductor.utils import run_and_get_triton_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing import make_tensor
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
@@ -58,21 +61,15 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from functorch.compile import config as functorch_config
-from torch._decomp import get_decompositions
 from torch._inductor import codecache, config, metrics, test_operators
-from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
-from torch._inductor.codegen.triton import texpr
-from torch._inductor.codegen.wrapper import pexpr
+from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
 
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
     complex_memory_overlap,
 )
-from torch._inductor.ir import ModularIndexing
-from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import has_torchvision_roi_align, timed
-from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
@@ -147,21 +144,6 @@ binary_list = [
 ]
 
 
-def requires_decomp(fn):
-    """Decorator to disable test if a decomp is missing"""
-
-    def wrap_test(test):
-        @functools.wraps(test)
-        def maybe_test(*args, **kwargs):
-            if len(get_decompositions([fn])) == 0:
-                raise unittest.SkipTest(f"requires decomp for {fn.__name__}")
-            return test(*args, **kwargs)
-
-        return maybe_test
-
-    return wrap_test
-
-
 class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls):
@@ -186,10 +168,14 @@ class TestCase(TorchTestCase):
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
+        self._start = time.perf_counter()
 
     def tearDown(self):
         super().tearDown()
         torch._dynamo.reset()
+        if os.environ.get("ERROR_ON_SLOW") == "1":
+            elapsed = time.perf_counter() - self._start
+            assert elapsed < 120
 
 
 class ToTuple(torch.nn.Module):
@@ -265,15 +251,19 @@ def clone_preserve_strides(x):
 
 
 @patch.object(config, "debug", True)
-def run_and_get_cpp_code(fn, args):
+def run_and_get_cpp_code(fn, *args, **kwargs):
     torch._dynamo.reset()
     import io
-    from contextlib import redirect_stdout
+    import logging
 
-    f = io.StringIO()
-    with redirect_stdout(f):
-        fn(*args)
-    s = f.getvalue()
+    log_capture_string = io.StringIO()
+    ch = logging.StreamHandler(log_capture_string)
+    from torch._inductor.graph import output_code_log
+
+    output_code_log.addHandler(ch)
+    fn(*args, **kwargs)
+    s = log_capture_string.getvalue()
+    output_code_log.removeHandler(ch)
     return s
 
 
@@ -535,152 +525,6 @@ class SweepInputs2:
         for name1 in cls.input_gen_types1:
             for name2 in cls.input_gen_types2:
                 cls.gen_template(name1, name2)
-
-
-class TestIndexingSimplification(TorchTestCase):
-    def test_indexing_simplification(self):
-        sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
-        i2 = sympy.Symbol("i2", integer=True)
-        r3 = sympy.Symbol("r3", integer=True)
-
-        var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
-        expr = (
-            128 * i2
-            + ModularIndexing(i1, 1, 64)
-            + 64 * ModularIndexing(i1 + 64 * r3, 64, 2)
-        )
-        # check that `i1//64` is removed when i1 is always less than 64,
-        # and the next simplificaton doesn't happen
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr, var_ranges),
-            i1 + 128 * i2 + 64 * ModularIndexing(r3, 1, 2),
-        )
-        # all the modular indexing should be removed when the body cant be larger than the modulus
-        var_ranges[r3] = 2
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
-        )
-        # if there are negative terms in ModularIndexing base, we cannot replace it with FloorDiv
-        expr = ModularIndexing(i1 - 15, 1, 64)
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr, var_ranges),
-            ModularIndexing(i1 - 15, 1, 64),
-        )
-        # small terms should be kept if the rest is not guaranteed to be divisible
-        self.assertEqual(
-            sizevars.simplify_with_ranges(FloorDiv(r3 + i2 + i1, 32), var_ranges),
-            FloorDiv(r3 + i2 + i1, 32),
-        )
-
-        expr = ModularIndexing(2 * i2 + r3, 1, 64)
-        # modular indexing is removed if base is smaller than modulo
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), 2 * i2 + r3)
-
-        # check the same thing but with symbolic divisor
-        self.assertEqual(FloorDiv(r3 * i0, r3), i0)
-        self.assertEqual(ModularIndexing(r3 * i0, r3, 10), ModularIndexing(i0, 1, 10))
-
-        # (10*i) % 10 is always zero and should get optimized away
-        self.assertEqual(
-            ModularIndexing(i0 + i1 * 10, 1, 10), ModularIndexing(i0, 1, 10)
-        )
-
-        # ((20*i)//2) % 10 is always zero and should get optimized away
-        self.assertEqual(
-            ModularIndexing(i0 + i1 * 20, 2, 10), ModularIndexing(i0, 2, 10)
-        )
-
-        # the same things happens with symbolic divisor
-        self.assertEqual(
-            ModularIndexing(i0 + i1 * i2 * r3, i2, r3), ModularIndexing(i0, i2, r3)
-        )
-
-        # if there are negative terms, we cannot optimize away zero terms due to https://github.com/openai/triton/issues/619
-        self.assertEqual(
-            ModularIndexing(-i0 + i1 * 20, 2, 10), ModularIndexing(-i0 + i1 * 20, 2, 10)
-        )
-        self.assertEqual(
-            ModularIndexing(-15 + i1 * 20, 2, 10), ModularIndexing(-15 + i1 * 20, 2, 10)
-        )
-
-        # Constant fold from divisor into base
-        self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
-        self.assertEqual(FloorDiv(i0 * 4, 2), i0 * 2)
-
-        # Nested modular indexing is correctly simplified
-        var_ranges = {"i1": 13, "i2": 121}
-        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
-        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
-        var_ranges = {"i2": 784}
-        expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
-        expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
-        expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
-
-    def test_indexing_join(self):
-        sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
-        i2 = sympy.Symbol("i2", integer=True)
-
-        # join two ModularIndexing calls into one larger one when possible
-        expr1 = ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr1, {}), ModularIndexing(i0, 1, 128)
-        )
-
-        # it should also work with a scale
-        self.assertEqual(
-            sizevars.simplify_with_ranges(2 * expr1, {}),
-            2 * ModularIndexing(i0, 1, 128),
-        )
-
-        # it should work when divisor is not 1
-        expr2 = ModularIndexing(i0, 3, 32) + 32 * ModularIndexing(i0, 32 * 3, 4)
-        simplified = sizevars.simplify_with_ranges(expr2, {})
-        self.assertEqual(simplified, ModularIndexing(i0, 3, 128))
-        self.assertEqual(expr2.subs({i0: 39485}), simplified.subs({i0: 39485}))
-
-        # it should not happen in this case as the modulus is wrong
-        expr3 = ModularIndexing(i0, 1, 30) + 32 * ModularIndexing(i0, 32, 4)
-        self.assertEqual(sizevars.simplify_with_ranges(expr3, {}), expr3)
-
-        # check that it also works with a modulus>1
-        expr4 = ModularIndexing(i0, 10, i1) + i1 * ModularIndexing(i0, i1 * 10, i2)
-        res0 = expr4.subs({i0: 24056, i1: 13, i2: 19})
-        simplified = sizevars.simplify_with_ranges(expr4, {})
-        res1 = simplified.subs({i0: 24056, i1: 13, i2: 19})
-        self.assertEqual(res0, res1)
-        self.assertEqual(simplified, ModularIndexing(i0, 10, i1 * i2))
-
-        # and also works with an offset
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr4 + 10, {}),
-            ModularIndexing(i0, 10, i1 * i2) + 10,
-        )
-
-        # works for ModularIndexing + FloorDiv
-        expr5 = 197 * FloorDiv(i0, 197) + ModularIndexing(i0, 1, 197)
-        simplified = sizevars.simplify_with_ranges(expr5, {})
-        self.assertEqual(simplified, i0)
-        self.assertEqual(expr5.subs({i0: 39485}), simplified.subs({i0: 39485}))
-
-        # works with a scale
-        self.assertEqual(
-            sizevars.simplify_with_ranges(2 * expr5, {}),
-            2 * i0,
-        )
-
-        # divisor != 1
-        expr6 = 197 * FloorDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
-        simplified = sizevars.simplify_with_ranges(expr6, {})
-        self.assertEqual(simplified, FloorDiv(i0, 3))
-        self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
 
 class CommonTemplate:
@@ -1907,12 +1751,13 @@ class CommonTemplate:
                 res = self.linear(res)
                 return res
 
-        with torch.no_grad():
-            m = M(224, 224).bfloat16().eval()
-            m_opt = torch.compile(m)
-            x = torch.randn(224, 224, dtype=torch.bfloat16)
-            m_opt(x)
-            self.assertEqual(m(x), m_opt(x))
+        if has_bf16_support():
+            with torch.no_grad():
+                m = M(224, 224).bfloat16().eval()
+                m_opt = torch.compile(m)
+                x = torch.randn(224, 224, dtype=torch.bfloat16)
+                m_opt(x)
+                self.assertEqual(m(x), m_opt(x))
 
     @slow()
     def test_conv2d_unary(self):
@@ -2101,6 +1946,14 @@ class CommonTemplate:
                     mod,
                     (v,),
                 )
+            if has_bf16_support() and len(input_shape) > 1:
+                mod = mod.to(torch.bfloat16)
+                v = v.to(torch.bfloat16)
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
@@ -2128,7 +1981,7 @@ class CommonTemplate:
                 return mod(*ex, **kwargs)
 
             run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, (v,))
+            code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
@@ -2475,7 +2328,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
     @requires_multigpu()
-    def test_recompile_on_index(self):
+    def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
 
         def gemm(x, y):
@@ -4511,6 +4364,22 @@ class CommonTemplate:
             ),
         )
 
+    def test_index_put_deterministic_fallback(self):
+        with DeterministicGuard(True):
+
+            def fn(a, b, c):
+                return torch.index_put(a, [b], c, True)
+
+            self.common(
+                fn,
+                [
+                    torch.randn([100, 32]),
+                    torch.randint(0, 100, size=[600], dtype=torch.int64),
+                    torch.randn([600, 32]),
+                ],
+                check_lowp=False,
+            )
+
     def test_index_put_index(self):
         def fn(ind, x, src):
             y = torch.ops.aten.index_put.default(x, [ind], src)
@@ -5209,6 +5078,8 @@ class CommonTemplate:
 
     @config.patch(search_autotune_cache=False)
     def test_lowmem_dropout2(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("lowmem_dropout only supports cuda")
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
             torch.nn.Dropout(),
@@ -5668,6 +5539,72 @@ class CommonTemplate:
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_index_dynamic_shapes(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("index dynamic shapes only supports cpu")
+
+        # Repro from vision_maskrcnn
+        def fn(arg0_1):
+            unsqueeze = arg0_1.unsqueeze(0)
+            sym_size = arg0_1.size(1)
+            ceil = math.ceil(sym_size * 1.8735363483428955)
+            iota = torch.ops.prims.iota.default(
+                ceil,
+                start=0,
+                step=1,
+                dtype=torch.int64,
+                device="cpu",
+                requires_grad=False,
+            )
+            convert_element_type_1 = iota.to(torch.float32)
+            sym_size_1 = arg0_1.size(2)
+            floor_1 = math.floor(sym_size_1 * 1.8735363483428955)
+            ceil_1 = math.ceil(floor_1)
+            iota_1 = torch.ops.prims.iota.default(
+                ceil_1,
+                start=0,
+                step=1,
+                dtype=torch.int64,
+                device="cpu",
+                requires_grad=False,
+            )
+            convert_element_type_3 = iota_1.to(torch.float32)
+            sub_2 = (convert_element_type_1 + 0.5) * (sym_size / ceil) - 0.5
+            clamp_min = sub_2.clamp_min(0.0)
+            sub_3 = (convert_element_type_3 + 0.5) * (sym_size_1 / floor_1) - 0.5
+            clamp_min_1 = sub_3.clamp_min(0.0)
+            convert_element_type_4 = clamp_min.to(torch.int64)
+            sub_4 = sym_size - 1
+            clamp_max = clamp_min.ceil().clamp_max(sub_4)
+            convert_element_type_5 = clamp_max.to(torch.int64)
+            convert_element_type_6 = clamp_min_1.to(torch.int64)
+            unsqueeze_2 = convert_element_type_4.unsqueeze(1)
+            index = torch.ops.aten.index.Tensor(
+                unsqueeze, [None, None, unsqueeze_2, convert_element_type_6]
+            )
+            index_1 = torch.ops.aten.index.Tensor(
+                unsqueeze,
+                [
+                    None,
+                    None,
+                    convert_element_type_5.unsqueeze(1),
+                    convert_element_type_6,
+                ],
+            )
+            sub_6 = clamp_min.unsqueeze(1) - unsqueeze_2
+            mul_10 = (index * (1.0 - sub_6) + index_1 * (sub_6)) * (
+                1.0 - (clamp_min_1 - convert_element_type_6)
+            )
+            select = torch.ops.aten.select.int(mul_10, 0, 0)
+            return (select,)
+
+        x = torch.randn(15, 20, 3)
+        self.common(
+            fn,
+            [x],
+        )
+
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):
         def fn(x, y):
@@ -5676,7 +5613,7 @@ class CommonTemplate:
 
         inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
         fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, inps)
+        code = run_and_get_cpp_code(fn_opt, *inps)
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
 
@@ -5695,40 +5632,6 @@ class CommonTemplate:
         assert "inductor_wrapper_call" in (
             e.name for e in prof.profiler.function_events
         )
-
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
-    def test_cpp_wrapper(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("cpp_wrapper only supports cpu")
-
-        device = "cpu"
-        for name, supported in [
-            ["test_as_strided", True],  # buffer reuse
-            ["test_bitwise", True],  # int32
-            ["test_bmm1", True],
-            ["test_bmm2", True],
-            ["test_cat", True],  # alias
-            ["test_linear1", True],
-            ["test_linear2", True],
-            ["test_lowmem_dropout1", True],  # None as output
-            ["test_mm_views", True],
-            [
-                "test_profiler_mark_wrapper_call",
-                True,
-            ],
-            ["test_reduction1", True],  # Reduction
-            ["test_relu", True],  # multiple inputs
-            ["test_silu", True],  # single input, single output
-            ["test_sum_dtype", True],  # float64
-            ["test_sum_int", True],  # bool, int64, int8, uint8
-            ["test_transpose", True],  # multiple outputs, buffer clear
-        ]:
-            test_name = f"{name}_{device}"
-            assert hasattr(self, test_name), "undefined function"
-            func = getattr(self, test_name)
-            assert callable(func), "not a callable"
-            code = run_and_get_cpp_code(func, [])
-            self.assertEqual("load_inline" in code, supported)
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
@@ -5817,7 +5720,7 @@ class CommonTemplate:
             a = a.max(0).values
             c = torch.cat((a, b))
             c = c.round()
-            b >= a[0]
+            b >= a[0]  # noqa: B015
             return c
 
         some_const = torch.tensor(6324)
@@ -5825,14 +5728,39 @@ class CommonTemplate:
         def fn2():
             a = torch.tensor([[0.6324]])
             ret = torch.cat((a, a), dim=0)
-            some_const >= a[0]
+            some_const >= a[0]  # noqa: B015
             return ret
 
         self.common(fn1, (torch.tensor([[4.0]]), torch.tensor([5.0])))
         self.common(fn2, ())
 
+    def test_argmax_to_float(self):
+        # https://github.com/pytorch/pytorch/issues/97127
+        def fn():
+            a = torch.zeros([2, 2])
+            b = a.argmax(0)
+            return b.float().mean()
 
-def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
+        self.common(fn, ())
+
+    def test_const_int32_to_float(self):
+        # https://github.com/pytorch/pytorch/issues/97124
+        def fn():
+            a = torch.zeros([1, 2], dtype=torch.int32)
+            a = a + a
+            b = a.to(dtype=torch.float32)
+            return b * 0.8
+
+        self.common(fn, ())
+
+
+@dataclasses.dataclass
+class TestFailure:
+    suffixes: Tuple[str]
+    is_skip: bool = False
+
+
+def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use lambdas here to
@@ -5840,12 +5768,17 @@ def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
             # would modify all methods sharing the same object id. Also, by
             # using a default argument in a lambda, we create a copy instead of
             # a reference. Otherwise, we would lose access to the value.
-            skips = test_skips and test_skips.get(name)
-            if skips and suffix in skips:
+            tf = test_failures and test_failures.get(name)
+            if tf is not None and suffix in tf.suffixes:
+                skip_func = (
+                    unittest.skip("Skipped!")
+                    if tf.is_skip
+                    else unittest.expectedFailure
+                )
                 setattr(
                     other_cls,
                     f"{name}_{suffix}",
-                    unittest.skip("Skipped!")(lambda self, value=value: value(self)),
+                    skip_func(lambda self, value=value: value(self)),
                 )
             else:
                 setattr(
@@ -5853,7 +5786,7 @@ def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
                 )
 
 
-if HAS_CPU:
+if HAS_CPU and not torch.backends.mps.is_available():
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -6125,15 +6058,17 @@ if HAS_CPU:
                 value = torch.randn((2, 17), dtype=dtype)
                 mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
                 with config.patch({"cpp.simdlen": None}):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    opt_fn = torch._dynamo.optimize("inductor")(fn)
-                    opt_fn(value, mask)
+                    for cpp_wrapper_flag in [True, False]:
+                        with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
+                            torch._dynamo.reset()
+                            metrics.reset()
+                            opt_fn = torch._dynamo.optimize("inductor")(fn)
+                            opt_fn(value, mask)
 
-                    real_out = fn(value, mask)
-                    compiled_out = opt_fn(value, mask)
-                    assert same(real_out, compiled_out, equal_nan=True)
-                    assert metrics.generated_cpp_vec_kernel_count >= 1
+                            real_out = fn(value, mask)
+                            compiled_out = opt_fn(value, mask)
+                            assert same(real_out, compiled_out, equal_nan=True)
+                            assert metrics.generated_cpp_vec_kernel_count >= 1
 
         def test_load_same_bool_tensor_twice(self):
             @torch._dynamo.optimize("inductor")
@@ -6229,12 +6164,16 @@ if HAS_CPU:
                 tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
 
                 with config.patch({"cpp.simdlen": None}):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    traced = make_fx(fn)(x)
-                    compiled = compile_fx_inner(traced, [x])
-                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True, tol=tol)
-                    assert metrics.generated_cpp_vec_kernel_count == 1
+                    for cpp_wrapper_flag in [True, False]:
+                        with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
+                            torch._dynamo.reset()
+                            metrics.reset()
+                            traced = make_fx(fn)(x)
+                            compiled = compile_fx_inner(traced, [x])
+                            assert same(
+                                fn(x)[0], compiled([x])[0], equal_nan=True, tol=tol
+                            )
+                            assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6260,6 +6199,7 @@ if HAS_CPU:
                     assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                     assert metrics.generated_cpp_vec_kernel_count == 1
 
+        @slow()
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
@@ -6363,6 +6303,32 @@ if HAS_CPU:
                         - metrics.generated_cpp_vec_kernel_count
                     ) == 0
 
+        def test_skip_cpp_codegen(self):
+            with config.patch({"disable_cpp_codegen": True}):
+                inps = torch.ones([20]), torch.rand([20])
+
+                def f(x, y):
+                    return x + y + torch.tensor(1)
+
+                f_opt = torch.compile()(f)
+
+                code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
+                FileCheck().check_not("void kernel").run(code)
+
+                self.assertEqual(
+                    f(*inps),
+                    f_opt(*inps),
+                )
+
+                # constant needs to be propagated on fallback
+                def f(x):
+                    return x[torch.tensor(1) :] * 2
+
+                f_opt = torch.compile()(f)
+                code = run_and_get_cpp_code(f_opt, inps[0])
+                FileCheck().check_not("void kernel").run(code)
+                self.assertEqual(f_opt(inps[0]), f(inps[0]))
+
         def test_redundant_to_node_elimination_bf16(self):
             def fn(x, y):
                 res = x + y
@@ -6372,14 +6338,51 @@ if HAS_CPU:
             x = torch.randn((2, 9), dtype=torch.bfloat16)
             y = torch.randn((2, 9), dtype=torch.bfloat16)
 
-            with config.patch({"cpp.simdlen": None}):
-                torch._dynamo.reset()
-                metrics.reset()
-                traced = make_fx(fn)(x, y)
-                compiled = compile_fx_inner(traced, [x, y])
-                assert same(fn(x, y)[0], compiled([x, y])[0], equal_nan=True, tol=1e-2)
-                if codecache.valid_vec_isa_list():
-                    assert metrics.generated_cpp_vec_kernel_count == 1
+            for torch_compile_debug in [True, False]:
+                with config.patch(
+                    {"trace.enabled": torch_compile_debug, "cpp.simdlen": None}
+                ):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x, y)
+                    compiled = compile_fx_inner(traced, [x, y])
+                    assert same(
+                        fn(x, y)[0], compiled([x, y])[0], equal_nan=True, tol=1e-2
+                    )
+                    if codecache.valid_vec_isa_list():
+                        assert metrics.generated_cpp_vec_kernel_count == 1
+
+        def test_do_not_insert_to_dtype_for_memory_copy_only_kernel(self):
+            def fn(x):
+                res = x.clone()
+                return (res,)
+
+            x = torch.randn((100, 100), dtype=torch.bfloat16)
+
+            torch._dynamo.reset()
+            metrics.reset()
+            traced = make_fx(fn)(x)
+            compiled = compile_fx_inner(traced, [x])
+            assert same(fn(x)[0], compiled([x])[0])
+            assert metrics.cpp_to_dtype_count == 0
+            if codecache.valid_vec_isa_list():
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+        def test_insert_to_dtype_count(self):
+            def fn(x):
+                res = x.relu()
+                return (res,)
+
+            x = torch.randn((100, 100), dtype=torch.bfloat16)
+
+            torch._dynamo.reset()
+            metrics.reset()
+            traced = make_fx(fn)(x)
+            compiled = compile_fx_inner(traced, [x])
+            assert same(fn(x)[0], compiled([x])[0])
+            assert metrics.cpp_to_dtype_count == 2
+            if codecache.valid_vec_isa_list():
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6408,7 +6411,16 @@ if HAS_CPU:
                     torch.double,
                 ),
             )
-            _graph.output((b, c))
+            d: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "ge",
+                args=(
+                    a,
+                    b,
+                    b,
+                ),
+            )
+            _graph.output((d, c))
 
             def get_index():
                 return ""
@@ -6494,7 +6506,16 @@ if HAS_CPU:
                     torch.int64,
                 ),
             )
-            _graph.output(c)
+            d: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "ge",
+                args=(
+                    a,
+                    c,
+                    c,
+                ),
+            )
+            _graph.output(d)
 
             def get_index():
                 return ""
@@ -6637,6 +6658,25 @@ if HAS_CPU:
                     compiled = compile_fx_inner(traced, [x])
                     assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                     assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_reduction_cpu_only(self):
+            def fn(x):
+                return (torch.argmax(x, -1),)
+
+            for dtype in vec_dtypes:
+                x = torch.randn((10, 10), dtype=dtype)
+
+                with config.patch({"cpp.simdlen": None}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x)
+                    compiled = compile_fx_inner(traced, [x])
+                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 0
 
         # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
         # supported, the vectorization will not work and skip this test case. For ARM or
@@ -7117,6 +7157,33 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             assert compiled([])[0].device.type == "cuda"
 
         @config.patch({"triton.cudagraphs": True})
+        def test_no_device_idx_repro_cudagraphs(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self):
+                    full = torch.ops.aten.full.default(
+                        [8, 512],
+                        1,
+                        dtype=torch.float32,
+                        layout=torch.strided,
+                        device=torch.device(type="cuda", index=0),
+                        pin_memory=False,
+                    )
+                    full_1 = torch.ops.aten.full.default(
+                        [8, 512],
+                        0,
+                        dtype=torch.int64,
+                        layout=torch.strided,
+                        device=torch.device(type="cuda", index=0),
+                        pin_memory=False,
+                    )
+                    return (full_1, full)
+
+            self.common(Repro(), ())
+
+        @config.patch({"triton.cudagraphs": True})
         def test_expanded_inputs_cudagraphs(self):
             @torch._dynamo.optimize("inductor")
             def fn(x, y):
@@ -7161,37 +7228,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
-
-        @config.patch(tune_layout=True)
-        def test_tune_layout(self):
-            class Repro(torch.nn.Module):
-                def forward(self, arg1_1, unsqueeze, unsqueeze_1):
-                    convolution_1 = torch.ops.aten.convolution.default(
-                        unsqueeze,
-                        unsqueeze_1,
-                        arg1_1,
-                        [1, 1],
-                        [1, 0],
-                        [1, 1],
-                        False,
-                        [0, 0],
-                        1,
-                    )
-                    unsqueeze = unsqueeze_1 = arg1_1 = None
-                    return (convolution_1,)
-
-            args = [
-                ((512,), (1,), torch.float16, "cuda"),
-                ((4096, 512, 16, 1), (8192, 16, 1, 1), torch.float16, "cuda"),
-                ((512, 512, 3, 1), (1536, 3, 1, 1), torch.float16, "cuda"),
-            ]
-            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-
-            mod = Repro()
-            opt_mod = torch._dynamo.optimize("inductor")(mod)
-            ref = mod(*args)
-            res = opt_mod(*args)
-            self.assertTrue(same(ref, res))
 
         @config.patch({"triton.cudagraphs": True})
         def test_inplace_updates_cudagraphs(self):
@@ -7287,7 +7323,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             https://github.com/pytorch/torchdynamo/issues/1670
             """
             from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-            from torch._inductor.triton_ops.autotune import CachingAutotuner, grid
+            from torch._inductor.triton_heuristics import CachingAutotuner, grid
             from torch._inductor.utils import instance_descriptor
 
             def autotune(configs, meta):
@@ -7391,8 +7427,51 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             fn_optimized = torch._dynamo.optimize("inductor")(fn)
             assert same(fn(a, b), fn_optimized(a, b))
 
+        @requires_cuda()
+        def test_issue97695_1input(self):
+            def fn(arg3_1, relu, permute_1):
+                addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+                cat_2 = torch.ops.aten.cat.default([addmm_1], 1)
+                return (cat_2,)
+
+            args = [
+                ((96,), (1,), torch.float32, "cuda"),
+                ((10, 256), (256, 1), torch.float32, "cuda"),
+                ((256, 96), (1, 256), torch.float32, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            correct = fn(*args)
+
+            mod = make_fx(fn, tracing_mode="real")(*args)
+            compiled = compile_fx_inner(mod, args)
+            ref = compiled(list(args))
+            assert same(ref, correct)
+
+            ref = torch.compile(fn, fullgraph=True)(*args)
+            assert same(ref, correct)
+
+        @requires_cuda()
+        def test_issue97695_2input(self):
+            def fn(arg3_1, arg3_2, relu, permute_1):
+                addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+                addmm_2 = torch.ops.aten.addmm.default(arg3_2, relu, permute_1)
+                cat_2 = torch.ops.aten.cat.default([addmm_1, addmm_2], 1)
+                return (cat_2,)
+
+            args = [
+                ((96,), (1,), torch.float32, "cuda"),
+                ((96,), (1,), torch.float32, "cuda"),
+                ((10, 256), (256, 1), torch.float32, "cuda"),
+                ((256, 96), (1, 256), torch.float32, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            correct = fn(*args)
+
+            ref = torch.compile(fn, fullgraph=True)(*args)
+            assert same(ref, correct)
+
     class TritonCodeGenTests(TestCase):
-        from torch._inductor.triton_ops.autotune import CachingAutotuner
+        from torch._inductor.triton_heuristics import CachingAutotuner
 
         class NoOpCompilerBackend:
             def __init__(self):
@@ -7444,7 +7523,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 for val in mod.__dict__.values():
                     if isinstance(
-                        val, torch._inductor.triton_ops.autotune.CachingAutotuner
+                        val, torch._inductor.triton_heuristics.CachingAutotuner
                     ):
                         kernels.append(val)
 
@@ -7637,50 +7716,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     )
                     inps = torch.randn([5, 5])
                     fn_opt(inps)
-
-
-class ExprPrinterTests(TestCase):
-    def test_print_pow(self):
-        s1 = sympy.Symbol("foo", integer=True)
-        s2 = sympy.Symbol("bar", integer=True)
-        s3 = sympy.Symbol("baz", integer=True)
-
-        cases = (
-            # expr, result
-            # Test exprs.
-            (
-                s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                lambda c: f"((-1)*({c}/(((-1) + (2*foo))))) + (foo*({c}/(((-1) + (2*foo)))))",
-            ),
-            (s1 / (s2 - s3), lambda c: f"foo*({c}/((bar + ((-1)*baz))))"),
-            # Test Pow directly.
-            (
-                sympy.Pow(s1 + s2, 0),
-                lambda _: "1",
-            ),  # note: simplified before _print_Pow
-            (
-                sympy.Pow(s1 + s2, -3),
-                lambda c: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
-            ),
-            (sympy.Pow(s1 + s2, 2), lambda _: "(bar + foo)*(bar + foo)"),
-        )
-
-        for expr, result in cases:
-            self.assertEqual(cexpr(expr), result(1.0))  # 1.0 for FP div
-            self.assertEqual(texpr(expr), result(1))
-            self.assertEqual(pexpr(expr), result(1))
-
-    def test_print_floor(self):
-        s1 = sympy.Symbol("s1", integer=False)
-        expr = sympy.floor(s1)
-        self.assertEqual(texpr(expr), "tl.math.floor(s1)")
-        self.assertEqual(pexpr(expr), "math.floor(s1)")
-
-    def test_print_ceil(self):
-        s1 = sympy.Symbol("s1", integer=False)
-        expr = sympy.ceiling(s1)
-        self.assertEqual(texpr(expr), "tl.math.ceil(s1)")
-        self.assertEqual(pexpr(expr), "math.ceil(s1)")
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
