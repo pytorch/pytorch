@@ -584,7 +584,7 @@ class Constraint:
 def export(
     f: Callable[..., Any],
     *args,
-    aten_graph: bool = False,
+    aten_graph: str = "none",
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
@@ -600,8 +600,10 @@ def export(
 
         *args: Variable length argument list to be passed to the function f.
 
-        aten_graph (bool): If True, exports a graph with ATen operators.
-        If False, exports a graph with Python operators. Default is False.
+        aten_graph (str): Valid options include:
+          "none": export a graph with Python operations. Default is False.
+          "aten": export a graph with ATen operations.
+          "aten_pre_autograd": export a graph with pre_autograd ATen operations.
 
         decomposition_table (dict): A dictionary that maps operators to their decomposition functions.
         Required if aten_graph or tracing_mode is specified. Default is None.
@@ -626,10 +628,12 @@ def export(
     """
     check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
+    assert aten_graph in ['none', 'aten', 'aten_pre_autograd'], "aten_graph must be set to one of 'none','aten','aten_pre_autograd'"
     if decomposition_table is not None or tracing_mode != "real":
         assert (
-            aten_graph
-        ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
+            aten_graph != "none"
+        ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph='aten' \
+        or aten_graph='aten_pre_autograd'"
     f = innermost_fn(f)
 
     graph = None
@@ -757,7 +761,7 @@ def export(
                 r.node.meta["val"] = self.current_node.meta["val"]
             return r
 
-    if aten_graph:
+    if aten_graph != "none":
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
@@ -767,6 +771,7 @@ def export(
             graph_with_interpreter,
             decomposition_table=decomposition_table,
             tracing_mode=tracing_mode,
+            pre_autograd=aten_graph == "aten_pre_autograd",
             _allow_non_fake_inputs=True,
         )(*graph_captured_input)
 
