@@ -7396,11 +7396,16 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 nheads = 16
                 start = math.log2(0.5)
                 end = math.log2(1 / (2**8))
-                scales = 2 ** torch.arange(
-                    start,
-                    end + 1e-6 * np.sign(end - start),
-                    (end - start) / (nheads - 1),
-                ).view(1, nheads, 1, 1).cuda()
+                scales = (
+                    2
+                    ** torch.arange(
+                        start,
+                        end + 1e-6 * np.sign(end - start),
+                        (end - start) / (nheads - 1),
+                    )
+                    .view(1, nheads, 1, 1)
+                    .cuda()
+                )
                 q_pos = torch.arange(dec_in.size(1), dtype=torch.long).cuda()
                 k_pos = torch.arange(dec_in.size(1), dtype=torch.long).cuda()
                 rel_pos = k_pos[None, :] - q_pos[:, None]
@@ -7410,15 +7415,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 dec_mask = dec_mask + dec_bias[0]
 
-                emb = nn.Embedding(1024, 256)
+                emb = nn.Embedding(1024, 256, device="cuda")
                 out = emb(dec_in)
 
                 dec_layer = nn.TransformerDecoderLayer(
-                    256, 16, 512, batch_first=True, norm_first=True
+                    256, 16, 512, batch_first=True, norm_first=True, device="cuda"
                 )
                 out = dec_layer(out, enc_out, tgt_mask=dec_mask)
 
-                head = nn.Linear(256, 1024)
+                head = nn.Linear(256, 1024, device="cuda")
                 return head(out)
 
             enc_out = torch.rand(1, 512, 256)
