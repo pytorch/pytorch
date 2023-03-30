@@ -244,9 +244,6 @@ class WrapperCodeGen(CodeGen):
     def get_output_refs(self):
         return [x.codegen_reference() for x in V.graph.graph_outputs]
 
-    def mark_output_type(self):
-        return
-
     def write_prefix(self):
         self.prefix.splice(
             """
@@ -350,8 +347,6 @@ class WrapperCodeGen(CodeGen):
                     self.wrapper_call.writeline(line)
 
             output_refs = self.get_output_refs()
-            self.mark_output_type()
-
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
 
@@ -721,22 +716,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
             for x in V.graph.graph_outputs
         ]
 
-    def mark_output_type(self):
-        # mark output type to unwrap tensor back to python scalar
-        from ..ir import ShapeAsConstantBuffer
-
-        output_is_tensor = dict()
-        for idx, x in enumerate(V.graph.graph_outputs):
-            # TODO: cases other than ShapeAsConstantBuffer but also scalar value?
-            if isinstance(x, ShapeAsConstantBuffer):
-                # TODO: is this check needed?
-                assert x.shape.is_integer, "Expect ShapeAsConstantBuffer to be integer"
-                output_is_tensor[idx] = False
-            else:
-                output_is_tensor[idx] = True
-
-        self.output_is_tensor = output_is_tensor
-
     def call_func_name(self):
         return f"call_{self._call_func_id}"
 
@@ -872,27 +851,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
         )
         # Wrap the func to support setting result._boxed_call = True
-        if all(x for x in self.output_is_tensor.values()):
-            # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
-            return_str = "return f(args_tensor)"
-        else:
-            outputs = [
-                f"outputs[{i}]" if self.output_is_tensor[i] else f"outputs[{i}].item()"
-                for i in range(len(V.graph.graph_outputs))
-            ]
-            outputs_str = f"[{', '.join(outputs)}]"
-            return_str = f"""
-                    outputs = f(args_tensor)
-                    return {outputs_str}
-
-            """
-
         result.splice(
             f"""
             def _wrap_func(f):
                 def g(args):
                     args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]
-                    {return_str}
+                    return f(args_tensor)
                 return g
             call = _wrap_func(module.call_{self._call_func_id})
             """
