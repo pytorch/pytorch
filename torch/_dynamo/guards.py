@@ -652,7 +652,6 @@ class CheckFunctionManager:
     def compile_check_fn(
         self, local_builder, global_builder, guards_out, guard_fail_fn
     ):
-        intersection = set(local_builder.argnames) & set(global_builder.argnames)
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
         largs += [a for a in local_builder.argnames if a != "___implicit0"]
@@ -711,33 +710,29 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        # TODO(voz): Make this a real util
-        def _print_true(*args):
-            print("PRINTING TRUE", args)
-            return True
-
         code = " and ".join(unique(code_parts))
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
-                ("__print_true", _print_true),
                 ("tensor_check_names", tensor_check_names),
             ]
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
-def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda L, G: {code}
+def ___make_guard_fn(G, {','.join(closure_vars.keys())}):
+    return lambda L: {code}
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
-        guard_fn = out["___make_guard_fn"](*closure_vars.values())
+        guard_fn = out["___make_guard_fn"](
+            global_builder.scope["G"], *closure_vars.values()
+        )
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
@@ -770,7 +765,6 @@ def guard_fail_hook(
     code: types.CodeType,
     index: int,
     f_locals: Dict[str, object],
-    f_globals: Dict[str, object],
     last: bool,
 ) -> None:
     """
@@ -781,7 +775,7 @@ def guard_fail_hook(
     # Don't waste time computing the fail reason for guards we aren't going to report out.
     if not guard_fn.guard_fail_fn and not (first or last):
         return
-    scope = {"L": f_locals, "G": f_globals}
+    scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     reason = None
     for part in guard_fn.verbose_code_parts:
@@ -827,7 +821,6 @@ def guard_error_hook(
     code: types.CodeType,
     index: int,
     f_locals: Dict[str, object],
-    f_globals: Dict[str, object],
     last: bool,
 ):
     print(

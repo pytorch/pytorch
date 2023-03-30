@@ -476,16 +476,14 @@ static PyObject* call_guard_fail_hook(
     PyObject* hook,
     CacheEntry* e,
     size_t index,
-    PyObject* f_locals,
-    PyObject* f_globals) {
+    PyObject* f_locals) {
   // call debugging logic when a guard fails
   PyObject* args = PyTuple_Pack(
-      6,
+      5,
       e->check_fn,
       e->code,
       PyLong_FromSize_t(index),
       f_locals,
-      f_globals,
       (e->next == NULL ? Py_True : Py_False));
   if (args == NULL) return NULL;
   PyObject* result = PyObject_CallObject(hook, args);
@@ -522,15 +520,8 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     return Py_None;
   }
   PyObject *f_locals = frame->f_locals;
-  if (f_locals == NULL) {
-      f_locals = frame->f_locals = PyDict_New();
-  }
-  PyObject *f_globals = frame->f_globals;
-  if (f_globals == NULL) {
-      f_globals = frame->f_globals = PyDict_New();
-  }
   // TODO: In Python 3.9 can optimize this to PyObject_CallOneArg
-  PyObject* args_tuple = PyTuple_Pack(2, f_locals, f_globals);
+  PyObject* args_tuple = PyTuple_Pack(1, f_locals);
   if (args_tuple == NULL) {
     return NULL;
   }
@@ -539,7 +530,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     if (guard_error_hook != NULL) {
       PyObject *type, *value, *traceback;
       PyErr_Fetch(&type, &value, &traceback);
-      PyObject* r = call_guard_fail_hook(guard_error_hook, e, index, f_locals, f_globals);
+      PyObject* r = call_guard_fail_hook(guard_error_hook, e, index, f_locals);
       if (r == NULL) {
         return NULL;
       }
@@ -563,7 +554,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     return (PyObject*)e->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
-    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, index, f_locals, f_globals);
+    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, index, f_locals);
     if (r == NULL) {
       return NULL;
     }
