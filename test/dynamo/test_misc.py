@@ -934,6 +934,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             opt_fn(a, b)
         self.assertEqual(cnts.frame_count, 2)
 
+    @unittest.skip("DYNAMO 3.11")
     def test_nested_grad_mode_graph_break(self):
         def fn(x):
             before = torch.is_grad_enabled()
@@ -3662,6 +3663,7 @@ def fn():
         self.assertEqual(res.dtype, torch.bfloat16)
         self.assertEqual(opt_res.dtype, torch.bfloat16)
 
+    @unittest.skip("DYNAMO 3.11")
     def test_autocast_cpu_graph_break_inner_fn(self):
         class MyModule(torch.nn.Module):
             @staticmethod
@@ -4584,6 +4586,23 @@ def fn():
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_tuple_from_tuple_iter(self):
+        def inner_fn(*args):
+            acc = torch.ones(10, 10)
+            for arg in args:
+                acc.add_(arg)
+
+            return acc
+
+        @torch._dynamo.optimize("eager")
+        def fn(inputs, params):
+            y = tuple(inputs) + tuple(params)
+            return inner_fn(*y)
+
+        inputs = [torch.randn(10, 10) for _ in range(3)]
+
+        fn(inputs, iter(tuple(inputs)))
+
     def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests
 
@@ -4775,6 +4794,28 @@ def fn():
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_if_tensor_is_none(self):
+        """
+        Python 3.11 adds new jump instructions that check if
+        TOS is None. We do not support these instructions.
+        """
+
+        def f(x, y):
+            z = 1
+            if x is None:
+                z *= 2
+            if y is not None:
+                z *= 3
+            return z
+
+        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+        self.assertEqual(opt_f(None, torch.ones(2)), 6)
+
+        if sys.version_info >= (3, 11):
+            insts = bytecode_transformation.cleaned_instructions(f.__code__)
+            for inst in insts:
+                self.assertNotIn("_NONE", inst.opname)
+
     @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
     def test_py311_jump_offset(self):
         new_inst = bytecode_transformation.create_instruction
@@ -4875,10 +4916,6 @@ def fn():
             dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
             self.assertEqual(dummy_opt(), test[3])
 
-    def test_get_const_index(self):
-        code_options = {"co_consts": (None, -0.0, 0.0)}
-        self.assertEqual(bytecode_transformation.get_const_index(code_options, 0.0), 2)
-
     def test_encode_varint(self):
         nums = [
             0b111_101010_000000,
@@ -4927,6 +4964,21 @@ def fn():
             finally:
                 e()
             f()
+
+        def nothing(*args):
+            pass
+
+        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
+    def test_exceptiontable_e2e_2(self):
+        # last instructions of an exn_table entry is a large instruction,
+        def fn():
+            try:
+                return a
+            except Exception:
+                pass
 
         def nothing(*args):
             pass
@@ -5286,6 +5338,16 @@ def fn():
         self.assertEqual(seen_frames[1].name, "uwu_inline_me")
         self.assertEqual(seen_frames[2].line, "r2 = uwu_inline_me_deep(y, z)")
 
+    def test_error_on_recompile(self):
+        @torch._dynamo.optimize("eager")
+        def fn(a, b):
+            return a + b
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            with self.assertRaises(torch._dynamo.exc.RecompileError):
+                fn(torch.rand(2, 3), torch.rand(2, 3))
+                fn(torch.rand(2, 3), (1, 2, 3))
+
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
@@ -5331,6 +5393,21 @@ def fn():
             ).run(
                 prof.report()
             )
+
+    def test_guards_strip_function_call(self):
+        from torch._dynamo.guards import strip_function_call
+
+        test_case = [
+            ("___odict_getitem(a, 1)", "a"),
+            ("a.layers[slice(2)][0]._xyz", "a"),
+            ("getattr(a.layers[slice(2)][0]._abc, '0')", "a"),
+            ("getattr(getattr(a.x[3], '0'), '3')", "a"),
+            ("a.layers[slice(None, -1, None)][0]._xyz", "a"),
+            ("a.layers[func('offset', -1, None)][0]._xyz", "a"),
+        ]
+        # strip_function_call should extract the object from the string.
+        for name, expect_obj in test_case:
+            self.assertEqual(strip_function_call(name), expect_obj)
 
 
 class CustomFunc1(torch.autograd.Function):

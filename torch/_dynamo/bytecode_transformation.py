@@ -1,3 +1,4 @@
+import bisect
 import dataclasses
 import dis
 import itertools
@@ -507,6 +508,7 @@ def virtualize_exception_table(exn_tab_bytes: bytes, instructions: List[Instruct
     """Replace exception table entries with pointers to make editing easier"""
     exn_tab = parse_exception_table(exn_tab_bytes)
     offset_to_inst = {inst.offset: inst for inst in instructions}
+    offsets = sorted(offset_to_inst.keys())
     exn_tab_iter = iter(exn_tab)
     try:
         entry, inst_entry = None, None
@@ -514,9 +516,13 @@ def virtualize_exception_table(exn_tab_bytes: bytes, instructions: List[Instruct
         def step():
             nonlocal entry, inst_entry
             entry = next(exn_tab_iter)
+            # find rightmost offset <= entry.end
+            end_offset_idx = bisect.bisect_right(offsets, entry.end)
+            assert end_offset_idx > 0
+            end_offset = offsets[end_offset_idx - 1]
             inst_entry = InstructionExnTabEntry(
                 _get_instruction_by_offset(offset_to_inst, entry.start),
-                _get_instruction_by_offset(offset_to_inst, entry.end),
+                _get_instruction_by_offset(offset_to_inst, end_offset),
                 _get_instruction_by_offset(offset_to_inst, entry.target),
                 entry.depth,
                 entry.lasti,
@@ -541,11 +547,14 @@ def compute_exception_table(
 
     for inst in instructions:
         if inst.exn_tab_entry:
-            print(inst)
             start = _get_instruction_front(
                 instructions, indexof[id(inst.exn_tab_entry.start)]
             ).offset
-            end = inst.exn_tab_entry.end.offset
+            end = (
+                inst.exn_tab_entry.end.offset
+                + instruction_size(inst.exn_tab_entry.end)
+                - 2
+            )
             target = _get_instruction_front(
                 instructions, indexof[id(inst.exn_tab_entry.target)]
             ).offset
@@ -573,6 +582,28 @@ def remove_load_call_method(instructions: List[Instruction]):
             inst.opname = rewrites[inst.opname]
             inst.opcode = dis.opmap[inst.opname]
     return instructions
+
+
+def remove_jump_if_none(instructions: List[Instruction]):
+    new_insts = []
+    for inst in instructions:
+        new_insts.append(inst)
+        if "_NONE" in inst.opname:
+            is_op = create_instruction("IS_OP", arg=int("NOT" in inst.opname))
+            is_op.argval = is_op.arg
+            jump_op = create_instruction(
+                "POP_JUMP_FORWARD_IF_TRUE"
+                if "FORWARD" in inst.opname
+                else "POP_JUMP_BACKWARD_IF_TRUE",
+                target=inst.target,
+            )
+            # modify inst in-place to preserve jump target
+            inst.opcode = dis.opmap["LOAD_CONST"]
+            inst.opname = "LOAD_CONST"
+            inst.arg = None
+            inst.argval = None
+            new_insts.extend([is_op, jump_op])
+    instructions[:] = new_insts
 
 
 def explicit_super(code: types.CodeType, instructions: List[Instruction]):
@@ -866,15 +897,19 @@ def populate_kw_names_argval(instructions, consts):
 
 def cleaned_instructions(code, safe=False):
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
+    check_offsets(instructions)
     if sys.version_info >= (3, 11):
         populate_kw_names_argval(instructions, code.co_consts)
         virtualize_exception_table(code.co_exceptiontable, instructions)
-    check_offsets(instructions)
     virtualize_jumps(instructions)
     strip_extended_args(instructions)
     if not safe:
         if sys.version_info < (3, 11):
             remove_load_call_method(instructions)
+        else:
+            remove_jump_if_none(instructions)
+            update_offsets(instructions)
+            devirtualize_jumps(instructions)
         explicit_super(code, instructions)
     return instructions
 

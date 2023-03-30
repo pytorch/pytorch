@@ -55,7 +55,7 @@ namespace jit {
 
 using CodeImpl = interpreter::CodeImpl;
 
-// Before we translate to intepreter instructions, we do
+// Before we translate to interpreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
 // to what the instructions will look like.
 // In particular we:
@@ -145,12 +145,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
   // memory used by the pointers in this will be small
-  // instead we are very aggresive about releasing tensors when they become dead
-  // to make sure memory management happens efficiently.
-  // We optimize for the case where derivatives are run with retain_graph=False
-  // in the case where it is true, then the interpreter and this array get
-  // copied if this every becomes a bottleneck then we _should_ consider
-  // minimizing the total number or register
+  // instead we are very aggressive about releasing tensors when they become
+  // dead to make sure memory management happens efficiently. We optimize for
+  // the case where derivatives are run with retain_graph=False in the case
+  // where it is true, then the interpreter and this array get copied if this
+  // every becomes a bottleneck then we _should_ consider minimizing the total
+  // number or register
   std::vector<IValue> registers;
 
   // A stack of objects that have been __enter__'d.
@@ -188,7 +188,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   // relative to the end of the register list so that when we call
-  // functions we are referring to the registers of the currenly executing
+  // functions we are referring to the registers of the currently executing
   // function.
   IValue& reg(size_t reg) {
     return *(registers.end() - reg);
@@ -207,7 +207,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 #endif
 // Primitives for making interpreter internal state transitions.
 // We maintain two local variables as the internal interpreter state:
-// `frame` will be the current frame that the interpreter operatos on.
+// `frame` will be the current frame that the interpreter operators on.
 // `inst` will the current instruction pointed to by program counter.
 //
 // Instruction blocks should be always declared through `INST` macro and

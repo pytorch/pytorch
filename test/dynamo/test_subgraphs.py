@@ -532,6 +532,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             self._common(fn, 2, 9)
 
+    @unittest.skip("DYNAMO 3.11")
     def test_resume_with_no_grad2(self):
         def fn(a, b):
             x = a + b
