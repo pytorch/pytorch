@@ -305,36 +305,14 @@ class ModuleDict(torch.nn.Module):
             }
         )
 
+    def __getitem__(self, key: str) -> torch.nn.Module:
+        return self.layers[key]
+
     def forward(self, x):
         # TODO(future PR): handle more logic
+        x = self["0"](x)
         x = self.layers["0"](x)
         return x
-
-
-class ModuleDictWithCustomGetItem(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.layers = torch.nn.ModuleDict(
-            {
-                "__0": torch.nn.Linear(10, 10),
-            }
-        )
-
-    def __getitem__(self, key: str) -> torch.nn.Module:
-        return self.layers["__" + key]
-
-    def forward(self, x):
-        x = self["0"](x)
-        return x
-
-
-class ModuleWithCustomModuleDict(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.dict = ModuleDictWithCustomGetItem()
-
-    def forward(self, x):
-        return self.dict["0"](x)
 
 
 class TensorList(torch.nn.Module):
@@ -786,7 +764,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
     test_moduledict = make_test(ModuleDict())
-    test_custom_moduledict = make_test(ModuleWithCustomModuleDict())
     test_super1 = make_test(SuperModule())
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())

@@ -476,8 +476,16 @@ class NNModuleVariable(VariableTracker):
                 assert isinstance(args[0], variables.ConstantVariable), typestr(args[0])
                 key = args[0].as_python_constant()
                 assert isinstance(key, str)
-                # Try fallback to custom __getitem__
-                return self._custom_getitem_fallback(module, tx, name, options, args[0])
+                fn = getattr(module, name).__func__
+
+                assert isinstance(fn, types.FunctionType)
+
+                src = AttrSource(AttrSource(self.source, name), "__func__")
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(fn, source=src, **options),
+                    [self] + list(args),
+                    kwargs,
+                )
 
             assert self.source
 
