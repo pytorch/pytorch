@@ -269,11 +269,14 @@ class PyCodegen:
         ]
 
     def make_function_with_closure(
-        self, fn_name: str, code: types.CodeType, num_on_stack=0
+        self, fn_name: str, code: types.CodeType, push_null: bool, num_on_stack=0
     ):
         freevars = code.co_freevars
         assert freevars
         output = self._output
+        if sys.version_info >= (3, 11) and push_null:
+            output.append(create_instruction("PUSH_NULL"))
+            output.extend(self.rot_n(num_on_stack + 1))
         for var in freevars:
             assert var in self.cell_and_freevars()
             output.append(create_instruction("LOAD_CLOSURE", argval=var))

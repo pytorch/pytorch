@@ -4844,8 +4844,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             dummy_fn.__code__ = code
             self.assertEqual(dummy_fn(), test[3])
 
-            # TODO should also pass the code object back into dynamo again, but
-            # dynamo is not enabled for Python 3.11 yet.
+            dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
+            self.assertEqual(dummy_opt(), test[3])
 
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
