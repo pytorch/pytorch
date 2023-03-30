@@ -14,6 +14,9 @@ jobs:
     name: the-test
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@v35
