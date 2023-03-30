@@ -73,7 +73,7 @@ class _NotProvided:
         return "_NotProvided"
 
 
-def create_instruction(name, arg=None, argval=_NotProvided, target=None):
+def create_instruction(name, *, arg=None, argval=_NotProvided, target=None):
     """
     At most one of `arg`, `argval`, and `target` can be not None/_NotProvided.
     This is to prevent ambiguity, e.g. does

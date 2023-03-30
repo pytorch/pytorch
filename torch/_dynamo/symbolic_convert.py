@@ -1967,7 +1967,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         cg.extend_output([cg.create_load(k) for k in argnames])
         cg.extend_output(create_call_function(nargs, False))
         cg.append_output(create_instruction("RETURN_VALUE"))
-        breakpoint()
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
