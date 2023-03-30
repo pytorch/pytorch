@@ -284,7 +284,7 @@ class PythonArgument:
                     "MemoryFormat::Contiguous": "contiguous_format",
                     "QScheme::PER_TENSOR_AFFINE": "per_tensor_affine",
                 }.get(self.default, self.default)
-            return f"{name}: {type_str}={default}"
+            return f"{name}: {type_str} = {default}"
         else:
             return f"{name}: {type_str}"
 
@@ -636,6 +636,7 @@ def has_tensor_options(f: NativeFunction) -> bool:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+
 # 'simple_type' was introduced by the old codegen, which is slightly
 # different from the python schema type, e.g.: doesn't have '?' suffix
 # for optional Tensor/TensorList; doesn't have '[size]' suffix for list type.
@@ -814,9 +815,7 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.ScalarType)),
                 default="None",
                 default_init=(
-                    "self.scalar_type()"
-                    if is_like_or_new_function
-                    else topt_default_init("dtype")
+                    None if is_like_or_new_function else topt_default_init("dtype")
                 ),
             )
         )
@@ -826,9 +825,7 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.Layout)),
                 default="None",
                 default_init=(
-                    "self.layout()"
-                    if is_like_or_new_function
-                    else topt_default_init("layout")
+                    None if is_like_or_new_function else topt_default_init("layout")
                 ),
             )
         )
@@ -838,7 +835,7 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.Device)),
                 default="None",
                 default_init=(
-                    "self.device()"
+                    None
                     if is_like_or_new_function
                     else (
                         topt_default_init("device")
@@ -919,7 +916,7 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.str:
             ret = "str"
         elif t.name == BaseTy.Scalar:
-            ret = "Number"
+            ret = "Union[Number, _complex]"
         elif t.name == BaseTy.ScalarType:
             ret = "_dtype"
         elif t.name == BaseTy.bool:
@@ -995,10 +992,18 @@ def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, s
     namedtuple_name = signature.name
     field_names = namedtuple_fieldnames(signature.returns.returns)
     if field_names:
-        tuple_args = [
-            f'("{name}", {typ})' for name, typ in zip(field_names, python_returns)
-        ]
-        namedtuple_def = f'NamedTuple("{namedtuple_name}", [{", ".join(tuple_args)}])'
+        namedtuple_def_lines = [f"class {namedtuple_name}(NamedTuple):"]
+        namedtuple_def_lines.extend(
+            f"    {name}: {typ}" for name, typ in zip(field_names, python_returns)
+        )
+        namedtuple_def_lines.append("")  # add an extra newline
+        namedtuple_def = "\n".join(namedtuple_def_lines)
+        # Example:
+        # namedtuple_def = (
+        #     "class max(NamedTuple):\n"
+        #     "    values: Tensor\n"
+        #     "    indices: Tensor\n"
+        # )
         return namedtuple_name, namedtuple_def
     return None
 
@@ -1206,6 +1211,7 @@ def cpp_dispatch_exprs(
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+
 # We explicitly enumerate the PythonArgParser unpacking methods for all
 # supported types. This might be more verbose than necessary, partially
 # because of the irregularity of unpacking method naming, partially
@@ -1346,6 +1352,7 @@ TENSOR_OPTIONS_FIELDS = {
     "pin_memory": "bool?",
     "requires_grad": "bool?",
 }
+
 
 # bind arg parser outputs (python args) with dispatch lambda arguments (c++ args).
 def dispatch_lambda_exprs(

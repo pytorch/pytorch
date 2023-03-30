@@ -14,6 +14,7 @@ from . import config, utils
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 inductor_decompositions = get_decompositions(
     [
@@ -363,9 +364,18 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
         result = result * alpha
+    if beta == 0:
+        return result
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
+
+
+@register_decomposition([aten.cat.default])
+def cat(tensors, dim=0):
+    if len(tensors) == 1:
+        return tensors[0].clone()
+    return NotImplemented
 
 
 @register_decomposition([aten.conj_physical])
@@ -383,6 +393,36 @@ def lift(self):
 def bernoulli(self, *, generator=None):
     assert generator is None
     return torch.rand_like(self, dtype=torch.float32) < self
+
+
+@register_decomposition([aten.fmin, prims.fmin])
+def fmin(self, other):
+    return torch.where(torch.isnan(other) | (other > self), self, other)
+
+
+@register_decomposition([aten.fmax, prims.fmax])
+def fmax(self, other):
+    return torch.where(torch.isnan(other) | (other < self), self, other)
+
+
+@register_decomposition([aten.narrow_copy])
+def narrow_copy(self, dim, start, length):
+    return torch.narrow(self, dim, start, length).clone()
+
+
+@register_decomposition([aten.expand_copy])
+def expand_copy(self, size, *, implicit=False):
+    return aten.expand(self, size, implicit=implicit).clone()
+
+
+@register_decomposition([aten.view_copy.default])
+def view_copy_default(self, size):
+    return aten.view(self, size).clone()
+
+
+@register_decomposition([aten.view_copy.dtype])
+def view_copy_dtype(self, dtype):
+    return self.to(dtype).clone()
 
 
 """
@@ -414,11 +454,15 @@ register_extra_random_decomp = functools.partial(
 
 @register_extra_random_decomp([aten.bernoulli_])
 def bernoulli_(self, p=0.5):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
     return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
 
 
 @register_extra_random_decomp([aten.bernoulli.p])
 def bernoulli_p(self, p=0.5, *, generator=None):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
     assert generator is None
     return torch.rand_like(self, dtype=torch.float32) < p
 

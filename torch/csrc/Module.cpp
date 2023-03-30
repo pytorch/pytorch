@@ -188,7 +188,7 @@ static PyObject* THPModule_crashIfCsrcUBSAN(PyObject* module, PyObject* arg) {
 }
 
 static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
-  // This code shoud work perfectly fine, as vtables are idential for Foo and
+  // This code should work perfectly fine, as vtables are identical for Foo and
   // Baz unless rtti and ubsan are enabled
   struct Foo {
     virtual int bar() = 0;
@@ -464,6 +464,7 @@ PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
       c10::get_backtrace(frames_to_skip, maximum_number_of_frames, true));
   END_HANDLE_TH_ERRORS
 }
+
 static PyObject* THModule_rename_privateuse1_backend(
     PyObject* _unused,
     PyObject* arg) {
@@ -476,6 +477,14 @@ static PyObject* THModule_rename_privateuse1_backend(
   const std::string backend_name = THPUtils_unpackString(arg);
   c10::register_privateuse1_backend(backend_name);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THModule_get_privateuse1_backend_name(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(c10::get_privateuse1_backend());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1134,6 +1143,10 @@ static PyMethodDef TorchMethods[] = {
      THModule_rename_privateuse1_backend,
      METH_O,
      nullptr},
+    {"_get_privateuse1_backend_name",
+     THModule_get_privateuse1_backend_name,
+     METH_NOARGS,
+     nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
     {"_get_default_device", THPModule_getDefaultDevice, METH_NOARGS, nullptr},
@@ -1555,6 +1568,15 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_get_linalg_preferred_backend", []() {
     return at::globalContext().linalgPreferredBackend();
   });
+
+  py_module.def(
+      "_construct_storage_from_data_pointer",
+      [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
+        return c10::Storage(
+            c10::Storage::use_byte_size_t(),
+            size_bytes,
+            at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
+      });
 
   py_module.def("_stash_obj_in_tls", [](std::string key, py::handle arg) {
     at::impl::ThreadLocalPythonObjects::get_state().set(

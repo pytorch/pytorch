@@ -183,7 +183,6 @@ def create_debug_info_from_selected_models(
     selected_models: List[dict],
     new_style_rule: bool,
 ):
-
     model_dict = {
         "asset_info": {},  # maps asset name -> dict of asset metadata like hashes
         "is_new_style_rule": new_style_rule,
@@ -465,13 +464,13 @@ def fill_output(output: Dict[str, object], options: object):
     # to True, since it indicates that this operator list came from something
     # other than a traced operator list.
     include_all_non_op_selectives = False
-    for (op_name, op_info) in operators.items():
+    for op_name, op_info in operators.items():
         include_all_non_op_selectives = (
             include_all_non_op_selectives or op_info.include_all_overloads
         )
 
     operators_as_dict = {}
-    for (k, v) in operators.items():
+    for k, v in operators.items():
         operators_as_dict[k] = v.to_dict()
 
     output["operators"] = operators_as_dict
@@ -555,7 +554,7 @@ def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
         "--include_all_operators",
         action="store_true",
         default=False,
-        help="Set this flag to request inclusion of all opeators (i.e. build is not selective).",
+        help="Set this flag to request inclusion of all operators (i.e. build is not selective).",
         required=False,
     )
     parser.add_argument(

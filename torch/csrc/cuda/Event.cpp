@@ -25,7 +25,7 @@ static PyObject* THCPEvent_pynew(
   unsigned char interprocess = 0;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  constexpr char* kwlist[] = {
+  constexpr const char* kwlist[] = {
       "enable_timing", "blocking", "interprocess", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
