@@ -91,7 +91,7 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         id: install-nvidia-driver
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: huydhn/test-infra/.github/actions/setup-nvidia@update-nvidia-smi-error-check
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
 
       - name: Lock NVIDIA A100 40GB Frequency
@@ -295,6 +295,36 @@ jobs:
           set -x
 
           nvidia-smi
+          # NB: Surprisingly, nvidia-smi command returns successfully with return code 0 even in
+          # the case where the driver has already crashed as it still can get the driver version
+          # and some basic information like the bus ID.  However, the rest of the information
+          # would be missing (ERR!), for example:
+          #
+          # +-----------------------------------------------------------------------------+
+          # | NVIDIA-SMI 525.89.02    Driver Version: 525.89.02    CUDA Version: 12.0     |
+          # |-------------------------------+----------------------+----------------------+
+          # | GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+          # | Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+          # |                               |                      |               MIG M. |
+          # |===============================+======================+======================|
+          # |   0  ERR!                Off  | 00000000:00:1E.0 Off |                 ERR! |
+          # |ERR!  ERR! ERR!    ERR! / ERR! |   4184MiB / 23028MiB |    ERR!      Default |
+          # |                               |                      |                 ERR! |
+          # +-------------------------------+----------------------+----------------------+
+          #
+          # +-----------------------------------------------------------------------------+
+          # | Processes:                                                                  |
+          # |  GPU   GI   CI        PID   Type   Process name                  GPU Memory |
+          # |        ID   ID                                                   Usage      |
+          # |=============================================================================|
+          # +-----------------------------------------------------------------------------+
+          #
+          # This should be reported as a failure instead as it will guarantee to fail when
+          # Docker tries to run with --gpus all
+          #
+          # So, the correct check here is to query one of the missing piece of info like
+          # GPU name, so that the command can fail accordingly
+          nvidia-smi --query-gpu=gpu_name --format=csv,noheader --id=0
           NVIDIA_SMI_STATUS=$?
 
           # These are acceptable return code from nvidia-smi as copied from setup-nvidia GitHub action
