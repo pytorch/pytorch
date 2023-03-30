@@ -293,12 +293,12 @@ class TritonOverrides(OpOverrides):
         return f"{a} | {b}"
 
     @staticmethod
-    def rand(seed, offset, _):
+    def rand(seed, offset, _):  # _ here to keep the contract identical to CPU rand op
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
-    def randn(seed, offset, _):
+    def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
 
@@ -1651,6 +1651,7 @@ class TritonScheduling:
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
+        V.graph.sizevars.guard_leq(numel, int_max)
         for size in buf_sizes:
             V.graph.sizevars.guard_leq(size, int_max)
         return True
