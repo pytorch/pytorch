@@ -423,7 +423,7 @@ def tensor_is_on_xla(tensors):
     if not isinstance(tensors, (tuple, list)):
         tensors = [tensors]
     tensors = [x for x in tensors if isinstance(x, torch.Tensor)]
-    return any(map(lambda x: x.device.type == "xla", tensors))
+    return any((x.device.type == "xla" for x in tensors))
 
 
 def timed(
@@ -757,12 +757,9 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
     shapes = [x[0].shape for x in example_inputs]
     shape_keys = sorted(set(shapes))
     shape_speedups = {
-        shape: list(
-            map(
-                lambda it: it[1],
-                filter(lambda it: it[0] == shape, zip(shapes, speedups)),
-            )
-        )
+        shape: [
+            it[1] for it in filter(lambda it: it[0] == shape, zip(shapes, speedups))
+        ]
         for shape in shape_keys
     }
     output_str = (
