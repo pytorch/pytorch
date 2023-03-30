@@ -2036,6 +2036,9 @@ class ShapeAsConstantBuffer(IRNode):
 
         return pexpr(V.graph.sizevars.simplify(self.shape))
 
+    def cpp_wrapper_codegen_reference(self):
+        return f"torch::tensor({self.codegen_reference()})"
+
 
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):

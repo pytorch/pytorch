@@ -1677,12 +1677,12 @@ class CommonTemplate:
         self.common(fn, [torch.randint(5, (1, 8)), 5400])
 
     def test_int_div(self):
-        def fn(x, y):
+        def fn(x):
             s3 = x.size(1)
             a = torch.zeros((1 + s3) // 2)
-            return a
+            return a, s3
 
-        self.common(fn, [torch.randint(5, (1, 8)), 5400])
+        self.common(fn, [torch.randint(5, (1, 8))])
 
     def test_shape_prop_torch_ones(self):
         class Model(torch.nn.Module):
