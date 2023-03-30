@@ -457,7 +457,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if self.kwdefaults:
             flags |= 0x02
             codegen(self.kwdefaults)
-        if isinstance(self.annotations, (variables.ConstDictVariable, variables.TupleVariable)):
+        if isinstance(
+            self.annotations, (variables.ConstDictVariable, variables.TupleVariable)
+        ):
             flags |= 0x04
             try:
                 if isinstance(self.annotations, variables.ConstDictVariable):
