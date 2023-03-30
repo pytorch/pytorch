@@ -10,6 +10,7 @@ import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 from .. import config, variables
+from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -674,11 +675,8 @@ class NumpyTensorVariable(TensorVariable):
 
         result = None
         options = VariableTracker.propagate(self)
-        if name == "shape" and self.size is not None:
-            sizes = [ConstantVariable(x) for x in self.size]
-            result = TupleVariable(sizes)
-        elif name == "ndim" and self.ndim is not None:
-            result = ConstantVariable(self.ndim, **options)
+        if name in ["shape", "ndim"]:
+            result = super().var_getattr(tx, name)
         elif name == "T":
             dims = TupleVariable(
                 [ConstantVariable(x) for x in range(self.ndim - 1, -1, -1)]
@@ -731,6 +729,19 @@ class NumpyTensorVariable(TensorVariable):
         if result is None:
             unimplemented(f"ndarray.{name} not supported")
         return result
+
+    def reconstruct_ndarray(self, stack_values):
+        # returns bytecode to actually convert NumpyTensorVariable to np.ndarray
+        return [
+            create_instruction(
+                name="LOAD_METHOD", arg=len(stack_values) - 1, argval="numpy"
+            ),
+            create_instruction(
+                name="CALL_METHOD",
+                arg=len(stack_values) - 1,
+                argval=len(stack_values) - 1,
+            ),
+        ]
 
     def call_method(
         self,
