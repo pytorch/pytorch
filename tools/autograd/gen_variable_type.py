@@ -974,14 +974,14 @@ def emit_body(
 
     is_inplace_foreach = name.startswith("_foreach") and inplace
 
-    foreacharg2refarg: Dict[Argument, Argument] = {}
+    inplace_foreacharg2refarg: Dict[Argument, Argument] = {}
     if is_inplace_foreach and info is not None:
         for foreach_arg, ref_arg in zip(
             f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
         ):
             foreach_arg_type = getattr(foreach_arg.type, "elem", foreach_arg.type)
             assert foreach_arg_type == ref_arg.type
-            foreacharg2refarg[foreach_arg] = ref_arg
+            inplace_foreacharg2refarg[foreach_arg] = ref_arg
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -1006,10 +1006,10 @@ def emit_body(
     @with_native_function
     def gen_differentiable_inputs(f: NativeFunction) -> List[DifferentiableInput]:
         arguments = list(f.func.arguments.non_out)
-        if foreacharg2refarg:
+        if inplace_foreacharg2refarg:
             for arg in f.func.arguments.flat_non_out:
-                if arg in foreacharg2refarg:
-                    mapped_arg = foreacharg2refarg[arg]
+                if arg in inplace_foreacharg2refarg:
+                    mapped_arg = inplace_foreacharg2refarg[arg]
                     if arg.name != mapped_arg.name:
                         arguments.append(
                             Argument(
@@ -1201,8 +1201,8 @@ def emit_body(
             list_like_arg = "self"
             args = [arg.name for arg in args_with_derivatives]
             for i, arg in enumerate(args):
-                if foreacharg2refarg:
-                    for foreach_arg, ref_arg in foreacharg2refarg.items():
+                if inplace_foreacharg2refarg:
+                    for foreach_arg, ref_arg in inplace_foreacharg2refarg.items():
                         if arg == ref_arg.name:
                             args[i] = foreach_arg.name + (
                                 "[i]" if hasattr(foreach_arg.type, "elem") else ""
@@ -1303,8 +1303,8 @@ def emit_body(
             foreacharg: Optional[Argument] = None
             is_foreacharg_list_type: bool = False
             remove_underscore_before_replace: bool = False
-            if foreacharg2refarg:
-                for _foreacharg, refarg in foreacharg2refarg.items():
+            if inplace_foreacharg2refarg:
+                for _foreacharg, refarg in inplace_foreacharg2refarg.items():
                     if refarg.name == name or (
                         refarg.name in name and "scalar_type" in name
                     ):
@@ -1331,7 +1331,7 @@ def emit_body(
                         var = "original_selfs[i].value()"
                     assert not is_output
                 if inplace and is_output:
-                    # TODO(crcrpar): Handle this case with `foreacharg2refarg`
+                    # TODO(crcrpar): Handle this case with `inplace_foreacharg2refarg`
                     if name == "result_" and is_inplace_foreach:
                         var = "self[i]"
                     else:
@@ -1655,9 +1655,9 @@ def emit_body(
             ]
         else:
             args = [arg.name for arg in args_with_derivatives]
-            if foreacharg2refarg:
+            if inplace_foreacharg2refarg:
                 for i, arg in enumerate(args):
-                    for f_arg, r_arg in foreacharg2refarg.items():
+                    for f_arg, r_arg in inplace_foreacharg2refarg.items():
                         if arg == r_arg.name:
                             args[i] = f_arg.name
             return (
