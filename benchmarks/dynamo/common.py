@@ -1776,6 +1776,11 @@ def parse_args(args=None):
         help="Disables cudagraphs for Inductor",
     )
     parser.add_argument(
+        "--inductor-compile-mode",
+        default=None,
+        help="torch.compile mode argument for inductor runs.",
+    )
+    parser.add_argument(
         "--print-graph-breaks",
         action="store_true",
         help="Show a warning whenever graph break",
@@ -2166,7 +2171,12 @@ def run(runner, args, original_dir=None):
         if args.threads:
             inductor_config.cpp.threads = args.threads
 
-        optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
+        optimize_ctx = functools.partial(
+            torch.compile,
+            backend="inductor",
+            fullgraph=args.nopython,
+            mode=args.inductor_compile_mode,
+        )
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.speedup_dynamo_ts:

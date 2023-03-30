@@ -422,9 +422,11 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
+        constraint_inputs = [a.constraint_dims for a in fs]
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
+            constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
         )
         for shape_guard in guards:
