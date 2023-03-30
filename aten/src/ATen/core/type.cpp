@@ -926,7 +926,7 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
       idx++;
     }
     std::string result;
-    result.reserve(strlen("Tuple[") + strlen(", ") * elts.size() - 1 + total_length + 1);
+    result.reserve(strlen("Tuple[") + strlen(", ") * (elts.size() - 1) + total_length + 1);
     result.append("Tuple[");
     for (const auto ii : c10::irange(elts.size())) {
       if (ii > 0) {
