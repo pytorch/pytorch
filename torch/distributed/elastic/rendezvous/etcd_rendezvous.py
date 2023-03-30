@@ -211,7 +211,7 @@ class EtcdRendezvous:
         last_call_timeout,
     ):
         self.client = client
-        log.info("Etcd machines: " + str(self.client.machines))
+        log.info("Etcd machines: %s", self.client.machines)
 
         self._prefix = prefix
         self._run_id = run_id
@@ -310,7 +310,7 @@ class EtcdRendezvous:
                 # to avoid spamming etcd
                 # FIXME: there are a few things that fall under this like
                 # etcd.EtcdKeyNotFound, etc, which could be handled more explicitly.
-                log.info("Rendezvous attempt failed, will retry. Reason: " + str(e))
+                log.info("Rendezvous attempt failed, will retry. Reason: %s", e)
                 time.sleep(1)
 
     def init_phase(self):
@@ -335,12 +335,12 @@ class EtcdRendezvous:
         try:
             active_version = self.try_create_rendezvous()
             state = json.loads(active_version.value)
-            log.info("New rendezvous state created: " + str(state))
+            log.info("New rendezvous state created: %s", state)
         except etcd.EtcdAlreadyExist:
             active_version, state = self.get_rdzv_state()
             # Note: it is possible for above query to fail (etcd.EtcdKeyNotFound),
             # but this is ok for us - just means we'll restart from beginning.
-            log.info("Observed existing rendezvous state: " + str(state))
+            log.info("Observed existing rendezvous state: %s", state)
 
         if state["status"] == "closed":
             raise RendezvousClosedError()
