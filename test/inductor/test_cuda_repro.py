@@ -5,7 +5,6 @@ import unittest
 import torch
 
 import torch._dynamo
-import triton
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -16,6 +15,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 try:
     try:
+        import triton
         from triton import language as tl
     except ImportError:
         raise unittest.SkipTest("requires triton")
