@@ -536,9 +536,10 @@ class GuardBuilder(GuardBuilderBase):
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
             else:
-                assert not hasattr(
-                    value, "_dynamo_dynamic_indices"
-                ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
+                if not config.allow_ignore_mark_dynamic:
+                    assert not hasattr(
+                        value, "_dynamo_dynamic_indices"
+                    ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
 
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
