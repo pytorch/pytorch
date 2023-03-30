@@ -3654,7 +3654,7 @@ else:
 
     # FIXME: find a test suite for the masked scatter operator
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_masked_scatter(self, device, dtype):
         dt = dtype
         with warnings.catch_warnings(record=True) as w:
@@ -3668,11 +3668,6 @@ else:
                 src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
                 src_ones = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt, device=device)
                 mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=maskType, device=device)
-
-                if dt == torch.bool:
-                    # torch.bool is a special case and is being tested
-                    # in a separate test
-                    return
 
                 dest.masked_scatter_(mask, src)
                 j = 0
