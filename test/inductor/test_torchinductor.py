@@ -7594,6 +7594,49 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             fn_optimized = torch._dynamo.optimize("inductor")(fn)
             assert same(fn(a, b), fn_optimized(a, b))
 
+        @requires_cuda()
+        def test_issue97695_1input(self):
+            def fn(arg3_1, relu, permute_1):
+                addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+                cat_2 = torch.ops.aten.cat.default([addmm_1], 1)
+                return (cat_2,)
+
+            args = [
+                ((96,), (1,), torch.float32, "cuda"),
+                ((10, 256), (256, 1), torch.float32, "cuda"),
+                ((256, 96), (1, 256), torch.float32, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            correct = fn(*args)
+
+            mod = make_fx(fn, tracing_mode="real")(*args)
+            compiled = compile_fx_inner(mod, args)
+            ref = compiled(list(args))
+            assert same(ref, correct)
+
+            ref = torch.compile(fn, fullgraph=True)(*args)
+            assert same(ref, correct)
+
+        @requires_cuda()
+        def test_issue97695_2input(self):
+            def fn(arg3_1, arg3_2, relu, permute_1):
+                addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+                addmm_2 = torch.ops.aten.addmm.default(arg3_2, relu, permute_1)
+                cat_2 = torch.ops.aten.cat.default([addmm_1, addmm_2], 1)
+                return (cat_2,)
+
+            args = [
+                ((96,), (1,), torch.float32, "cuda"),
+                ((96,), (1,), torch.float32, "cuda"),
+                ((10, 256), (256, 1), torch.float32, "cuda"),
+                ((256, 96), (1, 256), torch.float32, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            correct = fn(*args)
+
+            ref = torch.compile(fn, fullgraph=True)(*args)
+            assert same(ref, correct)
+
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_heuristics import CachingAutotuner
 
