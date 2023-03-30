@@ -529,8 +529,14 @@ def _str_intern(inp, *, tensor_contents=None):
 
             if self.is_meta:
                 nt_sizes = self._nested_tensor_size()
-                suffixes.append("num_components=" + str(nt_sizes.shape[0]))
-                suffixes.append("dim=" + str(nt_sizes.shape[1] + 1))
+                suffixes.append(
+                    "num_components="
+                    + ("0" if nt_sizes.dim() == 0 else str(nt_sizes.shape[0]))
+                )
+                suffixes.append(
+                    "dim="
+                    + ("0" if nt_sizes.dim() == 0 else str(nt_sizes.shape[1] + 1))
+                )
                 if self.dtype != torch.get_default_dtype():
                     suffixes.append("dtype=" + str(self.dtype))
                 if not custom_contents_provided:

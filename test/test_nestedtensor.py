@@ -99,32 +99,28 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None):
     return torch.nested.nested_tensor(ts1, device=device, dtype=dtype)
 
 def define_crossref_xfails():
+    # These all fail because they call _nested_tensor_from_tensor_list(), which
+    # isn't supported.
     crossref_xfails = [
-        # NotImplementedError: Could not run 'aten::as_strided' with arguments
-        # from the 'NestedTensorMeta' backend. Similar error when trying to run
-        # fallback for NestedTensorCPU.
-        "TestNestedTensor.test_2d_nested_tensor*",
-        "TestNestedTensor.test_3d_nested_tensor*",
+        "TestNestedTensor.test_2d*",
+        "TestNestedTensor.test_3d*",
         "TestNestedTensor.test_copy_",
-        # NotImplementedError: Could not run 'aten::fill_.Scalar' with arguments
-        # from the 'NestedTensorMeta' backend.
+        "TestNestedTensor.test_default_nested_tensor",
+        "TestNestedTensor.test_dim",
         "TestNestedTensor.test_fill_",
-        # NotImplementedError: Could not run 'aten::transpose.int' with arguments
-        # from the 'NestedTensorMeta' backend.
         "TestNestedTensor.test_is_contiguous",
-        # NotImplementedError: Could not run 'aten::zero_' / 'aten::normal_' /
-        # 'aten::fill_.Scalar' with arguments from the 'NestedTensorMeta' backend.
         "TestNestedTensor.test_like_functions*",
-        # Calls _to_copy() decomp -> torch._prims.convert_element_type() which is
-        # dense-specific.
+        "TestNestedTensor.test_nested_namespace",
+        "TestNestedTensor.test_nested_tensor_matching_dim",
+        "TestNestedTensor.test_numel",
+        "TestNestedTensor.test_repr_string",
+        "TestNestedTensor.test_size",
+        "TestNestedTensor.test_size_dim",
+        "TestNestedTensor.test_stride",
         "TestNestedTensor.test_to",
-        # DataDependentOutputException (expected for these)
-        "TestNestedTensor.test_unbind_0",
-        "TestNestedTensor.test_unbind_1",
-        "TestNestedTensor.test_unbind_3",
-        "TestNestedTensor.test_unbind_4",
-        # NotImplementedError: Could not run 'aten::as_strided' with arguments
-        # from the 'NestedTensorMeta' backend.
+        "TestNestedTensor.test_to_padded_tensor_on_empty_tensor",
+        "TestNestedTensor.test_unbind_*",
+        "TestNestedTensor.test_unbind_dim",
         "TestNestedTensor.test_zero_",
     ]
     expectedFailureIfCrossRef = expectedFailureIf(TEST_WITH_CROSSREF)

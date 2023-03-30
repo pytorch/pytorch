@@ -520,17 +520,9 @@ def index_put_(fake_mode, func, *args, **kwargs):
 
 @register_op_impl(lambda fn: fn in _nested_constructors)
 def nested_constructor(fake_mode, func, *args, **kwargs):
-    assert func not in _non_kwarg_device_constructors
-    new_args, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    raise RuntimeError(
+        "_nested_tensor_from_tensor_list() is not supported for fake tensors"
     )
-    # default device is device of first tensor in tensorlist
-    default_device = torch.device("cpu") if len(args[0]) == 0 else args[0][0].device
-    out_device = new_kwargs.get("device", default_device)
-    new_kwargs["device"] = torch.device("meta")
-    with in_kernel_invocation_manager(fake_mode):
-        r = func(*new_args, **new_kwargs)
-    return FakeTensor(fake_mode, r, out_device)
 
 
 @register_op_impl(
