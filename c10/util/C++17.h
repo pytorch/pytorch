@@ -354,7 +354,6 @@ template <bool Condition, class ThenCallback, class ElseCallback>
 decltype(auto) if_constexpr(
     ThenCallback&& thenCallback,
     ElseCallback&& elseCallback) {
-#if defined(__cpp_if_constexpr)
   // If we have C++17, just use it's "if constexpr" feature instead of wrapping
   // it. This will give us better error messages.
   if constexpr (Condition) {
@@ -376,12 +375,6 @@ decltype(auto) if_constexpr(
       return static_cast<ElseCallback&&>(elseCallback)();
     }
   }
-#else
-  // C++14 implementation of if constexpr
-  return detail::_if_constexpr<Condition>::call(
-      static_cast<ThenCallback&&>(thenCallback),
-      static_cast<ElseCallback&&>(elseCallback));
-#endif
 }
 
 template <bool Condition, class ThenCallback>
