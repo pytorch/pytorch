@@ -1,5 +1,6 @@
 import functools
 import logging
+import math
 
 import torch
 from ..._dynamo.utils import counters
@@ -95,8 +96,47 @@ def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
     )
 
 
-# TODO(jansel): add support for attn_mask!=None
-# TODO(jansel): add support for is_causal=True
+def _sfdp_pattern_5(query, key, value, attn_mask):
+    attn_weight = torch.softmax(
+        (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask, dim=-1
+    )
+    # attn_weight = torch.dropout(attn_weight, dropout_p)
+    return attn_weight @ value
+
+
+def _sfdp_replacement_5(query, key, value, attn_mask):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query.contiguous(),
+        key.contiguous(),
+        value.contiguous(),
+        attn_mask=attn_mask,
+        dropout_p=0.0,
+        is_causal=False,
+    )
+
+
+def _sfdp_pattern_6(query, key, value, attn_mask, dropout_p):
+    attn_weight = torch.softmax(
+        (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask, dim=-1
+    )
+    attn_weight = torch.dropout(attn_weight, dropout_p, True)
+    return attn_weight @ value
+
+
+def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query.contiguous(),
+        key.contiguous(),
+        value.contiguous(),
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=False,
+    )
+
+
+# TODO(jansel): add more patterns based on what we see in real models
 
 
 @functools.lru_cache(None)
@@ -123,6 +163,8 @@ def _sfdp_init():
         (_sfdp_pattern_2, _sfdp_replacement_2, [g(), g(), g(), c()], {}),
         (_sfdp_pattern_3, _sfdp_replacement_3, [g(), g(), g(), c()], d),
         (_sfdp_pattern_4, _sfdp_replacement_4, [g(), g(), g(), c()], d),
+        (_sfdp_pattern_5, _sfdp_replacement_5, [g(), g(), g(), b()], {}),
+        (_sfdp_pattern_6, _sfdp_replacement_6, [g(), g(), g(), b()], d),
     ]:
         args = [*args, *workaround.values()]
         register_replacement(

@@ -132,6 +132,39 @@ class TestSDPAPatternRewriter(TestCase):
 
         self._check_common(dot_prod_attention, contains=False)
 
+    def test_sdpa_rewriter_5(self):
+        def sfdp_pattern_5(query, key, value):
+            attn_mask = torch.ones(
+                query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
+            ).tril(diagonal=0)
+            attn_mask = attn_mask.masked_fill(
+                torch.logical_not(attn_mask), -float("inf")
+            )
+            attn_weight = torch.softmax(
+                (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask,
+                dim=-1,
+            )
+            return attn_weight @ value
+
+        self._check_common(sfdp_pattern_5, contains=False)
+
+    def test_sdpa_rewriter_6(self):
+        def sfdp_pattern_6(query, key, value):
+            attn_mask = torch.ones(
+                query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
+            ).tril(diagonal=0)
+            attn_mask = attn_mask.masked_fill(
+                torch.logical_not(attn_mask), -float("inf")
+            )
+            attn_weight = torch.softmax(
+                (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask,
+                dim=-1,
+            )
+            attn_weight = torch.dropout(attn_weight, 0.5, True)
+            return attn_weight @ value
+
+        self._check_common(sfdp_pattern_6, contains=False)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA:
