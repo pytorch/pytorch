@@ -232,68 +232,6 @@ struct function_takes_identity_argument<
     void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
 #endif
 
-template <bool Condition>
-struct _if_constexpr;
-
-template <>
-struct _if_constexpr<true> final {
-  template <
-      class ThenCallback,
-      class ElseCallback,
-      std::enable_if_t<
-          function_takes_identity_argument<ThenCallback>::value,
-          void*> = nullptr>
-  static decltype(auto) call(
-      ThenCallback&& thenCallback,
-      ElseCallback&& /* elseCallback */) {
-    // The _identity instance passed in can be used to delay evaluation of an
-    // expression, because the compiler can't know that it's just the identity
-    // we're passing in.
-    return thenCallback(_identity());
-  }
-
-  template <
-      class ThenCallback,
-      class ElseCallback,
-      std::enable_if_t<
-          !function_takes_identity_argument<ThenCallback>::value,
-          void*> = nullptr>
-  static decltype(auto) call(
-      ThenCallback&& thenCallback,
-      ElseCallback&& /* elseCallback */) {
-    return thenCallback();
-  }
-};
-
-template <>
-struct _if_constexpr<false> final {
-  template <
-      class ThenCallback,
-      class ElseCallback,
-      std::enable_if_t<
-          function_takes_identity_argument<ElseCallback>::value,
-          void*> = nullptr>
-  static decltype(auto) call(
-      ThenCallback&& /* thenCallback */,
-      ElseCallback&& elseCallback) {
-    // The _identity instance passed in can be used to delay evaluation of an
-    // expression, because the compiler can't know that it's just the identity
-    // we're passing in.
-    return elseCallback(_identity());
-  }
-
-  template <
-      class ThenCallback,
-      class ElseCallback,
-      std::enable_if_t<
-          !function_takes_identity_argument<ElseCallback>::value,
-          void*> = nullptr>
-  static decltype(auto) call(
-      ThenCallback&& /* thenCallback */,
-      ElseCallback&& elseCallback) {
-    return elseCallback();
-  }
-};
 } // namespace detail
 
 /*
@@ -379,7 +317,6 @@ decltype(auto) if_constexpr(
 
 template <bool Condition, class ThenCallback>
 decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
-#if defined(__cpp_if_constexpr)
   // If we have C++17, just use it's "if constexpr" feature instead of wrapping
   // it. This will give us better error messages.
   if constexpr (Condition) {
@@ -394,11 +331,6 @@ decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
       return static_cast<ThenCallback&&>(thenCallback)();
     }
   }
-#else
-  // C++14 implementation of if constexpr
-  return if_constexpr<Condition>(
-      static_cast<ThenCallback&&>(thenCallback), [](auto) {});
-#endif
 }
 
 // GCC 4.8 doesn't define std::to_string, even though that's in C++11. Let's
