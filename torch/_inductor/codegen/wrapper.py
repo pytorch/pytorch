@@ -874,7 +874,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # Wrap the func to support setting result._boxed_call = True
         if all(x for x in self.output_is_tensor.values()):
             # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
-            return_str = "f(args_tensor)"
+            return_str = "return f(args_tensor)"
         else:
             outputs = [
                 f"outputs[{i}]" if self.output_is_tensor[i] else f"outputs[{i}].item()"
