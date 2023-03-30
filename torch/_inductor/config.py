@@ -93,6 +93,9 @@ comment_origin = False
 # Convert 1x1 convs into matmuls
 conv_1x1_as_mm = False
 
+# Only save random seed for backwards rather than full mask
+lowmem_dropout = False
+
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
