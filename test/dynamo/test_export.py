@@ -2282,7 +2282,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return x.cos()
             return x.sin()
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Dynamic control flow is not supported at the moment"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Dynamic control flow is not supported at the moment",
+        ):
             gm, _ = torch._dynamo.export(
                 f, torch.randn(5, 6), aten_graph=True, tracing_mode="symbolic"
             )
