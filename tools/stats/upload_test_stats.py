@@ -317,6 +317,14 @@ if __name__ == "__main__":
         action="store_true",
         help="If this is being run through circleci",
     )
+    parser.add_argument(
+        "--changed-files",
+        required=True,
+        help="Space delimited list of associated files (ie. changed in the PR), defaults to empty list.",
+        default="",
+        nargs="*",  # 0 or more values expected => creates a list
+    )
+
     args = parser.parse_args()
 
     print(f"Workflow id is: {args.workflow_run_id}")
@@ -336,6 +344,9 @@ if __name__ == "__main__":
     # For PRs, only upload a summary of test_runs. This helps lower the
     # volume of writes we do to Rockset.
     test_case_summary = summarize_test_cases(test_cases)
+    for summary in test_case_summary:
+        summary["changed_files"] = args.changed_files
+
     invoking_file_times = get_invoking_file_times(
         test_case_summary, pytest_parallel_times
     )

@@ -44,6 +44,10 @@ jobs:
           pip3 install rockset==1.0.3
           pip3 install boto3==1.19.12
 
+      - name: Get added or modified  files
+        id: changed-files
+        uses: tj-actions/changed-files@v35
+
       - name: Upload test stats
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
@@ -54,7 +58,7 @@ jobs:
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           echo "${WORKFLOW_URL}"
-          python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --head-branch "${HEAD_BRANCH}"
+          python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --changed-files ${{ steps.changed-files.outputs.all_changed_files }} --head-branch "${HEAD_BRANCH}"
           python3 -m tools.stats.upload_sccache_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
 
       - name: Upload test artifacts
