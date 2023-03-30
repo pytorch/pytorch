@@ -645,7 +645,6 @@ def inference_graph(fn, args):
 
 
 @torch.enable_grad()
-@torch._functorch.config.patch(use_intermediate_base=False)
 def training_graph(fn, args):
     """Build a normalized training graph, for use with fx_to_pattern"""
     gm = None
@@ -758,6 +757,9 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     Memory planning to remove cat.  We can't use the stock memory
     planner since autotuning matmauls needs to know the output layout.
     """
+    if len(inputs) == 1:
+        return op(*inputs[0])
+
     # TODO(jansel): rewrite this as a bmm?
     if dim < 0:
         dim += len(shape_of(*inputs[0]))
