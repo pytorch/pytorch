@@ -1,10 +1,4 @@
-from enum import Enum
-import warnings
-from typing import Any
-import torch
 from torch._C import _rename_privateuse1_backend
-
-__all__ = ["rename_privateuse1_backend", "run_custom_mod_func", "get_custom_mod_func"]
 
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
@@ -56,77 +50,3 @@ def rename_privateuse1_backend(backend_name: str) -> None:
         >>> a = torch.ones(2, device="foo")
         """
     return _rename_privateuse1_backend(backend_name)
-
-class _LogLevel(Enum):
-    WarningLevel = 0
-    ErrorLevel = 1
-    UndefinedLevel = 2
-
-def _warn_or_error_func(_log_level_, message):
-    if _log_level_ == _LogLevel.WarningLevel.value:
-        warnings.warn(message, UserWarning, stacklevel=3)
-    elif _log_level_ == _LogLevel.ErrorLevel.value:
-        raise NotImplementedError(message)
-    else:
-        # TODO: optimize the log message in the future.
-        pass
-
-def run_custom_mod_func(_func_name_: str, _default_: Any = None, _log_level_: int = 0, *args, **kwargs) -> Any:
-    r"""
-    return results executing the func named `_func_name_` with `*args` and `**kwargs`,
-    and the func is defined in custom device module which is registered with
-    `torch.utils.rename_privateuse1_backend('foo')` and `torch._register_device_module('foo', BackendModule)`.
-    If the custom device module or the func is not defined, it will give warning or error message.
-
-    Args:
-        _func_name_ (str): The function defined in custom device module.
-
-        _default_: default return value.
-
-        _log_level_ (int, _LogLevel): If the  custom device module or the func is not defined,
-            it will give warning or error message. Default to _LogLevel.WarningLevel=1, it only
-            give warning info and return the `default`.
-            When set it to _LogLevel.WarningLevel=2, it will raise NotImplementedError.
-            When set it to other value, there is no warning or error message, and return the `default`.
-
-        *args, **kwargs: The arguments for the func of `_func_name_`.
-
-    Example::
-
-        class DummyfooModule:
-            @staticmethod
-            def is_available():
-                return True
-
-            @staticmethod
-            def func_name(*args, **kwargs):
-                ....
-        torch.utils.rename_privateuse1_backend("foo")
-        torch._register_device_module("foo", DummyfooModule)
-
-        foo_is_available = run_custom_device_mod_func("is_available")
-        result = run_custom_device_mod_func("func_name", None, 0, *args, **wkargs)
-        # raise error/warning, you must have define func named `device_count` in `DummyfooModule` module
-        run_custom_device_mod_func("device_count")
-    """
-    func_ = get_custom_mod_func(_func_name_, _default_, _log_level_)
-    if callable(func_):
-        return func_(*args, **kwargs)
-    return _default_
-
-def get_custom_mod_func(_func_name_: str, _default_: Any = None, _log_level_: int = 0):
-    r""" run the callable func named `_func_name_` defined in custom device module.
-    See details in `run_custom_mod_func`.
-    """
-    assert isinstance(_func_name_, str), f"_func_name_ must be `str`, but got `{type(_func_name_)}`."
-    backend_name = torch._C._get_privateuse1_backend_name()
-    message = f'Try to use torch.{backend_name}.{_func_name_}. The backend must register a custom backend '
-    message += f"module with `torch._register_device_module('{backend_name}', BackendModule)`. And "
-    message += f"BackendModule needs to have the following API's:\n `{_func_name_}(*args, **kwargs)`. \n"
-    if hasattr(torch, backend_name):
-        custom_device_mod = getattr(torch, backend_name)
-        if hasattr(custom_device_mod, _func_name_):
-            return getattr(custom_device_mod, _func_name_)
-    _warn_or_error_func(_log_level_,
-                        message + f"Not implemented for backend `{backend_name}` or func `{_func_name_}`. \n")
-    return _default_
