@@ -866,11 +866,8 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
   endif()
 
-  if((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
-    OR(CMAKE_COMPILER_IS_GNUCXX
-    AND(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
-    string(APPEND CMAKE_CXX_FLAGS " -faligned-new")
-  endif()
+  append_cxx_flag_if_supported("-faligned-new" CMAKE_CXX_FLAGS)
+
   if(WERROR)
     append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
     if(NOT COMPILER_SUPPORT_WERROR)
