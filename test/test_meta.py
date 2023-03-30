@@ -869,7 +869,7 @@ meta_dispatch_expected_failures = {
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.logcumsumexp.default : {bf16, f32, f64, c64, c128},
     aten.logcumsumexp.out : {bf16, f32, f64, c64, c128},
-    aten.max_pool3d_with_indices.default : {f32, f64},
+    aten.max_pool3d_with_indices.default : {bf16, f32, f64},
     aten.max_unpool2d.default : {f32, f64},
     aten.max_unpool3d.default : {f32, f64},
     aten.median.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
