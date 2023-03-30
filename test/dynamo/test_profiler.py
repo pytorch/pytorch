@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import numpy as np
 import torch
 
 import torch._dynamo.test_case
@@ -24,7 +23,9 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         with torch.profiler.profile(with_stack=False) as prof:
             outer_fn(x, y)
 
-        self.assertTrue(any("inner_fn (dynamo_timed)" in evt.name for evt in prof.events()))
+        self.assertTrue(
+            any("inner_fn (dynamo_timed)" in evt.name for evt in prof.events())
+        )
 
     def test_dynamo_timed_profiling_backend_compile(self):
         # @dynamo_timed functions should appear in profile traces.
@@ -42,7 +43,9 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         with torch.profiler.profile(with_stack=False) as prof:
             torch._dynamo.optimize("aot_eager")(fn)(x, y)
 
-        self.assertTrue(any(f"{fn_name} (dynamo_timed)" in evt.name for evt in prof.events()))
+        self.assertTrue(
+            any(f"{fn_name} (dynamo_timed)" in evt.name for evt in prof.events())
+        )
 
 
 if __name__ == "__main__":
