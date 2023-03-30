@@ -7387,6 +7387,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._dynamo.config.patch(dynamic_shapes=True)
         def test_negative_arange_dynamic_shapes(self):
             # Repro from alibi relative encodings
+            def sign(x):
+                return (x > 0) - (x < 0)
+
             def fn(enc_out, dec_in):
                 padmask = dec_in == 0
                 dec_mask = padmask.unsqueeze(-1) == padmask.unsqueeze(-2)
@@ -7400,7 +7403,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     2
                     ** torch.arange(
                         start,
-                        end + 1e-6 * np.sign(end - start),
+                        end + 1e-6 * sign(end - start),
                         (end - start) / (nheads - 1),
                     )
                     .view(1, nheads, 1, 1)
