@@ -848,10 +848,19 @@ def _maybe_insert_observers_before_graph_output(
         """
         if isinstance(maybe_node, Node):
             # check dtype of this node
-            this_node_dtype = _get_arg_target_dtype_as_output(maybe_node, named_modules)
-            observer_mod = maybe_node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"]()
-            target_dtype = observer_mod.dtype
-            if this_node_dtype != target_dtype:
+            arg_as_output_target_dtype = _get_arg_target_dtype_as_output(maybe_node, named_modules)
+            if "target_dtype_info" in maybe_node.meta:
+                observer_mod = maybe_node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"]()
+                arg_as_input_target_dtype = observer_mod.dtype
+            else:
+                observer_mod = None
+                arg_as_input_target_dtype = torch.float
+            # TODO: this does not handle dynamic quantization yet
+            need_obs = (
+                arg_as_output_target_dtype != arg_as_input_target_dtype and
+                arg_as_input_target_dtype != torch.float
+            )
+            if need_obs:
                 # insert observer
                 observer_node = _insert_observer(
                     maybe_node, observer_mod, model, named_modules, graph)
@@ -873,8 +882,10 @@ def _maybe_insert_observers_before_graph_output(
                 results_dict[k] = _recursive_maybe_replace_node_with_obs(
                     inner_v, model, named_modules, graph)
             return results_dict
+        elif maybe_node is None:
+            return None
         else:
-            return results
+            raise Exception("Unhandled type for returned node:", maybe_node)
 
     new_args = []
     for old_arg in graph_output_node.args:
