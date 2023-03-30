@@ -205,6 +205,10 @@ class WrapperCodeGen(CodeGen):
                 import torch
                 import math
                 import random
+                import os
+                import tempfile
+                from torch._inductor.utils import maybe_profile
+
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
@@ -221,7 +225,7 @@ class WrapperCodeGen(CodeGen):
                 """
                 import triton
                 import triton.language as tl
-                from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
+                from torch._inductor.triton_heuristics import grid, start_graph, end_graph
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
@@ -457,6 +461,9 @@ class WrapperCodeGen(CodeGen):
             )
 
             for name, value in V.graph.constants.items():
+                # all the constants are global variables, that's why we need
+                # these 'global var_name' lines
+                output.writeline(f"global {name}")
                 add_fake_input(
                     name, value.size(), value.stride(), value.device, value.dtype
                 )
@@ -494,6 +501,7 @@ class WrapperCodeGen(CodeGen):
                     "parser = argparse.ArgumentParser()",
                     'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
                     'parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")',  # noqa: B950, line too long
+                    'parser.add_argument("--profile", "-p", action="store_true", help="Whether to profile the compiled module")',  # noqa: B950, line too long
                     "args = parser.parse_args()",
                     "",
                     "if args.benchmark_kernels:",
@@ -505,7 +513,19 @@ class WrapperCodeGen(CodeGen):
                 )
             output.writeline("else:")
             with output.indent():
-                output.writeline("benchmark_compiled_module()")
+                output.writeline("with maybe_profile(args.profile) as p:")
+                with output.indent():
+                    output.writeline("benchmark_compiled_module()")
+                output.writeline("")
+                output.writeline("if p:")
+                with output.indent():
+                    output.writelines(
+                        [
+                            'path = f"{tempfile.gettempdir()}/compiled_module_profile.json"',
+                            "p.export_chrome_trace(path)",
+                            'print(f"Chrome trace for the profile is written to {path}")',
+                        ]
+                    )
 
     def define_kernel(self, name: str, kernel: str, metadata: str = None):
         metadata_comment = f"{metadata}\n" if metadata else ""

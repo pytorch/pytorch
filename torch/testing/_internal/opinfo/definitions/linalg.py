@@ -514,10 +514,8 @@ def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwa
                 }
                 yield sample
 
-    for sample in sample_inputs_linalg_invertible(
-        op_info, device, dtype, requires_grad
-    ):
-        yield sample  # default kwargs
+    # default kwargs
+    yield from sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
 
 
 def sample_inputs_linalg_pinv_singular(

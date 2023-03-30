@@ -1,5 +1,5 @@
 import math
-from typing import TypeVar, Optional, Iterator
+from typing import Optional, Iterator
 
 import torch
 from . import Sampler, Dataset
@@ -7,10 +7,8 @@ import torch.distributed as dist
 
 __all__ = ["DistributedSampler", ]
 
-T_co = TypeVar('T_co', covariant=True)
 
-
-class DistributedSampler(Sampler[T_co]):
+class DistributedSampler(Sampler[int]):
     r"""Sampler that restricts data loading to a subset of the dataset.
 
     It is especially useful in conjunction with
@@ -94,7 +92,7 @@ class DistributedSampler(Sampler[T_co]):
         self.shuffle = shuffle
         self.seed = seed
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[int]:
         if self.shuffle:
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()
