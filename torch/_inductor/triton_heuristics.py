@@ -499,8 +499,15 @@ def unique_configs(configs: List[Config]):
     """Remove duplicate configurations"""
     seen = set()
     pruned_configs = []
+
+    def config_to_hashable(cfg):
+        items = list(cfg.kwargs.items())
+        items.append(("num_warps", cfg.num_warps))
+        items.append(("num_stages", cfg.num_stages))
+        return tuple(items)
+        
     for cfg in configs:
-        key = tuple(cfg.kwargs.items())
+        key = config_to_hashable(cfg)
         if key not in seen:
             seen.add(key)
             pruned_configs.append(cfg)
@@ -736,6 +743,10 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 Config({"XBLOCK": 1, "RBLOCK": 2048}, num_warps=16, num_stages=1),
                 # improve 1.185x for https://gist.github.com/shunting314/1afc463bf01cb75672ce3b418d4c66f3
                 Config({"XBLOCK": 1, "RBLOCK": 512}, num_warps=8, num_stages=1),
+                # improve 1.098x for https://gist.github.com/shunting314/8b7c83c4f9134110065e95d3daae2a56
+                Config({"XBLOCK": 2, "RBLOCK": 1024}, num_warps=8, num_stages=1),
+                # imporve 1.035x for https://gist.github.com/shunting314/5258e534ce028871a5b0d1be9033f67c
+                Config({"XBLOCK": 2, "RBLOCK": 256}, num_warps=8, num_stages=1),
             ],
             meta=meta,
             filename=filename,
