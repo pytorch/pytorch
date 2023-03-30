@@ -264,6 +264,38 @@ def forward(self, x : torch.Tensor):
     add = mul + 4;  mul = None""",
         )
 
+    def test_replace_local(self):
+        global FILE
+        FILE = StringIO()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def g(x):
+            @comptime
+            def _(ctx):
+                print(
+                    ctx.get_local("x").as_proxy().node.meta["example_value"].size(),
+                    file=FILE,
+                )
+
+            return x
+
+        @torch._dynamo.optimize(cnt)
+        def f(x):
+            g(x)
+            g(x.unsqueeze_(0))
+            g(x)
+            return x
+
+        f(torch.rand([1, 2]))
+        self.assertExpectedInline(
+            FILE.getvalue(),
+            """\
+torch.Size([1, 2])
+torch.Size([1, 1, 2])
+torch.Size([1, 1, 2])
+""",
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

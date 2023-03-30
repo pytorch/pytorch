@@ -517,7 +517,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self, oldvar: VariableTracker, newvar: VariableTracker
     ):
         def repl(v: VariableTracker):
-            if v is oldvar:
+            if isinstance(v, TensorVariable) and v.proxy.node is oldvar.proxy.node:
                 return newvar
             return v
 
