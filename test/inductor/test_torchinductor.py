@@ -7655,7 +7655,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 r1 = fn(idx, values)
                 for _ in range(10):
                     rn = fn(idx, values)
-                    assert (r1 == rn).all()
+                    self.assertEqual(r1, rn, atol=0, rtol=0)
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_heuristics import CachingAutotuner
