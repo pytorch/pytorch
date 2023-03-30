@@ -64,6 +64,10 @@ As a wise man said once: Don't cross the streams (https://www.youtube.com/watch?
 data_ptr_to_work = dict()
 work_version = 0
 
+def _maybe_wrap_tensor(self):
+    # Mockup while waiting for https://github.com/pytorch/pytorch/pull/98001
+    pass
+
 def _register_tensor_work(tensor, work):
     # Note: called directly by inductor codegen currently
     global data_ptr_to_work

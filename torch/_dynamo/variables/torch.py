@@ -453,6 +453,13 @@ class TorchVariable(VariableTracker):
             return TorchVariable(torch.add, **options).call_function(
                 tx, [args[0], result], {}
             )
+        elif self.value == torch.distributed._functional_collectives._maybe_wrap_tensor:
+            # this function will wrap with AsyncTensor during eager, but does nothing other
+            # than trace a 'wait_tensor' call under tracing.
+            assert len(args) == 1, "expected single input tensor for wait_tensor()"
+            return TorchVariable(torch._C._nn.wait_tensor, **options).call_function(
+                tx, args, {}
+            )
         else:
             any_symints_or_symfloats = any(
                 [isinstance(x, SymNodeVariable) for x in args]
