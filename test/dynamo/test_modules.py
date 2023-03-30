@@ -309,7 +309,8 @@ class ModuleDict(torch.nn.Module):
         # TODO(future PR): handle more logic
         x = self.layers["0"](x)
         return x
-    
+
+
 class ModuleDictWithCustomGetItem(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -331,7 +332,7 @@ class ModuleWithCustomModuleDict(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.dict = ModuleDictWithCustomGetItem()
-        
+
     def forward(self, x):
         return self.dict["0"](x)
 
