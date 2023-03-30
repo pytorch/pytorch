@@ -48,6 +48,7 @@ class JobCheckState(NamedTuple):
     url: str
     status: Optional[str]
     classification: Optional[str]
+    job_id: Optional[int]
 
 
 JobNameToStateDict = Dict[str, JobCheckState]
@@ -114,6 +115,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
           name
           conclusion
           detailsUrl
+          databaseId
         }
         pageInfo {
           endCursor
@@ -302,6 +304,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_c
                     name
                     conclusion
                     detailsUrl
+                    databaseId
                   }
                   pageInfo {
                     endCursor
@@ -422,6 +425,9 @@ RE_DIFF_REV = re.compile(r"^Differential Revision:.+?(D[0-9]+)", re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
+ROCKSET_MERGES_COLLECTION = "merges"
+ROCKSET_MERGES_WORKSPACE = "commons"
+REMOTE_MAIN_BRANCH = "origin/master"
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -526,6 +532,7 @@ def add_workflow_conclusions(
                             checkrun_node["detailsUrl"],
                             checkrun_node["conclusion"],
                             None,
+                            checkrun_node["databaseId"],
                         )
 
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
@@ -550,7 +557,11 @@ def add_workflow_conclusions(
                 res[job_name] = job
         else:
             res[workflow_name] = JobCheckState(
-                workflow.name, workflow.url, workflow.status, None
+                workflow.name,
+                workflow.url,
+                workflow.status,
+                None,
+                None,
             )
     for job_name, job in no_workflow_obj.jobs.items():
         res[job_name] = job
@@ -690,7 +701,7 @@ class GitHubPR:
         self.fetch()
         gitrepo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         self.merge_base = gitrepo.get_merge_base(
-            "origin/master", self.last_commit()["oid"]
+            REMOTE_MAIN_BRANCH, self.last_commit()["oid"]
         )
         return self.merge_base
 
@@ -871,7 +882,11 @@ class GitHubPR:
             for status in orig_last_commit["status"]["contexts"]:
                 name = status["context"]
                 self.conclusions[name] = JobCheckState(
-                    name, status["targetUrl"], status["state"], None
+                    name,
+                    status["targetUrl"],
+                    status["state"],
+                    None,
+                    None,
                 )
 
         return self.conclusions
@@ -1033,7 +1048,7 @@ class GitHubPR:
         ignore_current_checks: Optional[List[str]] = None,
     ) -> None:
         # Raises exception if matching rule is not found
-        find_matching_merge_rule(
+        merge_rule, pending_checks, failed_checks = find_matching_merge_rule(
             self,
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
@@ -1049,6 +1064,34 @@ class GitHubPR:
             self.add_numbered_label("merged")
             for pr in additional_merged_prs:
                 pr.add_numbered_label("merged")
+
+        if comment_id and self.pr_num:
+            # When the merge process reaches this part, we can assume that the commit
+            # has been successfully pushed to trunk
+            merge_commit_sha = repo.rev_parse(name=REMOTE_MAIN_BRANCH)
+
+            # Finally, upload the record to Rockset. The list of pending and failed
+            # checks are at the time of the merge
+            save_merge_record(
+                collection=ROCKSET_MERGES_COLLECTION,
+                comment_id=comment_id,
+                pr_num=self.pr_num,
+                owner=self.org,
+                project=self.project,
+                author=self.get_author(),
+                pending_checks=pending_checks,
+                failed_checks=failed_checks,
+                last_commit_sha=self.last_commit().get("oid", ""),
+                merge_base_sha=self.get_merge_base(),
+                merge_commit_sha=merge_commit_sha,
+                is_failed=False,
+                dry_run=dry_run,
+                skip_mandatory_checks=skip_mandatory_checks,
+                ignore_current=bool(ignore_current_checks),
+                workspace=ROCKSET_MERGES_WORKSPACE,
+            )
+        else:
+            print("Missing comment ID or PR number, couldn't upload to Rockset")
 
     def merge_changes(
         self,
@@ -1148,11 +1191,17 @@ def find_matching_merge_rule(
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
     ignore_current_checks: Optional[List[str]] = None,
-) -> MergeRule:
-    """Returns merge rule matching to this pr or raises an exception.
+) -> Tuple[
+    MergeRule,
+    List[Tuple[str, Optional[str], Optional[int]]],
+    List[Tuple[str, Optional[str], Optional[int]]],
+]:
+    """
+    Returns merge rule matching to this pr together with the list of associated pending
+    and failing jobs OR raises an exception.
 
-    NB: this function is used in Meta-internal workflows, see the comment
-    at the top of this file for details.
+    NB: this function is used in Meta-internal workflows, see the comment at the top of
+    this file for details.
     """
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
@@ -1259,7 +1308,7 @@ def find_matching_merge_rule(
                 lambda x: "EasyCLA" in x or not skip_mandatory_checks, mandatory_checks
             )
         )
-        [pending_checks, failed_checks] = categorize_checks(
+        pending_checks, failed_checks = categorize_checks(
             checks,
             required_checks,
             ok_failed_checks_threshold=3 if rule.ignore_flaky_failures else 0,
@@ -1296,7 +1345,14 @@ def find_matching_merge_rule(
                 "This PR has internal changes and must be landed via Phabricator"
             )
 
-        return rule
+        # Categorize all checks when skip_mandatory_checks (force merge) is set. Do it here
+        # where the list of checks is readily available
+        pending_mandatory_checks, failed_mandatory_checks = categorize_checks(
+            checks,
+            [],
+            ok_failed_checks_threshold=0,
+        )
+        return (rule, pending_mandatory_checks, failed_mandatory_checks)
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, rule)
@@ -1307,7 +1363,9 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
 
-def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[str]:
+def checks_to_markdown_bullets(
+    checks: List[Tuple[str, Optional[str], Optional[int]]]
+) -> List[str]:
     return [
         f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]
     ]
@@ -1321,6 +1379,96 @@ def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
         if num_retries > 0:
             return _get_flaky_rules(url, num_retries=num_retries - 1)
         return []
+
+
+def save_merge_record(
+    collection: str,
+    comment_id: int,
+    pr_num: int,
+    owner: str,
+    project: str,
+    author: str,
+    pending_checks: List[Tuple[str, Optional[str], Optional[int]]],
+    failed_checks: List[Tuple[str, Optional[str], Optional[int]]],
+    last_commit_sha: str,
+    merge_base_sha: str,
+    merge_commit_sha: str = "",
+    is_failed: bool = False,
+    dry_run: bool = False,
+    skip_mandatory_checks: bool = False,
+    ignore_current: bool = False,
+    error: str = "",
+    workspace: str = "commons",
+    num_retries: int = 3,
+) -> None:
+    """
+    This saves the merge records into Rockset, so we can query them (for fun and profit)
+    """
+    if dry_run:
+        # Decide not to save the record to Rockset if dry-run is set to not pollute
+        # the collection
+        return
+
+    try:
+        import rockset  # type: ignore[import]
+
+        # Prepare the record to be written into Rockset
+        data = [
+            {
+                "comment_id": comment_id,
+                "pr_num": pr_num,
+                "owner": owner,
+                "project": project,
+                "author": author,
+                "pending_checks": pending_checks,
+                "failed_checks": failed_checks,
+                "last_commit_sha": last_commit_sha,
+                "merge_base_sha": merge_base_sha,
+                "merge_commit_sha": merge_commit_sha,
+                "is_failed": is_failed,
+                "skip_mandatory_checks": skip_mandatory_checks,
+                "ignore_current": ignore_current,
+                "error": error,
+            }
+        ]
+
+        client = rockset.RocksetClient(
+            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+        )
+        client.Documents.add_documents(
+            collection=collection,
+            data=data,
+            workspace=workspace,
+        )
+
+    except ModuleNotFoundError:
+        print("Rockset is missing, no record will be saved")
+        return
+
+    except Exception as e:
+        if num_retries > 0:
+            print(f"Could not upload to Rockset ({num_retries - 1} tries left): {e}")
+            return save_merge_record(
+                collection=collection,
+                comment_id=comment_id,
+                pr_num=pr_num,
+                owner=owner,
+                project=project,
+                author=author,
+                pending_checks=pending_checks,
+                failed_checks=failed_checks,
+                last_commit_sha=last_commit_sha,
+                merge_base_sha=merge_base_sha,
+                merge_commit_sha=merge_commit_sha,
+                is_failed=is_failed,
+                dry_run=dry_run,
+                skip_mandatory_checks=skip_mandatory_checks,
+                ignore_current=ignore_current,
+                error=error,
+                workspace=workspace,
+                num_retries=num_retries - 1,
+            )
+        print(f"Could not upload to Rockset ({num_retries} tries left): {e}")
 
 
 def get_rockset_results(
@@ -1394,7 +1542,11 @@ def get_classifications(
             continue
         if ignore_current_checks is not None and name in ignore_current_checks:
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "IGNORE_CURRENT_CHECK"
+                check.name,
+                check.url,
+                check.status,
+                "IGNORE_CURRENT_CHECK",
+                check.job_id,
             )
             continue
         head_sha_job = head_sha_jobs.get(name)
@@ -1406,11 +1558,11 @@ def get_classifications(
             and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
         ):
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "BROKEN_TRUNK"
+                check.name, check.url, check.status, "BROKEN_TRUNK", check.job_id
             )
         elif any([rule.matches(head_sha_job) for rule in flaky_rules]):
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "FLAKY"
+                check.name, check.url, check.status, "FLAKY", check.job_id
             )
     return checks_with_classifications
 
@@ -1531,28 +1683,40 @@ def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: List[str],
     ok_failed_checks_threshold: int = 3,
-) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
-    pending_checks: List[Tuple[str, Optional[str]]] = []
-    failed_checks: List[Tuple[str, Optional[str]]] = []
-    ok_failed_checks: List[Tuple[str, Optional[str]]] = []
+) -> Tuple[
+    List[Tuple[str, Optional[str], Optional[int]]],
+    List[Tuple[str, Optional[str], Optional[int]]],
+]:
+    pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
+    failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
+    ok_failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
 
+    # If required_checks is not set or empty, consider all names are relevant
     relevant_checknames = [
-        name for name in check_runs.keys() if any([x in name for x in required_checks])
+        name
+        for name in check_runs.keys()
+        if not required_checks or any([x in name for x in required_checks])
     ]
 
     for checkname in required_checks:
         if all([checkname not in x for x in check_runs.keys()]):
-            pending_checks.append((checkname, None))
+            pending_checks.append((checkname, None, None))
+
     for checkname in relevant_checknames:
-        if check_runs[checkname].status is None:
-            pending_checks.append((checkname, check_runs[checkname].url))
+        status = check_runs[checkname].status
+        url = check_runs[checkname].url
+        classification = check_runs[checkname].classification
+        job_id = check_runs[checkname].job_id
+
+        if status is None:
+            pending_checks.append((checkname, url, job_id))
         elif not is_passing_status(check_runs[checkname].status):
-            if check_runs[checkname].classification == "IGNORE_CURRENT_CHECK":
+            if classification == "IGNORE_CURRENT_CHECK":
                 pass
-            elif check_runs[checkname].classification in ("BROKEN_TRUNK", "FLAKY"):
-                ok_failed_checks.append((checkname, check_runs[checkname].url))
+            elif classification in ("BROKEN_TRUNK", "FLAKY"):
+                ok_failed_checks.append((checkname, url, job_id))
             else:
-                failed_checks.append((checkname, check_runs[checkname].url))
+                failed_checks.append((checkname, url, job_id))
 
     if ok_failed_checks:
         print(
@@ -1620,13 +1784,8 @@ def merge(
 
     if ignore_current:
         checks = pr.get_checkrun_conclusions()
-        pending, failing = categorize_checks(checks, list(checks.keys()))
+        _, failing = categorize_checks(checks, list(checks.keys()))
         ignore_current_checks_info = failing
-        if len(pending) == 0:
-            raise RuntimeError(
-                "The --ignore-current flag was used but there are no pending checks on this PR.  Please use "
-                + "-f/--force instead."
-            )
 
     gh_post_pr_comment(
         org,
@@ -1643,8 +1802,9 @@ def merge(
     elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
         raise RuntimeError(
             f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
-            "Please rebase and try again. You can rebase by leaving the following comment on this PR:\n"
-            "`@pytorchbot rebase`"
+            "Please rebase and try again. You can rebase and merge by leaving the following comment on this PR:\n"
+            "`@pytorchbot merge -r`\n"
+            "Or just rebase by leaving `@pytorchbot rebase` comment"
         )
 
     start_time = time.time()
@@ -1835,6 +1995,31 @@ def main() -> None:
         )
     except Exception as e:
         handle_exception(e)
+
+        if args.comment_id and args.pr_num:
+            # Finally, upload the record to Rockset, we don't have access to the
+            # list of pending and failed checks here, but they are not really
+            # needed at the moment
+            save_merge_record(
+                collection=ROCKSET_MERGES_COLLECTION,
+                comment_id=args.comment_id,
+                pr_num=args.pr_num,
+                owner=org,
+                project=project,
+                author=pr.get_author(),
+                pending_checks=[],
+                failed_checks=[],
+                last_commit_sha=pr.last_commit().get("oid", ""),
+                merge_base_sha=pr.get_merge_base(),
+                is_failed=True,
+                dry_run=args.dry_run,
+                skip_mandatory_checks=args.force,
+                ignore_current=args.ignore_current,
+                error=str(e),
+                workspace=ROCKSET_MERGES_WORKSPACE,
+            )
+        else:
+            print("Missing comment ID or PR number, couldn't upload to Rockset")
 
 
 if __name__ == "__main__":
