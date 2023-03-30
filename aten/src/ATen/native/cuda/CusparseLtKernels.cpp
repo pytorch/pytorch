@@ -102,13 +102,14 @@ struct CusparseLtLinear : torch::CustomClassHolder {
 
     std::cout << weight_compressed.dtype() << std::endl;
 
-    // if (weight_compressed.dtype() == c10::Half) {
-    std::cout << "here" << std::endl;
-    // }
-    // // else {
-    //   type = CUDA_R_8I;
-    //   compute_type = CUSPARSE_COMPUTE_32I;
-    // }
+    if (weight_compressed.dtype() == torch::kInt8) {
+      std::cout << "int" << std::endl;
+      type = CUDA_R_8I;
+      compute_type = CUSPARSE_COMPUTE_32I;
+    }
+    else {
+      std::cout << "here" << std::endl;
+    }
   };
 
 };
@@ -192,7 +193,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   
   void* dA_compressedBuffer = nullptr;
 
-  CHECK_CUDA( cudaMalloc((void**)&dA_compressed, compressed_size) )
+  // CHECK_CUDA( cudaMalloc((void**)&dA_compressed, compressed_size) )
   CHECK_CUDA( cudaMalloc((void**)&dA_compressedBuffer, compressed_buffer_size) )
 
   std::cout << "SIZE BYTES "<< num_weight_bytes<< "  " << compressed_size <<"  "<<  (float)num_weight_bytes / (float)compressed_size << std::endl;
@@ -215,7 +216,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
 at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
 
   // create tensor
-  auto res = input.new_zeros({input.size(0), num_A_rows, input.size(2)});
+  auto res = input.new_empty({input.size(0), num_A_rows, input.size(2)});
 
   int num_batches = (int)input.size(0);
   int64_t k = input.size(1);
