@@ -10,16 +10,16 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
 
-namespace at { namespace native {
+namespace at::native {
 
-const char log_name[] = "log_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char log_name[] = "log_kernel";
 void log_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto log_string = jiterator_stringify(
         template <typename T> T log_kernel(T x) { return std::log(x); });
-    AT_DISPATCH_COMPLEX_TYPES(common_dtype, "log_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "log_cuda", [&]() {
       jitted_gpu_kernel<
           /*name=*/log_name,
           /*return_dtype=*/scalar_t,
@@ -27,9 +27,12 @@ void log_kernel_cuda(TensorIteratorBase& iter) {
           /*arity=*/1>(iter, log_string);
     });
 #else
-    AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "log_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, iter.common_dtype(), "log_cuda", [&]() {
       gpu_kernel(
-          iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return ::log(a); });
+          iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+            using opmath_t = at::opmath_type<scalar_t>;
+            return ::log(static_cast<opmath_t>(a));
+          });
     });
 #endif
   } else {
@@ -41,7 +44,7 @@ void log_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-const char log10_name[] = "log10_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char log10_name[] = "log10_kernel";
 void log10_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -71,14 +74,14 @@ void log10_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void log1p_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "log1p_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "log1p_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::log1p(a);
     });
   });
 }
 
-const char log2_name[] = "log2_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char log2_name[] = "log2_kernel";
 void log2_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -112,4 +115,4 @@ REGISTER_DISPATCH(log10_stub, &log10_kernel_cuda);
 REGISTER_DISPATCH(log2_stub, &log2_kernel_cuda);
 REGISTER_DISPATCH(log1p_stub, &log1p_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

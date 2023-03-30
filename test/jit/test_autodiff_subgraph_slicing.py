@@ -86,7 +86,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         with enable_profiling_mode_for_profiling_tests():
             class M(torch.nn.Module):
                 def __init__(self, has_bias):
-                    super(M, self).__init__()
+                    super().__init__()
                     self.ll = torch.nn.Linear(10, 10, has_bias)
 
                 def forward(self, x, y):
@@ -483,3 +483,37 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 .check("Tensor = aten::relu") \
                 .check_not("aten::t") \
                 .run(graph)
+
+    def test_has_profiled_info_aliasing_outputs(self):
+        # The expectation is that CallFunction will prevent the final profile node from
+        # getting merged into the DifferentiableGraph, and that create_autodiff_subgraphs
+        # will instead add this to the type for %4.
+        ir = """
+        graph(%a : Tensor):
+            %1 : Tensor = prim::profile[profiled_type=Float(requires_grad=0)](%a)
+            %2 : Tensor = aten::relu(%1)
+            %3 : Tensor = prim::profile[profiled_type=Float(requires_grad=0)](%2)
+            %4 : Tensor = aten::relu(%3)
+            %5 : Tensor = prim::CallFunction(%4)
+            %6 : Tensor = prim::profile[profiled_type=Float(requires_grad=0)](%4)
+            return (%6)
+        """
+
+        graph = torch._C.parse_ir(ir)
+        torch._C._jit_pass_create_autodiff_subgraphs(graph)
+
+        for n in graph.nodes():
+            if n.kind() == "prim::DifferentiableGraph":
+                diff_graph = n.g("Subgraph")
+
+        outputs = list(diff_graph.outputs())
+        self.assertEqual(1, len(outputs))
+        output = outputs[0]
+        self.assertEqual(False, output.requiresGrad())
+
+        FileCheck().check("= prim::DifferentiableGraph") \
+            .check("with prim::DifferentiableGraph") \
+            .check(" = aten::relu") \
+            .check("requires_grad=0") \
+            .check("aten::relu") \
+            .run(graph)

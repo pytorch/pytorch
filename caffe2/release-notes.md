@@ -133,7 +133,7 @@ If you're running this all on a cloud computer, you probably won't have a UI or 
 
 First configure your cloud server to accept port 8889, or whatever you want, but change the port in the following commands. On AWS you accomplish this by adding a rule to your server's security group allowing a TCP inbound on port 8889. Otherwise you would adjust iptables for this.
 
-Next you launch the Juypter server.
+Next you launch the Jupyter server.
 
 ```
 jupyter notebook --no-browser --port=8889

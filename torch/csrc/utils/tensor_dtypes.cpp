@@ -1,17 +1,16 @@
-#include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_types.h>
 
 namespace torch {
 namespace utils {
 
-std::pair<std::string, std::string> getDtypeNames(
-    at::ScalarType scalarType) {
+std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarType) {
   switch (scalarType) {
     case at::ScalarType::Byte:
       // no "byte" because byte is signed in numpy and we overload
@@ -53,6 +52,16 @@ std::pair<std::string, std::string> getDtypeNames(
       return std::make_pair("quint4x2", "");
     case at::ScalarType::QUInt2x4:
       return std::make_pair("quint2x4", "");
+    case at::ScalarType::Bits1x8:
+      return std::make_pair("bits1x8", "");
+    case at::ScalarType::Bits2x4:
+      return std::make_pair("bits2x4", "");
+    case at::ScalarType::Bits4x2:
+      return std::make_pair("bits4x2", "");
+    case at::ScalarType::Bits8:
+      return std::make_pair("bits8", "");
+    case at::ScalarType::Bits16:
+      return std::make_pair("bits16", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }
@@ -72,14 +81,14 @@ void initializeDtypes() {
   for (at::ScalarType scalarType : all_scalar_types) {
     std::string primary_name, legacy_name;
     std::tie(primary_name, legacy_name) = getDtypeNames(scalarType);
-    PyObject *dtype = THPDtype_New(scalarType, primary_name);
+    PyObject* dtype = THPDtype_New(scalarType, primary_name);
     torch::registerDtypeObject((THPDtype*)dtype, scalarType);
     Py_INCREF(dtype);
     if (PyModule_AddObject(torch_module.get(), primary_name.c_str(), dtype) !=
         0) {
       throw python_error();
     }
-    if (legacy_name != "") {
+    if (!legacy_name.empty()) {
       Py_INCREF(dtype);
       if (PyModule_AddObject(torch_module.get(), legacy_name.c_str(), dtype) !=
           0) {

@@ -1,58 +1,30 @@
-from typing import Dict, List, Tuple, Union, Any, Callable, Set
-from torch.nn.utils.rnn import PackedSequence
+from typing import cast
 
 import torch
-
-from collections import OrderedDict
-
-"""Useful functions to deal with tensor types with other python container types."""
+from torch.nn.modules.batchnorm import _BatchNorm
+from torch.utils._mode_utils import no_dispatch
 
 
-def _apply_to_tensors(
-    fn: Callable, container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
-) -> Any:
-    """Recursively apply to all tensor in different kinds of container types."""
-
-    def apply(x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]) -> Any:
-        if torch.is_tensor(x):
-            return fn(x)
-        elif isinstance(x, OrderedDict):
-            od = x.__class__()
-            for key, value in x.items():
-                od[key] = apply(value)
-            return od
-        elif isinstance(x, PackedSequence):
-            apply(x.data)
-            return x
-        elif isinstance(x, dict):
-            return {key: apply(value) for key, value in x.items()}
-        elif isinstance(x, (list, tuple, set)):
-            return type(x)(apply(el) for el in x)
-        else:
-            return x
-
-    return apply(container)
+def _contains_batchnorm(module):
+    return any(isinstance(mod, _BatchNorm) for mod in module.modules())
 
 
-def _replace_by_prefix(
-    state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
-    old_prefix: str,
-    new_prefix: str,
-) -> None:
-    """
-    Replace all keys that match a given old_prefix with a new_prefix (in-place).
+def _override_batchnorm_mixed_precision(module):
+    for mod in module.modules():
+        if isinstance(mod, _BatchNorm):
+            mod._wrap_overrides = {"mixed_precision": None}  # type: ignore[assignment]
 
-    Usage::
 
-        state_dict = {"layer.xyz": torch.tensor(1)}
-        replace_by_prefix_(state_dict, "layer.", "module.layer.")
-        assert state_dict == {"module.layer.xyz": torch.tensor(1)}
-    """
-    if old_prefix == new_prefix:
-        raise ValueError("old_prefix and new_prefix must be distinct")
-    for key in list(state_dict.keys()):
-        if not key.startswith(old_prefix):
-            continue
-        new_key = new_prefix + key[len(old_prefix) :]
-        state_dict[new_key] = state_dict[key]
-        del state_dict[key]
+def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
+    """Returns if ``x`` and ``y`` share the same storage."""
+    # NOTE: CPU and GPU tensors are ensured to have different data pointers.
+    return x._typed_storage()._data_ptr() == y._typed_storage()._data_ptr()
+
+
+def _same_storage_as_data_ptr(x: torch.Tensor, data_ptr: int) -> bool:
+    return x._typed_storage()._data_ptr() == data_ptr
+
+
+def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.cuda.Stream) -> None:
+    with no_dispatch():
+        tensor.record_stream(cast(torch._C.Stream, stream))

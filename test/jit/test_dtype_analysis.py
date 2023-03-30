@@ -128,9 +128,9 @@ class TestDtypeBase(JitTestCase):
         inputs = [self.get_rand_tensor(s, d) for s, d in zip(in_shapes, in_dtypes)]
         try:
             self.assert_dtype_equal_custom_args(fn, inputs)
-        except Exception:
+        except Exception as e:
             fail_text = f"Failed for shapes {in_shapes}, and dtypes {in_dtypes}"
-            raise AssertionError(fail_text)
+            raise AssertionError(fail_text) from e
 
     def assert_dtype_equal_custom_args(self, fn, args):
         try:
@@ -353,6 +353,7 @@ class TestDtypeCustomRules(TestDtypeBase):
         # Run the Dtype Analysis
         graph = traced_fn.graph  # Note this is a cached graph
         input_tensors = [t for t in input_args if isinstance(t, torch.Tensor)]
+        input_tensors += [v for v in sample_input.kwargs.values() if isinstance(v, torch.Tensor)]
         self.prop_dtype_on_graph(graph, input_tensors)
         self.assert_output_dtype_equal(expected_res, graph)
 

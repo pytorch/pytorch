@@ -138,6 +138,7 @@ ExprHandle dequant(
 Tensor computeQuantizePerTensor(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>&,
     at::Device) {
   std::vector<VarPtr> vars;
@@ -177,6 +178,7 @@ Tensor computeQuantizePerTensor(
 Tensor computeQuantizedAdd(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   const BufHandle& QA = c10::get<BufHandle>(inputs[0]);
@@ -219,6 +221,7 @@ Tensor computeQuantizedAdd(
 Tensor computeQuantizePerTensorExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     at::Device) {
@@ -251,6 +254,7 @@ Tensor computeQuantizePerTensorExternalCall(
 Tensor computeDequantizeExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   Dtype dtype = kFloat;
@@ -275,6 +279,7 @@ Tensor computeDequantizeExternalCall(
 Tensor computeQuantizedConv2dPrepack(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   Dtype dtype = kFloat;
@@ -323,6 +328,7 @@ Tensor computeQuantizedConv2dPrepack(
 Tensor computeQuantizedConv1d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -354,6 +360,7 @@ Tensor computeQuantizedConv1d(
 Tensor computeQuantizedConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -385,6 +392,7 @@ Tensor computeQuantizedConv2d(
 Tensor computeQuantizedConv2dRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -416,6 +424,7 @@ Tensor computeQuantizedConv2dRelu(
 Tensor computeQuantizedLinear(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -447,6 +456,7 @@ Tensor computeQuantizedLinear(
 Tensor computeQuantizedLinearRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -478,6 +488,7 @@ Tensor computeQuantizedLinearRelu(
 Tensor computeQuantizedAddExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -521,6 +532,7 @@ Tensor computeQuantizedAddExternalCall(
 Tensor computeQuantizedMul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -551,6 +563,7 @@ Tensor computeQuantizedMul(
 Tensor computeQuantizedMulScalar(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -577,6 +590,7 @@ Tensor computeQuantizedMulScalar(
 Tensor computeQuantizedRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -607,6 +621,7 @@ Tensor computeQuantizedRelu(
 Tensor computeQuantizedCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -645,6 +660,7 @@ Tensor computeQuantizedCat(
 Tensor computeDequantize(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   Dtype dtype = kFloat;
@@ -676,11 +692,12 @@ Tensor computeDequantize(
 Tensor computeUpsampleNearest2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   auto A = c10::get<BufHandle>(inputs[0]);
-  auto output_height = outputShape[2];
-  auto output_width = outputShape[3];
+  const auto& output_height = outputShape[2];
+  const auto& output_width = outputShape[3];
   auto input_height = ExprHandle(A.dim(2));
   auto input_width = ExprHandle(A.dim(3));
 
@@ -690,7 +707,7 @@ Tensor computeUpsampleNearest2d(
   auto scale_h =
       promoteToDtype(input_height, ScalarType::Double) / output_height;
   auto scale_w = promoteToDtype(input_width, ScalarType::Double) / output_width;
-  // TODO: will repetetive if in idx calculation will be taken out of the loop?
+  // TODO: will repetitive if in idx calculation will be taken out of the loop?
   auto compute_nearest_idx =
       [](ExprHandle scale, ExprHandle dst_index, ExprHandle input_size) {
         return Min::make(
@@ -721,6 +738,7 @@ Tensor computeUpsampleNearest2d(
 Tensor computeUpsampleNearest2dExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   Dtype dtype = kFloat;
@@ -779,6 +797,7 @@ Tensor computeUpsampleNearest2dExternalCall(
 Tensor computeQuantizedSigmoidExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     at::Device) {

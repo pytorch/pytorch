@@ -44,12 +44,10 @@ TORCH_API c10::intrusive_ptr<rpc::Message> getMessageWithAutograd(
     c10::intrusive_ptr<rpc::Message> wrappedRpcMsg,
     rpc::MessageType msgType,
     bool forceGradRecording = false,
-    const rpc::DeviceMap& deviceMap =
-        {});
+    const rpc::DeviceMap& deviceMap = {});
 
 // Send message after autograd checking
-TORCH_API c10::intrusive_ptr<c10::ivalue::Future>
-sendMessageWithAutograd(
+TORCH_API c10::intrusive_ptr<c10::ivalue::Future> sendMessageWithAutograd(
     rpc::RpcAgent& agent,
     const rpc::WorkerInfo& dst,
     c10::intrusive_ptr<rpc::Message> wrappedRpcMsg,

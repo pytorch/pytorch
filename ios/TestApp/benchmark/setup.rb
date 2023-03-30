@@ -36,6 +36,11 @@ targets.each do |target|
         config.build_settings['LIBRARY_SEARCH_PATHS']   = libraries_search_path
         config.build_settings['OTHER_LDFLAGS']          = other_linker_flags
         config.build_settings['ENABLE_BITCODE']         = 'No'
+        if (options[:lite])
+            config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = ['$(inherited)', "BUILD_LITE_INTERPRETER"]
+        else
+            config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = ['$(inherited)']
+        end
         dev_team_id = options[:team_id]
         if dev_team_id
             config.build_settings['DEVELOPMENT_TEAM']   = dev_team_id
@@ -46,13 +51,20 @@ group = project.main_group.find_subpath(File.join('TestApp'),true)
 group.set_source_tree('SOURCE_ROOT')
 group.files.each do |file|
     if (file.name.to_s.end_with?(".pt") ||
-        file.name.to_s.end_with?(".ptl"))
+        file.name.to_s.end_with?(".ptl") ||
+        file.name == "config.json")
         group.remove_reference(file)
         targets.each do |target|
             target.resources_build_phase.remove_file_reference(file)
         end
     end
 end
+
+config_path = File.expand_path("./config.json")
+if not File.exist?(config_path)
+    raise "config.json can't be found!"
+end
+config_file_ref = group.new_reference(config_path)
 
 file_refs = []
 # collect models
@@ -66,6 +78,7 @@ Dir.foreach(models_dir) do |model|
 end
 
 targets.each do |target|
+    target.resources_build_phase.add_file_reference(config_file_ref, true)
     file_refs.each do |ref|
         target.resources_build_phase.add_file_reference(ref, true)
     end

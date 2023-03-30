@@ -50,7 +50,7 @@ Tensor NestedTensor_from_padded_tensor_cpu(
     const Tensor& padded,
     const NestedTensorImpl& nt);
 
-Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim);
+Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c10::optional<int64_t> mask_dim_length);
 
 template <typename T>
 void remove_padding_kernelLauncher(
@@ -81,6 +81,23 @@ void add_padding_kernelLauncher(
     const int* input_sizes,
     int input_dim,
     const std::vector<int64_t>& output_sizes,
-    const int batch_size);
+    const int batch_size,
+    const int output_batch_size);
+
+TORCH_API Tensor flash_attention_helper(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool need_attn_weights,
+    bool is_causal);
+
+TORCH_API std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool need_attn_weights,
+    bool is_causal);
 } // namespace native
 } // namespace at

@@ -4,10 +4,10 @@
 #include <ATen/ATen.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/onednn_utils.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/quantized/PackedParams.h>
 
 #ifdef USE_FBGEMM
 template <int kSpatialDim>
@@ -126,7 +126,7 @@ template <int kSpatialDim>
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<
     kSpatialDim>::unpack() {
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
-      orig_weight_, orig_bias_);
+      orig_weight_.clone(), orig_bias_);
 }
 
 template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<

@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
+#include <c10/util/Exception.h>
 
 #include <torch/library.h>
 
@@ -48,6 +49,17 @@ Tensor ffn(
   res = linear_for_ffn(b2, res, w2, c10::nullopt);
   return res;
 }
+
+Tensor norm(
+    const Tensor& input,
+    const int64_t embed_dim,
+    const double eps,
+    const Tensor& weight,
+    const Tensor& bias,
+    const bool use_nested_tensor) {
+  return at::layer_norm(input, {embed_dim}, weight, bias, eps, true);
+}
+
 } // namespace
 
 Tensor transformer_encoder_layer_forward(
@@ -69,21 +81,25 @@ Tensor transformer_encoder_layer_forward(
     const Tensor& ffn_bias_1,
     const Tensor& ffn_weight_2,
     const Tensor& ffn_bias_2,
-    const c10::optional<Tensor>& mask) {
+    const c10::optional<Tensor>& mask,
+    const c10::optional<int64_t> mask_type) {
   {
     const Tensor& check_for_empty = src.is_nested() ? get_nested_tensor_impl(src)->get_buffer() : src;
     if (check_for_empty.numel() == 0) {
       return src.is_nested()
-        ? at::detail::make_tensor<NestedTensorImpl>(check_for_empty, get_nested_tensor_impl(src)->get_nested_size_tensor())
+        ? at::detail::make_tensor<NestedTensorImpl>(check_for_empty, get_nested_tensor_impl(src)->get_nested_sizes())
         : src.clone();
     }
   }
-  TORCH_CHECK(!norm_first, "norm_first is not supported yet");
   const bool use_nested_tensor = src.is_nested();
-  auto x = std::get<0>(native_multi_head_attention(
-      src,
-      src,
-      src,
+  Tensor x = src;
+  if (norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
+  }
+  x = std::get<0>(at::_native_multi_head_attention(
+      x,
+      x,
+      x,
       embed_dim,
       num_heads,
       qkv_weight,
@@ -91,23 +107,21 @@ Tensor transformer_encoder_layer_forward(
       proj_weight,
       proj_bias,
       mask,
-      false /* need_weights */));
-  if (use_nested_tensor) {
-    NestedTensor_add_NestedTensor_in_place(x, src);
-    x = NestedTensor_layer_norm(
-        x, layer_norm_weight_1, layer_norm_bias_1, layer_norm_eps);
-  } else {
-    x.add_(src);
-    x = at::layer_norm(
-        x,
-        {embed_dim},
-        layer_norm_weight_1,
-        layer_norm_bias_1,
-        layer_norm_eps,
-        true);
+      false /* need_weights */,
+      true /* average_attn_weights */,
+      mask_type));
+
+  x.add_(src);
+  if (!norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
   }
 
+
   auto pre_ffn_res = x;
+
+  if (norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
+  }
   x = ffn(
       x,
       ffn_weight_1,
@@ -116,19 +130,9 @@ Tensor transformer_encoder_layer_forward(
       ffn_bias_2,
       use_gelu,
       /* add_norm* */ false);
-  if (use_nested_tensor) {
-    NestedTensor_add_NestedTensor_in_place(x, pre_ffn_res);
-    x = NestedTensor_layer_norm(
-        x, layer_norm_weight_2, layer_norm_bias_2, layer_norm_eps);
-  } else {
-    x.add_(pre_ffn_res);
-    x = at::layer_norm(
-        x,
-        {embed_dim},
-        layer_norm_weight_2,
-        layer_norm_bias_2,
-        layer_norm_eps,
-        true);
+  x.add_(pre_ffn_res);
+  if (!norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
   }
   return x;
 }

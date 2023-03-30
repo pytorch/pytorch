@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <c10/core/ScalarType.h>
 
 namespace at {
 namespace native {

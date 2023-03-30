@@ -6,14 +6,12 @@ from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
 )
-from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
-)
-
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -34,22 +32,27 @@ class TestTraversal(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_modules(self):
-        group = dist.distributed_c10d._get_default_group()
-        model = NestedWrappedModule(group, wrap_fsdp=True)
-        modules = FSDP.fsdp_modules(model)
-        self.assertEquals(
-            modules, [
-                model.module.get_submodule("1"),
-                model.module.get_submodule("1").get_submodule("0"),
-                model.module.get_submodule("2"),
-            ]
+        nested_wrapped_module = NestedWrappedModule.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
         )
-        modules = FSDP.fsdp_modules(model, root_only=True)
+        modules = FSDP.fsdp_modules(nested_wrapped_module)
         self.assertEqual(
-            modules, [
-                model.module.get_submodule("1"),
-                model.module.get_submodule("2"),
-            ]
+            modules,
+            [
+                nested_wrapped_module.module.get_submodule("1"),
+                nested_wrapped_module.module.get_submodule("1").get_submodule("0"),
+                nested_wrapped_module.module.get_submodule("2"),
+            ],
+        )
+        modules = FSDP.fsdp_modules(nested_wrapped_module, root_only=True)
+        self.assertEqual(
+            modules,
+            [
+                nested_wrapped_module.module.get_submodule("1"),
+                nested_wrapped_module.module.get_submodule("2"),
+            ],
         )
 
 

@@ -15,11 +15,9 @@
 namespace torch {
 namespace jit {
 
-using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
-using caffe2::serialize::ReadAdapterInterface;
 
 // Current support bytecode version
 namespace {
@@ -75,21 +73,6 @@ void selective_copy(
       writer.writeRecord(record, data, size);
     }
   }
-}
-
-// Copy all content from reader to stringstream
-void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
-  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    out.write(static_cast<const char*>(buf), nbytes);
-    return !out ? 0 : nbytes;
-  };
-  PyTorchStreamWriter writer(writer_func);
-
-  selective_copy(
-      reader,
-      writer,
-      std::unordered_set<std::string>(),
-      std::unordered_set<std::string>());
 }
 
 // The write_archive_current function is used for bytecode from version v5 to

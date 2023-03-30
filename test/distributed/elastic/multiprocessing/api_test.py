@@ -32,7 +32,7 @@ from torch.distributed.elastic.multiprocessing.api import (
 )
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
 from torch.testing._internal.common_utils import (
-    IS_IN_CI,
+    IS_CI,
     IS_MACOS,
     IS_WINDOWS,
     NO_MULTIPROCESSING_SPAWN,
@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TestCase,
     run_tests,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
 )
 
 
@@ -392,7 +392,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     results = pc.wait(period=0.1)
                     self.assertEqual({0: None, 1: None}, results.return_values)
 
-        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan")
+        @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan")
         def test_function_large_ret_val(self):
             # python multiprocessing.queue module uses pipes and actually PipedQueues
             # This means that if a single object is greater than a pipe size
@@ -522,7 +522,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             with self.assertRaises(RuntimeError):
                 _validate_full_rank({}, 10, "")
 
-        @sandcastle_skip_if(
+        @skip_but_pass_in_sandcastle_if(
             NO_MULTIPROCESSING_SPAWN,
             "Disabled for environments that \
                         don't support multiprocessing with spawn start method",
@@ -658,7 +658,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
-if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
+if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
 
     class StartProcessesNotCITest(StartProcessesTest):
         def test_wrap_bad(self):

@@ -3,15 +3,17 @@ The dispatch registrations at the end of this file applies to fbgemm, qnnpack, a
 The correct unpack backend function is determined using runtime polymorphism through the packed_weight pointer,
 which is of type intrusive_ptr<LinearPackedParamsBase> and points to either a PackedLinearWeightsQnnp,
 PackedLinearWeights (Fbgemm), or PackedLinearWeightsCudnn at runtime, which all inherit from LinearPackedParamsBase.
-The implementations for the unpack functions can be found in /cpu/qlinear_unpack_impl.cpp, for fbgemm&qnnpack
+The implementations for the unpack functions can be found in /cpu/LinearUnpackImpl.cpp, for fbgemm&qnnpack
 and /cudnn/linear_unpack_impl.cpp, for cudnn.
 */
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/packed_params.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+
+int register_linear_params();
 
 namespace at {
 namespace native {
@@ -68,6 +70,7 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_unpack"), TORCH_FN(QLinearUnpackWeightInt8::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_unpack_fp16"), TORCH_FN(QLinearUnpackWeightFp16::run));
 }

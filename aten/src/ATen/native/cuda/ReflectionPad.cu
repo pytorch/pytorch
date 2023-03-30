@@ -24,8 +24,7 @@
 
 #include <thrust/pair.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 using at::cuda::detail::canUse32BitIndexMath;
@@ -335,7 +334,7 @@ void reflection_pad2d_out_template(
   int64_t size_y = nplane;
   int64_t size_z = nbatch;
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
     input.scalar_type(), "reflection_pad2d_out_template", [&] {
 
       for (int64_t block_y = 0; block_y < size_y; block_y += 65535) {
@@ -407,7 +406,7 @@ void reflection_pad2d_backward_out_template(
   int64_t size_y = nplane;
   int64_t size_z = nbatch;
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
     input.scalar_type(), "reflection_pad2d_backward_out_template", [&] {
 
       for (int64_t block_y = 0; block_y < size_y; block_y += 65535) {
@@ -463,8 +462,8 @@ TORCH_IMPL_FUNC(reflection_pad1d_out_cuda)
 
   Tensor input = input_.contiguous();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-      kHalf, input.scalar_type(), "reflection_pad1d_out_template", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      kHalf, kBFloat16, input.scalar_type(), "reflection_pad1d_out_template", [&] {
         reflection_pad1d_out_kernel<<<
             grid_size,
             block_size,
@@ -520,7 +519,7 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
   dim3 block_size(output_w > 256 ? 256 : output_w);
   dim3 grid_size((int) ::ceil(output_w / 256.0), nplane, nbatch);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
     grad_input.scalar_type(), "reflection_pad1d_backward_out_cuda", [&] {
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -589,7 +588,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
   auto input = input_.contiguous();
   bool batch_mode = (input.dim() == 5);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "reflection_pad3d_out_cuda", [&] {
         auto input_inner = input;
         auto output_inner = output;
@@ -641,7 +640,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
   int64_t pad_top = padding[2];
   int64_t pad_front = padding[4];
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "reflection_pad3d_backward_out_cuda", [&] {
         auto grad_input_ = grad_input;
         auto grad_output_ = grad_output;
@@ -678,5 +677,4 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
       });
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

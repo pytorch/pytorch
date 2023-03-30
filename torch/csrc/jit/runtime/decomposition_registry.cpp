@@ -8,8 +8,12 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 
 #include <c10/util/Exception.h>
-#include <jit/runtime/graph_executor.h>
+#include <torch/csrc/autograd/jit_decomp_interface.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <memory>
 #include <unordered_map>
 
@@ -47,7 +51,7 @@ void loadModule(const CompilationUnit& module) {
 
 void loadDecompositionFunctions() {
   std::lock_guard<std::mutex> guard(lock);
-  if (schema_to_decomposition.size() != 0) {
+  if (!schema_to_decomposition.empty()) {
     return;
   }
 
@@ -129,7 +133,7 @@ c10::optional<GraphFunction*> GetDecompositionFunction(
   auto& func = toGraphFunction(*cache_it->second);
   // Simple Executor:
   // To allow decomposition to run on tensor subclasses such as batched tensors,
-  // we set decompostion execution to use the simple executor so that
+  // we set decomposition execution to use the simple executor so that
   // optimizations that do not compose with arbitrary subclasses (such as
   // fusion) do not run
   func._set_initial_executor_execution_mode(ExecutorExecutionMode::SIMPLE);
@@ -143,11 +147,59 @@ void RegisterDecomposition(
     std::shared_ptr<Graph> g) {
   loadDecompositionFunctions();
   std::lock_guard<std::mutex> guard(lock);
+  Inline(*g);
+  for (const auto i : c10::irange(2)) {
+    (void)i; // Suppress unused variable warning
+    PeepholeOptimize(g);
+    ConstantPropagationImmutableTypes(g);
+  }
+
   std::unique_ptr<GraphFunction> new_func(new GraphFunction(
       schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE));
   user_registered_funcs.emplace(&schema, std::move(new_func));
   schema_to_function[&schema] = user_registered_funcs[&schema].get();
   schema_to_decomposition[&schema] = g;
+}
+
+// see NOTE: [Jit Decomposition Interface]
+struct JitDecomp final : torch::autograd::impl::JitDecompInterface {
+  bool has_jit_decomposition(const c10::FunctionSchema& schema) const override;
+  void run_jit_decomposition(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const override;
+};
+
+JitDecomp jitDecomp;
+torch::autograd::impl::JitDecompRegisterer registerJitDecomp(&jitDecomp);
+
+void JitDecomp::run_jit_decomposition(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) const {
+  ::torch::jit::run_jit_decomposition(op, stack);
+}
+
+bool JitDecomp::has_jit_decomposition(const FunctionSchema& schema) const {
+  return ::torch::jit::has_jit_decomposition(schema);
+}
+
+void run_jit_decomposition(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+  // TODO: templatize based on op and keep static trace_exec
+  auto* trace_exec = torch::jit::GetDecompositionExecutor(schema);
+  trace_exec->run((*stack));
+  if (stack->back().isTuple()) {
+    at::IValue tup = stack->back();
+    stack->pop_back();
+    for (const auto& elem : tup.toTuple()->elements()) {
+      stack->push_back(elem);
+    }
+  }
+}
+
+bool has_jit_decomposition(const FunctionSchema& schema) {
+  return GetDecompositionFunction(schema).has_value();
 }
 
 Function* GetDecompositionExecutor(const FunctionSchema& schema) {

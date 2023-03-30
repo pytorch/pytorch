@@ -1,8 +1,8 @@
-#include <aten/src/ATen/Context.h>
+#include <ATen/Context.h>
 #include <torch/library.h>
 
+#include <ATen/ExpandUtils.h>
 #include <ATen/core/jit_type.h>
-#include <aten/src/ATen/ExpandUtils.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/utils.h>
@@ -11,7 +11,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
-#include <aten/src/ATen/InitialTensorOptions.h>
+#include <ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 
@@ -68,7 +68,7 @@ std::vector<int64_t> compute_sizes(const IValue& seq) {
   auto seq_recur = seq.toList();
   while (true) {
     sizes.push_back(seq_recur.size());
-    if (seq_recur.size() == 0 || !seq_recur.get(0).isList()) {
+    if (seq_recur.empty() || !seq_recur.get(0).isList()) {
       break;
     }
     seq_recur = seq_recur.get(0).toList();

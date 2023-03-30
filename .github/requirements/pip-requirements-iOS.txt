@@ -1,0 +1,3 @@
+# iOS simulator requirements
+coremltools==5.0b5
+protobuf==3.20.2

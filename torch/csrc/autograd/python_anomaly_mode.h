@@ -4,13 +4,13 @@
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/pybind.h>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 struct PyAnomalyMetadata : public AnomalyMetadata {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-writable-strings)
   static constexpr const char* ANOMALY_TRACE_KEY = "traceback_";
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-writable-strings)
   static constexpr const char* ANOMALY_PARENT_KEY = "parent_";
 
   PyAnomalyMetadata() {
@@ -32,9 +32,13 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
     return dict_;
   }
 
-private:
+ private:
   PyObject* dict_;
 };
-void _print_stack(PyObject* trace_stack, const std::string& current_node_name, bool is_parent);
+void _print_stack(
+    PyObject* trace_stack,
+    const std::string& current_node_name,
+    bool is_parent);
 
-}}
+} // namespace autograd
+} // namespace torch

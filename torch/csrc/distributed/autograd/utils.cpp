@@ -1,6 +1,6 @@
-#include <torch/csrc/autograd/functions/utils.h>
-#include <aten/src/ATen/ThreadLocalState.h>
+#include <ATen/ThreadLocalState.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
+#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
@@ -20,7 +20,6 @@ using torch::distributed::rpc::JitFuture;
 using torch::distributed::rpc::Message;
 using torch::distributed::rpc::MessageType;
 using torch::distributed::rpc::RpcAgent;
-using torch::distributed::rpc::RpcCommandBase;
 using torch::distributed::rpc::WorkerInfo;
 
 void addSendRpcBackward(
@@ -93,7 +92,6 @@ c10::intrusive_ptr<Message> getMessageWithProfiling(
   auto wrappedProfilingMsg = RpcWithProfilingReq(
       msgType,
       std::move(wrappedRpcMessage),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(profilerConfig),
       globallyUniqueProfilingId);
 
@@ -160,27 +158,26 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
   // tell the remote end to process this request with the profiler enabled.
   if (!forceDisableProfiling) {
     switch (torch::profiler::impl::profilerType()) {
-      case torch::profiler::impl::ActiveProfilerType::LEGACY:
-        {
-          auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
-          auto msgWithProfiling = getMessageWithProfiling(
+      case torch::profiler::impl::ActiveProfilerType::LEGACY: {
+        auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
+        auto msgWithProfiling = getMessageWithProfiling(
             std::move(msg),
             rpc::MessageType::RUN_WITH_PROFILING_REQ,
-            // NOLINTNEXTLINE(performance-move-const-arg)
             std::move(profilerConfig));
-          return agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
-        }
+        return agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
+      }
       case torch::profiler::impl::ActiveProfilerType::KINETO:
         TORCH_WARN_ONCE(
-          "Profiling a distributed call with the Kineto profiler will profile "
-          "the caller, but not the worker.");
+            "Profiling a distributed call with the Kineto profiler will profile "
+            "the caller, but not the worker.");
         break;
       default:
         break;
     }
   }
 
-  return agent.send(dst, std::move(msg), rpcTimeoutSeconds);;
+  return agent.send(dst, std::move(msg), rpcTimeoutSeconds);
+  ;
 }
 
 } // namespace autograd

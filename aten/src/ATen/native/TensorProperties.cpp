@@ -1,11 +1,27 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorProperties.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/NamedTensorUtils.h>
-#include <torch/library.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/TensorProperties.h>
 
-#include <ATen/Config.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_nested_tensor_size_native.h>
+#include <ATen/ops/contiguous_native.h>
+#include <ATen/ops/cudnn_is_acceptable_native.h>
+#include <ATen/ops/detach_native.h>
+#include <ATen/ops/equal.h>
+#include <ATen/ops/is_same_size_native.h>
+#include <ATen/ops/is_set_to_native.h>
+#include <ATen/ops/size_native.h>
+#include <ATen/ops/stride_native.h>
+#endif
+
 #include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 
@@ -13,6 +29,18 @@ bool is_same_size(const Tensor& self, const Tensor& other) {
   return self.sizes().equals(other.sizes());
 }
 
+bool nested_is_same_size(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      self.is_nested() && other.is_nested(),
+      "Expected both self and other to be nested tensors. ",
+      "Self ", self.is_nested()? "is " : "is not ",
+      "nested. While Other ",
+      other.is_nested()? "is " : "is not ",
+      "nested.")
+  const auto self_nt_size = _nested_tensor_size(self);
+  const auto other_nt_size = _nested_tensor_size(other);
+  return at::equal(self_nt_size, other_nt_size);
+}
 int64_t size(const Tensor& self, int64_t dim) {
   return self.size(dim);
 }
@@ -41,7 +69,7 @@ bool cudnn_is_acceptable(const TensorBase& self) {
   // tensors. Maybe some cuDNN functions actually support empty tensors, but
   // native/THNN kernels shouldn't be much slower because the output is also
   // likely empty.
-  if (self.numel() == 0) return false;
+  if (self.sym_numel() == 0) return false;
   // NB: In the old Python code, there was also a test to see if the
   // cuDNN library was actually dynamically linked or not.  I'm not
   // sure if we can actually test this.

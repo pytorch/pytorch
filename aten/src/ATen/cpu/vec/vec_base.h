@@ -14,11 +14,13 @@
 // See https://github.com/pytorch/pytorch/issues/37577 for an instance
 // of this bug in the past.
 
+#include <cassert>
 #include <cstring>
 #include <functional>
 #include <cmath>
 #include <type_traits>
 #include <bitset>
+#include <climits>
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/native/Math.h>
@@ -32,6 +34,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
+#include <c10/util/Load.h>
 
 // These macros helped us unify vec_base.h
 #ifdef CPU_CAPABILITY_AVX512
@@ -130,8 +133,9 @@ public:
   // versions GCC/Clang have buggy determinations on whether or not an
   // identifier is odr-used or not, and in any case it's hard to tell if
   // a variable is odr-used or not.  So best to just cut the problem at the root.
+  static constexpr size_type size_T = sizeof(T);  // Workaround to compile with VS2022.
   static constexpr size_type size() {
-    return VECTOR_WIDTH / sizeof(T);
+    return VECTOR_WIDTH / size_T;
   }
   Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
@@ -376,6 +380,9 @@ public:
   Vectorized<T> exp() const {
     return map(std::exp);
   }
+  Vectorized<T> exp2() const {
+    return map(exp2_impl);
+  }
   Vectorized<T> expm1() const {
     return map(std::expm1);
   }
@@ -537,7 +544,7 @@ private:
     // 1 if the pred is true, otherwise 0.
     Vectorized<T> vector;
     for (int i = 0; i != size(); ++ i) {
-      vector[i] = bool(op(values[i], other.values[i]));
+      vector[i] = static_cast<T>(op(values[i], other.values[i]));
     }
     return vector;
   }
@@ -796,6 +803,34 @@ inline Vectorized<T> operator~(const Vectorized<T>& a) {
   return a ^ ones;
 }
 
+template <class T> Vectorized<T> inline operator<<(const Vectorized<T> &a, const Vectorized<T> &b) {
+  constexpr T max_shift = sizeof(T) * CHAR_BIT;
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    T shift = b[i];
+    if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+      c[i] = 0;
+    } else {
+      c[i] = static_cast<std::make_unsigned_t<T>>(a[i]) << shift;
+    }
+  }
+  return c;
+}
+
+template <class T> Vectorized<T> inline operator>>(const Vectorized<T> &a, const Vectorized<T> &b) {
+  // right shift value to retain sign bit for signed and no bits for unsigned
+  constexpr T max_shift = sizeof(T) * CHAR_BIT - std::is_signed_v<T>;
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    T shift = b[i];
+    if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+      c[i] = a[i] >> max_shift;
+    } else {
+      c[i] = a[i] >> shift;
+    }
+  }
+  return c;
+}
 
 template <typename T>
 inline Vectorized<T>& operator += (Vectorized<T>& a, const Vectorized<T>& b) {
@@ -824,8 +859,25 @@ inline Vectorized<T>& operator *= (Vectorized<T>& a, const Vectorized<T>& b) {
 }
 
 template <typename T>
+inline Vectorized<T>& operator <<= (Vectorized<T>& a, const Vectorized<T>& b) {
+  a = a << b;
+  return a;
+}
+
+template <typename T>
+inline Vectorized<T>& operator >>= (Vectorized<T>& a, const Vectorized<T>& b) {
+  a = a >> b;
+  return a;
+}
+
+template <typename T>
 inline Vectorized<T> fmadd(const Vectorized<T>& a, const Vectorized<T>& b, const Vectorized<T>& c) {
   return a * b + c;
+}
+
+template <typename T>
+inline Vectorized<T> fmsub(const Vectorized<T>& a, const Vectorized<T>& b, const Vectorized<T>& c) {
+  return a * b - c;
 }
 
 template <int64_t scale = 1, typename T = void>
@@ -974,9 +1026,32 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #endif
   for (const auto i : c10::irange(n)) {
     (void)i; //Suppress unused variable warning
-    *dst = c10::static_cast_with_inter_type<dst_T, src_T>::apply(*src);
+    *dst = c10::convert<dst_T>(c10::load(src));
     src++;
     dst++;
+  }
+}
+
+template <typename T>
+inline Vectorized<T> flip(const Vectorized<T> & data) {
+  static constexpr int size = Vectorized<T>::size();
+  T output[size];
+  T buffer[size];
+  data.store(static_cast<void*>(buffer));
+  for (const auto i : c10::irange(size)) {
+    output[i] = buffer[size - i - 1];
+  }
+  return Vectorized<T>::loadu(static_cast<void*>(output));
+}
+
+// Transpose the `src` buffer of type `T` and size (M,N) into the `dst` buffer. `ld_src` is the leading
+// dimension of `src` and `ld_dst` is the leading dimension of `dst`.
+template <typename T, int M, int N>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      dst[j*ld_dst + i] = src[i*ld_src + j];
+    }
   }
 }
 

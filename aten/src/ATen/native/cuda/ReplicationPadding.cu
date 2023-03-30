@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
@@ -26,8 +27,7 @@
 #include <cmath>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 __host__ __device__ __forceinline__ int imin(int a, int b) {
   return a > b ? b : a;
 }
@@ -750,4 +750,3 @@ Tensor replication_pad3d_backward_cuda(
 }
 
 } // at::native
-} // at

@@ -16,8 +16,7 @@
 #include <ATen/ops/multi_margin_loss_backward_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 constexpr int MULTIMARGIN_THREADS = 128;
 
@@ -31,6 +30,7 @@ __global__ void MultiMarginLoss_forward_kernel(
   scalar_t *input_k = input + k*dim;
   scalar_t *output_k = output + k;
   int target_k = static_cast<int>(target[k]);
+  CUDA_KERNEL_ASSERT(target_k >= 0 && target_k < dim && "target index is out of bounds");
   scalar_t input_target_k = input_k[target_k];
 
   int i_start = threadIdx.x;
@@ -385,10 +385,10 @@ Tensor multi_margin_loss_cuda_backward(
     const Tensor &grad_output, const Tensor &input, const Tensor &target,
     const Scalar &p, const Scalar &margin, const c10::optional<Tensor> &weights,
     int64_t reduction) {
-  auto grad_input = at::empty({}, input.options());
+  auto grad_input = at::empty({0}, input.options());
   multi_margin_loss_cuda_backward_out(
       grad_output, input, target, p, margin, weights, reduction, grad_input);
   return grad_input;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

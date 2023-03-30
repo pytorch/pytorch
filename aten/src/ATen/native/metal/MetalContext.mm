@@ -53,9 +53,12 @@ using namespace at::native::metal;
           isOperatingSystemAtLeastVersion:supportedVer]) {
     return false;
   }
+C10_CLANG_DIAGNOSTIC_PUSH()
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-declarations")
   if (![_device supportsFeatureSet:MTLFeatureSet_macOS_GPUFamily1_v3]) {
     return false;
   }
+C10_CLANG_DIAGNOSTIC_POP()
 #else
   return false;
 #endif
@@ -89,7 +92,7 @@ using namespace at::native::metal;
                                                             constants {
   TORCH_CHECK(_library, "Failed to load Metal shaders");
   std::string kernelStr = kernel;
-  for (auto i = 0; i < constants.count; ++i) {
+  for (NSUInteger i = 0; i < constants.count; ++i) {
     kernelStr += "_" + std::string([constants[i] stringValue].UTF8String);
   }
   std::lock_guard<std::mutex> g(_pipelineCacheMutex);
@@ -100,7 +103,7 @@ using namespace at::native::metal;
   MTLFunctionConstantValues* constantValues = [MTLFunctionConstantValues new];
   NSUInteger ushortArgIndex = 0;
   NSUInteger floatArgIndex = 12;
-  for (auto i = 0; i < constants.count; ++i) {
+  for (NSUInteger i = 0; i < constants.count; ++i) {
     NSNumber* constant = constants[i];
     const char* type = constant.objCType;
     if (strcmp(type, @encode(NSUInteger)) == 0 ||
@@ -136,7 +139,7 @@ using namespace at::native::metal;
 - (id<MTLBuffer>)emptyMTLBuffer:(int64_t) size {
     TORCH_CHECK(_device);
     id<MTLBuffer> buffer = [_device newBufferWithLength:size
-                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+                      options:MTLResourceCPUCacheModeWriteCombined];
     return buffer;
 }
 

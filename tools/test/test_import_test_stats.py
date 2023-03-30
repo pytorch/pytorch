@@ -1,8 +1,9 @@
 import os
 import unittest
-from tools.stats.import_test_stats import get_disabled_issues
 from typing import List
 from unittest.mock import patch
+
+from tools.stats.import_test_stats import get_disabled_issues
 
 
 class TestGetDisabledIssues(unittest.TestCase):

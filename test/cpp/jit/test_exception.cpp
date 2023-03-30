@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/jit.h>
 #include <iostream>
 #include <stdexcept>
@@ -112,7 +113,7 @@ TEST(TestException, TestCustomException) {
   py::exec(R"PY(
   class SimpleValueError(ValueError):
     def __init__(self, message):
-      super(SimpleValueError, self).__init__(message)
+      super().__init__(message)
   )PY");
 
   std::string pythonCode = R"PY(

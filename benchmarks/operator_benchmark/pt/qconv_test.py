@@ -1,7 +1,7 @@
 
 import operator_benchmark as op_bench
 import torch
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 
 from pt import configs
 
@@ -41,7 +41,7 @@ class QConv1dBenchmark(op_bench.TorchBenchmarkBase):
 class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
     # def init(self, N, IC, OC, H, W, G, kernel, stride, pad):
     def init(self, IC, OC, kernel, stride, N, H, W, G, pad, device):
-        # super(QConv2dBenchmark, self).init(N, IC, OC, (H, W), G, (kernel, kernel), stride, pad)
+        # super().init(N, IC, OC, (H, W), G, (kernel, kernel), stride, pad)
 
         self.scale = 1.0 / 255
         self.zero_point = 0

@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Pattern
+from typing import Any, Dict, List, NamedTuple, Optional, Pattern, Set
 
 
 IS_WINDOWS: bool = os.name == "nt"
@@ -148,8 +148,7 @@ def _run_command(
     try:
         return subprocess.run(
             args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=True,
             encoding="utf-8",
         )

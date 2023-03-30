@@ -7,12 +7,12 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (run_tests, TestCase,)
+    (parametrize, run_tests, TestCase, DeterministicGuard)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    (instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
-    (get_all_dtypes, get_all_fp_dtypes,)
+    (get_all_dtypes,)
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -71,6 +71,18 @@ class TestScatterGather(TestCase):
         actual = torch.gather(src, 1, idx)
         expected = torch.tensor(((False, False), (True, True)), device=device, dtype=dtype)
         self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @parametrize("sparse_grad", [False, True])
+    @dtypes(torch.float32, torch.float64)
+    def test_gather_backward_with_empty_index_tensor(self, device, dtype, sparse_grad):
+        dim = -1
+        input = torch.rand([10, 5], dtype=dtype, device=device, requires_grad=True)
+        index = torch.randint(0, 2, [3, 0], dtype=torch.int64, device=device)
+        res = torch.gather(input, dim, index, sparse_grad=sparse_grad)
+        res.sum().backward()
+        grad = input.grad.to_dense() if sparse_grad else input.grad
+        expected_grad = torch.zeros_like(input, requires_grad=False)
+        self.assertEqual(grad, expected_grad, atol=0, rtol=0)
 
     def _test_scatter_base(self, fn, *, device, dtype, is_scalar, reduction,
                            unique_indices=True, include_self=True):
@@ -173,19 +185,23 @@ class TestScatterGather(TestCase):
 
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter_add_(self, device, dtype):
-        self._test_scatter_base(torch.Tensor.scatter_add_, device=device, dtype=dtype,
-                                is_scalar=False, reduction=None)
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                self._test_scatter_base(torch.Tensor.scatter_add_, device=device, dtype=dtype,
+                                        is_scalar=False, reduction=None)
 
     @dtypes(torch.float32)
     def test_scatter_add_mult_index_base(self, device, dtype):
-        m, n = 30, 40
-        idx = torch.zeros(m, n, device=device, dtype=torch.long)
-        src = torch.ones(m, n, device=device, dtype=dtype)
-        res0 = torch.zeros(m, n, device=device, dtype=dtype).scatter_add_(0, idx, src)
-        res1 = torch.zeros(m, n, device=device, dtype=dtype).scatter_add_(1, idx, src)
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                m, n = 30, 40
+                idx = torch.zeros(m, n, device=device, dtype=torch.long)
+                src = torch.ones(m, n, device=device, dtype=dtype)
+                res0 = torch.zeros(m, n, device=device, dtype=dtype).scatter_add_(0, idx, src)
+                res1 = torch.zeros(m, n, device=device, dtype=dtype).scatter_add_(1, idx, src)
 
-        self.assertEqual(res0[0, :], m * torch.ones(n, device=device, dtype=dtype), atol=0, rtol=0)
-        self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
+                self.assertEqual(res0[0, :], m * torch.ones(n, device=device, dtype=dtype), atol=0, rtol=0)
+                self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
 
     # FIXME: discrepancy between bool ReduceAdd on CUDA and CPU (a + b on CPU and buggy a && b on CUDA)
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
@@ -196,7 +212,7 @@ class TestScatterGather(TestCase):
                                     include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
+    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_prod(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -204,7 +220,7 @@ class TestScatterGather(TestCase):
                                     include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
+    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_mean(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -212,21 +228,110 @@ class TestScatterGather(TestCase):
                                     include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
+    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_amax(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                     is_scalar=False, reduction='amax', unique_indices=False,
                                     include_self=include_self)
+            # simple test for nan/inf propagation
+            if (dtype.is_floating_point):
+                input = torch.zeros(3, device=device, dtype=dtype)
+                src = torch.tensor([1, float('nan'), -float('inf'), -float('inf'), 2, float('inf')], device=device, dtype=dtype)
+                idx = torch.tensor([0, 0, 1, 1, 2, 2], device=device)
+                input.scatter_reduce_(0, idx, src, 'amax', include_self=include_self)
+                expected_result = torch.tensor([float('nan'), -float('inf'), float('inf')], device=device, dtype=dtype)
+                if (include_self):
+                    expected_result[1] = 0
+                self.assertEqual(input, expected_result)
+
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
+    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_amin(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                     is_scalar=False, reduction='amin', unique_indices=False,
                                     include_self=include_self)
+            # simple test for nan/inf propagation
+            if (dtype.is_floating_point):
+                input = torch.zeros(3, device=device, dtype=dtype)
+                src = torch.tensor([1, float('nan'), -2, -float('inf'), float('inf'), float('inf')], device=device, dtype=dtype)
+                idx = torch.tensor([0, 0, 1, 1, 2, 2], device=device)
+                input.scatter_reduce_(0, idx, src, 'amin', include_self=include_self)
+                expected_result = torch.tensor([float('nan'), -float('inf'), float('inf')], device=device, dtype=dtype)
+                if (include_self):
+                    expected_result[2] = 0
+                self.assertEqual(input, expected_result)
 
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    def test_scatter_expanded_index(self, device, dtype):
+        def helper(input_size, idx_size):
+            input = torch.randn(input_size, device=device).to(dtype=dtype)
+            input2 = input.clone()
+
+            shape = [1] * len(input_size)
+            shape[0] = idx_size
+            dim_size = input_size[0]
+            idx = torch.randint(0, dim_size, shape)
+
+            # The fast path on scatter when index is expanded
+            # will depend on sorted index where the collected src indice
+            # for each row in input will be mapped to rowptrs in a CSR format.
+            # Create some empty rows by masking:
+            mask = (idx > 1) * (idx < 4)
+            idx[mask] = 0
+
+            expanded_shape = input_size
+            expanded_shape[0] = idx_size
+            idx = idx.expand(expanded_shape)
+            idx2 = idx.contiguous()
+            src = torch.randn(expanded_shape, device=device).to(dtype=dtype)
+
+            out = input.scatter_add(0, idx, src)
+            out2 = input2.scatter_add(0, idx2, src)
+
+            self.assertEqual(out, out2)
+
+            for reduce in ["sum", "prod", "mean", "amax", "amin"]:
+                for include_self in [True, False]:
+                    out = input.scatter_reduce(0, idx, src, reduce=reduce, include_self=include_self)
+                    out2 = input2.scatter_reduce(0, idx2, src, reduce=reduce, include_self=include_self)
+                    self.assertEqual(out, out2)
+
+        helper([50, 17], 100)
+        helper([50, 1], 100)
+        helper([50, 8, 7], 100)
+        helper([50, 3, 4, 5], 100)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    def test_gather_expanded_index(self, device, dtype):
+        def helper(input_size, idx_size):
+            input = torch.randn(input_size, device=device).to(dtype=dtype)
+            input2 = input.clone()
+
+            shape = [1] * len(input_size)
+            shape[0] = idx_size
+            dim_size = input_size[0]
+            idx = torch.randint(0, dim_size, shape)
+
+            # Test the fast path on gather when index is expanded
+            expanded_shape = input_size
+            expanded_shape[0] = idx_size
+            idx = idx.expand(expanded_shape)
+            idx2 = idx.contiguous()
+
+            out = torch.gather(input, 0, idx)
+            out2 = torch.gather(input2, 0, idx2)
+
+            self.assertEqual(out, out2)
+
+        helper([50, 17], 100)
+        helper([50, 1], 100)
+        helper([50, 8, 7], 100)
+        helper([50, 3, 4, 5], 100)
 
 # Generic Device Test Framework instantation, see
 #   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests

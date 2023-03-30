@@ -1,15 +1,16 @@
-from typing import Dict, Set, Optional, Tuple, List
-import yaml
-
 from dataclasses import dataclass
+from typing import Dict, List, Optional, Set, Tuple
+
+import yaml
 
 from torchgen.model import NativeFunction
 from torchgen.selective_build.operator import (
-    SelectiveBuildOperator,
     merge_debug_info,
     merge_operator_dicts,
+    SelectiveBuildOperator,
     strip_operator_overload_name,
 )
+
 
 # A SelectiveBuilder holds information extracted from the selective build
 # YAML specification.
@@ -20,7 +21,6 @@ from torchgen.selective_build.operator import (
 #
 @dataclass(frozen=True)
 class SelectiveBuilder:
-
     # If true, then the build is not selective, and includes all
     # operators.
     include_all_operators: bool
@@ -91,14 +91,14 @@ class SelectiveBuilder:
         operators_dict = data.get("operators", {})
         assert isinstance(operators_dict, dict)
 
-        for (k, v) in operators_dict.items():
+        for k, v in operators_dict.items():
             operators[k] = SelectiveBuildOperator.from_yaml_dict(k, v)
 
         kernel_metadata = {}
         kernel_metadata_dict = data.get("kernel_metadata", {})
         assert isinstance(kernel_metadata_dict, dict)
 
-        for (k, v) in kernel_metadata_dict.items():
+        for k, v in kernel_metadata_dict.items():
             kernel_metadata[str(k)] = list(map(lambda dtype: str(dtype), v))
 
         custom_classes = data.get("custom_classes", [])
@@ -223,7 +223,7 @@ class SelectiveBuilder:
             "include_all_operators": self.include_all_operators,
         }
         operators = {}
-        for (op_name, op) in self.operators.items():
+        for op_name, op in self.operators.items():
             operators[op_name] = op.to_dict()
         ret["operators"] = operators
 
@@ -231,7 +231,7 @@ class SelectiveBuilder:
             ret["debug_info"] = sorted(self._debug_info)
 
         ret["kernel_metadata"] = {
-            k: sorted(list(v)) for (k, v) in self.kernel_metadata.items()
+            k: sorted(v) for (k, v) in self.kernel_metadata.items()
         }
 
         ret["custom_classes"] = sorted(self.custom_classes)
@@ -246,7 +246,7 @@ def merge_kernel_metadata(
     rhs: Dict[str, List[str]],
 ) -> Dict[str, List[str]]:
     kernel_metadata: Dict[str, List[str]] = {}
-    for (tag_name, dtypes) in list(lhs.items()) + list(rhs.items()):
+    for tag_name, dtypes in list(lhs.items()) + list(rhs.items()):
         dtypes_copy = set(dtypes)
         if tag_name in kernel_metadata:
             dtypes_copy |= set(kernel_metadata[tag_name])
@@ -282,4 +282,4 @@ def combine_selective_builders(
 def op_name_from_native_function(f: NativeFunction) -> str:
     # This was originally read from the 'operator_name_with_overload' field in the
     # declaration dict, which was the part before the first '(' in 'schema_string'.
-    return f"aten::{f.func.name}"
+    return f"{f.namespace}::{f.func.name}"

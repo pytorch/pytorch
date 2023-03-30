@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <c10/macros/Export.h>
+#include <cstdint>
 
 namespace at {
 

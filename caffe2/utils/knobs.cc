@@ -1,5 +1,5 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
-
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
 // This is a very basic knob implementation that purely uses command line flags.
 // This can be replaced with a more sophisticated implementation for use in
 // other production environments.

@@ -1,9 +1,15 @@
 import argparse
 import os
+import re
 import subprocess
 from pathlib import Path
-from setuptools import distutils  # type: ignore[import]
 from typing import Optional, Union
+
+from setuptools import distutils  # type: ignore[import]
+
+
+UNKNOWN = "Unknown"
+RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
 
 
 def get_sha(pytorch_root: Union[str, Path]) -> str:
@@ -14,7 +20,23 @@ def get_sha(pytorch_root: Union[str, Path]) -> str:
             .strip()
         )
     except Exception:
-        return "Unknown"
+        return UNKNOWN
+
+
+def get_tag(pytorch_root: Union[str, Path]) -> str:
+    try:
+        tag = subprocess.run(
+            ["git", "describe", "--tags", "--exact"],
+            cwd=pytorch_root,
+            encoding="ascii",
+            capture_output=True,
+        ).stdout.strip()
+        if RELEASE_PATTERN.match(tag):
+            return tag
+        else:
+            return UNKNOWN
+    except Exception:
+        return UNKNOWN
 
 
 def get_torch_version(sha: Optional[str] = None) -> str:
@@ -27,7 +49,7 @@ def get_torch_version(sha: Optional[str] = None) -> str:
         version = os.getenv("PYTORCH_BUILD_VERSION", "")
         if build_number > 1:
             version += ".post" + str(build_number)
-    elif sha != "Unknown":
+    elif sha != UNKNOWN:
         if sha is None:
             sha = get_sha(pytorch_root)
         version += "+git" + sha[:7]
@@ -39,12 +61,13 @@ if __name__ == "__main__":
         description="Generate torch/version.py from build and environment metadata."
     )
     parser.add_argument(
+        "--is-debug",
         "--is_debug",
         type=distutils.util.strtobool,
         help="Whether this build is debug mode or not.",
     )
-    parser.add_argument("--cuda_version", type=str)
-    parser.add_argument("--hip_version", type=str)
+    parser.add_argument("--cuda-version", "--cuda_version", type=str)
+    parser.add_argument("--hip-version", "--hip_version", type=str)
 
     args = parser.parse_args()
 
@@ -54,8 +77,13 @@ if __name__ == "__main__":
 
     pytorch_root = Path(__file__).parent.parent
     version_path = pytorch_root / "torch" / "version.py"
+    # Attempt to get tag first, fall back to sha if a tag was not found
+    tagged_version = get_tag(pytorch_root)
     sha = get_sha(pytorch_root)
-    version = get_torch_version(sha)
+    if tagged_version == UNKNOWN:
+        version = get_torch_version(sha)
+    else:
+        version = tagged_version
 
     with open(version_path, "w") as f:
         f.write("__version__ = '{}'\n".format(version))

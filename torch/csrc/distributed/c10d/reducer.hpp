@@ -6,16 +6,17 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#include <c10/core/ScalarType.h>
 
 #include <ATen/core/ivalue_inl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Utils.hpp>
-#include <c10d/comm.hpp>
-#include <c10d/debug.h>
-#include <c10d/reducer_timer.hpp>
-#include <c10d/default_comm_hooks.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/debug.h>
+#include <torch/csrc/distributed/c10d/reducer_timer.hpp>
+#include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
@@ -67,14 +68,16 @@ class TORCH_API Reducer {
   // all live on the same device and have the same dimensionality.
   void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
 
+  void autograd_hook(size_t index);
+
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
   // If they don't, and wish to accumulate gradients before reducing them,
   // a call to this function can simply be omitted.
   void prepare_for_backward(const std::vector<at::Tensor>& outputs);
 
-  // Called at the begginning of forward() inside DistributedDataParallel,
-  // right now it caputures the starting time of forward in each iteration.
+  // Called at the beginning of forward() inside DistributedDataParallel,
+  // right now it captures the starting time of forward in each iteration.
   void prepare_for_forward();
 
   // Returns the relative time in nanoseconds when gradients were ready,
@@ -95,9 +98,17 @@ class TORCH_API Reducer {
   // Cannot combine with the call of `register_comm_hook`.
   void register_builtin_comm_hook(c10d::BuiltinCommHookType comm_hook_type);
 
+  // If set_to_none=True, reducer will set gradients to None in
+  // finalize_backward callback.
+  void set_grads_to_none(bool set_to_none);
+
   // Runs allreduce or installed communication hook given GradBucket instance.
   c10::intrusive_ptr<c10::ivalue::Future> run_comm_hook(
       GradBucket& grad_bucket);
+
+  // Runs default allreduce hook.
+  c10::intrusive_ptr<c10::ivalue::Future> run_allreduce_hook(
+    GradBucket& grad_bucket);
 
   // Returns gradient buckets in sequential order of buckets_. This is the order
   // in which buckets are reduced across processes. If return_zero_tensors=true,
@@ -133,10 +144,10 @@ class TORCH_API Reducer {
   // Pushes all parameters to be rebuilt.
   void push_rebuilt_params_for_all_indices();
 
-  // Creates and sets ForwardPassWorkHandle given a ProcessGroup::Work and the
+  // Creates and sets ForwardPassWorkHandle given a Work and the
   // corresponding tensor being reduced.
   void set_forward_pass_work_handle(
-      c10::intrusive_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+      c10::intrusive_ptr<c10d::Work> forwardPassWorkHandle,
       bool useStaticWorldSize);
 
   // Retrieve on-device tensors used to track locally unused parameters. It is
@@ -145,7 +156,7 @@ class TORCH_API Reducer {
 
   // An function for users to set sample_rate of collecting
   // runtime stats. The time stats will be recorded for the
-  // first 10 iterations, after 10 iteratons time stats will be
+  // first 10 iterations, after 10 iterations time stats will be
   // recorded once every "sample_rate" training iterations.
   void set_ddp_runtime_logging_sample_rate(int sample_rate);
 
@@ -155,6 +166,8 @@ class TORCH_API Reducer {
   // Delay all reduce to be after all gradients' calculation is complete.
   void delay_all_reduce();
 
+  void set_mixed_precision_param_dtype(c10::ScalarType dtype);
+
   // Weak reference to associated DDP logger. The reference is weak to avoid
   // refcycle between reducer and logger.
   void set_logger(std::weak_ptr<c10d::Logger> logger);
@@ -163,6 +176,8 @@ class TORCH_API Reducer {
   // parameters, this will return whether the graph has been static until the
   // current iteration, which means unused params set has not changed.
   bool ddp_graph_static();
+
+  void remove_autograd_hooks();
 
  protected:
   // Forward declaration.
@@ -229,17 +244,17 @@ class TORCH_API Reducer {
   // List of futures installed by Reducer::install_futures that should be awaited
   // at the end of backwards pass.
   c10::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>> installed_futures_{c10::nullopt};
+  // Mixed precision parameter dtype for bucket type checking.
+  c10::optional<c10::ScalarType> mixed_precision_param_dtype_{c10::nullopt};
 
   // Work handle for allreduce on local_used_map_
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
+  c10::intrusive_ptr<c10d::Work> local_used_work_;
 
   void mark_variable_ready_dense(size_t variable_index);
 
   void mark_variable_ready_sparse(size_t variable_index);
 
   void mark_variable_ready(size_t variable_index);
-
-  void autograd_hook(size_t index);
 
   void mark_bucket_ready(size_t bucket_index);
 
@@ -376,10 +391,7 @@ class TORCH_API Reducer {
 
     VariableLocator() = default;
 
-    VariableLocator(size_t bucket_index_, size_t intra_bucket_index_) {
-      bucket_index = bucket_index_;
-      intra_bucket_index = intra_bucket_index_;
-    }
+    VariableLocator(size_t bucket_index_, size_t intra_bucket_index_) : bucket_index(bucket_index_), intra_bucket_index(intra_bucket_index_) {}
   };
 
   // Map the index of a variable to its location in the bucket structure.
@@ -433,7 +445,7 @@ class TORCH_API Reducer {
   // A struct containing work handle and tensor for allreduce scheduled in
   // forward pass, if applicable.
   struct ForwardPassAllreduceWork {
-    c10::intrusive_ptr<c10d::ProcessGroup::Work> workHandle;
+    c10::intrusive_ptr<c10d::Work> workHandle;
     at::Tensor resultTensor;
     // whether we should divide by the initial world_size or the no. of
     // remaining DDP ranks.
@@ -499,7 +511,7 @@ class TORCH_API Reducer {
   // Retrieves parameter names that have not been marked as ready as part of
   // previous iteration.
   std::vector<std::string> getUnmarkedParamsForIteration();
-  // Retrives parameter indices that have not been marked as ready as part of
+  // Retrieves parameter indices that have not been marked as ready as part of
   // previous iteration.
   std::vector<size_t> getUnmarkedParamIndicesForIteration();
   // Raises appropriate error if mark_variable_ready is called on the same
@@ -512,6 +524,7 @@ class TORCH_API Reducer {
   // are rebuilt after which this mapping is static.
   mutable std::unordered_map<size_t, std::vector<at::Tensor>> cached_variables_for_bucket_;
 
+  bool set_grads_to_none_{false};
   friend class Logger;
 };
 

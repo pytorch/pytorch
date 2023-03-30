@@ -5,7 +5,9 @@ import warnings
 
 import torch
 from torch.nn import Module
-from torch.optim.lr_scheduler import _LRScheduler
+from torch.optim.lr_scheduler import LRScheduler
+
+__all__ = ['AveragedModel', 'update_bn', 'SWALR']
 
 
 class AveragedModel(Module):
@@ -33,6 +35,7 @@ class AveragedModel(Module):
             both the parameters and the buffers of the model. (default: ``False``)
 
     Example:
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> loader, optimizer, model, loss_fn = ...
         >>> swa_model = torch.optim.swa_utils.AveragedModel(model)
         >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
@@ -58,9 +61,10 @@ class AveragedModel(Module):
     equally-weighted average of the weights.
 
     Example:
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> # Compute exponential moving averages of the weights and buffers
-        >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
-                            0.1 * averaged_model_parameter + 0.9 * model_parameter
+        >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged: (
+        ...                 0.1 * averaged_model_parameter + 0.9 * model_parameter)
         >>> swa_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg, use_buffers=True)
 
     .. note::
@@ -96,16 +100,12 @@ class AveragedModel(Module):
         https://arxiv.org/abs/2001.02312
     """
     def __init__(self, model, device=None, avg_fn=None, use_buffers=False):
-        super(AveragedModel, self).__init__()
+        super().__init__()
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
         self.register_buffer('n_averaged',
                              torch.tensor(0, dtype=torch.long, device=device))
-        if avg_fn is None:
-            def avg_fn(averaged_model_parameter, model_parameter, num_averaged):
-                return averaged_model_parameter + \
-                    (model_parameter - averaged_model_parameter) / (num_averaged + 1)
         self.avg_fn = avg_fn
         self.use_buffers = use_buffers
 
@@ -127,8 +127,22 @@ class AveragedModel(Module):
             if self.n_averaged == 0:
                 p_swa.detach().copy_(p_model_)
             else:
-                p_swa.detach().copy_(self.avg_fn(p_swa.detach(), p_model_,
-                                                 self.n_averaged.to(device)))
+                if self.avg_fn is None:
+                    p_swa.detach().copy_(
+                        p_swa.detach()
+                        + (p_model_ - p_swa.detach()) / (self.n_averaged.to(device) + 1)
+                    )
+                else:
+                    p_swa.detach().copy_(
+                        self.avg_fn(
+                            p_swa.detach(), p_model_, self.n_averaged.to(device)
+                        )
+                    )
+        if not self.use_buffers:
+            # If not apply running averages to the buffers,
+            # keep the buffers in sync with the source model.
+            for b_swa, b_model in zip(self.module.buffers(), model.buffers()):
+                b_swa.detach().copy_(b_model.detach().to(device))
         self.n_averaged += 1
 
 
@@ -149,6 +163,7 @@ def update_bn(loader, model, device=None):
             :attr:`device` before being passed into :attr:`model`.
 
     Example:
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> loader, model = ...
         >>> torch.optim.swa_utils.update_bn(loader, model)
 
@@ -187,7 +202,7 @@ def update_bn(loader, model, device=None):
     model.train(was_training)
 
 
-class SWALR(_LRScheduler):
+class SWALR(LRScheduler):
     r"""Anneals the learning rate in each parameter group to a fixed value.
 
     This learning rate scheduler is meant to be used with Stochastic Weight
@@ -204,11 +219,12 @@ class SWALR(_LRScheduler):
             (default: "cos")
         last_epoch (int): the index of the last epoch (default: -1)
 
-    The :class:`SWALR` scheduler is can be used together with other
+    The :class:`SWALR` scheduler can be used together with other
     schedulers to switch to a constant learning rate late in the training
     as in the example below.
 
     Example:
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> loader, optimizer, model = ...
         >>> lr_lambda = lambda epoch: 0.9
         >>> scheduler = torch.optim.lr_scheduler.MultiplicativeLR(optimizer,
@@ -243,7 +259,7 @@ class SWALR(_LRScheduler):
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
             raise ValueError(f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}")
         self.anneal_epochs = anneal_epochs
-        super(SWALR, self).__init__(optimizer, last_epoch)
+        super().__init__(optimizer, last_epoch)
 
     @staticmethod
     def _format_param(optimizer, swa_lrs):

@@ -1,8 +1,23 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/native/UpSample.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_upsample_nearest_exact2d.h>
+#include <ATen/ops/_upsample_nearest_exact2d_backward.h>
+#include <ATen/ops/_upsample_nearest_exact2d_backward_native.h>
+#include <ATen/ops/_upsample_nearest_exact2d_native.h>
+#include <ATen/ops/upsample_nearest2d.h>
+#include <ATen/ops/upsample_nearest2d_backward.h>
+#include <ATen/ops/upsample_nearest2d_backward_native.h>
+#include <ATen/ops/upsample_nearest2d_native.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -18,7 +33,7 @@ TORCH_META_FUNC(upsample_nearest2d) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options().memory_format(input.suggest_memory_format()));
+  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
 }
 
 TORCH_META_FUNC(_upsample_nearest_exact2d) (
@@ -32,7 +47,7 @@ TORCH_META_FUNC(_upsample_nearest_exact2d) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options().memory_format(input.suggest_memory_format()));
+  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
 }
 
 TORCH_META_FUNC(upsample_nearest2d_backward) (
@@ -56,7 +71,7 @@ TORCH_META_FUNC(upsample_nearest2d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options().memory_format(grad_output.suggest_memory_format()));
+  set_output_raw_strided(0, input_size, {}, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
 TORCH_META_FUNC(_upsample_nearest_exact2d_backward) (
@@ -80,7 +95,7 @@ TORCH_META_FUNC(_upsample_nearest_exact2d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options().memory_format(grad_output.suggest_memory_format()));
+  set_output_raw_strided(0, input_size, {}, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
 } // namespace meta
@@ -150,28 +165,6 @@ Tensor _upsample_nearest_exact2d(
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
   return at::_upsample_nearest_exact2d(input, osize, scale_h, scale_w);
-}
-
-Tensor upsample_nearest2d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return at::upsample_nearest2d_backward(grad_output, osize, input_size, scale_h, scale_w);
-}
-
-Tensor _upsample_nearest_exact2d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return at::_upsample_nearest_exact2d_backward(grad_output, osize, input_size, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(upsample_nearest2d_kernel);

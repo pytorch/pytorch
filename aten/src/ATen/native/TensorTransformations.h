@@ -12,8 +12,8 @@ namespace at {
 namespace native {
 
 static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
-  TORCH_CHECK(shifts.size() > 0, "`shifts` required");
-  if (dims.size() == 0 && shifts.size() == 1) {
+  TORCH_CHECK(!shifts.empty(), "`shifts` required");
+  if (dims.empty() && shifts.size() == 1) {
     auto flattened = self.contiguous().view(self.numel());
     return roll(flattened, shifts[0], 0).view(self.sizes());
   }

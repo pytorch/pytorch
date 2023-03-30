@@ -1,4 +1,5 @@
 from torch.utils.data.datapipes.datapipe import DataChunk
+from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
 __all__ = ["DataChunkDF", ]
 
@@ -11,11 +12,10 @@ class DataChunkDF(DataChunk):
 
     def __iter__(self):
         for df in self.items:
-            for record in df.to_records(index=False):
-                yield record
+            yield from df_wrapper.iterate(df)
 
     def __len__(self):
         total_len = 0
         for df in self.items:
-            total_len += len(df)
+            total_len += df_wrapper.get_len(df)
         return total_len

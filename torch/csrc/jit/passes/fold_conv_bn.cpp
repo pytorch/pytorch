@@ -17,6 +17,7 @@
 #endif
 
 #include <stack>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -27,9 +28,13 @@ std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
   const int64_t ndim = p.conv_w.dim();
   at::DimVector sizes(ndim, 1);
   sizes.at(0) = -1;
+
+  auto conv_w_dtype = p.conv_w.dtype();
+  auto conv_b_dtype = p.conv_b.dtype();
+
   at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape(sizes);
   at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
-  return std::make_tuple(new_w, new_b);
+  return std::make_tuple(new_w.to(conv_w_dtype), new_b.to(conv_b_dtype));
 }
 
 namespace {
@@ -99,9 +104,9 @@ void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
   if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {
       auto optional_tensor_type = OptionalType::create(TensorType::get());
-      t->addAttribute("bias", optional_tensor_type, true);
+      t->addAttribute("bias", std::move(optional_tensor_type), true);
       auto optional_tensor = c10::optional<at::Tensor>();
-      module.setattr("bias", optional_tensor);
+      module.setattr("bias", std::move(optional_tensor));
       replaceConvBiasWithGetAttr(module);
     }
   }
@@ -306,8 +311,7 @@ void FoldConvBatchNormHelper::analyze(
                 "Conv and BN modules didn't have all required parameters or attributes...");
             continue;
           }
-          conv_bn_paths_[g].push_back(
-              std::make_tuple(conv_module_path, bn_module_path));
+          conv_bn_paths_[g].emplace_back(conv_module_path, bn_module_path);
           // We are using a separate vector for saving Values we want to rewrite
           // to make sure that the order in which we perform these
           // transformations is deterministic. Iterating through keys of

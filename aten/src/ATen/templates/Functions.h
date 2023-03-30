@@ -62,13 +62,14 @@
 #include <ATen/TracerMode.h>
 #include <ATen/core/Generator.h>
 #include <ATen/core/Reduction.h>
-#include <ATen/core/SymInt.h>
+#include <c10/core/SymInt.h>
 #include <ATen/core/Tensor.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
+#include <c10/util/OptionalArrayRef.h>
 
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/tensor.h>

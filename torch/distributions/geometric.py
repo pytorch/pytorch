@@ -6,6 +6,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
+__all__ = ['Geometric']
 
 class Geometric(Distribution):
     r"""
@@ -18,6 +19,7 @@ class Geometric(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Geometric(torch.tensor([0.3]))
         >>> m.sample()  # underlying Bernoulli has 30% chance 1; 70% chance 0
         tensor([ 2.])
@@ -42,7 +44,7 @@ class Geometric(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = probs_or_logits.size()
-        super(Geometric, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
         if self._validate_args and probs is not None:
             # Add an extra check beyond unit_interval
             value = self.probs
@@ -70,6 +72,10 @@ class Geometric(Distribution):
     @property
     def mean(self):
         return 1. / self.probs - 1.
+
+    @property
+    def mode(self):
+        return torch.zeros_like(self.probs)
 
     @property
     def variance(self):

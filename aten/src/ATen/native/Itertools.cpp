@@ -1,5 +1,20 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorOperators.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/cartesian_prod_native.h>
+#include <ATen/ops/combinations_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/meshgrid.h>
+#include <ATen/ops/stack.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 #include <vector>
 

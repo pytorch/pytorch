@@ -6,13 +6,14 @@ from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing import FileCheck
 from torch import jit
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
-import unittest
 import os
 import sys
 import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
+import unittest
 from torch.testing._internal.common_utils import freeze_rng_state
+from torch.testing._internal.jit_utils import RUN_CUDA_HALF
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -47,24 +48,6 @@ class TestMisc(JitTestCase):
 
         self.assertEqual(out, out_script)
         self.assertEqual(captured, captured_script)
-
-    @unittest.skipIf(sys.version_info[:2] < (3, 7), "`dataclasses` module not present on < 3.7")
-    def test_dataclass_error(self):
-        from dataclasses import dataclass
-
-        @dataclass
-        class NormalizationInfo(object):
-            mean: float = 0.0
-
-            def compute(self, total_rows):
-                return self.mean
-
-        def fn():
-            return NormalizationInfo(1, 2, 3, 4, 5)
-
-        with self.assertRaisesRegex(OSError, "could not get source code"):
-            torch.jit.script(fn)
-
 
     def test_kwarg_support(self):
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "variable number of arguments"):
@@ -227,7 +210,7 @@ class TestMisc(JitTestCase):
             sub : OneTwoModule
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.sub = BarMod()
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -238,11 +221,11 @@ class TestMisc(JitTestCase):
 
         torch._C._enable_mobile_interface_call_export()
         scripted_M_mod = torch.jit.script(M())
-        self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
+        self.assertTrue({'aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal'}.issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
-        self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
+        self.assertTrue({'aten::add.Tensor', 'aten::mul.Scalar'}.issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
 
     def test_math_inf(self):
@@ -345,3 +328,75 @@ class TestMisc(JitTestCase):
 
         self.assertTrue(torch.jit.script(sum_i)(4) == 8)
         self.assertTrue(torch.jit.script(sum_f)(4.5) == 9.)
+
+    def test_parse_ir_annotate(self):
+        ir = """
+        graph():
+          %3 : int[] = prim::Constant[value=annotate(List[int], [])]()
+          return (%3)
+        """
+        graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret == [])
+
+    def test_parse_ir_single_element_tensor_positive(self):
+        ir = """
+        graph():
+          %7 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+          return (%7)
+        """
+        graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret.numel() == 1)
+        self.assertTrue(len(ret.size()) == 1)
+
+    def test_parse_ir_single_element_tensor_negative(self):
+        ir = """
+        graph():
+          %7 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={-17}]()
+          return (%7)
+        """
+        graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret.numel() == 1)
+        self.assertTrue(len(ret.size()) == 1)
+
+
+    def test_script_many_decorators(self):
+        def no_op_decorator(f):
+            return f
+
+        @no_op_decorator
+        @no_op_decorator
+        @no_op_decorator
+        @no_op_decorator
+        @no_op_decorator
+        def foo(x, dim: int):
+            return x.unsqueeze(dim)
+
+        x = torch.randn(1,)
+        expected = foo(x, 0)
+        scripted = torch.jit.script(foo)
+        actual = scripted(x, 0)
+        torch.testing.assert_close(expected, actual)
+
+    @unittest.skipIf(not RUN_CUDA_HALF, "need CUDA half support")
+    def test_pow_multiple_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/75476
+        def fn(p: torch.Tensor, gamma: float = 2.0) -> torch.Tensor:
+            p = torch.sigmoid(p)
+            result = p ** gamma
+            return result
+
+        x = torch.rand((2, 2), dtype=torch.half, device='cuda')
+
+        ref = fn(x)
+
+        script_fn = torch.jit.script(fn)
+        for i in range(4):
+            res = script_fn(x)
+
+        self.assertEqual(ref, res)

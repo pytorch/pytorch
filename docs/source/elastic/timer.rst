@@ -18,9 +18,20 @@ Below are the timer server and client pairs that are provided by torchelastic.
           in pairs since there is a messaging protocol between the server
           and client.
 
+Below is a pair of timer server and client that is implemented based on
+a ``multiprocess.Queue``.
+
 .. autoclass:: LocalTimerServer
 
 .. autoclass:: LocalTimerClient
+
+Below is another pair of timer server and client that is implemented
+based on a named pipe.
+
+.. autoclass:: FileTimerServer
+
+.. autoclass:: FileTimerClient
+
 
 Writing a custom timer server/client
 --------------------------------------

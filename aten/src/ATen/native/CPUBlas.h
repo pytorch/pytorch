@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TransposeType.h>
 #include <c10/util/complex.h>
@@ -33,10 +34,10 @@ template <typename scalar_t>
 void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
-    scalar_t alpha,
+    at::opmath_type<scalar_t> alpha,
     const scalar_t *a, int64_t lda,
     const scalar_t *b, int64_t ldb,
-    scalar_t beta,
+    at::opmath_type<scalar_t> beta,
     scalar_t *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
   gemm_stub(
@@ -62,17 +63,14 @@ void gemm(
     float beta,
     float *c, int64_t ldc);
 
-#ifdef BLAS_HAS_SBGEMM
-using _bfloat16_t = decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t);
 void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
-    _bfloat16_t alpha,
-    const _bfloat16_t *a, int64_t lda,
-    const _bfloat16_t *b, int64_t ldb,
-    _bfloat16_t beta,
-    _bfloat16_t *c, int64_t ldc);
-#endif // BLAS_HAS_SBGEMM
+    float alpha,
+    const at::BFloat16 *a, int64_t lda,
+    const at::BFloat16 *b, int64_t ldb,
+    float beta,
+    at::BFloat16 *c, int64_t ldc);
 
 void gemm(
     TransposeType transa, TransposeType transb,

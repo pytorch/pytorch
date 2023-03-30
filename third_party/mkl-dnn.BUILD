@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("@//third_party:substitution.bzl", "template_rule")
+load("@pytorch//third_party:substitution.bzl", "template_rule")
 
 _DNNL_RUNTIME_OMP = {
     "#cmakedefine DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_${DNNL_CPU_THREADING_RUNTIME}": "#define DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_OMP",
@@ -9,7 +9,9 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine DNNL_WITH_SYCL": "/* #undef DNNL_WITH_SYCL */",
     "#cmakedefine DNNL_WITH_LEVEL_ZERO": "/* #undef DNNL_WITH_LEVEL_ZERO */",
     "#cmakedefine DNNL_SYCL_CUDA": "/* #undef DNNL_SYCL_CUDA */",
+    "#cmakedefine DNNL_SYCL_HIP": "/* #undef DNNL_SYCL_HIP */",
     "#cmakedefine DNNL_ENABLE_STACK_CHECKER": "#undef DNNL_ENABLE_STACK_CHECKER",
+    "#cmakedefine DNNL_EXPERIMENTAL": "#undef DNNL_EXPERIMENTAL",
     "#cmakedefine01 BUILD_TRAINING": "#define BUILD_TRAINING 1",
     "#cmakedefine01 BUILD_INFERENCE": "#define BUILD_INFERENCE 0",
     "#cmakedefine01 BUILD_PRIMITIVE_ALL": "#define BUILD_PRIMITIVE_ALL 1",
@@ -37,6 +39,13 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine01 BUILD_AVX2": "#define BUILD_AVX2 0",
     "#cmakedefine01 BUILD_AVX512": "#define BUILD_AVX512 0",
     "#cmakedefine01 BUILD_AMX": "#define BUILD_AMX 0",
+    "#cmakedefine01 BUILD_PRIMITIVE_GPU_ISA_ALL": "#define BUILD_PRIMITIVE_GPU_ISA_ALL 1",
+    "#cmakedefine01 BUILD_GEN9": "#define BUILD_GEN9 0",
+    "#cmakedefine01 BUILD_GEN11": "#define BUILD_GEN11 0",
+    "#cmakedefine01 BUILD_XELP": "#define BUILD_XELP 0",
+    "#cmakedefine01 BUILD_XEHPG": "#define BUILD_XEHPG 0",
+    "#cmakedefine01 BUILD_XEHPC": "#define BUILD_XEHPC 0",
+    "#cmakedefine01 BUILD_XEHP": "#define BUILD_XEHP 0",
 }
 
 template_rule(
@@ -45,9 +54,9 @@ template_rule(
     out = "third_party/oneDNN/include/oneapi/dnnl/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "2",
-        "@DNNL_VERSION_MINOR@": "5",
-        "@DNNL_VERSION_PATCH@": "2",
-        "@DNNL_VERSION_HASH@": "a9302535553c73243c632ad3c4c80beec3d19a1e",
+        "@DNNL_VERSION_MINOR@": "7",
+        "@DNNL_VERSION_PATCH@": "3",
+        "@DNNL_VERSION_HASH@": "7710bdc92064a08b985c5cbdb09de773b19cba1f",
     },
 )
 
@@ -91,7 +100,7 @@ cc_library(
         "-fno-strict-overflow",
         "-fopenmp",
     ] + select({
-        "@//tools/config:thread_sanitizer": ["-DDNNL_CPU_RUNTIME=0"],
+        "@pytorch//tools/config:thread_sanitizer": ["-DDNNL_CPU_RUNTIME=0"],
         "//conditions:default": ["-DDNNL_CPU_RUNTIME=2"],
     }),
     includes = [
@@ -110,7 +119,7 @@ cc_library(
     deps = [
         "@mkl",
     ] + select({
-        "@//tools/config:thread_sanitizer": [],
+        "@pytorch//tools/config:thread_sanitizer": [],
         "//conditions:default": ["@tbb"],
     }),
 )

@@ -174,8 +174,8 @@ set(PYTORCH_QNNPACK_EXEC_SRCS
   src/conv-run.cc
   src/deconv-run.cc
   src/fc-run.cc
+  src/fc-unpack.cc
   src/fc-dynamic-run.cc
-  src/pack_block_sparse.cc
   src/indirection.c
   src/operator-run.c)
 

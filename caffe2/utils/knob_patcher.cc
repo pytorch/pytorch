@@ -1,4 +1,7 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
 
 #include <map>
 
@@ -82,7 +85,7 @@ class Patcher {
       if (iter == patches_.end()) {
         LOG(FATAL) << "patch node not found when unpatching knob value";
       }
-      CHECK_EQ(iter->second, node);
+      TORCH_CHECK_EQ(iter->second, node);
       if (node->prev) {
         iter->second = node->prev;
       } else {

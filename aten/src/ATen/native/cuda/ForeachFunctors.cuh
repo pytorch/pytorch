@@ -1,11 +1,20 @@
 #pragma once
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
+#include <ATen/native/cuda/Pow.cuh>
 #include <ATen/OpMathType.h>
 
 namespace at { namespace native {
 
 namespace {
+
+// TODO(crcrpar): Handle version bump in codegen.
+// rel: https://github.com/pytorch/pytorch/blob/9cf84347767c8abb8feba18a9a1baba321eeb8b9/tools/autograd/gen_inplace_or_view_type.py#L481-L482
+inline void increment_version(TensorList tensors) {
+  for (const auto & t : tensors) {
+    t.unsafeGetTensorImpl()->bump_version();
+  }
+}
 
 // Initializes args and checks if all args are aligned
 template<int depth, typename T>
@@ -32,6 +41,25 @@ template<int depth, typename T, typename T2>
 __device__ bool init_args(
     T** args,
     TensorListScalarListMetadata<T2, depth>& tl,
+    int chunk_idx,
+    int chunk_size,
+    int tensor_loc) {
+        bool all_aligned = true;
+        for (int i = 0; i < depth; i++) {
+            args[i] =  (T*)tl.addresses[i][tensor_loc];
+            args[i] += chunk_idx * chunk_size;
+
+            if (!is_aligned(args[i])) {
+                all_aligned = false;
+            }
+        }
+        return all_aligned;
+}
+
+template<int depth, typename T>
+__device__ bool init_args(
+    T** args,
+    FusedOptimizerTensorListMetadata<depth>& tl,
     int chunk_idx,
     int chunk_size,
     int tensor_loc) {
@@ -412,6 +440,126 @@ struct PointwiseOpListFunctor {
                 }
             }
         }
+};
+
+template<typename T, int depth, int r_args_depth, int res_arg_index>
+struct TernaryOpListFunctor {
+  using opmath_t = at::opmath_type<T>;
+  template<typename Op> __device__ __forceinline__ void operator() (
+      int chunk_size,
+      TensorListMetadata<depth>& tl,
+      Op op) {
+    static_assert(depth == 3 || depth == 4, "");
+    static_assert(depth >= r_args_depth, "");
+    static_assert(res_arg_index == depth - 1 || res_arg_index == 0, "");
+    int tensor_loc = tl.block_to_tensor[blockIdx.x];
+    int chunk_idx = tl.block_to_chunk[blockIdx.x];
+    int n = tl.numel_for_tensor[tensor_loc];
+
+    T* args[depth];
+    const bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+    n -= chunk_idx * chunk_size;
+    T r_args[r_args_depth][kILP];
+
+    if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+      for (int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
+        load_store(r_args[0], args[0], 0, i_start);
+        load_store(r_args[1], args[1], 0, i_start);
+        load_store(r_args[2], args[2], 0, i_start);
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          r_args[0][ii] = op(
+              static_cast<opmath_t>(r_args[0][ii]),
+              static_cast<opmath_t>(r_args[1][ii]),
+              static_cast<opmath_t>(r_args[2][ii])
+          );
+        }
+        load_store(args[res_arg_index], r_args[0], i_start, 0);
+      }
+    } else {
+      for (int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
+        load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          r_args[0][ii] = op(
+              static_cast<opmath_t>(r_args[0][ii]),
+              static_cast<opmath_t>(r_args[1][ii]),
+              static_cast<opmath_t>(r_args[2][ii])
+          );
+        }
+        store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
+      }
+    }
+  }
+};
+
+template<typename T, int depth, int r_args_depth, int res_arg_index>
+struct TernaryOpScalarFunctor {
+  using opmath_t = at::opmath_type<T>;
+  template<typename Op> __device__ __forceinline__ void operator() (
+      int chunk_size,
+      TensorListMetadata<depth>& tl,
+      Op op,
+      opmath_t alpha) {
+    static_assert(depth == 2 || depth == 3, "");
+    static_assert(depth >= r_args_depth, "");
+    static_assert(res_arg_index == depth - 1 || res_arg_index == 0, "");
+    int tensor_loc = tl.block_to_tensor[blockIdx.x];
+    int chunk_idx = tl.block_to_chunk[blockIdx.x];
+    int n = tl.numel_for_tensor[tensor_loc];
+
+    T* args[depth];
+    bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+    n -= chunk_idx * chunk_size;
+    T r_args[r_args_depth][kILP];
+
+    // to make things simple, we put aligned case in a different code path
+    if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+      for(int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
+        // load
+        load_store(r_args[0], args[0], 0, i_start);
+        load_store(r_args[1], args[1], 0, i_start);
+#pragma unroll
+        for(int ii = 0; ii < kILP; ii++) {
+            r_args[0][ii] = op(
+                static_cast<opmath_t>(r_args[0][ii]),
+                static_cast<opmath_t>(r_args[1][ii]),
+                alpha
+            );
+        }
+        // store
+        load_store(args[res_arg_index], r_args[0], i_start , 0);
+      }
+    }
+    else {
+      for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
+        load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
+#pragma unroll
+        for(int ii = 0; ii < kILP; ii++) {
+          r_args[0][ii] = op(
+              static_cast<opmath_t>(r_args[0][ii]),
+              static_cast<opmath_t>(r_args[1][ii]),
+              alpha
+          );
+        }
+        store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
+      }
+    }
+  }
+};
+
+template <typename T>
+struct power_functor {
+  C10_DEVICE T operator()(const T& a, const T& b) const {
+    return at::native::pow_(a, b);
+  }
+};
+
+template <typename T>
+struct reverse_power_functor {
+  C10_DEVICE T operator()(const T& a, const T& b) const {
+    return at::native::pow_(b, a);
+  }
 };
 
 } // namespace

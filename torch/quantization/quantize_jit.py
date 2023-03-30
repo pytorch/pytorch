@@ -16,6 +16,7 @@ from torch.ao.quantization.quantize_jit import (
     _prepare_jit,
     prepare_jit,
     prepare_dynamic_jit,
+    _prepare_ondevice_dynamic_jit,
     _convert_jit,
     convert_jit,
     convert_dynamic_jit,

@@ -5,7 +5,7 @@
 //  index(Tensor self, indices) -> Tensor
 //  index_put_(Tensor self, indices, value, accumulate=false)
 //
-// The index is a TensorList containg kLong, kBool or kByte tensors or nulls. Byte
+// The index is a TensorList containing kLong, kBool or kByte tensors or nulls. Byte
 // tensors (boolean masks) are expanded to long tensors via nonzero(). Null
 // tensors signify that the dimension is not indexed.
 //
@@ -47,59 +47,106 @@
 //                   ...)
 //
 // where & and * represent the C-style address-of and indirection operations.
+// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ATen.h>
 
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/IListRef.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ScatterGatherChecks.h>
+#include <ATen/native/TensorAdvancedIndexingUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_gather_sparse_backward.h>
+#include <ATen/ops/_gather_sparse_backward_native.h>
+#include <ATen/ops/_index_put_impl.h>
+#include <ATen/ops/_index_put_impl_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/argwhere_native.h>
+#include <ATen/ops/as_strided.h>
+#include <ATen/ops/broadcast_to.h>
+#include <ATen/ops/count_nonzero.h>
+#include <ATen/ops/count_nonzero_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_quantized.h>
+#include <ATen/ops/gather.h>
+#include <ATen/ops/gather_backward_native.h>
+#include <ATen/ops/gather_meta.h>
+#include <ATen/ops/gather_native.h>
+#include <ATen/ops/index.h>
+#include <ATen/ops/index_add_meta.h>
+#include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_copy_meta.h>
+#include <ATen/ops/index_copy_native.h>
+#include <ATen/ops/index_fill_native.h>
+#include <ATen/ops/index_meta.h>
+#include <ATen/ops/index_native.h>
+#include <ATen/ops/index_put_native.h>
+#include <ATen/ops/index_reduce_meta.h>
+#include <ATen/ops/index_reduce_native.h>
+#include <ATen/ops/index_select_backward_native.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/masked_fill_native.h>
+#include <ATen/ops/masked_scatter_native.h>
+#include <ATen/ops/masked_select_backward_native.h>
+#include <ATen/ops/masked_select_native.h>
+#include <ATen/ops/nonzero_native.h>
+#include <ATen/ops/nonzero_numpy_native.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/put_native.h>
+#include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/scatter_add_meta.h>
+#include <ATen/ops/scatter_add_native.h>
+#include <ATen/ops/scatter_meta.h>
+#include <ATen/ops/scatter_native.h>
+#include <ATen/ops/scatter_reduce_meta.h>
+#include <ATen/ops/scatter_reduce_native.h>
+#include <ATen/ops/take_along_dim_native.h>
+#include <ATen/ops/take_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
 #include <algorithm>
-#include <functional>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 namespace at {
-namespace meta {
+namespace native {
 
-native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce, bool use_new_options = false) {
-  if (use_new_options) {
-    if (reduce == "sum") {
-      return native::SCATTER_GATHER_OP::REDUCE_ADD;
-    } else if (reduce == "prod") {
-      return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
-    } else if (reduce == "mean") {
-      return native::SCATTER_GATHER_OP::REDUCE_MEAN;
-    } else if (reduce == "amax") {
-      return native::SCATTER_GATHER_OP::REDUCE_MAXIMUM;
-    } else if (reduce == "amin") {
-    return native::SCATTER_GATHER_OP::REDUCE_MINIMUM;
-    } else {
-      TORCH_CHECK(false, "reduce argument must be either sum, prod, mean, amax or amin.");
-    }
-  } else {
-    if (reduce == "add") {
-      return native::SCATTER_GATHER_OP::REDUCE_ADD;
-    } else if (reduce == "multiply") {
-      return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
-    } else {
-      TORCH_CHECK(false, "reduce argument must be either add or multiply.")
-    }
-  }
-}
+std::string shapes_as_str(TensorList tensors);
+AdvancedIndex make_info(Tensor self, IOptTensorListRef orig);
+
+} // namespace native
+
+namespace meta {
 
 TORCH_META_FUNC(gather)
 (const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
@@ -112,7 +159,7 @@ TORCH_META_FUNC(gather)
   // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
   // and https://github.com/pytorch/pytorch/issues/63837
   bool check_result = result.defined();
-  set_output(index.sizes(), self.options());
+  set_output_raw_strided(0, index.sizes(), {}, self.options());
   if (check_result) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
@@ -151,10 +198,10 @@ void scatter_meta_impl(
     }
   }
 
-  meta.set_output(self.sizes(), self.options());
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (reduce.has_value()) {
     // Check if we have a valid reduce operator.
-    get_operator_enum(reduce.value(), use_new_options);
+    at::native::get_operator_enum(reduce.value(), use_new_options);
   }
 }
 
@@ -174,6 +221,10 @@ TORCH_META_FUNC2(scatter, reduce)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce) {
+  TORCH_WARN_ONCE(
+      "The reduce argument of torch.scatter with Tensor src is deprecated and will be removed ",
+      "in a future PyTorch release. Use torch.scatter_reduce instead for more reduction options."
+  );
   scatter_meta_impl(*this, self, dim, index, src, reduce);
 }
 
@@ -214,7 +265,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
   // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
   // and https://github.com/pytorch/pytorch/issues/63837
   bool check_result = result.defined();
-  set_output(self.sizes(), self.options());
+  set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (check_result) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
@@ -239,11 +290,11 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
 
   // Check that source and destination slices have the same size
   auto selfSlicedSizes = self.sizes().vec();
-  if (selfSlicedSizes.size() > 0) {
+  if (!selfSlicedSizes.empty()) {
     selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
   }
   auto sourceSlicedSizes = source.sizes().vec();
-  if (sourceSlicedSizes.size() > 0) {
+  if (!sourceSlicedSizes.empty()) {
     sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
   }
   if (selfSlicedSizes.size() != sourceSlicedSizes.size() ||
@@ -287,7 +338,7 @@ void index_func_meta_impl(
 
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
-  meta.set_output(self.sizes(), self.options());
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (is_defined) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
@@ -297,7 +348,7 @@ void index_func_meta_impl(
   // A hack to run TensorIterator checks in the meta function.
   // See comment: https://github.com/pytorch/pytorch/pull/65993#discussion_r760307417
   // TODO: (@krshrimali) Try inheriting from TensorIteratorBase instead.
-  if (result.device() == kMeta) {
+  if (result.device() == kMeta && result.dim() > 0) {
     auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
@@ -311,7 +362,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
-TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
+TORCH_PRECOMPUTE_META_FUNC(index_reduce)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -320,10 +371,77 @@ TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
  bool include_self) {
   (void)include_self;
   TORCH_CHECK(reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce == "amin",
-              "_index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
+              "index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
   dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "_index_reduce");
-  return TORCH_PRECOMPUTE_STRUCT(_index_reduce)().set_dim(dim);
+  index_func_meta_impl(*this, self, dim, index, source, "index_reduce");
+  return TORCH_PRECOMPUTE_STRUCT(index_reduce)().set_dim(dim);
+}
+
+static void build_index_op(
+    TensorIteratorBase& iter,
+    const at::native::AdvancedIndex& info,
+    const Tensor& result) {
+  // 'TensorIterator' needs to own the things comming from 'info', since
+  // 'info' will be destroyed after the META function.
+  TensorIteratorConfig config;
+  // info.src is a restrided view of result
+  config.set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .add_output(result)
+      .add_owned_input(info.src);
+  for (auto& index : info.indices) {
+    config.add_owned_input(index);
+  }
+  if (!result.defined()) {
+    config.declare_static_dtype_and_device(info.src.scalar_type(), info.src.device());
+  }
+  iter.build(config);
+}
+
+void check_indices_on_cpu_or_selfdevice(
+    const Tensor& self,
+    const at::MaterializedIOptTensorListRef& indices) {
+  auto dev = self.device();
+  bool indices_on_cpu_or_dev = std::all_of(
+      indices.begin(), indices.end(), [=](const at::OptionalTensorRef& opt) {
+        return opt.has_value() ? (opt->is_cpu() || opt->device() == dev) : true;
+      });
+  TORCH_CHECK(
+      indices_on_cpu_or_dev,
+      "indices should be either on ", kCPU,
+      " or on the same device as the indexed tensor (", dev, ")");
+}
+
+TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
+(const Tensor& self, at::IOptTensorListRef indices) {
+  auto materialized = indices.materialize();
+
+  TORCH_CHECK_INDEX(
+      materialized.size() <= (size_t)self.dim(),
+      "too many indices for tensor of dimension ",
+      self.dim(), " (got ", materialized.size(), ")");
+
+  // Only allow: `dev_tensor[{cpu,dev}_tensor]`.
+  // See: https://github.com/pytorch/pytorch/pull/69607
+  check_indices_on_cpu_or_selfdevice(self, materialized);
+
+  const auto& result = maybe_get_output();
+
+  if (result.defined()) {
+    at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, self);
+    for (const at::OptionalTensorRef& index : materialized) {
+      if (index.has_value()) {
+        at::assert_no_overlap(result, *index);
+      }
+    }
+  }
+
+  auto info = at::native::make_info(self, std::move(indices));
+  build_index_op(*this, info, result);
+  return TORCH_PRECOMPUTE_STRUCT2(index, Tensor)()
+      .set_sizes(std::move(info.indexed_sizes))
+      .set_strides(std::move(info.indexed_strides));
 }
 
 } // namespace meta
@@ -339,6 +457,7 @@ DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub);
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub);
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 DEFINE_DISPATCH(masked_scatter_stub);
@@ -351,8 +470,12 @@ DEFINE_DISPATCH(scatter_reduce_stub);
 DEFINE_DISPATCH(scatter_scalar_reduce_stub);
 DEFINE_DISPATCH(scatter_reduce_two_stub);
 
+DEFINE_DISPATCH(scatter_add_expanded_index_stub);
+DEFINE_DISPATCH(scatter_reduce_expanded_index_stub);
+DEFINE_DISPATCH(gather_expanded_index_stub);
+
 static bool all_strides_match(TensorList tensors) {
-  TORCH_CHECK(tensors.size() >= 1);
+  TORCH_CHECK(!tensors.empty());
   auto strides = tensors[0].strides();
   for (auto& tensor : tensors.slice(1)) {
     if (!strides.equals(tensor.strides())) {
@@ -362,7 +485,7 @@ static bool all_strides_match(TensorList tensors) {
   return true;
 }
 
-static std::string shapes_as_str(TensorList tensors) {
+inline std::string shapes_as_str(TensorList tensors) {
   std::ostringstream os;
   bool first = true;
   for (auto& tensor : tensors) {
@@ -444,78 +567,15 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
     }
   }
 
-  // For CUDA tensors, force all index tensors to have the same striding to
-  // simplify the CUDA kernel.
-  if (indices.size() >= 2 && this->src.device().type() == kCUDA) {
+  // For CUDA/MPS tensors, force all index tensors to have the same striding to
+  // simplify the CUDA/MPS kernel.
+  if (indices.size() >= 2 && (this->src.device().type() == kCUDA || this->src.device().type() == kMPS)) {
     if (!all_strides_match(indices)) {
       for (auto & indice : indices) {
         indice = indice.contiguous();
       }
     }
   }
-}
-
-static std::tuple<bool, Tensor> canDispatchToMaskedFill(const Tensor& self, const torch::List<c10::optional<at::Tensor>>& indices,
-const Tensor& value){
-  if (!(value.numel() ==1 && value.device().is_cpu())){
-    return std::make_tuple(false,Tensor());
-  }
-  int64_t num_ind = 0;
-  Tensor mask;
-  auto self_device = self.device();
-  for (const c10::optional<Tensor> i: indices) {
-    if (!i.has_value() || !(*i).defined()){
-      num_ind++;
-    } else {
-      Tensor index = std::move(*i);
-      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
-          index.device() != self_device || mask.defined()){
-        return std::make_tuple(false, Tensor());
-      } else {
-        mask = index;
-        for (const auto j : c10::irange(index.dim())) {
-          int64_t srcIdx = num_ind + j;
-          TORCH_CHECK_INDEX(index.size(j) == self.size(srcIdx), "The shape of the mask ", index.sizes(), " at index ", j,
-  " does not match the shape of the indexed tensor ", self.sizes(), " at index ", srcIdx);
-        }
-        num_ind += mask.ndimension();
-      }
-    }
-  }
-  for (const auto i : c10::irange(num_ind, self.ndimension())) {
-    (void)i; //Suppress unused variable warning
-    mask = mask.unsqueeze(-1);
-  }
-  return std::make_tuple(true, mask);
-}
-
-static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::Tensor>>& orig) {
-  checkIndexTensorTypes(orig);
-  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
-  auto indices = expandTensors(self, orig);
-  // next broadcast all index tensors together
-  try {
-    indices = expand_outplace(indices);
-  } catch (std::exception& e) {
-    TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
-                   " with shapes ", shapes_as_str(indices));
-  }
-  // add missing null Tensors so that it matches self.dim()
-  while (indices.size() < (size_t)self.dim()) {
-    indices.emplace_back();
-  }
-  // if the non-null indices are not all adjacent, transpose self and indices
-  // together so that they're adjacent at the front
-  if (!hasContiguousSubspace(indices)) {
-    std::tie(self, indices) = transposeToFront(self, indices);
-  }
-  // Ensure indices are on the same device as self
-  for (auto & indice : indices) {
-    if (indice.defined() && indice.device() != self.device()) {
-      indice = indice.to(self.device());
-    }
-  }
-  return AdvancedIndex(self, indices);
 }
 
 static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
@@ -538,39 +598,12 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
   return config.build();
 }
 
-static TensorIterator make_index_iterator(const AdvancedIndex& info) {
-  TensorIteratorConfig config;
-  config.set_check_mem_overlap(false)
-        .check_all_same_dtype(false)
-        .declare_static_dtype_and_device(info.src.scalar_type(), info.src.device())
-        .add_owned_output(Tensor())
-        .add_input(info.src);
-  for (auto& index : info.indices) {
-    config.add_input(index);
-  }
-  return config.build();
-}
-
-static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor& result) {
-  TensorIteratorConfig config;
-  // info.src is a restrided view of result
-  config.set_check_mem_overlap(false)
-        .check_all_same_dtype(false)
-        .add_output(result)
-        .add_input(info.src);
-  for (auto& index : info.indices) {
-    config.add_input(index);
-  }
-  return config.build();
-}
-
-Tensor index(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
-  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-
-  auto info = make_info(self, indices);
-  auto iter = make_index_iterator(info);
-  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
-  return iter.output();
+TORCH_IMPL_FUNC(index_out)
+(const Tensor& self,
+ DimVector sizes,
+ DimVector strides,
+ const Tensor& result) {
+  index_stub(device_type(), *this, sizes, strides);
 }
 
 Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
@@ -582,33 +615,9 @@ Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tens
   // For now, this is a naive implementation which does dq -> index -> q.
   // TODO(future PR): improve performance by removing the copies.
   const auto& self_dq = self.dequantize();
-
-  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-
-  auto info = make_info(self_dq, indices);
-  auto iter = make_index_iterator(info);
-  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
-  at::Tensor res = iter.output();
-
+  auto result = at::index(self_dq, indices);
   return at::quantize_per_tensor(
-      res, self.q_scale(), self.q_zero_point(), self.scalar_type());
-}
-
-Tensor& index_out(Tensor& result, const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
-  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-  at::assert_no_internal_overlap(result);
-  at::assert_no_overlap(result, self);
-  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const c10::optional<Tensor>& index: indices) {
-    if (index.has_value()) {
-      at::assert_no_overlap(result, *index);
-    }
-  }
-
-  auto info = make_info(self, indices);
-  auto iter = make_index_out_iterator(info, result);
-  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
-  return result;
+      result, self.q_scale(), self.q_zero_point(), self.scalar_type());
 }
 
 Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const bool accumulate) {
@@ -663,7 +672,7 @@ Tensor index_put(const Tensor & self, const torch::List<c10::optional<Tensor>>& 
 
 Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of index_put_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "
@@ -832,6 +841,63 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     if (numel == 0) {
       return;
     }
+
+    // When the slice of source or result is noncontiguous,
+    // original index_add is slow as it uses add for the sliced tensor,
+    // which is serial on index and parallel on sliced tensor to avoid write conflict.
+    // Doing parallel on the sliced tensor is not optimal as the size of sliced tensor
+    // may be not big enough to parallel and also causes multiple parallelizations.
+    // scatter_add is used to speedup for this case as scatter_add parallels on
+    // the outer dimension of input and is serial on the inner dimension to
+    // avoid write conflict. scatter_add only need one parallel and the size of
+    // outer dimensions is bigger to do parallel.
+
+    // TODO: When https://github.com/pytorch/pytorch/pull/82703 lands,
+    // using scatter_add will also get obvious speedup for the case dim == 0.
+    if ((result.stride(dim) == 1 || source.stride(dim) == 1) &&
+        // Data type of index should be long and alpha should be 1 to use scatter_add.
+        alpha.equal(1.0) && index_contig.scalar_type() == ScalarType::Long &&
+        result.numel() > at::internal::GRAIN_SIZE &&
+        // scatter_add does not support ComplexHalf
+        source.scalar_type() != ScalarType::ComplexHalf &&
+        result.scalar_type() != ScalarType::ComplexHalf) {
+      std::vector<int64_t> ep_sizes(result.sizes().size());
+      std::vector<int64_t> ep_strides(source.sizes().size());
+
+      // Check whether result and source are matched apart from the dimension dim.
+      // Note that the broadcast case:
+      // source.select(dim, i) is broadcast for result.select(dim, index_data[i])
+      // The broadcast case is not applicable for scatter_add
+      auto check_sizes = [&ep_sizes, &ep_strides, &numel](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
+        if (a.size() != b.size()) {
+          return false;
+        }
+
+        ep_sizes[dim] = numel;
+        ep_strides[dim] = 1;
+        for (const int64_t i : c10::irange(a.size())) {
+          if (i == dim) {
+            continue;
+          }
+
+          if (a[i] != b[i]) {
+            return false;
+          }
+          ep_sizes[i] = a[i];
+          ep_strides[i] = 0;
+
+        }
+        return true;
+      };
+
+      if (check_sizes(result.sizes(), source.sizes(), dim)) {
+        auto ep_index = index_contig.as_strided(ep_sizes, ep_strides);
+        result.scatter_add_(dim, ep_index, source);
+        return;
+      }
+
+    }
+
     auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
     auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
@@ -858,7 +924,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
 
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, ScalarType::ComplexHalf,
       result.scalar_type(), "index_add_", [&result, &source, &dim, &index_contig, &numel, &alpha] {
       auto alpha_value = alpha.to<scalar_t>();
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
@@ -887,22 +953,22 @@ void index_reduce_func_impl(
   const Tensor& source,
   bool include_self,
   const Tensor& result,
-  const INDEX_OP& op) {
+  const ReductionType& op) {
   if (!result.is_same(self)) result.copy_(self);
   if (!include_self) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+    AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       self.scalar_type(), "index_reduce_func_exclude_input_init", [&] {
       scalar_t init_val;
       switch (op) {
-        case INDEX_OP::PROD:
+        case ReductionType::PROD:
           init_val = (scalar_t)1;
           break;
-        case INDEX_OP::MAXIMUM:
+        case ReductionType::MAX:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::lowest();
           break;
-        case INDEX_OP::MINIMUM:
+        case ReductionType::MIN:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::max();
           break;
@@ -949,13 +1015,13 @@ void index_reduce_func_impl(
         iter.unsafe_replace_operand(2, source_data);
 
         switch (op) {
-          case INDEX_OP::PROD :
+          case ReductionType::PROD :
             mul_stub(iter.device_type(), iter);
             break;
-          case INDEX_OP::MINIMUM :
+          case ReductionType::MIN :
             minimum_stub(iter.device_type(), iter);
             break;
-          case INDEX_OP::MAXIMUM :
+          case ReductionType::MAX :
             maximum_stub(iter.device_type(), iter);
             break;
           default :
@@ -965,11 +1031,15 @@ void index_reduce_func_impl(
       }
     });
 
-    if (op == INDEX_OP::MEAN) {
+    if (op == ReductionType::MEAN) {
       auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
       counts.index_add_(dim, index, at::ones_like(source));
       counts.masked_fill_(counts == 0, 1);
-      result.div_(counts);
+      if (result.is_floating_point() || result.is_complex()) {
+        result.div_(counts);
+      } else {
+        result.div_(counts, "floor");
+      }
     }
   }
   else {
@@ -977,7 +1047,7 @@ void index_reduce_func_impl(
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
-    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
+    AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
       result.scalar_type(), "index_func_", [&result, &source, &dim, &index_contig, &numel, &op, &counts] {
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
@@ -996,19 +1066,19 @@ void index_reduce_func_impl(
             scalar_t *count_ip;
             scalar_t val;
             switch (op) {
-              case INDEX_OP::MEAN :
+              case ReductionType::MEAN :
                 *self_ip += *(source_ptr + i * source_stride);
                 count_ip = counts_ptr + self_i * counts_stride;
                 *count_ip += 1;
                 break;
-              case INDEX_OP::PROD :
+              case ReductionType::PROD :
                 *self_ip *= *(source_ptr + i * source_stride);
                 break;
-              case INDEX_OP::MINIMUM :
+              case ReductionType::MIN :
                 val = *(source_ptr + i * source_stride);
                 *self_ip = at::_isnan<scalar_t>(val) ? val : std::min(*self_ip, val);
                 break;
-              case INDEX_OP::MAXIMUM :
+              case ReductionType::MAX :
                 val = *(source_ptr + i * source_stride);
                 *self_ip = at::_isnan<scalar_t>(val) ? val : std::max(*self_ip, val);
                 break;
@@ -1018,14 +1088,18 @@ void index_reduce_func_impl(
         }
       });
     });
-    if (op == INDEX_OP::MEAN) {
+    if (op == ReductionType::MEAN) {
       counts.masked_fill_(counts == 0, 1);
-      result.div_(counts);
+      if (result.is_floating_point() || result.is_complex()) {
+        result.div_(counts);
+      } else {
+        result.div_(counts, "floor");
+      }
     }
   }
 }
 
-TORCH_IMPL_FUNC(_index_reduce_cpu_out)
+TORCH_IMPL_FUNC(index_reduce_cpu_out)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -1034,19 +1108,7 @@ TORCH_IMPL_FUNC(_index_reduce_cpu_out)
  bool include_input,
  const Tensor& result) {
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
-
-  INDEX_OP op;
-  if (reduce == "prod") {
-    op = INDEX_OP::PROD;
-  } else if (reduce == "mean") {
-    op = INDEX_OP::MEAN;
-  } else if (reduce == "amax") {
-    op = INDEX_OP::MAXIMUM;
-  } else if (reduce == "amin") {
-    op = INDEX_OP::MINIMUM;
-  } else {
-    TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
-  }
+  auto op = get_operator_enum(reduce, true);
   index_reduce_func_impl(self, dim, index, source, include_input, result, op);
 }
 
@@ -1133,11 +1195,10 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   dim = maybe_wrap_dim(dim, self.dim());
   auto numel = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
+  TORCH_CHECK(!(self.dim() == 0 && numel != 1), "index_select(): Index to scalar can have only 1 value, got ", numel, " value(s)");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "index_select(): self and result must have the same scalar type");
-  TORCH_CHECK(dim == 0 || dim < self.dim(),
-              "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, index);
@@ -1150,7 +1211,18 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   auto index_contig = index.contiguous();
 
   if (self.dim() > 1) {
-    if (numel == 0 || self.numel() == 0) {
+    if (numel == 0) {
+      return result;
+    }
+    if (self.numel() == 0) {
+      auto src_indexing_axis_dim = self.size(dim);
+      TORCH_CHECK(src_indexing_axis_dim > 0,
+                  "index_select(): self indexing axis dim should be positive");
+      AT_DISPATCH_INDEX_TYPES(
+      index_contig.scalar_type(), "index_select_empty_self_bound_check", [&]() {
+        const auto* idxs = index_contig.data_ptr<index_t>();
+        check_indexarray_range<index_t>(idxs, numel, src_indexing_axis_dim);
+      });
       return result;
     }
 
@@ -1251,7 +1323,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         });
       });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
         self.scalar_type(), "index_select", [&index_contig, &self, &result, &dim, &numel] {
         auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
         auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
@@ -1288,8 +1360,17 @@ Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tenso
   return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 
-Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
-  return at::zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
+Tensor index_select_backward(const Tensor& grad, at::IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+    return at::native::index_select_backward_symint(grad, c10::fromIntArrayRefSlow(self_sizes), dim, index);
+}
+
+Tensor index_select_backward_symint(const Tensor& grad, c10::SymIntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+  // for composite compliance, use out-of-place variant of
+  // `index_add` if index tensor is a Tensor Subclass.
+  if (isTensorSubclassLike(index)) {
+    return grad.new_zeros_symint(self_sizes, grad.options()).index_add(dim, index, grad);
+  }
+  return grad.new_zeros_symint(self_sizes, grad.options()).index_add_(dim, index, grad);
 }
 
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
@@ -1300,7 +1381,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Sca
     "index_fill_(): Expected dtype int64 for index.");
 
   at::assert_no_overlap(self, index);
-  if (at::has_internal_overlap(self) == at::MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == at::MemOverlap::Yes) {
     TORCH_WARN(
       "Use of index_fill_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "
@@ -1384,39 +1465,52 @@ TORCH_IMPL_FUNC(gather_out)
 (const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
   if (index.numel() == 0) return;
   dim = at::maybe_wrap_dim(dim, self.dim());
-  gather_stub(result.device().type(), result, self, dim, index);
+  if (can_use_expanded_index_path(result, dim, index, self, /*is_scatter_like=*/false)) {
+    gather_expanded_index_stub(result.device().type(), result, self, index);
+  } else {
+    gather_stub(result.device().type(), result, self, dim, index);
+  }
 }
 
 Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
+  auto result = grad.new_zeros_symint(self.sym_sizes());
+  // for composite, vmap and inductor compliance, use out-of-place variant of
+  // `scatter_add` if index or grad tensors is a Tensor Subclass.
+  if (areAnyTensorSubclassLike({index, grad})) {
+    return result.scatter_add(dim, index, grad);
+  }
+  result.scatter_add_(dim, index, grad);
+  return result;
 }
 
 static void scatter_reduce_exclude_self_helper(
   const Tensor& self,
   int64_t dim,
   const Tensor& index,
-  const SCATTER_GATHER_OP& op) {
+  const ReductionType& op) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
     self.scalar_type(), "scatter_reduce_exclude_input_init", [&] {
     scalar_t init_val;
     switch (op) {
-      case SCATTER_GATHER_OP::REDUCE_ADD:
+      case ReductionType::SUM:
         init_val = (scalar_t)0;
         break;
-      case SCATTER_GATHER_OP::REDUCE_MULTIPLY:
+      case ReductionType::PROD:
         init_val = (scalar_t)1;
         break;
-      case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
-        init_val = std::numeric_limits<scalar_t>::lowest();
+      case ReductionType::MAX:
+        init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
+                   : std::numeric_limits<scalar_t>::lowest();
         break;
-      case SCATTER_GATHER_OP::REDUCE_MINIMUM:
-        init_val = std::numeric_limits<scalar_t>::max();
+      case ReductionType::MIN:
+        init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
+                   : std::numeric_limits<scalar_t>::max();
         break;
-      case SCATTER_GATHER_OP::REDUCE_MEAN:
+      case ReductionType::MEAN:
         init_val = (scalar_t)0;
         break;
     }
@@ -1446,7 +1540,7 @@ void scatter_impl(
   if (index.numel() == 0) return;
 
   if (reduce.has_value()) {
-    auto op = meta::get_operator_enum(reduce.value(), use_new_options);
+    auto op = get_operator_enum(reduce.value(), use_new_options);
     if (!reduce_includes_self) {
       // scatter inits for reduction to appropriate indices (used by scatter_reduce.two)
       scatter_reduce_exclude_self_helper(mut_out, dim, index, op);
@@ -1520,18 +1614,107 @@ TORCH_IMPL_FUNC(scatter_add)
 
   if (index.numel() == 0) return;
 
-  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA && self.dim() == 1) {
-    TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "
-      "but their dims are ", index.dim(), " and ", src.dim(), ", respectively");
-    TORCH_CHECK(index.numel() == src.numel(), "index and src should have same number of elements for 1D tensors, "
-      "but got ", index.numel(), " versus ", src.numel());
-    TORCH_CHECK(dim == 0, "dim should be zero for 1D self tensor, but got ", dim);
-    torch::List<c10::optional<Tensor>> indices;
-    indices.reserve(1);
-    indices.push_back(index);
-    mut_out.index_put_(indices, src, true);
+  // See Note [Enabling Deterministic Operations]
+  // Avoid gpuAtomicAdd for CUDA if deterministic mode is turned on
+  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA) {
+    if (self.dim() == 1) {
+      // TODO: Pretty sure these checks can be removed, since they're done in
+      // `scatter_meta_impl`, which I think is always called before this
+      TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "
+        "but their dims are ", index.dim(), " and ", src.dim(), ", respectively");
+      TORCH_CHECK(index.numel() == src.numel(), "index and src should have same number of elements for 1D tensors, "
+        "but got ", index.numel(), " versus ", src.numel());
+      TORCH_CHECK(dim == 0, "dim should be zero for 1D self tensor, but got ", dim);
+      torch::List<c10::optional<Tensor>> indices;
+      indices.reserve(1);
+      indices.push_back(index);
+      mut_out.index_put_(indices, src, true);
+    } else {
+      Tensor mut_out_contig = mut_out.contiguous();
+
+      auto index_coords_sizes = index.sizes().vec();
+      index_coords_sizes.push_back(self.dim());
+      auto index_coords = at::empty(
+        index_coords_sizes,
+        at::TensorOptions().dtype(at::ScalarType::Long).device(self.device()));
+
+      for (int64_t dim_other = 0; dim_other < self.dim(); dim_other++) {
+        if (dim_other == dim) {
+          continue;
+        }
+        auto dim_coord_vals = at::arange(
+          index.size(dim_other),
+          at::TensorOptions().device(self.device()));
+
+        for (int64_t dim_unsqueeze = 0; dim_unsqueeze < self.dim() - 1; dim_unsqueeze++) {
+          dim_coord_vals = dim_coord_vals.unsqueeze((dim_unsqueeze >= dim_other) ? -1 : 0);
+        }
+
+        auto view_sizes = index.sizes().vec();
+        view_sizes.push_back(1);
+        auto view_strides = index_coords.strides().vec();
+        view_strides[self.dim()] = self.dim();
+
+        at::as_strided(
+          index_coords,
+          view_sizes,
+          view_strides,
+          dim_other
+        ).copy_(dim_coord_vals.unsqueeze(-1));
+      }
+
+      auto view_sizes = index.sizes().vec();
+      view_sizes.push_back(1);
+      auto view_strides = index_coords.strides().vec();
+      view_strides[self.dim()] = self.dim();
+
+      at::as_strided(
+        index_coords,
+        view_sizes,
+        view_strides,
+        dim
+      ).copy_(index.unsqueeze(-1));
+
+      Tensor index_coords_flat = index_coords.flatten(0, -2);
+
+      // Copy mut_out_contig's strides into a tensor
+      // TODO: Is there a utility function that already does this?
+      IntArrayRef mut_out_contig_strides = mut_out_contig.strides();
+      Tensor coord_strides = at::empty(
+        {mut_out_contig.dim()},
+        TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
+      std::memcpy(
+        coord_strides.data_ptr(),
+        mut_out_contig_strides.data(),
+        coord_strides.nbytes());
+      coord_strides = coord_strides.to(mut_out_contig.device());
+
+      // `index_flat` contains the 1-D indices corresponding with the
+      // flattened `mut_out`
+      Tensor index_flat = (index_coords_flat * coord_strides).sum({-1});
+      Tensor mut_out_flat = mut_out_contig.flatten();
+      Tensor src_flat = at::as_strided(
+        src,
+        index.sizes(),
+        src.strides()
+      ).flatten();
+
+      torch::List<c10::optional<Tensor>> indices;
+      indices.reserve(1);
+      indices.push_back(index_flat);
+
+      mut_out_flat.index_put_(indices, src_flat, true);
+
+      if (!mut_out.is_contiguous()) {
+        mut_out.copy_(mut_out_flat.reshape(mut_out.sizes()));
+      }
+    }
   } else {
-    scatter_add_stub(self.device().type(), mut_out, dim, index, src);
+    if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
+      scatter_add_expanded_index_stub(self.device().type(), mut_out, index, src);
+    } else {
+      scatter_add_stub(self.device().type(), mut_out, dim, index, src);
+    }
   }
 }
 
@@ -1543,8 +1726,19 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const c10::string_view reduce,
  bool include_self,
  const Tensor& out) {
-  // See issue https://github.com/pytorch/pytorch/issues/74770
-  TORCH_WARN_ONCE("scatter_reduce() is in beta and the API may change at any time.");
+
+  dim = at::maybe_wrap_dim(dim, self.dim());
+
+  if (!self.is_same(out)) {
+    out.copy_(self);
+  }
+
+  const auto op = get_operator_enum(reduce, true);
+
+  if (can_use_expanded_index_path(out, dim, index, src, /*is_scatter_like*/true)) {
+    scatter_reduce_expanded_index_stub(self.device().type(), out, index, src, op, include_self);
+    return;
+  }
 
   scatter_impl</*use_new_options=*/true>(self, dim, index, src, out,
                                          scatter_reduce_two_stub,
@@ -1552,7 +1746,7 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
                                          reduce,
                                          include_self);
 
-  if (meta::get_operator_enum(reduce, true) == SCATTER_GATHER_OP::REDUCE_MEAN) {
+  if (op == ReductionType::MEAN) {
     auto ones = at::ones_like(src);
     auto count = include_self ? at::ones_like(out) : at::zeros_like(out);
     count.scatter_add_(dim, index, ones);
@@ -1574,12 +1768,10 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
 
 static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const Scalar& value) {
   NoNamesGuard guard;
-  if (mask.dtype() == ScalarType::Byte) {
-    TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
+  TORCH_CHECK(mask.dtype() == ScalarType::Bool, "masked_fill_ only supports boolean masks, but got mask "
+      "with dtype ", mask.dtype());
 
-  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of masked_fill_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "
@@ -1648,19 +1840,14 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
 static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
   NoNamesGuard guard;
 
-  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
-              "masked_select: expected BoolTensor or ByteTensor for mask");
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool,
+              "masked_select: expected BoolTensor for mask");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
 
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, mask);
-
-  if (mask.dtype() == at::ScalarType::Byte) {
-    TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
 
   c10::MaybeOwned<Tensor> _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
@@ -1686,7 +1873,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   _self->is_contiguous() && _mask->is_contiguous();
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(false)  // result is intenionally zero-strided above
+      .set_check_mem_overlap(false)  // result is intentionally zero-strided above
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_strided)
@@ -1705,12 +1892,12 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   auto mask_long_data = mask_long.data_ptr<int64_t>();
   auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
   // TODO: Here can only use std::partial_sum for C++14,
-  // use std::exclusive_scan when PyTorch upgrades to C++17, which have better peformance.
+  // use std::exclusive_scan when PyTorch upgrades to C++17, which have better performance.
   // std::exclusive_scan(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data, 0);
   std::partial_sum(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data);
 
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // result is intenionally zero-strided above
+    .set_check_mem_overlap(false)  // result is intentionally zero-strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(result_strided)
@@ -1741,7 +1928,14 @@ Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Ten
   // implicitly handles broadcasting).
   auto result = at::zeros_like(
       input.expand(at::infer_size(input.sizes(), mask.sizes())), at::MemoryFormat::Preserve);
-  return result.masked_scatter_(mask, grad);
+
+  // for composite compliance, use out-of-place variant
+  // of `masked_scatter`.
+  if (areAnyTensorSubclassLike({grad, mask})) {
+    return result.masked_scatter(mask, grad);
+  }
+  result.masked_scatter_(mask, grad);
+  return result;
 }
 
 namespace {
@@ -1823,22 +2017,25 @@ Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optio
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
 // special case scalar input and/or index
-    if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(at::empty({0,grad.numel()}, index.options()), grad, self.sizes());
-    if (grad.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(index.view({1,1}), grad, self.sizes());
-    Tensor sparse_ind = at::empty({self.ndimension(), grad.numel()}, self.options().dtype(at::kLong));
-    int64_t n_above = grad.numel();
-    int64_t n_below = 1;
-    if (dim < 0) dim += self.ndimension();
-    for (const auto i : c10::irange(self.ndimension())) {
-        n_above /= grad.size(i);
-        if (i == dim) {
-            sparse_ind[i] = index.reshape(-1);
-        } else {
-            sparse_ind[i] = at::arange(grad.size(i),self.options().dtype(at::kLong)).unsqueeze(1).expand({grad.size(i), n_above}).reshape(-1).repeat(n_below);
-        }
-        n_below *= grad.size(i);
+    if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe_symint(at::empty_symint({0,grad.sym_numel()}, index.options()), grad, self.sym_sizes());
+    if (grad.ndimension() == 0) return at::_sparse_coo_tensor_unsafe_symint(index.view({1,1}), grad, self.sym_sizes());
+    Tensor sparse_ind = at::empty_symint({self.ndimension(), grad.sym_numel()}, self.options().dtype(at::kLong));
+    SymInt grad_numel = grad.sym_numel();
+    if (grad_numel > 0) {
+      SymInt n_above = grad_numel;
+      SymInt n_below = 1;
+      if (dim < 0) dim += self.ndimension();
+      for (const auto i : c10::irange(self.ndimension())) {
+          n_above /= grad.sym_size(i);
+          if (i == dim) {
+              sparse_ind[i] = index.reshape(-1);
+          } else {
+              sparse_ind[i] = at::arange(grad.sym_size(i),self.options().dtype(at::kLong)).unsqueeze(1).expand_symint({grad.sym_size(i), n_above}).reshape(-1).repeat_symint(n_below);
+          }
+          n_below *= grad.sym_size(i);
+      }
     }
-    return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
+    return at::_sparse_coo_tensor_unsafe_symint(sparse_ind, grad.reshape(-1), self.sym_sizes());
 }
 
 template <typename scalar_t>
@@ -1854,7 +2051,7 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
     int64_t i = 0;
     for (; i + (ilp_factor - 1) < n; i += ilp_factor) {
       c10::ForcedUnroll<ilp_factor>{}([&](int k) {
-        const auto& val = *reinterpret_cast<const scalar_t*>(ptr + k * stride);
+        const auto& val = c10::load<scalar_t>(ptr + k * stride);
         if (val != scalar_t(0)) {
           ++nonzero[k];
         }
@@ -1862,7 +2059,7 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
       ptr += ilp_factor * stride;
     }
     for (; i < n; ++i) {
-      const auto& val = *reinterpret_cast<const scalar_t*>(ptr);
+      const auto& val = c10::load<scalar_t>(ptr);
       if (val != scalar_t(0)) {
         ++nonzero[0];
       }
@@ -1883,7 +2080,7 @@ Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims){
 }
 
 Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
-  if (dims.size() > 0) {
+  if (!dims.empty()) {
     return (self != 0).sum(dims);
   }
 
@@ -1895,8 +2092,8 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
   const auto num_threads = at::get_num_threads();
   DimVector thread_count_nonzero(num_threads);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
     at::parallel_for(0, iter.numel(), internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       const auto tid = at::get_thread_num();
       thread_count_nonzero[tid] = count_nonzero_impl<scalar_t>(iter, {begin, end});
@@ -1938,8 +2135,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   DimVector thread_count_nonzero(num_threads + 1);
 
   // Pass 1: Count nonzero element per-thread
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
     at::parallel_for(0, numel, internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       const auto tid = at::get_thread_num();
       thread_begin[tid] = begin;
@@ -1965,8 +2162,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   }
 
   // Pass 2: Write indexes
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_cpu", [&] {
     at::parallel_for(0, numel, internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       auto tid = at::get_thread_num();
       // Work needs to be distributed the same on both passes
@@ -2001,7 +2198,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
           const char* ptr = data[0] + i * strides[1];
           for (const auto j : c10::irange(n1)) {
             (void)j; //Suppress unused variable warning
-            const auto& val = *reinterpret_cast<const scalar_t*>(ptr);
+            const auto& val = c10::load<scalar_t>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {
               for (const auto k : c10::irange(ndim)) {

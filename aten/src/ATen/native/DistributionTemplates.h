@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Generator.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
@@ -11,6 +12,15 @@
 #include <c10/util/Optional.h>
 #include <limits>
 #include <cmath>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/view_as_real.h>
+#endif
 
 namespace at {
 namespace native {
@@ -164,7 +174,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
       !std.is_complex(), \
       "normal expects standard deviation to be non-complex"); \
     TORCH_CHECK( \
-      std.numel() == 0 || std.min().ge(0).item<bool>(), \
+      std.numel() == 0 || std.is_meta() || std.min().ge(0).item<bool>(), \
       "normal expects all elements of std >= 0.0"); \
   } while (0)
 
@@ -204,7 +214,6 @@ Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::opt
   at::native::resize_output(output, shape);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   // CUDA NB: addcmul_out copies the tensor to be added into the output.
-  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean_tensor + mean_tensor * std instead of mean_tensor + output * std
@@ -219,7 +228,6 @@ Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c
   at::native::resize_output(output, shape);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   // CUDA NB: addcmul_out copies the tensor to be added into the output.
-  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean, output, std, 1);
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean + mean * std instead of mean + output * std
@@ -304,7 +312,7 @@ Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
 
 template<template<typename> class exponential_kernel, typename RNG>
 Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> gen) {
-  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   exponential_kernel<RNG>()(iter, lambda, gen);
   return self;
@@ -314,6 +322,10 @@ Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> 
 
 template<template<typename> class cauchy_kernel, typename RNG>
 Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
+  // TODO: instead of variable name 'sigma', use 'gamma' or 'scale'
+  // the variance, squared sigma, is undefined for cauchy distribution
+  TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Cauchy distribution is a continuous probability distribution. dtype must be a floating point but you specified ", self.dtype());
   auto iter = TensorIterator::borrowing_nullary_op(self);
   cauchy_kernel<RNG>()(iter, median, sigma, gen);
   return self;

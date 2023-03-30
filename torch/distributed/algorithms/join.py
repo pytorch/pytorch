@@ -6,6 +6,7 @@ from typing import Any, List, NamedTuple, Optional, Type
 import torch
 import torch.distributed as dist
 
+__all__ = ['JoinHook', 'Joinable', 'Join']
 
 class JoinHook():
     r"""
@@ -49,7 +50,7 @@ class Joinable(ABC):
     """
     @abstractmethod
     def __init__(self):
-        super(Joinable, self).__init__()
+        super().__init__()
         self._join_config = _JoinConfig.construct_disabled_join_config()
 
     @abstractmethod
@@ -149,6 +150,7 @@ class Join():
         >>> import torch
         >>> import torch.distributed as dist
         >>> import torch.multiprocessing as mp
+        >>> # xdoctest: +SKIP
         >>> import torch.nn.parallel.DistributedDataParallel as DDP
         >>> import torch.distributed.optim.ZeroRedundancyOptimizer as ZeRO
         >>> from torch.distributed.algorithms.join import Join

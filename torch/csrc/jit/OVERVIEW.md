@@ -58,6 +58,8 @@ Sections start with a reference to the source file where the code related to the
     - [Derivative Preserving Optimization](#derivative-preserving-optimization)
     - [Post-derivative optimization](#post-derivative-optimization)
     - [Derivate Splitting](#derivate-splitting)
+    - [Fusers](#fusers)
+    - [Disabling Optimizations](#disabling-optimizations)
   - [JIT Logging](#jit-logging)
   - [JIT Optimization Limiter](#jit-optimization-limiter)
   - [DifferentiableGraphOp](#differentiablegraphop)
@@ -590,7 +592,7 @@ The Environment object tracks the assignment of variable names during compilatio
 
 [frontend/convert_to_ssa.cpp](frontend/convert_to_ssa.cpp)
 
-As explained in the [Block](#Block) section, the IR is represented in structured control flow composed of ifs & loops. This makes it easier to optimize and lower to other compilers which do not support unstructured control flow. We lower Python control flow (break, continue, return) to this simplified form. We do closing over any variables in the environment, so we are able to convert all writes and reads from the environment directly to SSA form.
+As explained in the [Block](#block) section, the IR is represented in structured control flow composed of ifs & loops. This makes it easier to optimize and lower to other compilers which do not support unstructured control flow. We lower Python control flow (break, continue, return) to this simplified form. We do closing over any variables in the environment, so we are able to convert all writes and reads from the environment directly to SSA form.
 
 Conversion to SSA works in multiple parts.
 - First, we add loads and stores to control flow operators (ifs & loops).
@@ -871,7 +873,7 @@ graph(%x : Tensor,
 
 [runtime/graph_executor.cpp](runtime/graph_executor.cpp)
 
-All program execution starts with a graph executor. Its responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the `Graph` or subcomponents of it off to an interpreter to actually run.
+All program execution starts with a graph executor. It's responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the `Graph` or subcomponents of it off to an interpreter to actually run.
 
 
 In this section, we use a running example program that computes one step of an LSTM to show how the graph is transformed:
@@ -892,7 +894,7 @@ def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
     return hy, cy
 ```
 
-After going through the the frontend, we start with this unoptimized graph:
+After going through the frontend, we start with this unoptimized graph:
 
 ```
 graph(%x : Tensor,
@@ -1166,6 +1168,61 @@ with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *),
   return (%hy, %cy)
 ```
 
+### Fusers ###
+
+As mentioned in the [Post-derivative optimization](#post-derivative-optimization) section, one of the
+available optimizations is _fusion_, which merges operator kernels and compiles new kernels. Fusion
+has two benefits: first, it reduces dispatcher overhead by combining multiple operator calls into a
+single call to the fused kernel; and second, on GPU it can reduce the number of reads and writes to
+global GPU memory, which can be a significant portion of the runtime for pointwise operators.
+
+The current default fuser on NVIDIA GPUs is
+[NVFuser](https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/codegen/cuda/README.md), while other use cases use
+[NNC](https://github.com/pytorch/pytorch/tree/master/torch/csrc/jit/tensorexpr) as a fuser.
+
+Since fusers rely on specialized information that is only available at runtime - such as dtype,
+device, and shape - they are only applied after the first invocation of a torchscript function or
+module. As a result, the first invocation of a torchscript function can sometimes behave slightly
+differently from subsequent invocations.
+
+To enable/disable different fusers, refer to the settings below. These settings apply globally in
+the process in which they are set. Different fusers may excel in different scenarios, and disabling
+or switching the fuser could also provide a temporary fix in case of bugs.
+
+**Python APIs:**
+
+
+| Feature | Python API |
+|---|---|
+| NNC enable/disable | `torch._C._jit_set_texpr_fuser_enabled()` |
+| NNC on CPU | `torch._C._jit_override_can_fuse_on_cpu()` |
+| NNC on GPU | `torch._C._jit_override_can_fuse_on_gpu()` |
+| NNC context manager | `with torch.jit.fuser("fuser1"):` |
+| NVFuser enable/disable | `torch._C._jit_set_nvfuser_enabled()` |
+| NVFuser context manager | `with torch.jit.fuser("fuser2")` |
+| oneDNN Graph on CPU | `torch._C._jit_set_llga_enabled(True)` |
+| oneDNN Graph context manager | `with torch.jit.fuser("fuser3"):` |
+
+**C++ APIs:**
+
+| Feature | C++ API | Header file |
+|---|---|---|
+| NNC enable/disable | `torch::jit::setTensorExprFuserEnabled(bool);` | [here](https://github.com/pytorch/pytorch/blob/1a7e560adecb0192f69f4d05b990800b60dc380b/torch/csrc/jit/passes/tensorexpr_fuser.h#L22) |
+| NNC on CPU | `torch::jit::overrideCanFuseOnCPU(bool);` | [here](https://github.com/pytorch/pytorch/blob/1a7e560adecb0192f69f4d05b990800b60dc380b/torch/csrc/jit/codegen/fuser/interface.h#L28-L29) |
+| NNC on GPU | `torch::jit::overrideCanFuseOnGPU(bool);` | [here](https://github.com/pytorch/pytorch/blob/1a7e560adecb0192f69f4d05b990800b60dc380b/torch/csrc/jit/codegen/fuser/interface.h#L28-L29) |
+| NVFuser enable/disable | `torch::jit::fuser::cuda::setEnabled(bool);` | [here](https://github.com/pytorch/pytorch/blob/1a7e560adecb0192f69f4d05b990800b60dc380b/torch/csrc/jit/codegen/cuda/interface.h#L56) |
+
+### Disabling Optimizations ###
+
+To completely disable the runtime optimizations and only run the minimum optimizations necessary,
+the following commands can be used to globally (in a process) disable the majority of runtime
+optimizations. This will disable JIT autodiff (instead it will rely on the default autograd
+implementation provided in eager mode) as well as the fusers and some other runtime optimizations.
+
+* Python: `torch._C._get_graph_executor_optimize(False)`
+* C++: `torch::jit::setGraphExecutorOptimize(false);`
+* C++ header: [here](https://github.com/pytorch/pytorch/blob/1a7e560adecb0192f69f4d05b990800b60dc380b/torch/csrc/jit/python/update_graph_executor_opt.h#L5)
+
 ## JIT Logging ##
 
 [jit_log.h](jit_log.h)
@@ -1351,7 +1408,7 @@ TODO: differentiation, symbolic autograd, fusion, operators
 We attempt to reduce the number of `prim::Guard` nodes as these nodes may interfere with optimizations.
 * First, `GuardElimination::moveGuardsToDefs` tries to move `prim::Guards` to their definitions, so the guards guarding the same `Tensor` follow the definition directly or another guard on the same `Tensor`.
 * This ordering allows us to **coalesce** (done in `GuardElimination::coalesceGuards`) multiple guards into a single one.
-* After guards are  **coaslesced** , `GuardElimination::eliminateGuards` attempts to eliminate more guards as follows: it inspects each operation and its inputs. It checks if inputs to the operation are guarded and also if the operation produces the consistent shapes given the guarded inputs. For example, if two inputs to `add` are guaranteed to be of shape `(2, 3)`, the output shape will also always be `(2, 3)`. If this property holds, we are allowed to remove the guard guarding operation's output.
+* After guards are  **coalesced** , `GuardElimination::eliminateGuards` attempts to eliminate more guards as follows: it inspects each operation and its inputs. It checks if inputs to the operation are guarded and also if the operation produces the consistent shapes given the guarded inputs. For example, if two inputs to `add` are guaranteed to be of shape `(2, 3)`, the output shape will also always be `(2, 3)`. If this property holds, we are allowed to remove the guard guarding operation's output.
 
 Lastly, we need to be handle cases when the assumptions about `Tensor` shapes fail at runtime. To handle guard failures, we need to be able to run the original code i.e. the code  that doesn't rely on assumptions about shapes. As guards can be inserted and moved (by Optimizer) at/to arbitrary points in a computational graph, we need to be able to resume execution starting from those arbitrary points onward.
 

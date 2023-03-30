@@ -6,10 +6,13 @@
 #pragma once
 
 #include <c10/core/MemoryFormat.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -175,7 +178,7 @@ class TORCH_API Var : public ExprNode<Var> {
   }
 
   void set_name_hint(std::string&& name) {
-    name_hint_ = name;
+    name_hint_ = std::move(name);
   }
 
   Var(std::string name_hint, Dtype dtype)
@@ -185,9 +188,9 @@ class TORCH_API Var : public ExprNode<Var> {
   std::string name_hint_;
 };
 
-std::vector<ExprPtr> make_contiguous_strides(
+TORCH_API std::vector<ExprPtr> make_contiguous_strides(
     const std::vector<ExprHandle>& dims);
-std::vector<ExprPtr> make_channels_last_strides(
+TORCH_API std::vector<ExprPtr> make_channels_last_strides(
     const std::vector<ExprHandle>& dims);
 
 class TORCH_API Buf : public ExprNode<Buf> {
@@ -214,7 +217,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return base_handle_;
   }
   void set_base_handle(VarPtr base_handle) {
-    base_handle_ = base_handle;
+    base_handle_ = std::move(base_handle);
   }
 
   const std::string& name_hint() const {
@@ -235,10 +238,10 @@ class TORCH_API Buf : public ExprNode<Buf> {
       : Buf(alloc<Var>(name_hint, kHandle),
             dims,
             dtype,
-            initializer,
-            strides,
-            qscale,
-            qzero) {}
+            std::move(initializer),
+            std::move(strides),
+            std::move(qscale),
+            std::move(qzero)) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Buf(VarPtr var,
@@ -262,7 +265,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return dims_;
   }
   void set_dims(std::vector<ExprPtr> dims) {
-    dims_ = dims;
+    dims_ = std::move(dims);
   }
 
   std::vector<ExprPtr> strides() const {
@@ -270,7 +273,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
 
   void set_strides(std::vector<ExprPtr> strides) {
-    strides_ = strides;
+    strides_ = std::move(strides);
   }
 
   ExprPtr initializer() const {
@@ -286,11 +289,11 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
 
   void set_qzero(ExprPtr qzero) {
-    qzero_ = qzero;
+    qzero_ = std::move(qzero);
   }
 
   void set_qscale(ExprPtr qscale) {
-    qscale_ = qscale;
+    qscale_ = std::move(qscale);
   }
 
   bool hasConstantDims() const {
@@ -323,7 +326,6 @@ class TORCH_API Buf : public ExprNode<Buf> {
   bool is_cont_with(int cur_dim, int adjacent_dim) const;
   bool is_stride_one(int cur_dim) const;
 
- private:
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
   std::vector<ExprPtr> strides_;
@@ -353,7 +355,7 @@ class TORCH_API BufHandle : public ExprHandle {
 
   explicit BufHandle(Dtype dtype) : ExprHandle(Buf::make("_", {}, dtype)) {}
 
-  explicit BufHandle(BufPtr node) : ExprHandle(node) {}
+  explicit BufHandle(BufPtr node) : ExprHandle(std::move(node)) {}
   BufPtr node() const {
     return static_to<Buf>(ExprHandle::node());
   }
@@ -420,7 +422,7 @@ class TORCH_API VarHandle : public ExprHandle {
   VarHandle(const std::string& name_hint, Dtype dtype)
       : ExprHandle(Var::make(name_hint, dtype)) {}
 
-  explicit VarHandle(VarPtr node) : ExprHandle(node) {}
+  explicit VarHandle(VarPtr node) : ExprHandle(std::move(node)) {}
 
   VarPtr node() const {
     return static_to<Var>(ExprHandle::node());

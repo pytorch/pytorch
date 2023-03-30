@@ -1,17 +1,29 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/packed_params.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/onednn_utils.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_saturate_weight_to_fp16.h>
+#include <ATen/ops/_saturate_weight_to_fp16_native.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 #include <c10/util/irange.h>
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 int register_linear_params();
@@ -152,7 +164,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
   at::native::initQNNPACK();
 
   // We set the pre-packed linear weights to nullptr below as we call pre-pack
-  // during the first invocation of operator run. Refer to qlinear.cpp for more
+  // during the first invocation of operator run. Refer to Linear.cpp for more
   // details. TODO Update to actually call pre-pack here once bias is removed
   // from pre-packing step.
   auto wt_ptr = c10::make_intrusive<PackedLinearWeightsQnnp>(
@@ -238,7 +250,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
                                                              dnnl::memory::data_type::u8);
   ideep::tensor exp_wgt(w_desc);
   exp_wgt.feed_from(wgt);
-  ideep::tensor * packed_weight_p = new ideep::tensor(exp_wgt);
+  ideep::tensor * packed_weight_p = new ideep::tensor(std::move(exp_wgt));
   packed_weight_p->set_scale(wgt_scales);
   packed_weight_p->set_zero_point(wgt_zero_points);
   std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
@@ -288,7 +300,8 @@ class QLinearPackWeightInt8 final {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
     }
 #endif
@@ -320,7 +333,8 @@ class QLinearPackWeightFp16 final {
     // temporarily convert weight back to fp32, needs to be fixed
     // after fbgemm fixes the interface for their prepacking op (take fp16 input0
     weight = weight.to(ScalarType::Float);
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeightFp16::prepack(
           std::move(weight), std::move(bias));
     }
@@ -367,20 +381,24 @@ class QLinearPackWeightFp16Legacy final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack"), TORCH_FN(QLinearPackWeightInt8::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_legacy"), TORCH_FN(QLinearPackWeightInt8Legacy::run));
 }
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_fp16"), TORCH_FN(QLinearPackWeightFp16::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_fp16_legacy"), TORCH_FN(QLinearPackWeightFp16Legacy::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack"), TORCH_FN(QLinearPackWeightInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16"), TORCH_FN(QLinearPackWeightFp16::run));
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16_legacy"), TORCH_FN(QLinearPackWeightFp16Legacy::run));
 }

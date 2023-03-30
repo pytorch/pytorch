@@ -209,14 +209,14 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   // schema to editing this list here. These cases should only be things
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
-      prim::Constant,      prim::Uninitialized, prim::fork,
-      prim::ListConstruct, prim::DictConstruct, prim::ListUnpack,
-      prim::Print,         prim::PythonOp,      prim::TupleConstruct,
-      prim::TupleIndex,    prim::TupleSlice,    prim::TupleUnpack,
-      prim::CreateObject,  prim::GetAttr,       prim::SetAttr,
-      prim::CallFunction,  prim::isinstance,    prim::unchecked_cast,
-      prim::tolist,        prim::rpc_async,     prim::rpc_sync,
-      prim::rpc_remote};
+      prim::Constant,       prim::Uninitialized, prim::fork,
+      prim::awaitable,      prim::ListConstruct, prim::DictConstruct,
+      prim::ListUnpack,     prim::Print,         prim::PythonOp,
+      prim::TupleConstruct, prim::TupleIndex,    prim::TupleSlice,
+      prim::TupleUnpack,    prim::CreateObject,  prim::GetAttr,
+      prim::SetAttr,        prim::CallFunction,  prim::isinstance,
+      prim::unchecked_cast, prim::tolist,        prim::rpc_async,
+      prim::rpc_sync,       prim::rpc_remote};
 
   // WARNING: by adding a value to this set, you are asserting that your
   // primitive is only ever added during optimization and does not need
@@ -246,6 +246,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::StaticSubgraph, // optimization pass adds it
       prim::ConstantMKLDNNTensor, // optimization pass adds it
       prim::BroadcastMKLDNNTensors, // optimization pass adds it
+      prim::oneDNNFusionGroup, // optimization pass adds it
+      prim::oneDNNFusionGuard, // optimization pass adds it
       prim::StaticRuntimeCopyOuts, // used in SR only
       prim::Load, // used in interpreter only
       prim::MMTreeReduce, // used as an optimization
@@ -282,6 +284,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Loop,
       prim::FusionGroup,
       prim::CudaFusionGroup,
+      prim::oneDNNFusionGroup,
       prim::DifferentiableGraph,
       prim::TensorExprGroup,
       prim::TensorExprDynamicGroup,
@@ -311,6 +314,9 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::ConstantMKLDNNTensor,
       prim::BroadcastMKLDNNTensors,
       prim::fork,
+      prim::awaitable,
+      prim::awaitable_nowait,
+      prim::awaitable_wait,
       prim::CreateObject,
       prim::AutogradAdd,
       prim::GetAttr,

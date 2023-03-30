@@ -38,7 +38,7 @@ std::string DynamicType::str() const {
   std::string ret = "Dynamic<";
   ret += std::to_string(static_cast<DynamicTypeBits>(tag_));
   ret += ">";
-  if (tag_ != Tag::Class && arguments_.elems.size() > 0) {
+  if (tag_ != Tag::Class && !arguments_.elems.empty()) {
     ret += "[";
     for (const auto& arg : arguments_.elems) {
       if (arg.label) {
@@ -123,6 +123,7 @@ DynamicType::DynamicType(const Type& other) : SharedType(DynamicType::Kind) {
     tag_ = Tag::T;          \
     break;
     FORALL_DYNAMIC_TYPES(CASE_TYPE)
+    FORALL_DYNAMIC_TYPES_FAKE(CASE_TYPE)
 #undef CASE_TYPE
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported dynamic type: ", other.str());
@@ -210,6 +211,9 @@ TypeKind DynamicType::dynamicKind() const {
   case Tag::T:              \
     return TypeKind::T##Type;
     FORALL_DYNAMIC_TYPES(CASE_TYPE)
+    // FORALL_DYNAMIC_TYPES_FAKE is intentionally omitted here
+    // as these dynamic types map to the same tag, so they always
+    // resolve to integers
 #undef CASE_TYPE
     default:
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
@@ -227,8 +231,6 @@ TypePtr DynamicType::fallback() const {
       return BoolType::get();
     case Tag::Int:
       return IntType::get();
-    case Tag::SymInt:
-      return SymIntType::get();
     case Tag::Float:
       return FloatType::get();
     case Tag::Complex:
@@ -241,11 +243,13 @@ TypePtr DynamicType::fallback() const {
       return ListType::create(arguments_.elems[0].ty->fallback());
     case Tag::Tuple: {
       std::vector<TypePtr> fallbacks;
+      fallbacks.reserve(arguments_.elems.size());
       for (const auto& elem : arguments_.elems) {
         fallbacks.push_back(elem.ty->fallback());
       }
       if (name_) {
         std::vector<c10::string_view> fields;
+        fields.reserve(arguments_.elems.size());
         for (const auto& elem : arguments_.elems) {
           fields.emplace_back(*elem.label);
         }
@@ -289,6 +293,8 @@ TypePtr DynamicType::fallback() const {
       return RRefType::create(arguments_.elems[0].ty->fallback());
     case Tag::Future:
       return FutureType::create(arguments_.elems[0].ty->fallback());
+    case Tag::Await:
+      return AwaitType::create(arguments_.elems[0].ty->fallback());
     case Tag::Any:
       return AnyType::get();
   }
@@ -322,8 +328,6 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
       return DynamicTypeTrait<ComplexType>::getBaseType();
     case Tag::Int:
       return DynamicTypeTrait<IntType>::getBaseType();
-    case Tag::SymInt:
-      return DynamicTypeTrait<SymIntType>::getBaseType();
     case Tag::Bool:
       return DynamicTypeTrait<BoolType>::getBaseType();
     case Tag::String:
@@ -385,6 +389,7 @@ ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
 #define DYNAMIC_TYPE_TAG_VALUE(NAME, _, __) \
   constexpr bool DynamicTypeTrait<NAME##Type>::isBaseType;
 FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
+FORALL_DYNAMIC_TYPES_FAKE(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
 
 } // namespace c10

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/hash_provider.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -7,9 +8,11 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
+#include <utility>
+
 /* IR Simplification
  *
- * Simplfies expressions in two stages:
+ * Simplifies expressions in two stages:
  *  1. Recursively traverse the map combining similar operations into Terms
  * (interacted via Multiplication) and Polynomials (interacted via Addition). We
  * reorder the components of each Term or Polynomial into a consistent order to
@@ -29,7 +32,7 @@ Dtype promoteTypesVec(ExprPtr s, std::vector<ExprType>& v) {
   Dtype t = s->dtype();
   bool first = true;
 
-  for (auto e : v) {
+  for (const auto& e : v) {
     if (first) {
       t = Dtype(t.scalar_type(), e->dtype().lanes());
       first = false;
@@ -46,7 +49,7 @@ Dtype promoteTypesVec(std::vector<ExprType>& v) {
   }
 
   Dtype t = v[0]->dtype();
-  for (auto e : v) {
+  for (const auto& e : v) {
     t = promoteTypes(t, e->dtype());
   }
   return t;
@@ -162,12 +165,12 @@ class Term : public ExprNode<Term> {
 
   void addComponent() {}
   void addComponent(ExprPtr e) {
-    variables_.push_back(e);
+    variables_.push_back(std::move(e));
   }
   template <class... Es>
-  void addComponent(ExprPtr e, Es... es) {
-    addComponent(e);
-    addComponent(es...);
+  void addComponent(ExprPtr e, Es&&... es) {
+    addComponent(std::move(e));
+    addComponent(std::forward<Es>(es)...);
   }
 
   // Sort by hash to normalize order of components.
@@ -239,12 +242,12 @@ class Polynomial : public ExprNode<Polynomial> {
   HashProvider& hasher_;
 
   void addTerm(TermPtr t) {
-    variables_.push_back(t);
+    variables_.push_back(std::move(t));
   }
   template <class... Ts>
-  void addTerm(TermPtr t, Ts... ts) {
-    addTerm(t);
-    addTerm(ts...);
+  void addTerm(TermPtr t, Ts&&... ts) {
+    addTerm(std::move(t));
+    addTerm(std::forward<Ts>(ts)...);
   }
 
   // Sort by hash to normalize order of terms.
@@ -302,12 +305,12 @@ class MaxTerm : public ExprNode<MaxTerm> {
 
   void addComponent() {}
   void addComponent(ExprPtr e) {
-    variables_.push_back(e);
+    variables_.push_back(std::move(e));
   }
   template <class... Es>
-  void addComponent(ExprPtr e, Es... es) {
-    addComponent(e);
-    addComponent(es...);
+  void addComponent(ExprPtr e, Es&&... es) {
+    addComponent(std::move(e));
+    addComponent(std::forward<Es>(es)...);
   }
 
   // Uniquefy the terms using their hash.
@@ -359,12 +362,12 @@ class MinTerm : public ExprNode<MinTerm> {
 
   void addComponent() {}
   void addComponent(ExprPtr e) {
-    variables_.push_back(e);
+    variables_.push_back(std::move(e));
   }
   template <class... Es>
-  void addComponent(ExprPtr e, Es... es) {
-    addComponent(e);
-    addComponent(es...);
+  void addComponent(ExprPtr e, Es&&... es) {
+    addComponent(std::move(e));
+    addComponent(std::forward<Es>(es)...);
   }
 
   // Uniquefy the terms using their hash.
@@ -372,7 +375,8 @@ class MinTerm : public ExprNode<MinTerm> {
 };
 
 // Context-sensitive IR simplification
-using VarBoundInfo = std::unordered_map<VarPtr, std::pair<ExprPtr, ExprPtr>>;
+using VarBoundInfo = std::unordered_map<VarPtr, analysis::Bound>;
+
 class TORCH_API SimplifierUnderContext : public IRMutator {
  public:
   ~SimplifierUnderContext() override = default;
@@ -381,6 +385,11 @@ class TORCH_API SimplifierUnderContext : public IRMutator {
 
   ExprPtr mutate(DivPtr v) override;
   ExprPtr mutate(ModPtr v) override;
+  ExprPtr mutate(CompareSelectPtr v) override;
+  ExprPtr mutate(IfThenElsePtr v) override;
+
+ protected:
+  bool getLoopBoundInfo(const ExprPtr& expr, analysis::Bound* loop_bound_info);
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

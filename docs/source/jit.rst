@@ -61,6 +61,8 @@ Creating TorchScript Code
     ScriptFunction
     freeze
     optimize_for_inference
+    enable_onednn_fusion
+    onednn_fusion_enabled
     set_fusion_strategy
     strict_fusion
     save
@@ -159,7 +161,7 @@ Example (using a traced module):
 
     class MyScriptModule(torch.nn.Module):
         def __init__(self):
-            super(MyScriptModule, self).__init__()
+            super().__init__()
             self.means = torch.nn.Parameter(torch.tensor([103.939, 116.779, 123.68])
                                             .resize_(1, 3, 1, 1))
             self.resnet = torch.jit.trace(torchvision.models.resnet18(),
@@ -591,7 +593,7 @@ Q: How do I store attributes on a :class:`ScriptModule`?
 
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.x = 2
 
             def forward(self):
@@ -670,7 +672,7 @@ The new usage looks like this:
 
     class Model(nn.Module):
         def __init__(self):
-            super(Model, self).__init__()
+            super().__init__()
             self.conv1 = nn.Conv2d(1, 20, 5)
             self.conv2 = nn.Conv2d(20, 20, 5)
 
@@ -777,7 +779,7 @@ Old API:
 
     class MyModule(torch.jit.ScriptModule):
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.my_dict = torch.jit.Attribute({}, Dict[str, int])
             self.my_int = torch.jit.Attribute(20, int)
 
@@ -793,7 +795,7 @@ New API:
         my_dict: Dict[str, int]
 
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             # This type cannot be inferred and must be specified
             self.my_dict = {}
 
@@ -818,7 +820,7 @@ Old API:
         __constants__ = ['my_constant']
 
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.my_constant = 2
 
         def forward(self):
@@ -829,19 +831,14 @@ New API:
 
 ::
 
-    try:
-        from typing_extensions import Final
-    except:
-        # If you don't have `typing_extensions` installed, you can use a
-        # polyfill from `torch.jit`.
-        from torch.jit import Final
+    from typing import Final
 
     class MyModule(torch.nn.Module):
 
         my_constant: Final[int]
 
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.my_constant = 2
 
         def forward(self):
@@ -871,6 +868,11 @@ now supported.
         if flag:
             b = 2
         return x, b
+
+Fusion Backends
+~~~~~~~~~~~~~~~
+There are a couple of fusion backends available to optimize TorchScript execution. The default fuser on CPUs is NNC, which can perform fusions for both CPUs and GPUs. The default fuser on GPUs is NVFuser, which supports a wider range of operators and has demonstrated generated kernels with improved throughput. See the  `NVFuser documentation <https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/codegen/cuda/README.md>`_ for more details on usage and debugging.
+
 
 References
 ~~~~~~~~~~

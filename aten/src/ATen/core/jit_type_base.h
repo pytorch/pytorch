@@ -3,11 +3,13 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/type_ptr.h>
-#include <ATen/core/SymInt.h>
-#include <ATen/core/SymIntArrayRef.h>
+#include <c10/core/SymInt.h>
+#include <c10/core/SymFloat.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
@@ -28,6 +30,7 @@ namespace c10 {
   _(FloatType)              \
   _(ComplexType)            \
   _(FutureType)             \
+  _(AwaitType)              \
   _(RRefType)               \
   _(IntType)                \
   _(NoneType)               \
@@ -45,12 +48,14 @@ namespace c10 {
   _(CapsuleType)            \
   _(InterfaceType)          \
   _(QSchemeType)            \
-  _(LayoutType)             \
   _(ScalarTypeType)         \
+  _(LayoutType)             \
+  _(MemoryFormatType)       \
   _(AnyListType)            \
   _(AnyTupleType)           \
   _(AnyClassType)           \
   _(SymIntType)             \
+  _(SymFloatType)           \
   _(UnionType)              \
   _(DynamicType)
 
@@ -97,8 +102,9 @@ TORCH_DECLARE_SINGLETON(DeviceObjType);
 TORCH_DECLARE_SINGLETON(StreamObjType);
 TORCH_DECLARE_SINGLETON(CapsuleType);
 TORCH_DECLARE_SINGLETON(PyObjectType);
-TORCH_DECLARE_SINGLETON(LayoutType);
 TORCH_DECLARE_SINGLETON(ScalarTypeType);
+TORCH_DECLARE_SINGLETON(LayoutType);
+TORCH_DECLARE_SINGLETON(MemoryFormatType);
 TORCH_DECLARE_SINGLETON(AnyListType);
 TORCH_DECLARE_SINGLETON(AnyTupleType);
 TORCH_DECLARE_SINGLETON(AnyClassType);
@@ -245,7 +251,7 @@ struct TORCH_API Type {
     // nvcc; see comment in destroy() below.
     struct SharedPtrWrapper {
       SharedPtrWrapper(std::shared_ptr<T> &&x)
-          : repr_(x) {}
+          : repr_(std::move(x)) {}
       std::shared_ptr<T> repr_;
     };
     union Repr {
@@ -447,7 +453,7 @@ struct TORCH_API Type {
         return *renamed;
       }
     }
-    return annotation_str_impl(printer);
+    return annotation_str_impl(std::move(printer));
   }
   std::string annotation_str() const {
     // Overload instead of define a default value for `printer` to help

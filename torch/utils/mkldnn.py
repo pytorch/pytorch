@@ -3,7 +3,7 @@ import torch
 
 class MkldnnLinear(torch.jit.ScriptModule):
     def __init__(self, dense_module, dtype):
-        super(MkldnnLinear, self).__init__()
+        super().__init__()
         self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
         if dense_module.bias is not None:
             # Bias can be fp32 or bf16 for OneDNN bf16 path, but for good accuracy,
@@ -38,7 +38,7 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
     __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
     def __init__(self, dense_module):
-        super(_MkldnnConvNd, self).__init__()
+        super().__init__()
 
         self.stride = dense_module.stride
         self.padding = dense_module.padding
@@ -73,7 +73,7 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
 
 class MkldnnConv1d(_MkldnnConvNd):
     def __init__(self, dense_module, dtype):
-        super(MkldnnConv1d, self).__init__(dense_module)
+        super().__init__(dense_module)
 
         self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
 
@@ -86,7 +86,7 @@ class MkldnnConv1d(_MkldnnConvNd):
 
 class MkldnnConv2d(_MkldnnConvNd):
     def __init__(self, dense_module, dtype):
-        super(MkldnnConv2d, self).__init__(dense_module)
+        super().__init__(dense_module)
 
         self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv2d_weight(
             dense_module.weight.to_mkldnn(dtype),
@@ -108,7 +108,7 @@ class MkldnnConv2d(_MkldnnConvNd):
 
 class MkldnnConv3d(_MkldnnConvNd):
     def __init__(self, dense_module, dtype):
-        super(MkldnnConv3d, self).__init__(dense_module)
+        super().__init__(dense_module)
 
         self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv3d_weight(
             dense_module.weight.to_mkldnn(dtype),
@@ -133,7 +133,7 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
     __constants__ = ['exponential_average_factor', 'eps']
 
     def __init__(self, dense_module):
-        super(MkldnnBatchNorm, self).__init__()
+        super().__init__()
 
         assert(not dense_module.training)
         assert(dense_module.track_running_stats)
@@ -180,6 +180,26 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
             False,  # cuda_enabled
         )
 
+class MkldnnPrelu(torch.jit.ScriptModule):
+    def __init__(self, dense_module, dtype):
+        super().__init__()
+        self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
+
+    @torch.jit.script_method
+    def __getstate__(self):
+        return (self.weight.to_dense(), self.training)
+
+    @torch.jit.script_method
+    def __setstate__(self, state):
+        self.weight = state[0].to_mkldnn()
+        self.training = state[1]
+
+    @torch.jit.script_method
+    def forward(self, x):
+        x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
+        y_mkldnn = torch.prelu(x_mkldnn, self.weight)
+        y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
+        return y
 
 def to_mkldnn(module, dtype=torch.float):
     assert dtype in [torch.float, torch.bfloat16], \
@@ -194,10 +214,12 @@ def to_mkldnn(module, dtype=torch.float):
             return MkldnnConv2d(m, d)
         elif isinstance(m, torch.nn.Conv3d):
             return MkldnnConv3d(m, d)
-        elif isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm3d):
+        elif isinstance(m, (torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
             # For batchnorm bf16 path, OneDNN requires weight and bias need fp32 dtype.
             # so it doesn't need dtype argument.
             return MkldnnBatchNorm(m)
+        elif isinstance(m, torch.nn.PReLU):
+            return MkldnnPrelu(m, d)
         else:
             return m
 

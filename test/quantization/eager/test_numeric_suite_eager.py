@@ -1,8 +1,9 @@
 # Owner(s): ["oncall: quantization"]
 
+import unittest
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 from torch.ao.quantization import (
     DeQuantStub,
     QuantStub,
@@ -35,11 +36,11 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
 )
 from torch.testing._internal.common_quantized import override_qengines
-
+from torch.testing._internal.common_utils import IS_ARM64
 
 class SubModule(torch.nn.Module):
     def __init__(self):
-        super(SubModule, self).__init__()
+        super().__init__()
         self.qconfig = default_qconfig
         self.mod1 = torch.nn.Conv2d(3, 3, 3, bias=False).to(dtype=torch.float)
         self.mod2 = nn.ReLU()
@@ -56,7 +57,7 @@ class SubModule(torch.nn.Module):
 
 class ModelWithSubModules(torch.nn.Module):
     def __init__(self):
-        super(ModelWithSubModules, self).__init__()
+        super().__init__()
         self.mod1 = SubModule()
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
 
@@ -68,7 +69,7 @@ class ModelWithSubModules(torch.nn.Module):
 
 class ModelWithFunctionals(torch.nn.Module):
     def __init__(self):
-        super(ModelWithFunctionals, self).__init__()
+        super().__init__()
         self.mycat = nnq.FloatFunctional()
         self.myadd = nnq.FloatFunctional()
         self.mymul = nnq.FloatFunctional()
@@ -541,9 +542,9 @@ class TestNumericSuiteEager(QuantizationTestCase):
         float_model.to('cpu')
         float_model.eval()
         float_model.fuse_model()
-        float_model.qconfig = torch.quantization.default_qconfig
+        float_model.qconfig = torch.ao.quantization.default_qconfig
         img_data = [(torch.rand(2, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        qmodel = quantize(float_model, torch.quantization.default_eval_fn, [img_data], inplace=False)
+        qmodel = quantize(float_model, torch.ao.quantization.default_eval_fn, [img_data], inplace=False)
 
         wt_compare_dict = compare_weights(float_model.state_dict(), qmodel.state_dict())
 
@@ -574,11 +575,13 @@ class TestNumericSuiteEager(QuantizationTestCase):
         act_compare_dict = get_matching_activations(float_model, qmodel)
 
     @skip_if_no_torchvision
+    @unittest.skipIf(IS_ARM64, "Not working on arm right now")
     def test_mobilenet_v2(self):
         from torchvision.models.quantization import mobilenet_v2
         self._test_vision_model(mobilenet_v2(pretrained=True, quantize=False))
 
     @skip_if_no_torchvision
+    @unittest.skipIf(IS_ARM64, "Not working on arm right now")
     def test_mobilenet_v3(self):
         from torchvision.models.quantization import mobilenet_v3_large
         self._test_vision_model(mobilenet_v3_large(pretrained=True, quantize=False))

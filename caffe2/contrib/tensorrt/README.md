@@ -15,4 +15,4 @@ For further information please explore `caffe2/python/trt/test_trt.py` test show
 
 ## Questions and Feedback
 
-Please use Github issues (https://github.com/pytorch/pytorch/issues) to ask questions, report bugs, and request new features.
+Please use GitHub issues (https://github.com/pytorch/pytorch/issues) to ask questions, report bugs, and request new features.

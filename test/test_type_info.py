@@ -63,6 +63,7 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(xinfo.min, -3.38953e+38)
         self.assertEqual(xinfo.eps, 0.0078125)
         self.assertEqual(xinfo.tiny, 1.17549e-38)
+        self.assertEqual(xinfo.tiny, xinfo.smallest_normal)
         self.assertEqual(xinfo.resolution, 0.01)
         self.assertEqual(xinfo.dtype, "bfloat16")
         torch.set_default_dtype(x.dtype)

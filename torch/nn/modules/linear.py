@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -7,6 +8,14 @@ from .. import functional as F
 from .. import init
 from .module import Module
 from .lazy import LazyModuleMixin
+
+
+__all__ = [
+    'Bilinear',
+    'Identity',
+    'LazyLinear',
+    'Linear',
+]
 
 
 class Identity(Module):
@@ -29,8 +38,8 @@ class Identity(Module):
         torch.Size([128, 20])
 
     """
-    def __init__(self, *args, **kwargs):
-        super(Identity, self).__init__()
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__()
 
     def forward(self, input: Tensor) -> Tensor:
         return input
@@ -40,6 +49,8 @@ class Linear(Module):
     r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     Args:
         in_features: size of each input sample
@@ -79,7 +90,7 @@ class Linear(Module):
     def __init__(self, in_features: int, out_features: int, bias: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(Linear, self).__init__()
+        super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.weight = Parameter(torch.empty((out_features, in_features), **factory_kwargs))
@@ -167,7 +178,7 @@ class Bilinear(Module):
     def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(Bilinear, self).__init__()
+        super().__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features
         self.out_features = out_features

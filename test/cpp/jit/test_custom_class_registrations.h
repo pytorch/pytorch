@@ -4,6 +4,11 @@
 namespace torch {
 namespace jit {
 
+struct ScalarTypeClass : public torch::CustomClassHolder {
+  ScalarTypeClass(at::ScalarType s) : scalar_type_(s) {}
+  at::ScalarType scalar_type_;
+};
+
 template <class T>
 struct MyStackClass : torch::CustomClassHolder {
   std::vector<T> stack_;

@@ -6,7 +6,7 @@ If you are adding a new entry/functionality, please, add it to the
 appropriate files under `torch/ao/quantization/fx/`, while adding an import statement
 here.
 """
-from torch.ao.quantization.quantization_types import (
+from torch.ao.quantization.utils import (
     Pattern,
     QuantizerCls
 )

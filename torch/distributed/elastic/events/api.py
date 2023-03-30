@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Dict, Union, Optional
 
+__all__ = ['EventSource', 'Event', 'NodeState', 'RdzvEvent']
 
 EventMetadataValue = Union[str, int, float, bool, None]
 
@@ -33,7 +34,7 @@ class Event:
     Args:
         name: event name.
         source: the event producer, e.g. agent or worker
-        timestamp: timestamp in milliseconds when event occured.
+        timestamp: timestamp in milliseconds when event occurred.
         metadata: additional data that is associated with the event.
     """
 

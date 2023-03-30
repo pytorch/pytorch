@@ -1,11 +1,12 @@
 from numbers import Number
 import torch
-from torch._six import nan
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['FisherSnedecor']
 
 class FisherSnedecor(Distribution):
     r"""
@@ -13,6 +14,7 @@ class FisherSnedecor(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = FisherSnedecor(torch.tensor([1.0]), torch.tensor([2.0]))
         >>> m.sample()  # Fisher-Snedecor-distributed with df1=1 and df2=2
         tensor([ 0.2453])
@@ -34,7 +36,7 @@ class FisherSnedecor(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.df1.size()
-        super(FisherSnedecor, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(FisherSnedecor, _instance)
@@ -52,6 +54,12 @@ class FisherSnedecor(Distribution):
         df2 = self.df2.clone(memory_format=torch.contiguous_format)
         df2[df2 <= 2] = nan
         return df2 / (df2 - 2)
+
+    @property
+    def mode(self):
+        mode = (self.df1 - 2) / self.df1 * self.df2 / (self.df2 + 2)
+        mode[self.df1 <= 2] = nan
+        return mode
 
     @property
     def variance(self):

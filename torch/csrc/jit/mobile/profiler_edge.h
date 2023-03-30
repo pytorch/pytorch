@@ -24,6 +24,9 @@ class TORCH_API KinetoEdgeCPUProfiler {
    * @param with_flops: whether to report flops corresponding to the op.
    * @param with_modules: whether to report original python module
    *        hierarchy to which the op belongs.
+   * @param events
+   * @param adjust_vulkan_timestamps: whether to adjust vulkan timestamps from
+   *        query pool to align with cpu event times
    *
    * Usage pattern for this profiler must be as follows:
    *
@@ -55,7 +58,9 @@ class TORCH_API KinetoEdgeCPUProfiler {
       const bool profile_memory = false,
       const bool with_stack = false,
       const bool with_flops = false,
-      const bool with_modules = false);
+      const bool with_modules = false,
+      std::vector<std::string> events = {},
+      const bool adjust_vulkan_timestamps = false);
 
   const std::unique_ptr<torch::autograd::profiler::ProfilerResult>&
   disableProfiler();
@@ -67,6 +72,12 @@ class TORCH_API KinetoEdgeCPUProfiler {
       const int64_t debug_handle,
       const std::string& event_name,
       const std::string& backend_name);
+  void recordBackendMemoryEvent(
+      void* ptr,
+      int64_t alloc_size,
+      size_t total_allocated,
+      size_t total_reserved,
+      c10::Device device);
 
   ~KinetoEdgeCPUProfiler();
 
@@ -88,11 +99,20 @@ TORCH_API KinetoEdgeCPUProfiler* getCurrentEdgeProfiler();
     mobile::getCurrentEdgeProfiler()->recordBackendEvent(                    \
         start_time_us, end_time_us, debug_handle, event_name, backend_name); \
   }
+
+#define RECORD_BACKEND_MEMORY_EVENT_TO_EDGE_PROFILER(              \
+    ptr, alloc_size, total_allocated, total_reserved, device)      \
+  if (mobile::getCurrentEdgeProfiler()) {                          \
+    mobile::getCurrentEdgeProfiler()->recordBackendMemoryEvent(    \
+        ptr, alloc_size, total_allocated, total_reserved, device); \
+  }
 #else
 
 #define RECORD_BACKEND_EVENT_TO_EDGE_PROFILER( \
     start_time_us, end_time_us, debug_handle, event_name, backend_name)
 
+#define RECORD_BACKEND_MEMORY_EVENT_TO_EDGE_PROFILER( \
+    ptr, alloc_size, total_allocated, total_reserved, device)
 #endif
 } // namespace mobile
 } // namespace jit

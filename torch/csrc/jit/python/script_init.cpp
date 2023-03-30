@@ -2,6 +2,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/Device.h>
@@ -12,17 +13,20 @@
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/compatibility/backport.h>
 #include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
+#include <torch/csrc/jit/mobile/file_format.h>
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/quantization.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
-#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
@@ -31,6 +35,7 @@
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/graph_utils.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -58,6 +63,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -67,13 +73,11 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 
-using ResolutionCallback = std::function<py::object(std::string)>;
 using FunctionDefaults = std::unordered_map<std::string, py::object>;
 using ClassMethodDefaults = std::unordered_map<std::string, FunctionDefaults>;
 
@@ -109,7 +113,7 @@ struct PythonResolver : public Resolver {
       const SourceRange& loc) override {
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
-    if (obj.is(py::none())) {
+    if (obj.is_none()) {
       return nullptr;
     }
     return toSugaredValue(obj, m, loc);
@@ -133,7 +137,7 @@ struct PythonResolver : public Resolver {
     }
 
     if (isNamedTupleClass(obj)) {
-      return registerNamedTuple(obj, loc);
+      return registerNamedTuple(obj, loc, rcb_);
     }
 
     auto qualifiedName = c10::QualifiedName(
@@ -150,12 +154,13 @@ struct PythonResolver : public Resolver {
     }
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
-    if (obj.is(py::none())) {
+    if (obj.is_none()) {
       return nullptr;
     }
 
-    auto annotation_type = py::module::import("torch.jit.annotations")
-                               .attr("try_ann_to_type")(obj, loc);
+    auto annotation_type =
+        py::module::import("torch.jit.annotations")
+            .attr("try_ann_to_type")(obj, loc, py::cpp_function(rcb_));
     if (!annotation_type.is_none()) {
       return py::cast<TypePtr>(annotation_type);
     }
@@ -363,7 +368,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const ResolutionCallback& rcb,
     const FunctionDefaults& implementation_defaults,
     const py::object& signature) {
-  if (signature.is(py::none())) {
+  if (signature.is_none()) {
     throw ErrorReport(overload_decl.range())
         << "Must explicitly add type annotations to overloaded functions";
   }
@@ -433,88 +438,6 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
  private:
   std::shared_ptr<ConcreteModuleType> concreteType_;
 };
-
-static TypePtr getTensorType(const at::Tensor& t, bool complete) {
-  auto r = TensorType::create(t);
-  if (!complete) {
-    r = r->dimensionedOnly();
-  }
-  return r;
-}
-
-static TypePtr inferShapeAndTypeForInput(
-    TypePtr input_type,
-    Stack::const_iterator& s_iter,
-    const Stack::const_iterator& s_iter_end,
-    bool complete);
-
-static TupleTypePtr getTupleTensorType(
-    Stack::const_iterator& s_iter,
-    const Stack::const_iterator& s_iter_end,
-    const TypePtr& tupleType,
-    bool complete) {
-  TORCH_INTERNAL_ASSERT(tupleType->kind() == TupleType::Kind);
-  std::vector<TypePtr> types;
-  for (const auto& subType : tupleType->containedTypes()) {
-    TORCH_INTERNAL_ASSERT(s_iter != s_iter_end);
-    types.emplace_back(
-        inferShapeAndTypeForInput(subType, s_iter, s_iter_end, complete));
-  }
-  return TupleType::create(types);
-}
-
-static TypePtr inferShapeAndTypeForInput(
-    TypePtr input_type,
-    Stack::const_iterator& s_iter,
-    const Stack::const_iterator& s_iter_end,
-    bool complete) {
-  if (input_type->kind() == TupleType::Kind) {
-    return getTupleTensorType(s_iter, s_iter_end, input_type, complete);
-  } else if (input_type->kind() == TensorType::Kind) {
-    auto type = getTensorType(s_iter->toTensor(), complete);
-    s_iter++;
-    return type;
-  } else {
-    // Primitive type, keep as is.
-    s_iter++;
-    return input_type;
-  }
-}
-
-static void setInputTensorTypes(
-    Graph& g,
-    const Stack& stack,
-    bool complete,
-    const std::vector<int>& param_count_list = {}) {
-  at::ArrayRef<Value*> input_values = g.inputs();
-  auto s_iter = stack.begin();
-  size_t list_idx = 0;
-  if (!param_count_list.empty()) {
-    TORCH_INTERNAL_ASSERT(input_values.size() == param_count_list.size());
-  }
-  for (auto v : input_values) {
-    AT_ASSERT(s_iter != stack.end());
-    // Leave packed param types alone. This is needed for downstream passes
-    // (like alias analysis) to work properly. This will be unpacked later
-    // in unpackQuantizedWeights.
-    if (auto named_type = v->type()->cast<c10::NamedType>()) {
-      if (auto qualname = named_type->name()) {
-        if (getCustomClass(qualname->qualifiedName())) {
-          if (param_count_list.empty()) {
-            s_iter++;
-          } else {
-            s_iter += param_count_list[list_idx];
-          }
-          list_idx++;
-          continue;
-        }
-      }
-    }
-    v->setType(
-        inferShapeAndTypeForInput(v->type(), s_iter, stack.end(), complete));
-    list_idx++;
-  }
-}
 
 static std::shared_ptr<Graph> _propagate_shapes(
     Graph& graph,
@@ -783,6 +706,30 @@ void pyCompilationUnitDefine(
     auto default_rcb = py_default_rcb.cast<ResolutionCallback>();
     cu.define(c10::nullopt, src, pythonResolver(default_rcb), nullptr);
   }
+}
+
+// This function will copy bytes into a shared_ptr of chars aligned
+// at kFlatbufferDataAlignmentBytes boundary (currently 16).
+// This is required because tensors need to be aligned at 16 bytes boundary.
+static std::shared_ptr<char> copyStr(const std::string& bytes) {
+  size_t size = (bytes.size() / kFlatbufferDataAlignmentBytes + 1) *
+      kFlatbufferDataAlignmentBytes;
+#ifdef _WIN32
+  std::shared_ptr<char> bytes_copy(
+      static_cast<char*>(_aligned_malloc(size, kFlatbufferDataAlignmentBytes)),
+      _aligned_free);
+#elif defined(__APPLE__)
+  void* p;
+  ::posix_memalign(&p, kFlatbufferDataAlignmentBytes, size);
+  TORCH_INTERNAL_ASSERT(p, "Could not allocate memory for flatbuffer");
+  std::shared_ptr<char> bytes_copy(static_cast<char*>(p), free);
+#else
+  std::shared_ptr<char> bytes_copy(
+      static_cast<char*>(aligned_alloc(kFlatbufferDataAlignmentBytes, size)),
+      free);
+#endif
+  memcpy(bytes_copy.get(), bytes.data(), bytes.size());
+  return bytes_copy;
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -1185,7 +1132,8 @@ void initJitScriptBindings(PyObject* module) {
              const py::function& var_name_lookup_fn,
              bool strict,
              bool force_outplace,
-             const std::vector<std::string>& argument_names) {
+             const std::vector<std::string>& argument_names,
+             bool store_inputs) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
             auto typed_inputs = toTraceableStack(input_tuple);
@@ -1203,6 +1151,9 @@ void initJitScriptBindings(PyObject* module) {
             auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
             self.type()->addMethod(fn);
+            if (store_inputs) {
+              self.store_traced_inputs(name, typed_inputs);
+            }
             didFinishEmitModule(self);
           },
           py::arg("name"),
@@ -1211,14 +1162,56 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("var_name_lookup_fn"),
           py::arg("strict"),
           py::arg("force_outplace"),
-          py::arg("argument_names") = std::vector<std::string>())
+          py::arg("argument_names") = std::vector<std::string>(),
+          py::arg("store_inputs"))
+      .def(
+          "_create_method_from_trace_with_dict",
+          [](Module& self,
+             const std::string& name,
+             const py::function& func,
+             const py::dict& input_dict,
+             const py::function& var_name_lookup_fn,
+             bool strict,
+             bool force_outplace,
+             const std::vector<std::string>& argument_names,
+             bool store_inputs) {
+            // prereq: Module's buffers and parameters are unique
+            // this was ensured in python before calling this function
+            auto typed_inputs = toTraceableStack(input_dict);
+
+            std::shared_ptr<Graph> graph =
+                std::get<0>(tracer::createGraphByTracingWithDict(
+                    func,
+                    input_dict,
+                    typed_inputs,
+                    var_name_lookup_fn,
+                    strict,
+                    force_outplace,
+                    &self,
+                    argument_names));
+            const auto method_name = QualifiedName(*self.type()->name(), name);
+            auto fn = self._ivalue()->compilation_unit()->create_function(
+                method_name, graph);
+            if (store_inputs) {
+              self.store_traced_inputs(name, typed_inputs);
+            }
+            self.type()->addMethod(fn);
+            didFinishEmitModule(self);
+          },
+          py::arg("name"),
+          py::arg("func"),
+          py::arg("input_dict"),
+          py::arg("var_name_lookup_fn"),
+          py::arg("strict"),
+          py::arg("force_outplace"),
+          py::arg("argument_names") = std::vector<std::string>(),
+          py::arg("store_inputs"))
       .def(
           "_get_forward_hooks",
           [](const Module& m) {
             std::vector<StrongFunctionPtr> funcs;
             for (auto& hook : m.type()->getForwardHooks()) {
-              funcs.emplace_back(
-                  StrongFunctionPtr(m.type()->compilation_unit(), hook));
+              funcs.emplace_back(m.type()->compilation_unit(), hook);
             }
             return funcs;
           })
@@ -1227,10 +1220,14 @@ void initJitScriptBindings(PyObject* module) {
           [](const Module& m) {
             std::vector<StrongFunctionPtr> funcs;
             for (auto& pre_hook : m.type()->getForwardPreHooks()) {
-              funcs.emplace_back(
-                  StrongFunctionPtr(m.type()->compilation_unit(), pre_hook));
+              funcs.emplace_back(m.type()->compilation_unit(), pre_hook);
             }
             return funcs;
+          })
+      .def(
+          "_retrieve_traced_inputs",
+          [](const Module& m) {
+            return ScriptDict(m.retrieve_traced_inputs());
           })
       .def_property_readonly(
           "code",
@@ -1334,7 +1331,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           py::init([](const std::string& lang, const uint32_t _frames_up) {
             auto cu = std::make_shared<CompilationUnit>();
-            if (lang.size() > 0) {
+            if (!lang.empty()) {
               pyCompilationUnitDefine(*cu, lang, nullptr, _frames_up);
             }
             return cu;
@@ -1504,6 +1501,14 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "name",
           [](const StrongFunctionPtr& self) { return self.function_->name(); })
+      .def(
+          "_set_ignore_amp",
+          [](StrongFunctionPtr& self, bool ignore) {
+            auto fn = self.function_;
+            TORCH_INTERNAL_ASSERT(fn->isGraphFunction());
+            GraphFunction& g_fn = toGraphFunction(*fn);
+            g_fn._set_ignore_amp(ignore);
+          })
       .def_property_readonly(
           "qualified_name",
           [](const StrongFunctionPtr& self) {
@@ -1571,6 +1576,10 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def_property_readonly("owner", &Method::owner);
   m.def("_generate_upgraders_graph", &generate_upgraders_graph);
+  m.def(
+      "_calculate_package_version_based_on_upgraders",
+      &calculate_package_version_based_on_upgraders);
+  m.def("_get_version_calculator_flag", &get_version_calculator_flag);
   m.def(
       "_compile_graph_to_code_table",
       [](const std::string& name, const std::shared_ptr<Graph>& graph) {
@@ -1651,6 +1660,43 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("argument_names") = std::vector<std::string>());
 
   m.def(
+      "_create_function_from_trace_with_dict",
+      [](const std::string& qualname,
+         const py::function& func,
+         const py::dict& input_dict,
+         const py::function& var_name_lookup_fn,
+         bool strict,
+         bool force_outplace,
+         const std::vector<std::string>& argument_names) {
+        auto typed_inputs = toTraceableStack(input_dict);
+        std::shared_ptr<Graph> graph =
+            std::get<0>(tracer::createGraphByTracingWithDict(
+                func,
+                input_dict,
+                typed_inputs,
+                var_name_lookup_fn,
+                strict,
+                force_outplace,
+                /*self=*/nullptr,
+                argument_names));
+
+        auto cu = get_python_cu();
+        auto name = c10::QualifiedName(qualname);
+        auto result = cu->create_function(
+            std::move(name), std::move(graph), /*shouldMangle=*/true);
+        StrongFunctionPtr ret(std::move(cu), result);
+        didFinishEmitFunction(ret);
+        return ret;
+      },
+      py::arg("name"),
+      py::arg("func"),
+      py::arg("input_dict"),
+      py::arg("var_name_lookup_fn"),
+      py::arg("strict"),
+      py::arg("force_outplace"),
+      py::arg("argument_names") = std::vector<std::string>());
+
+  m.def(
       "_jit_script_class_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
@@ -1682,10 +1728,10 @@ void initJitScriptBindings(PyObject* module) {
           if (def.kind() != TK_DEF) {
             throw ErrorReport(def.range())
                 << "Currently class bodies can only contain method "
-                   "definitions. File an issue on Github if you want "
+                   "definitions. File an issue on GitHub if you want "
                    "something else!";
           }
-          methodDefs.emplace_back(Def(def));
+          methodDefs.emplace_back(def);
           methodRcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
@@ -1758,8 +1804,6 @@ void initJitScriptBindings(PyObject* module) {
     return Decl(p.parseTypeComment());
   });
 
-  m.def("_is_upgraders_enabled", &is_upgraders_enabled);
-
   m.def("_get_upgraders_map_size", &get_upgraders_map_size);
   m.def("_dump_upgraders_map", &dump_upgraders_map);
 
@@ -1777,16 +1821,22 @@ void initJitScriptBindings(PyObject* module) {
       [](std::shared_ptr<CompilationUnit> cu,
          const std::string& filename,
          py::object map_location,
-         const py::dict& extra_files) {
+         const py::dict& extra_files,
+         bool restore_shapes = false) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         ExtraFilesMap extra_files_map = extra_files_from_python(extra_files);
         auto ret = import_ir_module(
-            std::move(cu), filename, optional_device, extra_files_map);
+            std::move(cu),
+            filename,
+            optional_device,
+            extra_files_map,
+            /*load_debug_files*/ true,
+            restore_shapes);
         extra_files_to_python(extra_files_map, extra_files);
         return ret;
       });
@@ -1799,7 +1849,7 @@ void initJitScriptBindings(PyObject* module) {
          py::object map_location,
          std::string ts_id) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1816,17 +1866,23 @@ void initJitScriptBindings(PyObject* module) {
       [](std::shared_ptr<CompilationUnit> cu,
          const std::string& buffer,
          py::object map_location,
-         const py::dict& extra_files) {
+         const py::dict& extra_files,
+         bool restore_shapes = false) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         ExtraFilesMap extra_files_map = extra_files_from_python(extra_files);
         auto ret = import_ir_module(
-            std::move(cu), in, optional_device, extra_files_map);
+            std::move(cu),
+            in,
+            optional_device,
+            extra_files_map,
+            /*load_debug_files*/ true,
+            restore_shapes);
         extra_files_to_python(extra_files_map, extra_files);
         return ret;
       });
@@ -1834,7 +1890,7 @@ void initJitScriptBindings(PyObject* module) {
       "_load_for_lite_interpreter",
       [](const std::string& filename, py::object map_location) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1846,7 +1902,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& buffer, py::object map_location) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1888,9 +1944,30 @@ void initJitScriptBindings(PyObject* module) {
     return _get_model_bytecode_version(filename);
   });
   m.def(
+      "_get_model_extra_files",
+      [](const std::string& filename, const py::dict& py_extra_files) {
+        c10::optional<at::Device> optional_device;
+        ExtraFilesMap cpp_extra_files = ExtraFilesMap();
+        _load_for_mobile(filename, optional_device, cpp_extra_files);
+        extra_files_to_python(cpp_extra_files, py_extra_files);
+
+        return py_extra_files;
+      });
+  m.def(
       "_get_model_bytecode_version_from_buffer", [](const std::string& buffer) {
         std::istringstream in(buffer);
         return _get_model_bytecode_version(in);
+      });
+  m.def(
+      "_get_model_extra_files_from_buffer",
+      [](const std::string& buffer, const py::dict& py_extra_files) {
+        c10::optional<at::Device> optional_device;
+        ExtraFilesMap cpp_extra_files = ExtraFilesMap();
+        std::istringstream in(buffer);
+        _load_for_mobile(in, optional_device, cpp_extra_files);
+        extra_files_to_python(cpp_extra_files, py_extra_files);
+
+        return py_extra_files;
       });
   m.def("_get_mobile_model_contained_types", [](const std::string& filename) {
     return _get_mobile_model_contained_types(filename);
@@ -1917,6 +1994,12 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
   });
+  m.def(
+      "_quantize_ondevice_ptq_dynamic",
+      [](mobile::Module& m, const std::string& method_name) {
+        mobile::quantization::PTQQuanizationHelper ptq_helper;
+        ptq_helper.quantize_dynamic(m, method_name);
+      });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
@@ -2090,8 +2173,13 @@ void initJitScriptBindings(PyObject* module) {
           [](ConcreteModuleTypeBuilder& self) {
             self.setIterableModuleKind(IterableModuleKind::LIST);
           })
-      .def("set_parameter_list", [](ConcreteModuleTypeBuilder& self) {
-        self.setIterableModuleKind(IterableModuleKind::PARAMLIST);
+      .def(
+          "set_parameter_list",
+          [](ConcreteModuleTypeBuilder& self) {
+            self.setIterableModuleKind(IterableModuleKind::PARAMLIST);
+          })
+      .def("set_parameter_dict", [](ConcreteModuleTypeBuilder& self) {
+        self.setIterableModuleKind(IterableModuleKind::PARAMDICT);
       });
 
   py::class_<ConcreteModuleType, std::shared_ptr<ConcreteModuleType>>(
@@ -2246,8 +2334,92 @@ void initJitScriptBindings(PyObject* module) {
     return py::isinstance<Object>(obj);
   });
 
+  m.def("_get_file_format", [](const std::string& path) {
+    switch (getFileFormat(path)) {
+      case FileFormat::FlatbufferFileFormat:
+        return "flatbuffer";
+      case FileFormat::ZipFileFormat:
+        return "zipfile";
+      default:
+        return "invalid";
+    }
+  });
+
+  m.def(
+      "_save_parameters",
+      [](const std::map<std::string, at::Tensor>& map,
+         const std::string& filename,
+         bool use_flatbuffer = false) {
+        _save_parameters(map, filename, use_flatbuffer);
+      });
+
+  m.def("_load_mobile_module_from_file", [](const std::string& filename) {
+    return torch::jit::load_mobile_module_from_file(filename);
+  });
+  m.def("_load_mobile_module_from_bytes", [](const std::string& bytes) {
+    auto bytes_copy = copyStr(bytes);
+    return torch::jit::parse_and_initialize_mobile_module(
+        bytes_copy, bytes.size());
+  });
+  m.def("_load_jit_module_from_file", [](const std::string& filename) {
+    ExtraFilesMap extra_files = ExtraFilesMap();
+    return torch::jit::load_jit_module_from_file(filename, extra_files);
+  });
+  m.def("_load_jit_module_from_bytes", [](const std::string& bytes) {
+    auto bytes_copy = copyStr(bytes);
+    ExtraFilesMap extra_files = ExtraFilesMap();
+    return torch::jit::parse_and_initialize_jit_module(
+        bytes_copy, bytes.size(), extra_files);
+  });
+  m.def(
+      "_save_mobile_module",
+      [](const torch::jit::mobile::Module& module,
+         const std::string& filename,
+         const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+        return torch::jit::save_mobile_module(module, filename, _extra_files);
+      });
+  m.def(
+      "_save_jit_module",
+      [](const torch::jit::Module& module,
+         const std::string& filename,
+         const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+        return torch::jit::save_jit_module(module, filename, _extra_files);
+      });
+  m.def(
+      "_save_mobile_module_to_bytes",
+      [](const torch::jit::mobile::Module& module,
+         const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+        auto detached_buffer =
+            torch::jit::save_mobile_module_to_bytes(module, _extra_files);
+        return py::bytes(
+            reinterpret_cast<char*>(detached_buffer->data()),
+            detached_buffer->size());
+      });
+  m.def(
+      "_save_jit_module_to_bytes",
+      [](const torch::jit::Module& module,
+         const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+        auto detached_buffer =
+            torch::jit::save_jit_module_to_bytes(module, _extra_files);
+        return py::bytes(
+            reinterpret_cast<char*>(detached_buffer->data()),
+            detached_buffer->size());
+      });
+  m.def("_get_module_info_from_flatbuffer", [](std::string flatbuffer_content) {
+    py::gil_scoped_acquire acquire;
+    py::dict result;
+    mobile::ModuleInfo minfo =
+        torch::jit::get_module_info_from_flatbuffer(&flatbuffer_content[0]);
+    result["bytecode_version"] = minfo.bytecode_version;
+    result["operator_version"] = minfo.operator_version;
+    result["function_names"] = minfo.function_names;
+    result["type_names"] = minfo.type_names;
+    result["opname_to_num_args"] = minfo.opname_to_num_args;
+    return result;
+  });
+
   initScriptDictBindings(module);
   initScriptListBindings(module);
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

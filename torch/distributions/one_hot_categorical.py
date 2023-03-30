@@ -3,6 +3,7 @@ from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
 
+__all__ = ['OneHotCategorical', 'OneHotCategoricalStraightThrough']
 
 class OneHotCategorical(Distribution):
     r"""
@@ -24,6 +25,7 @@ class OneHotCategorical(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = OneHotCategorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
         tensor([ 0.,  0.,  0.,  1.])
@@ -41,7 +43,7 @@ class OneHotCategorical(Distribution):
         self._categorical = Categorical(probs, logits)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(OneHotCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(OneHotCategorical, _instance)
@@ -69,6 +71,12 @@ class OneHotCategorical(Distribution):
     @property
     def mean(self):
         return self._categorical.probs
+
+    @property
+    def mode(self):
+        probs = self._categorical.probs
+        mode = probs.argmax(axis=-1)
+        return torch.nn.functional.one_hot(mode, num_classes=probs.shape[-1]).to(probs)
 
     @property
     def variance(self):

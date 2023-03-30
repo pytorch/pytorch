@@ -9,12 +9,14 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
+#include <c10/core/SymFloat.h>
 
 #include <array>
 #include <memory>
 #include <ostream>
 #include <sstream>
 #include <type_traits>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -238,7 +240,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Optional[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Optional[" << getElementType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 };
@@ -269,7 +271,7 @@ inline c10::optional<T> merge_primitive(
 // the stride is precisely 1, otherwise a contiguity marker means that $stride_n
 // = size_{n-1}*stride_{n-1}$
 struct TORCH_API Stride {
-  Stride() {}
+  Stride() = default;
   Stride(
       const c10::optional<size_t>& stride_index,
       c10::optional<bool> contiguous,
@@ -786,23 +788,44 @@ struct TORCH_API TensorType : public SharedType {
 
   static const TypeKind Kind = TypeKind::TensorType;
 
-  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
-    std::vector<int64_t> strides(sizes.size());
-    if (sizes.empty()) // zero-dim case
+  static std::vector<int64_t> contiguousStridesOf(
+      at::IntArrayRef in_sizes,
+      at::MemoryFormat memory_format = MemoryFormat::Contiguous) {
+    auto contiguous_fn = [](const at::IntArrayRef& sizes,
+                            const std::vector<int64_t>& dim_order) {
+      std::vector<int64_t> strides(sizes.size());
+      if (sizes.empty()) // zero-dim case
+        return strides;
+
+      strides[dim_order[0]] = 1;
+      for (size_t i = 1; i < dim_order.size(); i++) {
+        auto cur_dim = dim_order[i];
+        auto pre_dim = dim_order[i - 1];
+        strides[cur_dim] = strides[pre_dim] * sizes[pre_dim];
+      }
       return strides;
-    strides.back() = 1;
-    for (size_t i = strides.size() - 1; i > 0; i--) {
-      strides[i - 1] = strides[i] * sizes[i];
+    };
+
+    std::vector<int64_t> dim_order(in_sizes.size());
+    if (memory_format == MemoryFormat::ChannelsLast) {
+      dim_order = {1, 3, 2, 0};
+    } else if (memory_format == MemoryFormat::ChannelsLast3d) {
+      dim_order = {1, 4, 3, 2, 0};
+    } else {
+      auto ndims = in_sizes.size();
+      for (size_t i = 0; i < ndims; i++) {
+        dim_order[i] = ndims - i - 1; // Reverse
+      }
     }
-    return strides;
+    return contiguous_fn(in_sizes, dim_order);
   }
 
  private:
   TensorType(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
-      const SymbolicShape& sizes,
-      const VaryingShape<Stride>& strides,
+      SymbolicShape sizes,
+      VaryingShape<Stride> strides,
       c10::optional<bool> requires_grad,
       c10::optional<bool> undefined = false);
 
@@ -884,7 +907,7 @@ struct TORCH_API ListType
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "List[" << getElementType()->annotation_str(printer) << "]";
+    ss << "List[" << getElementType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 };
@@ -976,12 +999,7 @@ struct TORCH_API DictType : public SharedType {
     types.push_back(std::move(value));
   }
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    std::stringstream ss;
-    ss << "Dict[" << getKeyType()->annotation_str(printer) << ", "
-       << getValueType()->annotation_str(printer) << "]";
-    return ss.str();
-  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
 
   std::vector<TypePtr> types;
   bool has_free_variables;
@@ -1024,7 +1042,49 @@ struct TORCH_API FutureType
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Future[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Future[" << getElementType()->annotation_str(std::move(printer)) << "]";
+    return ss.str();
+  }
+};
+
+struct AwaitType;
+using AwaitTypePtr = std::shared_ptr<AwaitType>;
+
+struct TORCH_API AwaitType
+    : public SingleElementType<TypeKind::AwaitType, AwaitType> {
+  friend struct Type;
+  template <typename... T>
+  static AwaitTypePtr create(TypePtr elem) {
+    return AwaitTypePtr(
+        new AwaitType(std::move(elem))); // NOLINT(modernize-make-shared)
+  }
+
+  std::string str() const override {
+    std::stringstream ss;
+    ss << "Await(" << getElementType()->str() << ")";
+    return ss.str();
+  }
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
+    return create(std::move(contained_types.at(0)));
+  }
+
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override {
+    if (Type::isSubtypeOfExt(rhs, why_not)) {
+      return true;
+    }
+    if (auto rhs_ = rhs.castRaw<AwaitType>()) {
+      return getElementType()->isSubtypeOfExt(*rhs_->getElementType(), why_not);
+    }
+    return false;
+  }
+
+ private:
+  AwaitType(TypePtr elem) : SingleElementType(std::move(elem)) {}
+
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "Await[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
   }
 };
@@ -1056,7 +1116,7 @@ struct TORCH_API RRefType
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "RRef[" << getElementType()->annotation_str(printer) << "]";
+    ss << "RRef[" << getElementType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 };
@@ -1288,7 +1348,6 @@ struct TORCH_API SymIntType : public Type {
     return "SymInt";
   }
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    // TODO: will become a Union[SymbolicIntNode|int] in the near future
     return "int";
   }
   static const TypeKind Kind = TypeKind::SymIntType;
@@ -1297,6 +1356,26 @@ struct TORCH_API SymIntType : public Type {
 
  private:
   SymIntType() : Type(TypeKind::SymIntType) {}
+};
+
+struct SymFloatType;
+using SymFloatTypePtr = SingletonTypePtr<SymFloatType>;
+struct TORCH_API SymFloatType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymFloat";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "float";
+  }
+  static const TypeKind Kind = TypeKind::SymFloatType;
+  // global singleton
+  static SymFloatTypePtr get();
+
+ private:
+  SymFloatType() : Type(TypeKind::SymFloatType) {}
 };
 
 struct IntType;
@@ -1717,6 +1796,13 @@ struct getTypePtr_ final {
   }
 };
 
+template <typename T, bool fake>
+struct getMaybeFakeTypePtr_ final {
+  static decltype(auto) call() {
+    return getTypePtr_<T>::call();
+  }
+};
+
 template <>
 struct getTypePtr_<at::IValue> final {
   static decltype(auto) call() {
@@ -1762,33 +1848,35 @@ struct getTypePtr_<int64_t> final {
 };
 
 template <>
-struct getTypePtr_<SymInt> final {
+struct getMaybeFakeTypePtr_<SymInt, false> final {
   static decltype(auto) call() {
     return SymIntType::get();
   }
 };
 template <>
-struct getTypePtr_<c10::ScalarType> final {
+struct getMaybeFakeTypePtr_<SymInt, true> final {
   static decltype(auto) call() {
     return IntType::get();
   }
 };
+
+template <>
+struct getMaybeFakeTypePtr_<SymFloat, false> final {
+  static decltype(auto) call() {
+    return SymFloatType::get();
+  }
+};
+template <>
+struct getMaybeFakeTypePtr_<SymFloat, true> final {
+  static decltype(auto) call() {
+    return FloatType::get();
+  }
+};
+
 template <>
 struct getTypePtr_<c10::Device> final {
   static decltype(auto) call() {
     return DeviceObjType::get();
-  }
-};
-template <>
-struct getTypePtr_<c10::Layout> final {
-  static decltype(auto) call() {
-    return IntType::get();
-  }
-};
-template <>
-struct getTypePtr_<c10::MemoryFormat> final {
-  static decltype(auto) call() {
-    return IntType::get();
   }
 };
 template <>
@@ -1834,47 +1922,55 @@ struct getTypePtr_<at::Dimname> final {
     return StringType::get();
   }
 };
-template <class T>
-struct getTypePtr_<std::vector<T>> final {
+template <class T, bool fake>
+struct getMaybeFakeTypePtr_<std::vector<T>, fake> final {
   static const auto& call() {
-    static auto inner_type = getTypePtr_<T>::call();
+    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
     // The "per vector<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = ListType::get("vector", inner_type);
     return type;
   }
 };
-template <class T>
-struct getTypePtr_<c10::ArrayRef<T>> final {
+template <class T, bool fake>
+struct getMaybeFakeTypePtr_<c10::ArrayRef<T>, fake> final {
   static const auto& call() {
-    static auto inner_type = getTypePtr_<T>::call();
+    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
     // The "per ArrayRef<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = ListType::get("ArrayRef", inner_type);
     return type;
   }
 };
-template <>
-struct getTypePtr_<c10::SymIntArrayRef> final {
+template <bool fake>
+struct getMaybeFakeTypePtr_<c10::SymIntArrayRef, fake> final {
   static const auto& call() {
-    static auto type = ListType::create(getTypePtr_<c10::SymInt>::call());
+    static auto type = ListType::create(getMaybeFakeTypePtr_<c10::SymInt, fake>::call());
     return type;
   }
 };
-template <class T>
-struct getTypePtr_<c10::List<T>> final {
+template <class T, bool fake>
+struct getMaybeFakeTypePtr_<c10::List<T>, fake> final {
   static const auto& call() {
-    static auto inner_type = getTypePtr_<T>::call();
+    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
     // The "per List<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = ListType::get("List", inner_type);
     return type;
   }
 };
-template <class T, size_t N>
-struct getTypePtr_<std::array<T, N>> final {
+template <class T, bool fake>
+struct getMaybeFakeTypePtr_<c10::IListRef<T>, fake> final {
   static const auto& call() {
-    static auto inner_type = getTypePtr_<T>::call();
+    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
+    static auto type = ListType::get("List", inner_type);
+    return type;
+  }
+};
+template <class T, size_t N, bool fake>
+struct getMaybeFakeTypePtr_<std::array<T, N>, fake> final {
+  static const auto& call() {
+    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
     // The "per array<T, N>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     // (Concatenating the length onto the end of the string because we want a unique
@@ -1883,22 +1979,22 @@ struct getTypePtr_<std::array<T, N>> final {
     return type;
   }
 };
-template <class K, class V>
-struct getTypePtr_<std::unordered_map<K, V>> final {
+template <class K, class V, bool fake>
+struct getMaybeFakeTypePtr_<std::unordered_map<K, V>, fake> final {
   static const auto& call() {
-    static auto inner_key_type = getTypePtr_<K>::call();
-    static auto inner_val_type = getTypePtr_<V>::call();
+    static auto inner_key_type = getMaybeFakeTypePtr_<K, fake>::call();
+    static auto inner_val_type = getMaybeFakeTypePtr_<V, fake>::call();
     // The "per unordered_map<K, V>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = DictType::get("unordered_map", inner_key_type, inner_val_type);
     return type;
   }
 };
-template <class K, class V>
-struct getTypePtr_<c10::Dict<K, V>> final {
+template <class K, class V, bool fake>
+struct getMaybeFakeTypePtr_<c10::Dict<K, V>, fake> final {
   static const auto& call() {
-    static auto inner_key_type = getTypePtr_<K>::call();
-    static auto inner_val_type = getTypePtr_<V>::call();
+    static auto inner_key_type = getMaybeFakeTypePtr_<K, fake>::call();
+    static auto inner_val_type = getMaybeFakeTypePtr_<V, fake>::call();
     // The "per Dict<K, V>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = DictType::get("Dict", inner_key_type, inner_val_type);
@@ -1906,10 +2002,10 @@ struct getTypePtr_<c10::Dict<K, V>> final {
   }
 };
 
-template <class T>
-struct getTypePtr_<at::optional<T>> final {
+template <class T, bool fake>
+struct getMaybeFakeTypePtr_<at::optional<T>, fake> final {
   static const auto& call() {
-    static auto inner_type = getTypePtr_<T>::call();
+    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
     // The "per optional<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = OptionalType::get(inner_type);
@@ -1921,17 +2017,31 @@ struct getTypePtr_<at::optional<T>> final {
 template<>
 struct getTypePtr_<at::OptionalIntArrayRef> final {
   static const auto& call() {
-    static auto type = OptionalType::create(getTypePtr_<IntArrayRef>::call());
+    static auto inner_type = getMaybeFakeTypePtr_<IntArrayRef, false>::call();
+    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = OptionalType::get(inner_type);
     return type;
   }
 };
 
-template <class... Contained>
-struct getTypePtr_<std::tuple<Contained...>> final {
+template <bool fake>
+struct getMaybeFakeTypePtr_<at::OptionalSymIntArrayRef, fake> final {
+  static const auto& call() {
+    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto inner_type = getMaybeFakeTypePtr_<SymIntArrayRef, fake>::call();
+    static auto type = OptionalType::get(inner_type);
+    return type;
+  }
+};
+
+template <class... Contained, bool fake>
+struct getMaybeFakeTypePtr_<std::tuple<Contained...>, fake> final {
   static const auto& call() {
     static auto type = ([]() {
       std::vector<TypePtr> contained_types = {
-        (getTypePtr_<Contained>::call())...
+        (getMaybeFakeTypePtr_<Contained, fake>::call())...
       };
       return TupleType::create(std::move(contained_types));
     })();
@@ -1949,7 +2059,7 @@ template <class T>
 inline decltype(auto) getTypePtr() {
   // TODO: static_assert that a templated function exists, and throw a friendly
   // error message if not
-  return detail::getTypePtr_<T>::call();
+  return detail::getMaybeFakeTypePtr_<T, false>::call();
 }
 
 template <class T>
@@ -1957,6 +2067,16 @@ inline TypePtr getTypePtrCopy() {
   // TODO: static_assert that a templated function exists, and throw a friendly
   // error message if not
   return getTypePtr<T>();
+}
+
+template <class T>
+inline decltype(auto) getFakeTypePtr() {
+  return detail::getMaybeFakeTypePtr_<T, true>::call();
+}
+
+template <class T>
+inline TypePtr getFakeTypePtrCopy() {
+  return getFakeTypePtr<T>();
 }
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
@@ -2066,9 +2186,40 @@ protected:
 EnumerationType() : Type(Kind) {}
 };
 
+// WARNING: These enumeration types below DO NOT actually get parsed out
+// from the logical schema strings, instead they are mapped as ints.  To
+// observe these types, use real_type() instead of type() on Argument
+
+struct ScalarTypeType;
+using ScalarTypeTypePtr = SingletonTypePtr<ScalarTypeType>;
+struct TORCH_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
+std::string str() const override {
+return "ScalarType";
+}
+static const TypeKind Kind = TypeKind::ScalarTypeType;
+// global singleton
+static ScalarTypeTypePtr get();
+
+private:
+ScalarTypeType() : EnumerationType() {}
+};
+
+struct MemoryFormatType;
+using MemoryFormatTypePtr = SingletonTypePtr<MemoryFormatType>;
+struct TORCH_API MemoryFormatType : public EnumerationType<TypeKind::MemoryFormatType> {
+std::string str() const override {
+return "MemoryFormat";
+}
+static const TypeKind Kind = TypeKind::MemoryFormatType;
+// global singleton
+static MemoryFormatTypePtr get();
+
+private:
+MemoryFormatType() : EnumerationType() {}
+};
+
 struct LayoutType;
 using LayoutTypePtr = SingletonTypePtr<LayoutType>;
-// This type represents a Generator
 struct TORCH_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
 std::string str() const override {
 return "Layout";
@@ -2081,20 +2232,44 @@ private:
 LayoutType() : EnumerationType() {}
 };
 
-struct ScalarTypeType;
-using ScalarTypeTypePtr = SingletonTypePtr<ScalarTypeType>;
-// This type represents a Generator
-struct TORCH_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
-std::string str() const override {
-return "ScalarType";
-}
-static const TypeKind Kind = TypeKind::ScalarTypeType;
-// global singleton
-static ScalarTypeTypePtr get();
-
-private:
-ScalarTypeType() : EnumerationType() {}
+namespace detail {
+template <>
+struct getMaybeFakeTypePtr_<c10::ScalarType, false> final {
+  static decltype(auto) call() {
+    return ScalarTypeType::get();
+  }
 };
+template <>
+struct getMaybeFakeTypePtr_<c10::Layout, false> final {
+  static decltype(auto) call() {
+    return LayoutType::get();
+  }
+};
+template <>
+struct getMaybeFakeTypePtr_<c10::MemoryFormat, false> final {
+  static decltype(auto) call() {
+    return MemoryFormatType::get();
+  }
+};
+template <>
+struct getMaybeFakeTypePtr_<c10::ScalarType, true> final {
+  static decltype(auto) call() {
+    return IntType::get();
+  }
+};
+template <>
+struct getMaybeFakeTypePtr_<c10::Layout, true> final {
+  static decltype(auto) call() {
+    return IntType::get();
+  }
+};
+template <>
+struct getMaybeFakeTypePtr_<c10::MemoryFormat, true> final {
+  static decltype(auto) call() {
+    return IntType::get();
+  }
+};
+} // namespace detail
 
 // the common supertype of all lists,
 // List[T] <: AnyList for all T
@@ -2188,7 +2363,11 @@ struct InferredType {
   /* implicit */ InferredType(std::string reason)
       : type_(nullptr), reason_(std::move(reason)) {}
   TypePtr type() const {
-    TORCH_INTERNAL_ASSERT(type_);
+    TORCH_INTERNAL_ASSERT(
+        type_,
+        "Tried to get the type from an InferredType but the type is null. ",
+        "Reason: ",
+        reason_);
     return type_;
   }
   bool success() const {

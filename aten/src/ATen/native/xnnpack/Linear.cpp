@@ -97,6 +97,7 @@ ContextLinear create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
+      nullptr,                                                        // xnn_caches_t
       &linear_op);                                                    // operator
 
   TORCH_CHECK(
@@ -136,7 +137,7 @@ Tensor run(
       output_size,
       padded_input.options().dtype(),
       padded_input.suggest_memory_format(),
-      padded_input.names());
+      padded_input.opt_names());
 
   const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
       context.op.get(),                                   // operator

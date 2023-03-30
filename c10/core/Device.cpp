@@ -8,7 +8,6 @@
 #include <exception>
 #include <ostream>
 #include <string>
-#include <tuple>
 #include <vector>
 
 namespace c10 {
@@ -36,6 +35,8 @@ DeviceType parse_type(const std::string& device_string) {
           {"mps", DeviceType::MPS},
           {"meta", DeviceType::Meta},
           {"hpu", DeviceType::HPU},
+          {"mtia", DeviceType::MTIA},
+          {"privateuseone", DeviceType::PrivateUse1},
       }};
   auto device = std::find_if(
       types.begin(),
@@ -46,9 +47,20 @@ DeviceType parse_type(const std::string& device_string) {
   if (device != types.end()) {
     return device->second;
   }
+  if (device_string == get_privateuse1_backend()) {
+    return DeviceType::PrivateUse1;
+  }
+  std::vector<const char*> device_names;
+  for (const auto& it : types) {
+    if (it.first) {
+      device_names.push_back(it.first);
+    }
+  }
   TORCH_CHECK(
       false,
-      "Expected one of cpu, cuda, ipu, xpu, mkldnn, opengl, opencl, ideep, hip, ve, ort, mps, xla, lazy, vulkan, meta, hpu device type at start of device string: ",
+      "Expected one of ",
+      c10::Join(", ", device_names),
+      " device type at start of device string: ",
       device_string);
 }
 enum DeviceStringParsingState { START, INDEX_START, INDEX_REST, ERROR };
@@ -117,7 +129,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
 
   try {
     if (!device_index_str.empty()) {
-      index_ = c10::stoi(device_index_str);
+      index_ = static_cast<c10::DeviceIndex>(c10::stoi(device_index_str));
     }
   } catch (const std::exception&) {
     TORCH_CHECK(

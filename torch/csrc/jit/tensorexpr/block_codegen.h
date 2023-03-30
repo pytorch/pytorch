@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include <ATen/ATen.h>
 #include <torch/csrc/jit/resource_guard.h>
@@ -43,7 +44,7 @@ class BlockAnalysis : public IRVisitor {
   std::string getInputName(BufPtr buf) const;
 
   std::string getFlatInputName(BufPtr buf) const {
-    return getInputName(buf) + "_flat";
+    return getInputName(std::move(buf)) + "_flat";
   }
 
   std::unordered_map<std::string, BufPtr> getBufferMap() const {

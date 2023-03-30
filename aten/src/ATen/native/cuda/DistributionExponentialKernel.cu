@@ -3,7 +3,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 void exponential_kernel(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
@@ -12,4 +12,4 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda, c10::optional<G
 
 REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 
-}} // namespace at::native
+} // namespace at::native

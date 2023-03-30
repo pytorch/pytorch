@@ -3,6 +3,8 @@ from typing import Any, Dict, Tuple, List
 from ._compatibility import compatibility
 from torch.utils._pytree import Context, _register_pytree_node
 
+__all__ = ["immutable_list", "immutable_dict"]
+
 _help_mutation = """\
 If you are attempting to modify the kwargs or args of a torch.fx.Node object,
 instead create a new copy of it and assign the copy to the node:
@@ -37,7 +39,7 @@ def _immutable_dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 def _immutable_dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
-    return immutable_dict({key: value for key, value in zip(context, values)})
+    return immutable_dict(dict(zip(context, values)))
 
 def _immutable_list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
     return d, None

@@ -32,7 +32,7 @@ using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 // Input is qualified name string, output is JIT StrongTypePtr
 // Same as jit::TypeResolver, did not import jit::TypeResolver to here
-// because it could instroduce cyclic dependencies.
+// because it could introduce cyclic dependencies.
 using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
@@ -52,31 +52,9 @@ struct RpcBackendOptions {
 
 // A globally unique ID to identify an RpcAgent
 struct TORCH_API WorkerInfo : torch::CustomClassHolder {
-  WorkerInfo(std::string name, int64_t id)
-      : WorkerInfo(std::move(name), (worker_id_t)id) {
-    TORCH_CHECK(
-        id <= std::numeric_limits<worker_id_t>::max(),
-        "RPC worker id ",
-        id,
-        " out of bound of int16_t.");
-  }
+  WorkerInfo(std::string name, int64_t id);
 
-  WorkerInfo(std::string name, worker_id_t id)
-      : name_(std::move(name)), id_(id) {
-    bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
-    bool validChar =
-        std::find_if(name_.begin(), name_.end(), [](char c) {
-          return !(std::isalnum(c) || c == '-' || c == '_' || c == ':');
-        }) == name_.end();
-    TORCH_CHECK(
-        validSize && validChar,
-        "Worker name must match ^[A-Za-z0-9-_:]*$, "
-        "and must be non-empty and shorter than ",
-        MAX_NAME_LEN,
-        " chars, "
-        "but got ",
-        name_);
-  }
+  WorkerInfo(std::string name, worker_id_t id);
 
   bool operator==(const WorkerInfo& rhs) {
     return (id_ == rhs.id_) && (name_ == rhs.name_);
@@ -86,6 +64,10 @@ struct TORCH_API WorkerInfo : torch::CustomClassHolder {
 
   const std::string name_;
   const worker_id_t id_;
+};
+
+struct TORCH_API RegisterWorkerInfoOnce {
+  RegisterWorkerInfoOnce();
 };
 
 TORCH_API std::ostream& operator<<(
@@ -171,7 +153,7 @@ class TORCH_API RpcAgent {
       const DeviceMap& deviceMap = {}) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
-  // receieved. The duration between consecutive sends is increased over
+  // received. The duration between consecutive sends is increased over
   // time using an exponential backoff algorithm.
   //
   // Sends ``message`` to the ``RpcAgent`` of id ``to`` and returns a
@@ -213,7 +195,7 @@ class TORCH_API RpcAgent {
 
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
-  virtual void join(bool shutdown = false) = 0;
+  virtual void join(bool shutdown = false, float timeout = 0) = 0;
 
   // Synchronize the this process with other ``RpcAgent`` processes. Block until
   // all ``RpcAgent``s reach this method and send all pending messages.
@@ -250,7 +232,7 @@ class TORCH_API RpcAgent {
   // Retrieve metrics as KV map
   virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
 
-  // Retrive debug info in addition to metrics as KV map
+  // Retrieve debug info in addition to metrics as KV map
   virtual std::unordered_map<std::string, std::string> getDebugInfo();
 
   // Flag to control whether GIL wait times

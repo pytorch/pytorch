@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 namespace c10d {
 namespace tcputil {

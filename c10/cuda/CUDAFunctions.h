@@ -8,6 +8,7 @@
 // The naming convention used here matches the naming convention of torch.cuda
 
 #include <c10/core/Device.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <cuda_runtime_api.h>
@@ -69,6 +70,11 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
           warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
     warn_or_error_on_sync();
   }
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_stream_synchronization(
+        reinterpret_cast<uintptr_t>(stream));
+  }
 #if defined(TORCH_HIP_VERSION) && (TORCH_HIP_VERSION >= 301)
   C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
 #else
@@ -82,8 +88,16 @@ C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
           warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
     warn_or_error_on_sync();
   }
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_stream_synchronization(
+        reinterpret_cast<uintptr_t>(stream));
+  }
   C10_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
+
+C10_CUDA_API bool hasPrimaryContext(int64_t device_index);
+C10_CUDA_API c10::optional<int64_t> getDeviceIndexWithPrimaryContext();
 
 } // namespace cuda
 } // namespace c10

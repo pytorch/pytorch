@@ -5,10 +5,10 @@
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -179,13 +179,13 @@ Tensor& add_out_dense_sparse_csr_cuda(
     return output;
   }
 
-  auto valuesBuffer = src_values.to(commonDtype).view({-1, src_values.size(-1)});
+  auto valuesBuffer = src_values.to(commonDtype).reshape({-1, src_values.size(-1)}).contiguous();
   resultBuffer = resultBuffer.view({-1, output.size(-2), output.size(-1)});
-  auto src_crow_indices = src.crow_indices().view({-1, src.crow_indices().size(-1)});
-  auto src_col_indices = src.col_indices().view({-1, src.col_indices().size(-1)});
+  auto src_crow_indices = src.crow_indices().reshape({-1, src.crow_indices().size(-1)}).contiguous();
+  auto src_col_indices = src.col_indices().reshape({-1, src.col_indices().size(-1)}).contiguous();
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBool, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBool, kBFloat16,
       commonDtype,
       "add_out_op2_sparse_csr",
       [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {
@@ -263,7 +263,24 @@ Tensor& add_out_sparse_csr_cuda(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
-    at::native::resize_as_sparse_csr_(out, self);
+    TORCH_CHECK(
+      self.is_cuda(),
+      "add: expected 'self' to be CUDA tensor, but got tensor on device: ",
+      self.device());
+    TORCH_CHECK(
+      other.is_cuda(),
+      "add: expected 'other' to be CUDA tensor, but got tensor on device: ",
+      other.device());
+    TORCH_CHECK(
+      out.is_cuda(),
+      "add: expected 'out' to be CUDA tensor, but got tensor on device: ",
+      out.device());
+
+    if (only_sparse_compressed_add_trivial_cases(self, other, alpha, out)) {
+      return out;
+    }
+
+    at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
   }
   return out;

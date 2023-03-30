@@ -5,6 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Poisson']
 
 class Poisson(ExponentialFamily):
     r"""
@@ -17,6 +18,7 @@ class Poisson(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +SKIP("poisson_cpu not implemented for 'Long'")
         >>> m = Poisson(torch.tensor([4]))
         >>> m.sample()
         tensor([ 3.])
@@ -32,6 +34,10 @@ class Poisson(ExponentialFamily):
         return self.rate
 
     @property
+    def mode(self):
+        return self.rate.floor()
+
+    @property
     def variance(self):
         return self.rate
 
@@ -41,7 +47,7 @@ class Poisson(ExponentialFamily):
             batch_shape = torch.Size()
         else:
             batch_shape = self.rate.size()
-        super(Poisson, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Poisson, _instance)

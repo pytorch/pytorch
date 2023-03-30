@@ -12,23 +12,57 @@ __all__ = [
     "WeightedRandomSampler",
 ]
 
-T_co = TypeVar('T_co', covariant=True)
+T_co = TypeVar('T_co', int, List[int], covariant=True)
 
 
 class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
 
     Every Sampler subclass has to provide an :meth:`__iter__` method, providing a
-    way to iterate over indices of dataset elements, and a :meth:`__len__` method
+    way to iterate over indices or lists of indices (batches) of dataset elements, and a :meth:`__len__` method
     that returns the length of the returned iterators.
+
+    Args:
+        data_source (Dataset): This argument is not used and will be removed in 2.2.0.
+            You may still have custom implementation that utilizes it.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> class AccedingSequenceLengthSampler(Sampler[int]):
+        >>>     def __init__(self, data: List[str]) -> None:
+        >>>         self.data = data
+        >>>
+        >>>     def __len__(self) -> int:
+        >>>         return len(self.data)
+        >>>
+        >>>     def __iter__(self) -> Iterator[int]:
+        >>>         sizes = torch.tensor([len(x) for x in self.data])
+        >>>         yield from torch.argsort(sizes).tolist()
+        >>>
+        >>> class AccedingSequenceLengthBatchSampler(Sampler[List[int]]):
+        >>>     def __init__(self, data: List[str], batch_size: int) -> None:
+        >>>         self.data = data
+        >>>         self.batch_size = batch_size
+        >>>
+        >>>     def __len__(self) -> int:
+        >>>         return (len(self.data) + self.batch_size - 1) // self.batch_size
+        >>>
+        >>>     def __iter__(self) -> Iterator[List[int]]:
+        >>>         sizes = torch.tensor([len(x) for x in self.data])
+        >>>         for batch in torch.chunk(torch.argsort(sizes), len(self)):
+        >>>             yield batch.tolist()
 
     .. note:: The :meth:`__len__` method isn't strictly required by
               :class:`~torch.utils.data.DataLoader`, but is expected in any
               calculation involving the length of a :class:`~torch.utils.data.DataLoader`.
     """
 
-    def __init__(self, data_source: Optional[Sized]) -> None:
-        pass
+    def __init__(self, data_source: Optional[Sized] = None) -> None:
+        if data_source is not None:
+            import warnings
+
+            warnings.warn("`data_source` argument is not used and will be removed in 2.2.0."
+                          "You may still have custom implementation that utilizes it.")
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -169,6 +203,7 @@ class WeightedRandomSampler(Sampler[int]):
         generator (Generator): Generator used in sampling.
 
     Example:
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> list(WeightedRandomSampler([0.1, 0.9, 0.4, 0.7, 3.0, 0.6], 5, replacement=True))
         [4, 4, 1, 4, 5]
         >>> list(WeightedRandomSampler([0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False))
@@ -187,7 +222,13 @@ class WeightedRandomSampler(Sampler[int]):
         if not isinstance(replacement, bool):
             raise ValueError("replacement should be a boolean value, but got "
                              "replacement={}".format(replacement))
-        self.weights = torch.as_tensor(weights, dtype=torch.double)
+
+        weights_tensor = torch.as_tensor(weights, dtype=torch.double)
+        if len(weights_tensor.shape) != 1:
+            raise ValueError("weights should be a 1d sequence but given "
+                             "weights have shape {}".format(tuple(weights_tensor.shape)))
+
+        self.weights = weights_tensor
         self.num_samples = num_samples
         self.replacement = replacement
         self.generator = generator
@@ -232,14 +273,27 @@ class BatchSampler(Sampler[List[int]]):
         self.drop_last = drop_last
 
     def __iter__(self) -> Iterator[List[int]]:
-        batch = []
-        for idx in self.sampler:
-            batch.append(idx)
-            if len(batch) == self.batch_size:
-                yield batch
-                batch = []
-        if len(batch) > 0 and not self.drop_last:
-            yield batch
+        # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
+        if self.drop_last:
+            sampler_iter = iter(self.sampler)
+            while True:
+                try:
+                    batch = [next(sampler_iter) for _ in range(self.batch_size)]
+                    yield batch
+                except StopIteration:
+                    break
+        else:
+            batch = [0] * self.batch_size
+            idx_in_batch = 0
+            for idx in self.sampler:
+                batch[idx_in_batch] = idx
+                idx_in_batch += 1
+                if idx_in_batch == self.batch_size:
+                    yield batch
+                    idx_in_batch = 0
+                    batch = [0] * self.batch_size
+            if idx_in_batch > 0:
+                yield batch[:idx_in_batch]
 
     def __len__(self) -> int:
         # Can only be called if self.sampler has __len__ implemented

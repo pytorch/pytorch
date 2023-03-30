@@ -142,7 +142,7 @@ class Vectorized<ComplexDbl> {
           vec_vsx_ld(offset16, reinterpret_cast<const double*>(ptr))};
     }
 
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {
@@ -282,6 +282,10 @@ class Vectorized<ComplexDbl> {
   Vectorized<ComplexDbl> log10() const {
     auto ret = log();
     return ret.elwise_mult(vd_log10e_inv);
+  }
+
+  Vectorized<ComplexDbl> log1p() const {
+    return map(std::log1p);
   }
 
   Vectorized<ComplexDbl> asin() const {
@@ -449,6 +453,12 @@ class Vectorized<ComplexDbl> {
   Vectorized<ComplexDbl> exp() const {
     return map(std::exp);
   }
+  Vectorized<ComplexDbl> exp2() const {
+    return map(exp2_impl);
+  }
+  Vectorized<ComplexDbl> expm1() const {
+    return map(std::expm1);
+  }
 
   Vectorized<ComplexDbl> pow(const Vectorized<ComplexDbl>& exp) const {
     __at_align__ ComplexDbl x_tmp[size()];
@@ -481,10 +491,6 @@ class Vectorized<ComplexDbl> {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 
-  Vectorized<ComplexDbl> log1p() const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   Vectorized<ComplexDbl> atan2(const Vectorized<ComplexDbl>& b) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
@@ -492,10 +498,6 @@ class Vectorized<ComplexDbl> {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<ComplexDbl> erfc() const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> expm1() const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 

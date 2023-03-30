@@ -6,6 +6,7 @@ import coremltools as ct  # type: ignore[import]
 import torch
 from coremltools.converters.mil.input_types import TensorType  # type: ignore[import]
 from coremltools.converters.mil.mil import types  # type: ignore[import]
+from coremltools.models.neural_network import quantization_utils  # type: ignore[import]
 
 CT_METADATA_VERSION = "com.github.apple.coremltools.version"
 CT_METADATA_SOURCE = "com.github.apple.coremltools.source"
@@ -33,13 +34,24 @@ class CoreMLComputeUnit:
     CPUAndGPU = "cpuAndGPU"
     ALL = "all"
 
+class CoreMLQuantizationMode:
+    LINEAR = "linear"
+    LINEAR_SYMMETRIC = "linear_symmetric"
+    NONE = "none"
+
+
 
 def TensorSpec(shape, dtype=ScalarType.Float):
     return (shape, dtype)
 
 
-def CompileSpec(inputs, outputs, backend=CoreMLComputeUnit.CPU, allow_low_precision=True):
-    return (inputs, outputs, backend, allow_low_precision)
+def CompileSpec(inputs,
+                outputs,
+                backend=CoreMLComputeUnit.CPU,
+                allow_low_precision=True,
+                quantization_mode=CoreMLQuantizationMode.NONE,
+                mlmodel_export_path=None):
+    return (inputs, outputs, backend, allow_low_precision, quantization_mode, mlmodel_export_path)
 
 
 def _check_enumerated_shape(shape):
@@ -60,7 +72,7 @@ def _convert_to_mil_type(shape, dtype, name: str):
 
 def preprocess(script_module: torch._C.ScriptObject, compile_spec: Dict[str, Tuple]):
     spec = compile_spec["forward"]
-    input_specs, output_specs, backend, allow_low_precision = spec
+    input_specs, output_specs, backend, allow_low_precision, quantization_mode, mlmodel_export_path = spec
     mil_inputs = []
     inputs = []
     for index, input in enumerate(input_specs):
@@ -71,6 +83,11 @@ def preprocess(script_module: torch._C.ScriptObject, compile_spec: Dict[str, Tup
         mil_inputs.append(ml_type)
     model = torch.jit.RecursiveScriptModule._construct(script_module, lambda x: None)
     mlmodel = ct.convert(model, inputs=mil_inputs)
+
+    if(quantization_mode != CoreMLQuantizationMode.NONE):
+        quant_model_spec = quantization_utils.quantize_weights(mlmodel, nbits=8, quantization_mode=quantization_mode)
+        mlmodel = ct.models.MLModel(quant_model_spec)
+
     spec = mlmodel.get_spec()
     assert len(spec.description.output) == len(output_specs)  # type: ignore[attr-defined]
     outputs = []
@@ -80,6 +97,11 @@ def preprocess(script_module: torch._C.ScriptObject, compile_spec: Dict[str, Tup
         outputs.append([name, str(dtype), str(shape)])
     mlmodel = ct.models.model.MLModel(spec)
     print(mlmodel)
+
+    if mlmodel_export_path is not None:
+        print(f"Saving CoreML .mlmodel file to {mlmodel_export_path}")
+        mlmodel.save(mlmodel_export_path)
+
     config = {
         "spec_ver": str(spec.specificationVersion),  # type: ignore[attr-defined]
         "backend": backend,

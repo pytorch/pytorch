@@ -138,9 +138,9 @@ REGISTER_CUDA_OPERATOR(ScaleBlobs, ScaleBlobsOp<CUDAContext>);
         }
       }
     }
-    cudaMalloc(&dStartCoorArr, sizeof(int) * coorArrSize);
-    cudaMemcpy(dStartCoorArr, startCoorArr, sizeof(int) * coorArrSize,
-    cudaMemcpyHostToDevice);
+    C10_CUDA_CHECK(cudaMalloc(&dStartCoorArr, sizeof(int) * coorArrSize));
+    C10_CUDA_CHECK(cudaMemcpy(dStartCoorArr, startCoorArr, sizeof(int) * coorArrSize,
+      cudaMemcpyHostToDevice));
 
   // ScaleBlobsCUDAKernelBalanced kernel launch
   ScaleBlobsCUDAKernelBalanced<T>
@@ -150,7 +150,7 @@ REGISTER_CUDA_OPERATOR(ScaleBlobs, ScaleBlobsOp<CUDAContext>);
      dOutputArr);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  cudaFree(dStartCoorArr);
+  C10_CUDA_CHECK(cudaFree(dStartCoorArr));
 */
 
 template <typename T>

@@ -1,6 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/Activation.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/glu_backward_native.h>
+#include <ATen/ops/glu_backward_jvp_native.h>
+#include <ATen/ops/glu_jvp_native.h>
+#include <ATen/ops/glu_native.h>
+#include <ATen/ops/sigmoid.h>
+#endif
 
 namespace at {
 
@@ -30,6 +45,8 @@ namespace native {
 DEFINE_DISPATCH(glu_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(glu_jvp_stub);
 
 TORCH_IMPL_FUNC(glu_out) (const Tensor& self, int64_t dim, const Tensor& out) {
   glu_stub(device_type(), *this);
@@ -68,6 +85,73 @@ Tensor glu_backward_cpu(const Tensor& grad_output, const Tensor& input, int64_t 
   auto grad_input = at::empty({0}, input.options());
   return glu_backward_cpu_out(grad_output, input, dim, grad_input);
 }
+
+Tensor glu_jvp(
+    const Tensor& glu,
+    const Tensor& x,
+    const Tensor& dx,
+    int64_t dim
+) {
+  dim = maybe_wrap_dim(dim, x.dim());
+  const auto glu_size = glu.size(dim);
+  const auto b = x.narrow(dim, glu_size, glu_size);
+  const auto da = dx.narrow(dim, 0, glu_size);
+  const auto db = dx.narrow(dim, glu_size, glu_size);
+  auto dglu = at::empty_like(glu);
+  auto iter = at::TensorIteratorConfig()
+    .add_output(dglu)
+    .add_input(glu)
+    .add_input(b)
+    .add_input(da)
+    .add_input(db)
+    .build();
+  glu_jvp_stub(iter.device_type(), iter);
+  return dglu;
+}
+
+Tensor glu_backward_jvp(
+    const Tensor& grad_x,
+    const Tensor& grad_glu,
+    const Tensor& x,
+    const Tensor& dgrad_glu,
+    const Tensor& dx,
+    int64_t dim
+) {
+  dim = maybe_wrap_dim(dim, x.dim());
+  const auto glu_size = grad_glu.size(dim);
+  const auto a = x.narrow(dim, 0, glu_size);
+  const auto b = x.narrow(dim, glu_size, glu_size);
+  const auto da = dx.narrow(dim, 0, glu_size);
+  const auto db = dx.narrow(dim, glu_size, glu_size);
+  // grad_x_a = grad_glu * sigmoid(b)
+  const auto grad_x_a = grad_x.narrow(dim, 0, glu_size);
+  // grad_x_b = grad_x_a * a * (1 - sigmoid(b))
+  const auto grad_x_b = grad_x.narrow(dim, glu_size, glu_size);
+
+  const auto sig_b = at::sigmoid(b);
+  // TODO: use glu from forward.
+  // TODO: fuse kernels.
+  const auto glu = a * sig_b;
+  const auto db_neg_sig_b = db - db * sig_b;
+
+  // dgrad_x_a = d(grad_glu * sigmoid(b))
+  //           = dgrad_glu * sigmoid(b) + grad_glu * sigmoid(b) * (1 - sigmoid(b)) * db
+  //           = dgrad_glu * sig_b + grad_x_a * (db - db * sig_b)
+  //           = dgrad_glu * sig_b + grad_x_a * db_neg_sig_b
+  const auto dgrad_x_a = dgrad_glu * sig_b + grad_x_a * db_neg_sig_b;
+
+  // dgrad_x_b = d(grad_glu * sigmoid(b) * a * (1 - sigmoid(b))
+  //           =  d(grad_glu * sigmoid(b)) * a * (1 - sigmoid(b))
+  //            + grad_glu * sigmoid(b) * da * (1 - sigmoid(b))
+  //            - grad_glu * sigmoid(b) * a * sigmoid(b) * (1 - sigmoid(b)) * db
+  //          =   dgrad_x_a * a * (1 - sigmoid(b))
+  //           + (grad_glu * sigmoid(b)) * (da * (1 - sigmoid(b)) - a * sigmoid(b) * (1 - sigmoid(b)) * db)
+  //          = dgrad_x_a * (a - glu) + grad_x_a * (da - da * sig_b - glu * db_neg_sig_b
+  const auto dgrad_x_b = dgrad_x_a * (a - glu) + grad_x_a * (da - da * sig_b - glu * db_neg_sig_b);
+
+  return at::cat({dgrad_x_a, dgrad_x_b}, dim);
+}
+
 
 } // at::native
 } // at

@@ -1,8 +1,11 @@
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+
 import torch
 import torch.optim._functional as F
 
 from torch import Tensor
+
+__all__: List[str] = []
 
 # Define a TorchScript compatible Functional Rprop Optimizer
 # where we use these optimizer in a functional way.
@@ -14,7 +17,7 @@ from torch import Tensor
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
 @torch.jit.script
-class _FunctionalRprop(object):
+class _FunctionalRprop:
     def __init__(
         self,
         params: List[Tensor],
@@ -22,6 +25,7 @@ class _FunctionalRprop(object):
         etas: Tuple[float, float] = (0.5, 1.2),
         step_sizes: Tuple[float, float] = (1e-6, 50),
         foreach: bool = False,
+        maximize: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
@@ -30,6 +34,7 @@ class _FunctionalRprop(object):
         self.etas = etas
         self.step_sizes = step_sizes
         self.foreach = foreach
+        self.maximize = maximize
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -41,12 +46,12 @@ class _FunctionalRprop(object):
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
     def step(self, gradients: List[Optional[Tensor]]):
-        params = self.param_group['params']
+        params = self.param_group["params"]
         params_with_grad = []
         grads = []
         prevs = []
         step_sizes = []
-        lr = self.defaults['lr']
+        lr = self.defaults["lr"]
         etaminus, etaplus = self.etas
         step_size_min, step_size_max = self.step_sizes
 
@@ -65,23 +70,28 @@ class _FunctionalRprop(object):
                 if param not in self.state:
                     self.state[param] = {}
                     state = self.state[param]
-                    state['step'] = torch.tensor(0.0)
-                    state['prev'] = torch.zeros_like(param, memory_format=torch.preserve_format)
-                    state['step_size'] = torch.full_like(gradient, lr)
+                    state["step"] = torch.tensor(0.0)
+                    state["prev"] = torch.zeros_like(
+                        param, memory_format=torch.preserve_format
+                    )
+                    state["step_size"] = torch.full_like(gradient, lr)
 
                 state = self.state[param]
-                prevs.append(state['prev'])
-                step_sizes.append(state['step_size'])
+                prevs.append(state["prev"])
+                step_sizes.append(state["step_size"])
 
-                state['step'] += 1
+                state["step"] += 1
 
         with torch.no_grad():
-            F.rprop(params_with_grad,
-                    grads,
-                    prevs,
-                    step_sizes,
-                    step_size_min=step_size_min,
-                    step_size_max=step_size_max,
-                    etaminus=etaminus,
-                    etaplus=etaplus,
-                    foreach=self.foreach)
+            F.rprop(
+                params_with_grad,
+                grads,
+                prevs,
+                step_sizes,
+                step_size_min=step_size_min,
+                step_size_max=step_size_max,
+                etaminus=etaminus,
+                etaplus=etaplus,
+                foreach=self.foreach,
+                maximize=self.maximize,
+            )

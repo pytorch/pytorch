@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/frozen_concat_linear.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_linear_folding.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
@@ -18,12 +19,14 @@ void OptimizeFrozenGraph(
   FrozenConcatLinear(graph);
   // run a couple times to capture Conv -> Mul -> Add etc
   if (optimize_numerics) {
-    for (const auto i : c10::irange(2)) {
-      (void)i; // Suppress unused variable warning
-      FoldFrozenConvBatchnorm(graph);
-      FoldFrozenConvAddOrSub(graph);
-      FoldFrozenConvMulOrDiv(graph);
-    }
+    bool changed = false;
+    do {
+      changed = false;
+      changed |= FoldFrozenConvBatchnorm(graph);
+      changed |= FoldFrozenConvAddOrSub(graph);
+      changed |= FoldFrozenConvMulOrDiv(graph);
+      changed |= FoldFrozenLinearBatchnorm(graph);
+    } while (changed);
   }
 }
 

@@ -5,8 +5,7 @@ import operator_benchmark as op_bench
 qarithmetic_binary_configs = op_bench.cross_product_configs(
     N=(2, 8, 64, 512),
     dtype=(torch.quint8, torch.qint8, torch.qint32),
-    # contig=(False, True),  # TODO: Reenable this after #29435
-    contig=(True,),
+    contig=(False, True),
     tags=('short',)
 )
 
@@ -30,7 +29,7 @@ qarithmetic_binary_scalar_ops = op_bench.op_list(
 
 class _QFunctionalBinaryArithmeticBenchmarkBase(op_bench.TorchBenchmarkBase):
     def setup(self, N, dtype, contig):
-        self.qfunctional = torch.nn.quantized.QFunctional()
+        self.qfunctional = torch.ao.nn.quantized.QFunctional()
 
         # TODO: Consider more diverse shapes
         f_input = (torch.rand(N, N) - 0.5) * 256
@@ -47,7 +46,7 @@ class _QFunctionalBinaryArithmeticBenchmarkBase(op_bench.TorchBenchmarkBase):
 
 class QFunctionalBenchmark(_QFunctionalBinaryArithmeticBenchmarkBase):
     def init(self, N, dtype, contig, op_func):
-        super(QFunctionalBenchmark, self).setup(N, dtype, contig)
+        super().setup(N, dtype, contig)
         self.inputs = {
             "q_input_a": self.q_input_a,
             "q_input_b": self.q_input_a,
@@ -67,7 +66,7 @@ op_bench.generate_pt_tests_from_op_list(qarithmetic_binary_ops,
 
 class QFunctionalScalarBenchmark(_QFunctionalBinaryArithmeticBenchmarkBase):
     def init(self, N, dtype, contig, op_func):
-        super(QFunctionalScalarBenchmark, self).setup(N, dtype, contig)
+        super().setup(N, dtype, contig)
         self.inputs = {
             "q_input": self.q_input_a,
             "scalar_input": 42

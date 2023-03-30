@@ -31,28 +31,6 @@ std::unordered_map<std::string, TensorShape> stripShapeInfoMap(
   return shape_map;
 }
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-uint64_t onnxifiDataType(caffe2::TensorProto::DataType t) {
-#define CAFFE2_TO_ONNXIFI_TYPE(x, y) \
-  case (caffe2::TensorProto::x):     \
-    return y
-  switch (t) {
-    CAFFE2_TO_ONNXIFI_TYPE(FLOAT, ONNXIFI_DATATYPE_FLOAT32);
-    CAFFE2_TO_ONNXIFI_TYPE(INT8, ONNXIFI_DATATYPE_INT8);
-    CAFFE2_TO_ONNXIFI_TYPE(UINT8, ONNXIFI_DATATYPE_UINT8);
-    CAFFE2_TO_ONNXIFI_TYPE(INT16, ONNXIFI_DATATYPE_INT16);
-    CAFFE2_TO_ONNXIFI_TYPE(UINT16, ONNXIFI_DATATYPE_UINT16);
-    CAFFE2_TO_ONNXIFI_TYPE(INT32, ONNXIFI_DATATYPE_INT32);
-    CAFFE2_TO_ONNXIFI_TYPE(INT64, ONNXIFI_DATATYPE_INT64);
-    CAFFE2_TO_ONNXIFI_TYPE(FLOAT16, ONNXIFI_DATATYPE_FLOAT16);
-    default:
-      LOG(WARNING) << "Unsupported Caffe2 tensor type: " << t
-                   << ", fallback to FLOAT";
-      return ONNXIFI_DATATYPE_FLOAT32;
-  }
-#undef CAFFE2_TO_ONNXIFI_TYPE
-}
-
 std::vector<::ONNX_NAMESPACE::ValueInfoProto> convertToValueInfo(
     const std::vector<std::string>& names,
     const std::unordered_map<std::string, TensorShape>& shape_hints,
@@ -910,14 +888,14 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       VLOG(2) << "Adding extra init tensor: " << t.name();
       TensorShape shape;
       shape.mutable_dims()->CopyFrom(t.dims());
+      auto dims_size = shape.dims_size();
       auto ret = shape_hints_onnx_.emplace(t.name(), std::move(shape));
       shape_hints_max_bs->emplace(
           std::piecewise_construct,
           std::forward_as_tuple(ret.first->first),
           std::forward_as_tuple(
               std::vector<TensorBoundShape::DimType>(
-                  // NOLINTNEXTLINE(bugprone-use-after-move)
-                  shape.dims_size(), TensorBoundShape_DimType_CONSTANT),
+                  dims_size, TensorBoundShape_DimType_CONSTANT),
               ret.first->second));
 
       // Feed into workspace as CPU Tensors

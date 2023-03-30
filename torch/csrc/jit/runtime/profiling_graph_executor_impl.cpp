@@ -395,7 +395,7 @@ FusionBehavior ProfilingGraphExecutorImpl::getCurrentBehavior(
     }
   }
   // should never get here
-  TORCH_WARN("Stratgy changed mid-invocation, NYI");
+  TORCH_WARN("Strategy changed mid-invocation, NYI");
   return FusionBehavior::STATIC;
 }
 
@@ -651,7 +651,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
     // value
 #ifndef C10_MOBILE
-    if (RegisterCudaFuseGraph::isRegistered()) {
+    if (torch::jit::fuser::cuda::isEnabled()) {
       torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
     }
 #endif

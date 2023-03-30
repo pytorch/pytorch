@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/Generator.h>
@@ -13,8 +15,6 @@ namespace at { namespace cuda { namespace detail {
 // in the same library where Magma will be used.
 TORCH_CUDA_CPP_API void set_magma_init_fn(void (*magma_init_fn)());
 
-TORCH_CUDA_CPP_API bool hasPrimaryContext(int64_t device_index);
-TORCH_CUDA_CPP_API c10::optional<int64_t> getDeviceIndexWithPrimaryContext();
 
 // The real implementation of CUDAHooksInterface
 struct CUDAHooks : public at::CUDAHooksInterface {
@@ -27,6 +27,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
   bool hasCuSOLVER() const override;
+  bool hasROCM() const override;
   const at::cuda::NVRTC& nvrtc() const override;
   int64_t current_device() const override;
   bool hasPrimaryContext(int64_t device_index) const override;
@@ -36,6 +37,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool compiledWithMIOpen() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
   bool supportsDepthwiseConvolutionWithCuDNN() const override;
+  bool supportsBFloat16ConvolutionWithCuDNNv8() const override;
   bool hasCUDART() const override;
   long versionCUDART() const override;
   long versionCuDNN() const override;

@@ -16,7 +16,7 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 static c10::MaybeOwned<Tensor> contiguous_out_arg(const Tensor &tensor) {
   if (tensor.is_contiguous()) {
@@ -60,6 +60,7 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
 }
 
 Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
+  const auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   result.resize_(self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
@@ -75,7 +76,7 @@ Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) 
   checkAllSameGPU(__func__, {output_arg, input_arg});
 
   auto result_ = contiguous_out_arg(result);
-  launch_logcumsumexp_cuda_kernel(*result_, self, dim);
+  launch_logcumsumexp_cuda_kernel(*result_, self, wrap_dim);
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
@@ -88,6 +89,11 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
 }
 
 void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+  if (self.is_floating_point() || self.is_complex()) {
+    // See Note [Writing Nondeterministic Operations]
+    // Issue reporting nondeterministic behavior: https://github.com/pytorch/pytorch/issues/75240
+    globalContext().alertNotDeterministic("cumsum_cuda_kernel");
+  }
   auto result_ = contiguous_out_arg(result);
   launch_cumsum_cuda_kernel(*result_, self, dim);
   if (!result.is_same(*result_)) {
@@ -106,4 +112,4 @@ void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) 
 REGISTER_CUDA_DISPATCH(cumsum_stub, &cumsum_cuda_kernel);
 REGISTER_CUDA_DISPATCH(cumprod_stub, &cumprod_cuda_kernel);
 
-}} // namespace at::native
+} // namespace at::native

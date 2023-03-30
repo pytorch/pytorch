@@ -39,6 +39,9 @@ class TORCH_API RRefContext {
 
   static void handleException(const JitFuture& jitFuture);
 
+  // handle exception without throw ::c10::Error again
+  static void handleExceptionSilent(const JitFuture& jitFuture);
+
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;
   void operator=(const RRefContext&) = delete;
@@ -177,7 +180,7 @@ class TORCH_API RRefContext {
   // been confirmed (i.e. is no longer in the pendingUsers_ map).
   c10::intrusive_ptr<RRef> getPendingUser(const ForkId& forkId);
 
-  // Start recroding new pending UserRRefs. All pending UserRRefs introduced
+  // Start recording new pending UserRRefs. All pending UserRRefs introduced
   // after this point will be put into the thread_local userTable_, which will
   // then be consumed and cleared in waitForThreadLocalPendingRRefs().
   void recordThreadLocalPendingRRefs();
@@ -261,7 +264,7 @@ class TORCH_API RRefContext {
       RRefId::Hash>
       forks_;
 
-  // This cond var is used by deleteAllUsers(), a event notificaton is sent if
+  // This cond var is used by deleteAllUsers(), a event notification is sent if
   // number of pending UserRRef or UserRRef children is reduced, or
   // number of owned OwnerRRef is reduced.
   std::condition_variable deleteAllUsersCV_;
@@ -300,7 +303,7 @@ class TORCH_API RRefContext {
   std::atomic<int64_t> numPendingFutures_{0};
 
   std::mutex destroyedMutex_;
-  bool destroyed_;
+  bool destroyed_{false};
 
   // Thread local states to keep UserRRefs deserialized from user function
   // arguments.

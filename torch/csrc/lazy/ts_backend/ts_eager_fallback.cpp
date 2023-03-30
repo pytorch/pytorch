@@ -1,13 +1,13 @@
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 
-#include <ATen/Functions.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/Functions.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/native/CPUFallback.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor.h>
-#include <torch/csrc/lazy/core/config.h>
 #include <torch/library.h>
 #include <sstream>
 #include <unordered_map>
@@ -119,7 +119,7 @@ c10::optional<c10::Device> compute_target_device(
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the
   // device Barring that, we take the first tensor from a TensorList arg.
-  if (t_args.size() > 0) {
+  if (!t_args.empty()) {
     return t_args[0].device();
   } else {
     // We need to loop through all of the (potentially multiple) TensorList
@@ -153,14 +153,20 @@ bool force_eager_fallback(c10::Symbol op) {
       return true;
     }
   }
+  if (op == at::aten::nonzero) {
+    // When symbolic shape mode is not enabled, the nonzero shape function
+    // returns an incorrect result.
+    return !symbolicShapeEnabled();
+  }
+
   return false;
 }
 
 void ltc_eager_fallback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
-  // TODO(whc) this FN_TRACK thing hasn't been used so far in LTC iirc but could land/re-enable it
-  // LTC_FN_TRACK(3);;
+  // TODO(whc) this FN_TRACK thing hasn't been used so far in LTC iirc but could
+  // land/re-enable it LTC_FN_TRACK(3);;
   const auto name = c10::toString(op.operator_name());
 
   // Manually applying the TORCH_LAZY_COUNTER macro.
@@ -177,7 +183,7 @@ void ltc_eager_fallback(
   auto arguments = torch::jit::last(stack, args.size());
 
   // Log each tensor argument.
-  for (const auto & ivalue : arguments) {
+  for (const auto& ivalue : arguments) {
     if (ivalue.isTensor()) {
       VLOG(3) << ivalue.toTensor().toString();
     }
@@ -215,7 +221,7 @@ void ts_eager_fallback(
 
   // Step 1: Convert all non-eager tensor inputs into eager tensors and put them
   // on the stack at the correct indices.
-  for (int64_t idx = 0; idx < arguments.size(); ++idx) {
+  for (size_t idx = 0; idx < arguments.size(); ++idx) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       tensor_args.push_back(ivalue.toTensor());
@@ -240,7 +246,7 @@ void ts_eager_fallback(
   // CPU together.
   auto eager_tensors = to_eager(tensor_args, device_type);
 
-  for (auto i = 0; i < tensor_args_indices.size(); ++i) {
+  for (const auto i : c10::irange(tensor_args_indices.size())) {
     auto idx = tensor_args_indices[i];
     (*stack)[arguments_begin + idx] = c10::IValue(eager_tensors[i]);
   }
@@ -251,7 +257,7 @@ void ts_eager_fallback(
   // Step 3: We need to take special care to handle mutable aliases properly:
   // If any input tensors are mutable aliases, we need to directly copy the
   // updated data on the eager tensors back to the original inputs.
-  for (int64_t i = 0; i < tensor_args_indices.size(); ++i) {
+  for (const auto i : c10::irange(tensor_args_indices.size())) {
     auto tensor_idx = tensor_args_indices[i];
     const auto alias_info = schema_args[tensor_idx].alias_info();
     if (alias_info != nullptr && alias_info->isWrite()) {
@@ -282,7 +288,7 @@ void ts_eager_fallback(
   auto returns = torch::jit::last(stack, num_returns);
   const auto returns_begin = stack->size() - num_returns;
 
-  for (int64_t idx = 0; idx < returns.size(); ++idx) {
+  for (const auto idx : c10::irange(returns.size())) {
     if (returns[idx].isTensor()) {
       const auto& return_tens = returns[idx].toTensor();
       if (return_tens.defined()) {
@@ -293,7 +299,7 @@ void ts_eager_fallback(
           bool found_alias = false;
           // We could store some extra metadata on the function schema to avoid
           // the loop here if we need to improve perf.
-          for (int64_t i = 0; i < tensor_args_indices.size(); ++i) {
+          for (const auto i : c10::irange(tensor_args_indices.size())) {
             auto input_tensor_idx = tensor_args_indices[i];
             const auto& input_tensor = eager_tensors[i];
             const auto input_alias_info =
@@ -317,8 +323,8 @@ void ts_eager_fallback(
               "mutable alias: ",
               schema_returns[idx]);
         } else {
-          c10::optional<c10::Device> tgt_device =
-              compute_target_device(tensor_args, tensorlist_args, opt_tensorlist_args);
+          c10::optional<c10::Device> tgt_device = compute_target_device(
+              tensor_args, tensorlist_args, opt_tensorlist_args);
           if (alias_info != nullptr && !alias_info->isWrite()) {
             // immutable alias (view) case: Warn here, since we're copying and
             // not creating a view.
@@ -331,7 +337,11 @@ void ts_eager_fallback(
             } else {
               dev_str << "<none>";
             }
-            TORCH_WARN(
+            // We should never hit this for a view op,
+            // because LazyTensor should provide a lowering for the
+            // corresponding view_copy operator. The functionalization pass will
+            // take care of calling the view_copy operator intead of the view.
+            TORCH_CHECK(
                 false,
                 "The operator ",
                 op.schema().operator_name(),

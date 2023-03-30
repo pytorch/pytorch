@@ -1,6 +1,13 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/sigmoid_native.h>          // for mkldnn_sigmoid, mkldnn_...
+#include <ATen/ops/tanh_native.h>             // for mkldnn_tanh, mkldnn_tanh_
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 

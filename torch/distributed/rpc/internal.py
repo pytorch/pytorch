@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 from torch._C._distributed_rpc import _get_current_rpc_agent
 
+__all__ = ["RPCExecMode", "serialize", "deserialize", "PythonUDF", "RemoteException"]
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
 # objects
@@ -102,8 +103,8 @@ class _InternalRPCPickler:
         # user picklers could have different initialization function from _InternalRPCPickler,
         # but all the user picklers should call serialize() and use _rref_reducer to pickle rref
         # in python. also, when _internal_rpc_pickler is imported to rpc/api.py, rpc.RRef is not
-        # compiled yet, it is not good place to acces rpc.RRef inside _InternalRPCPickler constructor,
-        # so puting rref's dispatch table here
+        # compiled yet, it is not good place to access rpc.RRef inside _InternalRPCPickler constructor,
+        # so putting rref's dispatch table here
         #
         # The return value of a `rpc.remote(..)` call is type of `rpc.PyRRef`.
         # The deserialized RRef object on an RPC receiver side is type of `rpc.PyRRef`.
@@ -217,7 +218,20 @@ def _run_function(python_udf):
 
 def _handle_exception(result):
     if isinstance(result, RemoteException):
-        raise result.exception_type(result.msg.encode("utf-8").decode("unicode_escape"))
+        exception_msg = result.msg.encode("utf-8").decode("unicode_escape")
+        # We wrap exception re-creation here in case some exception classes
+        # cannot be constructed directly from a string.
+        exc = None
+        try:
+            exc = result.exception_type(exception_msg)
+        except BaseException as e:
+            raise RuntimeError(  # noqa: B904
+                f"Failed to create original exception type. Error msg was {str(e)}"
+                f" Original exception on remote side was {exception_msg}"
+            ) from e
+
+        if exc is not None:
+            raise exc
 
 
 def _build_rpc_profiling_key(

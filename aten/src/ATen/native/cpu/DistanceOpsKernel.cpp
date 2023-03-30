@@ -7,10 +7,11 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
-#include <ATen/cpu/vml.h>
+#include <ATen/cpu/vec/functional.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native { namespace {
+namespace at::native {
+namespace {
 
 template<typename scalar_t>
 struct Dist {
@@ -394,8 +395,7 @@ struct Dist {
     const scalar_t * t1_end = t1 + l1_size;
     const scalar_t * t2_end = t2 + l2_size;
 
-    for (const auto l : c10::irange(d)) {
-      (void)l; //Suppress unused variable warning
+    for (const auto l C10_UNUSED : c10::irange(d)) {
       for (; t1 != t1_end; t1 += m, res += m) {
         const Vec vec_t1 = Vec::loadu(t1, count);
         Vec res_vec = Vec::loadu(res, count);
@@ -448,4 +448,4 @@ REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
 REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
 
-}}  // namespace at::native
+}  // namespace at::native

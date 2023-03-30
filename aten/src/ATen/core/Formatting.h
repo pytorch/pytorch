@@ -8,8 +8,8 @@
 
 namespace c10 {
 TORCH_API std::ostream& operator<<(std::ostream& out, Backend b);
-TORCH_API std::ostream& operator<<(std::ostream & out, Scalar s);
-TORCH_API std::string toString(Scalar s);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Scalar& s);
+TORCH_API std::string toString(const Scalar& s);
 }
 namespace at {
 

@@ -331,13 +331,39 @@ typedef void (*pytorch_q8gemm_dq_sparse_ukernel_function)(
     size_t output_channel_index,
     const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
 
-typedef void (*pytorch_q8gemm_dq_sparse_packedA_ukernel_function)(
+typedef void (*pytorch_q8gemm_dq_sparse_packedA_w32_ukernel_function)(
     size_t mr,
     size_t nr,
     const uint8_t* a_packed,
     const uint8_t* packed_w,
     const uint32_t* w_row_ptr,
     const uint32_t* w_block_ids_ptr,
+    const float* bias,
+    float* c,
+    size_t c_stride,
+    size_t output_channel_index,
+    const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
+
+typedef void (*pytorch_q8gemm_dq_sparse_packedA_w16_ukernel_function)(
+    size_t mr,
+    size_t nr,
+    const uint8_t* a_packed,
+    const uint8_t* packed_w,
+    const uint16_t* w_row_ptr,
+    const uint16_t* w_block_ids_ptr,
+    const float* bias,
+    float* c,
+    size_t c_stride,
+    size_t output_channel_index,
+    const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
+
+typedef void (*pytorch_q8gemm_dq_sparse_packedA_w8_ukernel_function)(
+    size_t mr,
+    size_t nr,
+    const uint8_t* a_packed,
+    const uint8_t* packed_w,
+    const uint8_t* w_row_ptr,
+    const uint8_t* w_block_ids_ptr,
     const float* bias,
     float* c,
     size_t c_stride,
@@ -545,7 +571,11 @@ struct pytorch_q8conv_parameters {
 
 struct pytorch_q8gemm_sparse_parameters {
   pytorch_q8gemm_dq_sparse_ukernel_function gemm_dq;
-  pytorch_q8gemm_dq_sparse_packedA_ukernel_function packedA_gemm_dq;
+  // w32, w16, and w8 refer to variants of the kernel which use uint32_t,
+  // uint16_t, and uint8_t datatype for row values/col indices respectively
+  pytorch_q8gemm_dq_sparse_packedA_w32_ukernel_function packedA_w32_gemm_dq;
+  pytorch_q8gemm_dq_sparse_packedA_w16_ukernel_function packedA_w16_gemm_dq;
+  pytorch_q8gemm_dq_sparse_packedA_w8_ukernel_function packedA_w8_gemm_dq;
   pytorch_q8gemm_sparse_packA_ukernel_function packA;
   uint8_t mr;
   uint8_t nr;

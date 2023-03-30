@@ -40,6 +40,8 @@ using ::c10::ivalue::ConstantString;
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+TORCH_API std::atomic<bool>& getTracerStateWarnMode();
+
 struct TORCH_API TracingState
     : public std::enable_shared_from_this<TracingState> {
   TracingState();
@@ -48,7 +50,7 @@ struct TORCH_API TracingState
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Graph> graph;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool warn = true;
+  bool warn = getTracerStateWarnMode();
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool strict = true;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -177,7 +179,6 @@ inline void warn(const char* _reason, const char* _kind = nullptr) {
 TORCH_API void setWarn(warn_fn_type fn);
 
 struct TORCH_API NoWarn {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   NoWarn() : state(getTracingState()) {
     if (state) {
       prev = state->warn;
@@ -190,16 +191,14 @@ struct TORCH_API NoWarn {
     }
   }
   std::shared_ptr<TracingState> state;
-  bool prev;
+  bool prev{false};
 };
 
 struct WithNestedTracingFrame {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   WithNestedTracingFrame() {
     getTracingState()->enterFrame();
   }
 
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~WithNestedTracingFrame() {
     getTracingState()->leaveFrame();
   }
@@ -265,6 +264,10 @@ TORCH_API void addInputs(Node* n, const char* name, c10::SymIntArrayRef value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    c10::optional<c10::SymInt> value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     const c10::optional<ArrayRef<int64_t>>& value);
 TORCH_API void addInputs(
     Node* n,
@@ -273,7 +276,21 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    const at::OptionalSymIntArrayRef& opt_value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     ArrayRef<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    std::vector<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    at::ITensorListRef value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
     Node* n,

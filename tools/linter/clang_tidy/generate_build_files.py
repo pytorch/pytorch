@@ -1,6 +1,6 @@
+import os
 import subprocess
 import sys
-import os
 from typing import List
 
 
@@ -8,8 +8,7 @@ def run_cmd(cmd: List[str]) -> None:
     print(f"Running: {cmd}")
     result = subprocess.run(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     stdout, stderr = (
         result.stdout.decode("utf-8").strip(),
@@ -22,24 +21,19 @@ def run_cmd(cmd: List[str]) -> None:
         exit(1)
 
 
-def run_timed_cmd(cmd: List[str]) -> None:
-    run_cmd(["time"] + cmd)
-
-
 def update_submodules() -> None:
     run_cmd(["git", "submodule", "update", "--init", "--recursive"])
 
 
 def gen_compile_commands() -> None:
     os.environ["USE_NCCL"] = "0"
-    os.environ["USE_DEPLOY"] = "1"
     os.environ["CC"] = "clang"
     os.environ["CXX"] = "clang++"
-    run_timed_cmd([sys.executable, "setup.py", "--cmake-only", "build"])
+    run_cmd([sys.executable, "setup.py", "--cmake-only", "build"])
 
 
 def run_autogen() -> None:
-    run_timed_cmd(
+    run_cmd(
         [
             sys.executable,
             "-m",
@@ -52,7 +46,7 @@ def run_autogen() -> None:
         ]
     )
 
-    run_timed_cmd(
+    run_cmd(
         [
             sys.executable,
             "tools/setup_helpers/generate_code.py",
@@ -60,7 +54,7 @@ def run_autogen() -> None:
             "aten/src/ATen/native/native_functions.yaml",
             "--tags-path",
             "aten/src/ATen/native/tags.yaml",
-            "--gen_lazy_ts_backend",
+            "--gen-lazy-ts-backend",
         ]
     )
 

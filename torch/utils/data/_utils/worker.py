@@ -10,8 +10,10 @@ import os
 import queue
 from dataclasses import dataclass
 from torch._utils import ExceptionWrapper
-from typing import Union
+from typing import Optional, Union, TYPE_CHECKING
 from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS, HAS_NUMPY
+if TYPE_CHECKING:
+    from torch.utils.data import Dataset
 
 if IS_WINDOWS:
     import ctypes
@@ -20,7 +22,7 @@ if IS_WINDOWS:
     # On Windows, the parent ID of the worker process remains unchanged when the manager process
     # is gone, and the only way to check it through OS is to let the worker have a process handle
     # of the manager and ask if the process status has changed.
-    class ManagerWatchdog(object):
+    class ManagerWatchdog:
         def __init__(self):
             self.manager_pid = os.getppid()
 
@@ -46,7 +48,7 @@ if IS_WINDOWS:
                 self.manager_dead = self.kernel32.WaitForSingleObject(self.manager_handle, 0) == 0
             return not self.manager_dead
 else:
-    class ManagerWatchdog(object):  # type: ignore[no-redef]
+    class ManagerWatchdog:  # type: ignore[no-redef]
         def __init__(self):
             self.manager_pid = os.getppid()
             self.manager_dead = False
@@ -59,7 +61,11 @@ else:
 _worker_info = None
 
 
-class WorkerInfo(object):
+class WorkerInfo:
+    id: int
+    num_workers: int
+    seed: int
+    dataset: 'Dataset'
     __initialized = False
 
     def __init__(self, **kwargs):
@@ -71,7 +77,7 @@ class WorkerInfo(object):
     def __setattr__(self, key, val):
         if self.__initialized:
             raise RuntimeError("Cannot assign attributes to {} objects".format(self.__class__.__name__))
-        return super(WorkerInfo, self).__setattr__(key, val)
+        return super().__setattr__(key, val)
 
     def __repr__(self):
         items = []
@@ -80,7 +86,7 @@ class WorkerInfo(object):
         return '{}({})'.format(self.__class__.__name__, ', '.join(items))
 
 
-def get_worker_info():
+def get_worker_info() -> Optional[WorkerInfo]:
     r"""Returns the information about the current
     :class:`~torch.utils.data.DataLoader` iterator worker process.
 
@@ -111,13 +117,13 @@ def get_worker_info():
 
 r"""Dummy class used to signal the end of an IterableDataset"""
 @dataclass(frozen=True)
-class _IterableDatasetStopIteration(object):
+class _IterableDatasetStopIteration:
     worker_id: int
 
 r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 @dataclass(frozen=True)
-class _ResumeIteration(object):
-    pass
+class _ResumeIteration:
+    seed: Optional[int] = None
 
 # The function `_generate_state` is adapted from `numpy.random.SeedSequence`
 # from https://github.com/numpy/numpy/blob/main/numpy/random/bit_generator.pyx
@@ -201,7 +207,7 @@ def _generate_state(base_seed, worker_id):
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                  auto_collation, collate_fn, drop_last, base_seed, init_fn, worker_id,
-                 num_workers, persistent_workers):
+                 num_workers, persistent_workers, shared_seed):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -221,6 +227,15 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
             np_seed = _generate_state(base_seed, worker_id)
             import numpy as np
             np.random.seed(np_seed)
+
+        from torch.utils.data import IterDataPipe
+        from torch.utils.data.graph_settings import apply_random_seed
+
+        shared_rng = torch.Generator()
+        if isinstance(dataset, IterDataPipe):
+            assert shared_seed is not None
+            shared_rng.manual_seed(shared_seed)
+            dataset = apply_random_seed(dataset, shared_rng)
 
         global _worker_info
         _worker_info = WorkerInfo(id=worker_id, num_workers=num_workers,
@@ -264,6 +279,12 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 # Acknowledge the main process
                 data_queue.put((r, None))
                 iteration_end = False
+
+                if isinstance(dataset, IterDataPipe):
+                    assert r.seed is not None
+                    shared_rng.manual_seed(r.seed)
+                    dataset = apply_random_seed(dataset, shared_rng)
+
                 # Recreate the fetcher for worker-reuse policy
                 fetcher = _DatasetKind.create_fetcher(
                     dataset_kind, dataset, auto_collation, collate_fn, drop_last)

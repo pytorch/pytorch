@@ -2,9 +2,7 @@
 
 from io import BytesIO
 
-from torch.package import (
-    PackageExporter,
-)
+from torch.package import PackageExporter
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -33,7 +31,7 @@ class TestDependencyHooks(PackageTestCase):
             exporter.register_extern_hook(my_extern_hook)
             exporter.save_source_string("foo", "import module_a")
 
-        self.assertEqual(my_externs, set(["module_a"]))
+        self.assertEqual(my_externs, {"module_a"})
 
     def test_multiple_extern_hooks(self):
         buffer = BytesIO()
@@ -95,7 +93,7 @@ class TestDependencyHooks(PackageTestCase):
             exporter.save_source_string("foo", "import module_a")
 
         self.assertEqual(my_externs, set())
-        self.assertEqual(my_externs2, set(["module_a"]))
+        self.assertEqual(my_externs2, {"module_a"})
 
     def test_extern_and_mock_hook(self):
         buffer = BytesIO()
@@ -116,8 +114,8 @@ class TestDependencyHooks(PackageTestCase):
             exporter.register_mock_hook(my_mock_hook)
             exporter.save_source_string("foo", "import module_a; import package_a")
 
-        self.assertEqual(my_externs, set(["module_a"]))
-        self.assertEqual(my_mocks, set(["package_a"]))
+        self.assertEqual(my_externs, {"module_a"})
+        self.assertEqual(my_mocks, {"package_a"})
 
 
 if __name__ == "__main__":

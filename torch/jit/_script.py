@@ -13,7 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict, List, Tuple, Union, Callable
+from typing import Any, Dict, List, Set, Tuple, Union, Callable
 
 
 import torch
@@ -23,7 +23,6 @@ from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_method
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
-from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
 from torch.jit._fuser import _graph_for, _script_method_graph_for
@@ -75,7 +74,7 @@ Attribute.__doc__ = """
     This method is a pass-through function that returns `value`, mostly
     used to indicate to the TorchScript compiler that the left-hand side
     expression is a class instance attribute with type of `type`. Note that
-    `torch.jit.Attribute` should only be used in `__init__` method of `nn.Module`
+    `torch.jit.Attribute` should only be used in `__init__` method of `jit.ScriptModule`
     subclasses.
 
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
@@ -95,9 +94,9 @@ Attribute.__doc__ = """
         import torch
         from typing import Dict
 
-        class AttributeModule(torch.nn.Module):
+        class AttributeModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.foo = torch.jit.Attribute(0.1, float)
 
                 # we should be able to use self.foo as a float here
@@ -111,6 +110,27 @@ Attribute.__doc__ = """
         # m will contain two attributes
         # 1. foo of type float
         # 2. names_ages of type Dict[str, int]
+
+    .. testcleanup::
+
+        del AttributeModule
+        del m
+
+    Note: it's now preferred to instead use type annotations instead of `torch.jit.Annotate`:
+
+    .. testcode::
+
+        import torch
+        from typing import Dict
+
+        class AttributeModule(torch.nn.Module):
+            names: Dict[str, int]
+
+            def __init__(self):
+                super().__init__()
+                self.names = {}
+
+        m = AttributeModule()
 
     .. testcleanup::
 
@@ -156,7 +176,7 @@ def _is_new_style_class(cls):
 #  len(view)
 
 
-class OrderedDictWrapper(object):
+class OrderedDictWrapper:
     def __init__(self, _c):
         self._c = _c
 
@@ -194,7 +214,7 @@ class OrderedDictWrapper(object):
 
 class OrderedModuleDict(OrderedDictWrapper):
     def __init__(self, module, python_dict):
-        super(OrderedModuleDict, self).__init__(torch._C.ModuleDict(module))
+        super().__init__(torch._C.ModuleDict(module))
         # contains _both_ script modules and non-script python-only modules
 
         # because script modules are subclassed in python and the
@@ -249,7 +269,7 @@ class ScriptMeta(type):
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
                 cls._methods[k] = v
-            base_constants = getattr(base, "_constants_set", set())
+            base_constants: Set = getattr(base, "_constants_set", set())
             cls._constants_set = cls._constants_set.union(base_constants)
 
         # find all the script methods of the current class
@@ -300,7 +320,7 @@ class ScriptMeta(type):
         super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
-class _CachedForward(object):
+class _CachedForward:
     def __get__(self, obj, cls):
         return self.__getattr__("forward")  # type: ignore[attr-defined]
 
@@ -390,7 +410,7 @@ if _enabled:
         "__exit__",
     ]
 
-    class RecursiveScriptClass(object):
+    class RecursiveScriptClass:
         """
         An analogue of RecursiveScriptModule for regular objects that are not modules.
         This class is a wrapper around a torch._C.ScriptObject that represents an instance
@@ -403,7 +423,7 @@ if _enabled:
                 exposed on this wrppaer.
         """
         def __init__(self, cpp_class):
-            super(RecursiveScriptClass, self).__init__()
+            super().__init__()
             self.__dict__["_initializing"] = True
             self._c = cpp_class
 
@@ -414,19 +434,19 @@ if _enabled:
 
         def __getattr__(self, attr):
             if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
-                return super(RecursiveScriptClass, self).__getattr__(attr)  # type: ignore[misc]
+                return super().__getattr__(attr)  # type: ignore[misc]
 
             if attr in self._props:
-                return self._props[attr].fget()
+                return self._props[attr].fget()  # type: ignore[call-arg, misc]
 
             return getattr(self._c, attr)
 
         def __setattr__(self, attr, value):
             if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
-                return super(RecursiveScriptClass, self).__setattr__(attr, value)
+                return super().__setattr__(attr, value)
 
             if attr in self._props:
-                return self._props[attr].fset(value)
+                return self._props[attr].fset(value)  # type: ignore[call-arg, misc]
 
             setattr(self._c, attr, value)
 
@@ -463,7 +483,7 @@ if _enabled:
     # did nothing, __getattr__ would not be called. Instead we'd get nn.Module.forward
     # which always throws an exception.
 
-    class ScriptModule(with_metaclass(ScriptMeta, Module)):  # type: ignore[misc]
+    class ScriptModule(Module, metaclass=ScriptMeta):
         r"""
         A wrapper around C++ ``torch::jit::Module``. ``ScriptModule``\s
         contain methods, attributes, parameters, and
@@ -472,13 +492,13 @@ if _enabled:
         __jit_unused_properties__ = ['code', 'code_with_constants', 'graph', 'inlined_graph', 'original_name']
 
         def __init__(self):
-            super(ScriptModule, self).__init__()
+            super().__init__()
 
-        forward = _CachedForward()
+        forward: Callable[..., Any] = _CachedForward()  # type: ignore[assignment]
 
         def __getattr__(self, attr):
             if "_actual_script_module" not in self.__dict__:
-                return super(ScriptModule, self).__getattr__(attr)
+                return super().__getattr__(attr)
             return getattr(self._actual_script_module, attr)
 
         def __setattr__(self, attr, value):
@@ -497,7 +517,7 @@ if _enabled:
                         self.__class__.__annotations__ = {}
                     self.__annotations__[attr] = value.type
                     value = value.value
-                return super(ScriptModule, self).__setattr__(attr, value)
+                return super().__setattr__(attr, value)
 
             setattr(self._actual_script_module, attr, value)
 
@@ -570,7 +590,7 @@ if _enabled:
         def __init__(self, cpp_module):
             self.__dict__["_initializing"] = True
             self._c = cpp_module
-            super(RecursiveScriptModule, self).__init__()
+            super().__init__()
             # Delete the 'training' attribute set up by `Module.__init__`. It
             # will get set on the underlying cpp module, so we delete it here
             # to avoid this version shadowing the cpp module version.
@@ -629,11 +649,11 @@ if _enabled:
             modules = {}
             for name, cpp_module in torch._C.ModuleDict(self._c).items():
                 modules[name] = wrap_cpp_module(cpp_module)
-            self._modules = OrderedModuleDict(self._c, modules)
+            self._modules = OrderedModuleDict(self._c, modules)  # type: ignore[assignment]
 
             # Copy parameters and buffers.
-            self._parameters = OrderedDictWrapper(torch._C.ParameterDict(self._c))
-            self._buffers = OrderedDictWrapper(torch._C.BufferDict(self._c))
+            self._parameters = OrderedDictWrapper(torch._C.ParameterDict(self._c))  # type: ignore[assignment]
+            self._buffers = OrderedDictWrapper(torch._C.BufferDict(self._c))  # type: ignore[assignment]
 
             # Get rid of the functions from the old C++ module.
             self.__dict__ = {
@@ -658,7 +678,7 @@ if _enabled:
             ``forward`` method. This graph will be preprocessed to inline all function and method calls.
             See :ref:`interpreting-graphs` for details.
             """
-            return self.forward.inlined_graph
+            return self.forward.inlined_graph  # type: ignore[attr-defined]
 
         @property
         def code(self):
@@ -667,7 +687,7 @@ if _enabled:
             the internal graph for the ``forward`` method. See
             :ref:`inspecting-code` for details.
             """
-            return self.forward.code
+            return self.forward.code  # type: ignore[attr-defined]
 
         @property
         def code_with_constants(self):
@@ -681,7 +701,7 @@ if _enabled:
 
             See :ref:`inspecting-code` for details.
             """
-            r = self.forward.code_with_constants
+            r = self.forward.code_with_constants  # type: ignore[attr-defined]
             return (r[0], ConstMap(r[1]))
 
         def save(self, f, **kwargs):
@@ -719,7 +739,7 @@ if _enabled:
             return "original_name={}".format(self.original_name)
 
         def graph_for(self, *args, **kwargs):
-            return self.forward.graph_for(self, *args, **kwargs)
+            return self.forward.graph_for(self, *args, **kwargs)  # type: ignore[attr-defined]
 
         @property
         def original_name(self):
@@ -746,7 +766,7 @@ if _enabled:
                 )
 
             if self._initializing:
-                return super(RecursiveScriptModule, self).__getattr__(attr)
+                return super().__getattr__(attr)
 
             # _modules check is before hasattr since modules are included as attributes in _c,
             # but we want to get the python wrapper from _modules instead of the raw _c object.
@@ -761,11 +781,11 @@ if _enabled:
                 self.__dict__[attr] = script_method
                 return script_method
 
-            return super(RecursiveScriptModule, self).__getattr__(attr)
+            return super().__getattr__(attr)
 
         def __setattr__(self, attr, value):
             if self._initializing:
-                return super(RecursiveScriptModule, self).__setattr__(attr, value)
+                return super().__setattr__(attr, value)
 
             if attr in self._modules:
                 self._modules[attr] = value
@@ -790,7 +810,7 @@ if _enabled:
                 #   s.python_attr = ...
                 #   s.save()   <--- this doesn't have `python_attr`
                 # It's fairly trivial to save enough info to warn in this case.
-                return super(RecursiveScriptModule, self).__setattr__(attr, value)
+                return super().__setattr__(attr, value)
 
         def __copy__(self):
             return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
@@ -829,7 +849,7 @@ if _enabled:
             if self_method.__func__ == _get_function_from_type(  # type: ignore[attr-defined]
                 RecursiveScriptModule, "__dir__"
             ):
-                return super(RecursiveScriptModule, self).__dir__()
+                return super().__dir__()
             return self_method()
 
         # to resolve bool(value), Python looks if __bool__ is defined then __iter__
@@ -856,7 +876,7 @@ if _enabled:
 
     # Need to copy all RecursiveScriptModule methods to ScriptModule.
     #
-    # This is because `super(MyScriptModule, self).foo()` does not use
+    # This is because `super().foo()` does not use
     # `__getattr__` to look up `foo`. So we need to make each method available on
     # the ScriptModule manually.
     for name, item in RecursiveScriptModule.__dict__.items():
@@ -893,7 +913,6 @@ if _enabled:
         "double",
         "half",
         "state_dict",
-        "_state_dict_impl",
         "_save_to_state_dict",
         "load_state_dict",
         "_load_from_state_dict",
@@ -936,9 +955,8 @@ if _enabled:
 
 else:
     # TODO MAKE SURE THAT DISABLING WORKS
-    class RecursiveScriptClass(object):  # type: ignore[no-redef]
-        def __init__(self):
-            super().__init__()
+    class RecursiveScriptClass:  # type: ignore[no-redef]
+        pass
 
     class ScriptModule(torch.nn.Module):  # type: ignore[no-redef]
         def __init__(self, arg=None):
@@ -1033,7 +1051,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
      and as a decorator ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
 
     Args:
-        obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, class type,
+        obj (Callable, class, or nn.Module):  The ``nn.Module``, function, class type,
                                                   dictionary, or list to compile.
         example_inputs (Union[List[Tuple], Dict[Callable, List[Tuple]], None]): Provide example inputs
             to annotate the arguments for a function or ``nn.Module``.
@@ -1121,7 +1139,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
 
             class MyModule(torch.nn.Module):
                 def __init__(self, N, M):
-                    super(MyModule, self).__init__()
+                    super().__init__()
                     # This parameter will be copied to the new ScriptModule
                     self.weight = torch.nn.Parameter(torch.rand(N, M))
 
@@ -1148,7 +1166,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
 
             class MyModule(nn.Module):
                 def __init__(self):
-                    super(MyModule, self).__init__()
+                    super().__init__()
                     # torch.jit.trace produces a ScriptModule's conv1 and conv2
                     self.conv1 = torch.jit.trace(nn.Conv2d(1, 20, 5), torch.rand(1, 1, 16, 16))
                     self.conv2 = torch.jit.trace(nn.Conv2d(20, 20, 5), torch.rand(1, 20, 16, 16))
@@ -1171,7 +1189,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
 
             class MyModule(nn.Module):
                 def __init__(self):
-                    super(MyModule, self).__init__()
+                    super().__init__()
 
                 @torch.jit.export
                 def some_entry_point(self, input):
@@ -1306,7 +1324,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
-            obj = obj.__original_fn
+            obj = obj.__original_fn  # type: ignore[union-attr]
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
 
         # some functions are explicitly marked as not supported in script mode
@@ -1325,6 +1343,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         )
         # Forward docstrings
         fn.__doc__ = obj.__doc__
+        # Allow torch.compile() to inline
+        fn._torchdynamo_inline = obj  # type: ignore[attr-defined]
         _set_jit_function_cache(obj, fn)
         return fn
     else:

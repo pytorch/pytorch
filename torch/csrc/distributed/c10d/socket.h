@@ -12,7 +12,7 @@
 #include <string>
 
 #include <c10/macros/Macros.h>
-#include <c10d/exception.h>
+#include <torch/csrc/distributed/c10d/exception.h>
 
 namespace c10d {
 namespace detail {
@@ -39,7 +39,7 @@ class SocketOptions {
     return connect_timeout_;
   }
 
-private:
+ private:
   bool prefer_ipv6_ = true;
   std::chrono::seconds connect_timeout_{30};
 };
@@ -54,7 +54,10 @@ class Socket {
 
   static Socket listen(std::uint16_t port, const SocketOptions& opts = {});
 
-  static Socket connect(const std::string& host, std::uint16_t port, const SocketOptions& opts = {});
+  static Socket connect(
+      const std::string& host,
+      std::uint16_t port,
+      const SocketOptions& opts = {});
 
   Socket() noexcept = default;
 

@@ -7,20 +7,23 @@
 namespace torch {
 namespace jit {
 
-inline std::pair<size_t, size_t> CalculateNecessaryArgs(
+// Calculates the number of args that need to be passed in.
+// Less args may be needed if defaults are provided.
+// Returns: {number args needed, number of out args}
+inline std::pair<int64_t, int64_t> CalculateNecessaryArgs(
     const std::vector<Argument>& schema_args,
     at::ArrayRef<Value*> actual_inputs,
     bool allow_trailing_out_args) {
-  if (schema_args.size() == 0) {
+  if (schema_args.empty()) {
     return std::make_pair(0, 0);
   }
 
   // count number of out arguments
-  auto schema_idx = schema_args.size() - 1;
+  int64_t schema_idx = static_cast<int64_t>(schema_args.size()) - 1;
   if (allow_trailing_out_args) {
     // skip over out arguments in the end.
     while (schema_idx >= 0) {
-      auto current_arg = schema_args.at(schema_idx);
+      const auto& current_arg = schema_args.at(schema_idx);
       if (!current_arg.is_out()) {
         break;
       }
@@ -28,7 +31,7 @@ inline std::pair<size_t, size_t> CalculateNecessaryArgs(
     }
   }
 
-  auto num_out = schema_args.size() - schema_idx - 1;
+  int64_t num_out = static_cast<int64_t>(schema_args.size()) - schema_idx - 1;
 
   if (schema_args.size() < actual_inputs.size()) {
     return std::make_pair(actual_inputs.size(), num_out);
@@ -54,7 +57,7 @@ inline std::pair<size_t, size_t> CalculateNecessaryArgs(
         return std::make_pair(schema_idx + 1, num_out);
       }
       // if the IR has same value as default value of the schema,
-      // it is not neccessary argument.
+      // it is not necessary argument.
       if (schema_value != actual_value.value()) {
         return std::make_pair(schema_idx + 1, num_out);
       }

@@ -38,8 +38,8 @@ fi
 EXTRA_CONDA_FLAGS=""
 NUMPY_PIN=""
 PROTOBUF_PACKAGE="defaults::protobuf"
+
 if [[ "\$python_nodot" = *310* ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.21.2"
@@ -47,15 +47,12 @@ if [[ "\$python_nodot" = *310* ]]; then
 fi
 
 if [[ "\$python_nodot" = *39*  ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.20"
 fi
 
-if [[ "$DESIRED_CUDA" == "cu115" || "$DESIRED_CUDA" == "cu116" ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
-fi
+
 
 # Move debug wheels out of the the package dir so they don't get installed
 mkdir -p /tmp/debug_final_pkgs
@@ -78,29 +75,28 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     set +u
     retry conda install \${EXTRA_CONDA_FLAGS} -yq \
       "numpy\${NUMPY_PIN}" \
-      future \
       mkl>=2018 \
       ninja \
-      dataclasses \
+      sympy \
       typing-extensions \
-      ${PROTOBUF_PACKAGE} \
-      six
+      ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
     else
-      # DESIRED_CUDA is in format cu90 or cu102
-      if [[ "${#DESIRED_CUDA}" == 4 ]]; then
-        cu_ver="${DESIRED_CUDA:2:1}.${DESIRED_CUDA:3}"
-      else
-        cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
+
+      cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
+      CUDA_PACKAGE="pytorch-cuda"
+      PYTORCH_CHANNEL="pytorch"
+      if [[ "\${TORCH_CONDA_BUILD_FOLDER}" == "pytorch-nightly" ]]; then
+              PYTORCH_CHANNEL="pytorch-nightly"
       fi
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
+      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c "\${PYTORCH_CHANNEL}" "pytorch-cuda=\${cu_ver}"
     fi
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
-  pip install "\$pkg"
-  retry pip install -q future numpy protobuf typing-extensions six
+  pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
+  retry pip install -q numpy protobuf typing-extensions
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"

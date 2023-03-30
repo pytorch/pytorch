@@ -6,13 +6,12 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/core/Scalar.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  ScalarType dtype = iter.dtype(0);
-  if (iter.dtype() == kBFloat16) {
+  ScalarType dtype = iter.common_dtype();
+  if (dtype == kBFloat16) {
     float float_val = value.to<float>();
     auto float_vec = Vectorized<float>(float_val);
     cpu_kernel_vec(
@@ -51,7 +50,7 @@ static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
 }
 
 static void addcdiv_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  ScalarType dtype = iter.dtype(0);
+  ScalarType dtype = iter.common_dtype();
   if (dtype == kBFloat16) {
     float float_val = value.to<float>();
     auto float_vec = Vectorized<float>(float_val);
@@ -242,5 +241,4 @@ REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cpu_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cpu_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cpu_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

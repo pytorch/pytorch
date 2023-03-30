@@ -7,7 +7,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -56,13 +56,16 @@ void cat_serial_kernel_impl(const Tensor& result, const MaterializedITensorListR
 }
 
 void cat_serial_kernel(const Tensor& result, const MaterializedITensorListRef& tensors, int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, result.scalar_type(), "cat_serial_kernel", [&]() {
-    cat_serial_kernel_impl<scalar_t>(result, tensors, dim);
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      result.scalar_type(),
+      "cat_serial_kernel",
+      [&]() { cat_serial_kernel_impl<scalar_t>(result, tensors, dim); });
 }
 
 } // anonymous namespace
 
 REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
 
-}} // at::native
+} // at::native

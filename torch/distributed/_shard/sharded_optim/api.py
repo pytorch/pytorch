@@ -20,8 +20,7 @@ class ShardedOptimizer(optim.Optimizer):
         Args:
             named_params (Dict[str, Union[Tensor, ShardedTensor]]) : a Dict
                 of parameters, where key is the parameter key, value is either
-                Tensor or ShardedTensor parameter. This usually used in
-                conjunction with :meth:`named_params_with_sharded_tensor`
+                Tensor or ShardedTensor parameter.
             optimizer_class (torch.optim.Optimizer): the Optimizer to use
                 locally, i.e. torch.optim.SGD, torch.optim.Adagrad, etc.
             *optimizer_args: the arguments to initialize the optimizer.
@@ -41,8 +40,8 @@ class ShardedOptimizer(optim.Optimizer):
         self.param_groups = self._optim.param_groups
         self.state = self._optim.state
 
-    def zero_grad(self, set_to_none: bool = False):  # type: ignore[override]
-        r"""Sets the gradients of all optimized :class:`torch.Tensor` s to zero.
+    def zero_grad(self, set_to_none: bool = True):  # type: ignore[override]
+        r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
 
         Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
@@ -62,7 +61,7 @@ class ShardedOptimizer(optim.Optimizer):
         r"""Performs a single optimization step (parameter update).
 
         Args:
-            closure (callable): A closure that reevaluates the model and
+            closure (Callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
 
         .. note::

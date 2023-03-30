@@ -495,8 +495,7 @@ void TensorPipeAgent::startImpl() {
 
   // Store our own url.
   const auto address = listener_->url(lowestPriorityTransport);
-  const std::vector<uint8_t> selfAddrData(address.begin(), address.end());
-  nameToAddressStore_.set(workerInfo_.name_, selfAddrData);
+  nameToAddressStore_.set(workerInfo_.name_, address);
 
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is using address "
           << address;
@@ -883,7 +882,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
     {
       std::unique_lock<std::mutex> lock(timeoutMapMutex_);
       auto& timeoutFuturesVector = timeoutMap_[expirationTime];
-      messageIdToTimeout_.emplace(std::make_pair(messageId, expirationTime));
+      messageIdToTimeout_.emplace(messageId, expirationTime);
       timeoutFuturesVector.emplace_back(
           messageId, futureResponseMessage, timeout);
     }
@@ -1078,7 +1077,7 @@ void TensorPipeAgent::leaveGroup() {
 }
 
 // TODO: Remove join()
-void TensorPipeAgent::join(bool shutdown) {
+void TensorPipeAgent::join(bool shutdown, float /* unused */) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
   if (!isStaticGroup_) {
     leaveGroup();
@@ -1174,7 +1173,12 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(
     it = workerNameToInfo_.find(workerName);
   }
   TORCH_CHECK(
-      it != workerNameToInfo_.end(), "Unknown destination worker ", workerName);
+      it != workerNameToInfo_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination name {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          workerName));
   return it->second;
 }
 
@@ -1185,12 +1189,18 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(worker_id_t workerId) const {
     it = workerIdToInfo_.find(workerId);
   }
   TORCH_CHECK(
-      it != workerIdToInfo_.end(), "Unknown destination worker ", workerId);
+      it != workerIdToInfo_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination id {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          workerId));
   return it->second;
 }
 
 std::vector<WorkerInfo> TensorPipeAgent::getWorkerInfos() const {
   std::vector<WorkerInfo> workerInfos;
+  workerInfos.reserve(workerNameToInfo_.size());
   for (auto& item : workerNameToInfo_) {
     workerInfos.emplace_back(item.second);
   }
@@ -1205,7 +1215,12 @@ const std::string& TensorPipeAgent::findWorkerURL(
     it = workerNameToURL_.find(worker.name_);
   }
   TORCH_CHECK(
-      it != workerNameToURL_.end(), "Unknown worker name: ", worker.name_);
+      it != workerNameToURL_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination url for name {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          worker.name_));
   return it->second;
 }
 
@@ -1246,18 +1261,22 @@ void TensorPipeAgent::updateGroupMembership(
     workerNameToInfo_.erase(name);
     workerNameToURL_.erase(name);
 
-    for (const auto& it : reverseDeviceMaps_) {
-      if (reverseDeviceMaps.find(it.first) == reverseDeviceMaps.end()) {
-        reverseDeviceMaps_.erase(it.first);
+    // remove reverse device maps that are no longer used
+    for (auto it = reverseDeviceMaps_.begin();
+         it != reverseDeviceMaps_.end();) {
+      if (reverseDeviceMaps.find(it->first) == reverseDeviceMaps.end()) {
+        it = reverseDeviceMaps_.erase(it);
+      } else {
+        it++;
       }
     }
 
-    auto iter = devices_.begin();
-    while (iter != devices_.end()) {
-      if (std::find(devices.begin(), devices.end(), *iter) == devices.end()) {
-        iter = devices_.erase(iter);
+    // remove devices that are no longer used
+    for (auto it = devices_.begin(); it != devices_.end();) {
+      if (std::find(devices.begin(), devices.end(), *it) == devices.end()) {
+        it = devices_.erase(it);
       } else {
-        iter++;
+        it++;
       }
     }
   }

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: autograd"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS
 import pkgutil
 import torch
 import sys
@@ -10,6 +10,20 @@ import inspect
 import json
 import os
 import unittest
+
+
+# TODO(jansel): we should remove this workaround once this is fixed:
+# https://github.com/pytorch/pytorch/issues/86619
+NOT_IMPORTED_WHEN_TEST_WRITTEN = {
+    "torch.fx.experimental.normalize",
+    "torch.fx.experimental.proxy_tensor",
+    "torch.fx.experimental.schema_type_annotation",
+    "torch.fx.experimental.symbolic_shapes",
+    "torch.fx.passes.backends.cudagraphs",
+    "torch.fx.passes.infra.partitioner",
+    "torch.fx.passes.utils.fuser_utils",
+}
+
 
 class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
@@ -36,64 +50,47 @@ class TestPublicBindings(TestCase):
             "AnyType",
             "Argument",
             "ArgumentSpec",
+            "AwaitType",
             "autocast_decrement_nesting",
             "autocast_increment_nesting",
             "AVG",
             "BenchmarkConfig",
             "BenchmarkExecutionStats",
-            "BFloat16StorageBase",
             "Block",
-            "BoolStorageBase",
             "BoolType",
             "BufferDict",
-            "ByteStorageBase",
+            "StorageBase",
             "CallStack",
             "Capsule",
-            "CharStorageBase",
             "ClassType",
             "clear_autocast_cache",
             "Code",
             "CompilationUnit",
             "CompleteArgumentSpec",
-            "ComplexDoubleStorageBase",
-            "ComplexFloatStorageBase",
             "ComplexType",
             "ConcreteModuleType",
             "ConcreteModuleTypeBuilder",
-            "CONV_BN_FUSION",
             "cpp",
-            "CudaBFloat16StorageBase",
             "CudaBFloat16TensorBase",
             "CudaBFloat16TensorBase",
-            "CudaBoolStorageBase",
             "CudaBoolTensorBase",
             "CudaBoolTensorBase",
-            "CudaByteStorageBase",
             "CudaByteTensorBase",
             "CudaByteTensorBase",
-            "CudaCharStorageBase",
             "CudaCharTensorBase",
             "CudaCharTensorBase",
-            "CudaComplexDoubleStorageBase",
             "CudaComplexDoubleTensorBase",
             "CudaComplexDoubleTensorBase",
-            "CudaComplexFloatStorageBase",
             "CudaComplexFloatTensorBase",
             "CudaComplexFloatTensorBase",
-            "CudaDoubleStorageBase",
             "CudaDoubleTensorBase",
             "CudaDoubleTensorBase",
-            "CudaFloatStorageBase",
             "CudaFloatTensorBase",
-            "CudaHalfStorageBase",
             "CudaHalfTensorBase",
-            "CudaIntStorageBase",
             "CudaIntTensorBase",
             "CudaIntTensorBase",
-            "CudaLongStorageBase",
             "CudaLongTensorBase",
             "CudaLongTensorBase",
-            "CudaShortStorageBase",
             "CudaShortTensorBase",
             "CudaShortTensorBase",
             "DeepCopyMemoTable",
@@ -103,19 +100,20 @@ class TestPublicBindings(TestCase):
             "DeviceObjType",
             "DictType",
             "DisableTorchFunction",
-            "DoubleStorageBase",
+            "DisableTorchFunctionSubclass",
+            "DispatchKey",
+            "DispatchKeySet",
             "dtype",
             "EnumType",
             "ErrorReport",
+            "ExcludeDispatchKeyGuard",
             "ExecutionPlan",
             "FatalError",
             "FileCheck",
             "finfo",
-            "FloatStorageBase",
             "FloatType",
             "fork",
             "FunctionSchema",
-            "FUSE_ADD_RELU",
             "Future",
             "FutureType",
             "Generator",
@@ -126,7 +124,6 @@ class TestPublicBindings(TestCase):
             "Gradient",
             "Graph",
             "GraphExecutorState",
-            "HalfStorageBase",
             "has_cuda",
             "has_cudnn",
             "has_lapack",
@@ -135,19 +132,18 @@ class TestPublicBindings(TestCase):
             "has_mps",
             "has_openmp",
             "has_spectral",
-            "HOIST_CONV_PACKED_PARAMS",
             "iinfo",
             "import_ir_module_from_buffer",
             "import_ir_module",
             "InferredType",
             "init_num_threads",
-            "INSERT_FOLD_PREPACK_OPS",
             "InterfaceType",
-            "IntStorageBase",
             "IntType",
+            "SymFloatType",
             "SymIntType",
             "IODescriptor",
             "is_anomaly_enabled",
+            "is_anomaly_check_nan_enabled",
             "is_autocast_cache_enabled",
             "is_autocast_cpu_enabled",
             "is_autocast_enabled",
@@ -159,10 +155,8 @@ class TestPublicBindings(TestCase):
             "LiteScriptModule",
             "LockingLogger",
             "LoggerBase",
-            "LongStorageBase",
             "memory_format",
             "merge_type_from_type_comment",
-            "MobileOptimizerType",
             "ModuleDict",
             "Node",
             "NoneType",
@@ -177,14 +171,8 @@ class TestPublicBindings(TestCase):
             "PyObjectType",
             "PyTorchFileReader",
             "PyTorchFileWriter",
-            "QInt32StorageBase",
-            "QInt8StorageBase",
             "qscheme",
-            "QUInt4x2StorageBase",
-            "QUInt2x4StorageBase",
-            "QUInt8StorageBase",
             "read_vitals",
-            "REMOVE_DROPOUT",
             "RRefType",
             "ScriptClass",
             "ScriptClassFunction",
@@ -209,13 +197,14 @@ class TestPublicBindings(TestCase):
             "set_num_interop_threads",
             "set_num_threads",
             "set_vital",
-            "ShortStorageBase",
             "Size",
             "StaticModule",
             "Stream",
             "StreamObjType",
             "StringType",
             "SUM",
+            "SymFloat",
+            "SymInt",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
@@ -249,6 +238,7 @@ class TestPublicBindings(TestCase):
             "import_ir_module_from_buffer",
             "init_num_threads",
             "is_anomaly_enabled",
+            "is_anomaly_check_nan_enabled",
             "is_autocast_enabled",
             "is_grad_enabled",
             "layout",
@@ -267,8 +257,8 @@ class TestPublicBindings(TestCase):
             "set_num_threads",
             "unify_type_list",
             "vitals_enabled",
-
             "wait",
+            "Tag",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 
@@ -281,7 +271,7 @@ class TestPublicBindings(TestCase):
         self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
-    @unittest.skipIf(IS_WINDOWS, "Distributed Attribute Error")
+    @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
     def test_correct_module_names(self):
         '''
         An API is considered public, if  its  `__module__` starts with `torch.`
@@ -298,6 +288,12 @@ class TestPublicBindings(TestCase):
             # no new entries should be added to this allow_dict.
             # New APIs must follow the public API guidelines.
             allow_dict = json.load(json_file)
+            # Because we want minimal modifications to the `allowlist_for_publicAPI.json`,
+            # we are adding the entries for the migrated modules here from the original
+            # locations.
+            for modname in allow_dict["being_migrated"]:
+                if modname in allow_dict:
+                    allow_dict[allow_dict["being_migrated"][modname]] = allow_dict[modname]
 
         def test_module(modname):
             split_strs = modname.split('.')
@@ -316,8 +312,13 @@ class TestPublicBindings(TestCase):
                 why_not_looks_public = ""
                 if elem_module is None:
                     why_not_looks_public = "because it does not have a `__module__` attribute"
+                # If a module is being migrated from foo.a to bar.a (that is entry {"foo": "bar"}),
+                # the module's starting package would be referred to as the new location even
+                # if there is a "from foo import a" inside the "bar.py".
+                modname = allow_dict["being_migrated"].get(modname, modname)
                 elem_modname_starts_with_mod = elem_module is not None and \
-                    elem_module.startswith(modname) and '._' not in elem_module
+                    elem_module.startswith(modname) and \
+                    '._' not in elem_module
                 if not why_not_looks_public and not elem_modname_starts_with_mod:
                     why_not_looks_public = f"because its `__module__` attribute (`{elem_module}`) is not within the " \
                         f"torch library or does not start with the submodule where it is defined (`{modname}`)"
@@ -328,6 +329,8 @@ class TestPublicBindings(TestCase):
                     why_not_looks_public = f"because it starts with `_` (`{elem}`)"
 
                 if is_public != looks_public:
+                    if modname in NOT_IMPORTED_WHEN_TEST_WRITTEN:
+                        return
                     if modname in allow_dict and elem in allow_dict[modname]:
                         return
 
@@ -376,7 +379,6 @@ class TestPublicBindings(TestCase):
                 for elem in all_api:
                     if not elem.startswith('_'):
                         check_one_element(elem, modname, mod, is_public=True, is_all=False)
-
         for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             test_module(modname)
 

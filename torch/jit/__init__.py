@@ -10,6 +10,8 @@ from torch.utils import set_module
 from torch._jit_internal import (
     Final,
     Future,
+    _Await,
+    _drop,
     _IgnoreContextManager,
     _overload,
     _overload_method,
@@ -48,8 +50,14 @@ from torch.jit._trace import (
     _get_trace_graph,
 )
 from torch.jit._async import fork, wait
+from torch.jit._await import _awaitable, _awaitable_wait, _awaitable_nowait
 from torch.jit._decomposition_utils import _register_decomposition
-from torch.jit._serialization import save, load, jit_module_from_flatbuffer, save_jit_module_to_flatbuffer
+from torch.jit._serialization import (
+    save,
+    load,
+    jit_module_from_flatbuffer,
+    save_jit_module_to_flatbuffer,
+)
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
 from torch.jit._ir_utils import _InsertPoint
@@ -149,7 +157,7 @@ def script_if_tracing(fn):
 # for torch.jit.isinstance
 def isinstance(obj, target_type):
     """
-    This function provides for conatiner type refinement in TorchScript. It can refine
+    This function provides for container type refinement in TorchScript. It can refine
     parameterized containers of the List, Dict, Tuple, and Optional types. E.g. ``List[str]``,
     ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. It can also
     refine basic types such as bools and ints that are available in TorchScript.
@@ -170,7 +178,7 @@ def isinstance(obj, target_type):
 
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, input: Any): # note the Any type
                 if torch.jit.isinstance(input, List[torch.Tensor]):
@@ -188,7 +196,7 @@ def isinstance(obj, target_type):
     """
     return _isinstance(obj, target_type)
 
-class strict_fusion(object):
+class strict_fusion:
     """
     This class errors if not all nodes have been fused in
     inference, or symbolically differentiated in training.
@@ -229,7 +237,19 @@ def _hide_source_ranges() -> Iterator[None]:
     finally:
         torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
-# dont expose Any, TODO: define `__all__`
+def enable_onednn_fusion(enabled: bool):
+    """
+    Enables or disables onednn JIT fusion based on the parameter `enabled`.
+    """
+
+    torch._C._jit_set_llga_enabled(enabled)
+
+def onednn_fusion_enabled():
+    """
+    Returns whether onednn JIT fusion is enabled
+    """
+    return torch._C._jit_llga_enabled()
+
 del Any
 
 if not torch._C._jit_init():

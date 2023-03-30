@@ -1,10 +1,9 @@
 from abc import abstractmethod
-import math
 import tempfile
 import unittest
 
 from copy import deepcopy
-from functools import reduce
+from functools import reduce, partial, wraps
 from itertools import product
 from operator import mul
 from math import pi
@@ -119,31 +118,6 @@ module_tests = [
         tf32_precision=0.005,
     ),
     dict(
-        module_name='Threshold',
-        constructor_args=(2., 1.),
-        cpp_constructor_args='torch::nn::ThresholdOptions(2., 1.)',
-        input_size=(2, 3, 4, 5),
-        check_inplace=True,
-        desc='threshold_value'
-    ),
-    dict(
-        module_name='Threshold',
-        constructor_args=(2., 10.),
-        cpp_constructor_args='torch::nn::ThresholdOptions(2., 10.)',
-        input_size=(2, 3, 4, 5),
-        desc='large_value'
-    ),
-    dict(
-        module_name='ReLU',
-        input_size=(2, 3, 4, 5),
-        check_inplace=True,
-    ),
-    dict(
-        module_name='ReLU6',
-        input_size=(2, 3, 4, 5),
-        check_inplace=True,
-    ),
-    dict(
         module_name='RReLU',
         input_size=(1, 2, 2),
         test_cuda=False,
@@ -157,125 +131,11 @@ module_tests = [
         test_cuda=False,
     ),
     dict(
-        module_name='Hardtanh',
-        input_size=(3, 2, 5),
-        reference_fn=lambda i, *_: i.clamp(-1, 1),
-    ),
-    dict(
-        module_name='Sigmoid',
-        input_size=(2, 3, 4, 5),
-    ),
-    dict(
-        module_name='Tanh',
-        input_size=(2, 3, 4, 5),
-    ),
-    dict(
         module_name='Flatten',
         input_size=(2, 3, 4, 5),
         reference_fn=lambda i, *_: torch.flatten(i, 1)
     ),
-    dict(
-        module_name='Softmax',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::SoftmaxOptions(1)',
-        input_size=(10, 20),
-        reference_fn=lambda i, *_: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20)),
-    ),
-    dict(
-        module_name='Softmax2d',
-        input_size=(1, 3, 10, 20),
-        reference_fn=lambda i, *_: torch.exp(i).div(torch.exp(i).sum(1, False)),
-    ),
-    dict(
-        module_name='LogSoftmax',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::LogSoftmaxOptions(1)',
-        input_size=(10, 20),
-        reference_fn=lambda i, *_: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_(),
-    ),
-    dict(
-        module_name='LogSoftmax',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::LogSoftmaxOptions(1)',
-        input_size=(1, 3, 10, 20),
-        reference_fn=lambda i, *_: torch.exp(i).div_(torch.exp(i).sum(1, False)).log_(),
-        desc='multiparam',
-    ),
-    dict(
-        module_name='ELU',
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::ELUOptions().alpha(2.)',
-        input_size=(3, 2, 5),
-        reference_fn=lambda x, *_: torch.where(x >= 0, x, 2 * (x.exp() - 1)),
-    ),
     # TODO: reference function
-    dict(
-        module_name='Hardshrink',
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::HardshrinkOptions(2.)',
-        input_size=(4, 3, 2, 4),
-    ),
-    dict(
-        module_name='LeakyReLU',
-        input_size=(3, 2, 5),
-        check_inplace=True
-    ),
-    dict(
-        module_name='LeakyReLU',
-        constructor_args=(0.5,),
-        cpp_constructor_args='torch::nn::LeakyReLUOptions().negative_slope(0.5)',
-        input_size=(3, 2, 5),
-        check_inplace=True,
-        desc='with_negval'
-    ),
-    dict(
-        module_name='LeakyReLU',
-        constructor_args=(0.0,),
-        cpp_constructor_args='torch::nn::LeakyReLUOptions().negative_slope(0.0)',
-        input_fn=lambda: torch.randn(10, 10),
-        check_inplace=True,
-        desc='with_zero_negval'
-    ),
-    dict(
-        module_name='LogSigmoid',
-        input_size=(2, 3, 4),
-        reference_fn=lambda i, *_: i.sigmoid().log(),
-    ),
-    dict(
-        module_name='Softplus',
-        input_size=(10, 20),
-        reference_fn=lambda i, *_: torch.log(1 + torch.exp(i)),
-    ),
-    dict(
-        module_name='Softplus',
-        constructor_args=(2,),
-        cpp_constructor_args='torch::nn::SoftplusOptions().beta(2)',
-        input_size=(10, 20),
-        reference_fn=lambda i, *_: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
-        desc='beta',
-    ),
-    dict(
-        module_name='Softplus',
-        constructor_args=(2, -100),
-        cpp_constructor_args='torch::nn::SoftplusOptions().beta(2).threshold(-100)',
-        input_size=(10, 20),
-        reference_fn=(
-            lambda i, *_: ((i * 2) > -100).type_as(i) * i
-            + ((i * 2) <= -100).type_as(i) * 1. / 2. * torch.log(1 + torch.exp(2 * i))
-        ),
-        desc='beta_threshold',
-    ),
-    dict(
-        module_name='Softshrink',
-        input_size=(3, 2, 5),
-    ),
-    dict(
-        module_name='Softshrink',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::SoftshrinkOptions(1)',
-        input_size=(3, 2, 5),
-        desc='lambda',
-    ),
     dict(
         module_name='CrossMapLRN2d',
         constructor_args=(5, 5e-3, 1e-3, 2),
@@ -284,70 +144,6 @@ module_tests = [
         check_gradgrad=False,
         # TODO(#50743): Figure out the error. "RuntimeError: Unrecognized tensor type ID: Batched"
         check_batched_grad=False,
-    ),
-    dict(
-        module_name='PReLU',
-        input_size=(2, 3, 4),
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-        desc='1d',
-    ),
-    dict(
-        module_name='PReLU',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::PReLUOptions().num_parameters(3)',
-        input_size=(2, 3, 4),
-        desc='1d_multiparam',
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-    ),
-    dict(
-        module_name='PReLU',
-        input_size=(2, 3, 4, 5),
-        desc='2d',
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-    ),
-    dict(
-        module_name='PReLU',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::PReLUOptions().num_parameters(3)',
-        input_size=(2, 3, 4, 5),
-        desc='2d_multiparam',
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-    ),
-    dict(
-        module_name='PReLU',
-        input_size=(2, 3, 4, 5, 6),
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-        desc='3d',
-    ),
-    dict(
-        module_name='PReLU',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::PReLUOptions().num_parameters(3)',
-        input_size=(2, 3, 4, 5, 6),
-        desc='3d_multiparam',
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-    ),
-    dict(
-        module_name='Softsign',
-        input_size=(3, 2, 5),
-        reference_fn=lambda i, *_: i.div(1 + torch.abs(i)),
-    ),
-    dict(
-        module_name='Softmin',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::SoftminOptions(1)',
-        input_size=(10, 20),
-    ),
-    dict(
-        module_name='Softmin',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::SoftminOptions(1)',
-        input_size=(2, 3, 5, 10),
-        desc='multidim',
-    ),
-    dict(
-        module_name='Tanhshrink',
-        input_size=(2, 3, 4, 5),
     ),
 ]
 
@@ -499,22 +295,22 @@ def bce_with_logistic_no_reduce_scalar_test():
 
 
 def kldivloss_with_target_no_reduce_test():
-    i = torch.rand(10, 10).log()
+    t = torch.rand(10, 10)
     return dict(
         fullname='KLDivLoss_with_target_no_reduce',
         constructor=wrap_functional(
-            lambda t: F.kl_div(i.type_as(t), t, reduction='none')),
-        cpp_function_call='F::kl_div(i.to(t.options()), t, F::KLDivFuncOptions().reduction(torch::kNone))',
-        input_fn=lambda: torch.rand(10, 10),
-        cpp_var_map={'i': i, 't': '_get_input()'},
-        reference_fn=lambda t, *_:
-            loss_reference_fns['KLDivLoss'](i.type_as(t), t, reduction='none'),
+            lambda i: F.kl_div(i, t.type_as(i), reduction='none')),
+        cpp_function_call='F::kl_div(i, t.to(i.options()), F::KLDivFuncOptions().reduction(torch::kNone))',
+        input_fn=lambda: torch.rand(10, 10).log(),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduction='none'),
         supports_forward_ad=True,
         pickle=False)
 
 
 def kldivloss_no_reduce_test():
-    t = torch.randn(10, 10)
+    t = torch.rand(10, 10)
     return dict(
         fullname='KLDivLoss_no_reduce',
         constructor=wrap_functional(
@@ -530,7 +326,7 @@ def kldivloss_no_reduce_test():
 
 
 def kldivloss_no_reduce_scalar_test():
-    t = torch.randn(())
+    t = torch.rand(())
     return dict(
         fullname='KLDivLoss_no_reduce_scalar',
         constructor=wrap_functional(
@@ -545,22 +341,22 @@ def kldivloss_no_reduce_scalar_test():
 
 
 def kldivloss_with_log_target_no_reduce_test():
-    i = torch.rand(10, 10).log()
+    t = torch.rand(10, 10).log()
     return dict(
         fullname='KLDivLoss_with_log_target_no_reduce',
         constructor=wrap_functional(
-            lambda t: F.kl_div(i.type_as(t), t, reduction='none', log_target=True)),
-        cpp_function_call='F::kl_div(i.to(t.options()), t, F::KLDivFuncOptions().reduction(torch::kNone).log_target(true))',
-        input_fn=lambda: torch.rand(10, 10),
-        cpp_var_map={'i': i, 't': '_get_input()'},
-        reference_fn=lambda t, *_:
-            loss_reference_fns['KLDivLoss_log_target'](i.type_as(t), t, reduction='none'),
+            lambda i: F.kl_div(i, t.type_as(i), reduction='none', log_target=True)),
+        cpp_function_call='F::kl_div(i, t.to(i.options()), F::KLDivFuncOptions().reduction(torch::kNone).log_target(true))',
+        input_fn=lambda: torch.rand(10, 10).log(),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
         supports_forward_ad=True,
         pickle=False)
 
 
 def kldivloss_no_reduce_log_target_test():
-    t = torch.randn(10, 10)
+    t = torch.rand(10, 10).log()
     return dict(
         fullname='KLDivLoss_no_reduce_log_target',
         constructor=wrap_functional(
@@ -576,7 +372,7 @@ def kldivloss_no_reduce_log_target_test():
 
 
 def kldivloss_no_reduce_scalar_log_target_test():
-    t = torch.randn(())
+    t = torch.rand(()).log()
     return dict(
         fullname='KLDivLoss_no_reduce_scalar_log_target',
         constructor=wrap_functional(
@@ -2454,211 +2250,6 @@ new_module_tests = [
         desc='3d_custom_params',
     ),
     dict(
-        module_name='ReflectionPad1d',
-        constructor_args=((1, 2),),
-        cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
-        input_size=(2, 3, 8),
-    ),
-    dict(
-        module_name='ReflectionPad1d',
-        constructor_args=((1, 2),),
-        cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
-        input_size=(3, 8),
-        reference_fn=single_batch_reference_fn,
-        desc='batch',
-    ),
-    dict(
-        module_name='ReflectionPad1d',
-        constructor_args=((1, 2),),
-        cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
-        input_fn=lambda: torch.rand(2, 3, 8, dtype=torch.complex128, requires_grad=True),
-        skip_half=True,
-        desc='complex'
-    ),
-    dict(
-        module_name='ReflectionPad2d',
-        constructor_args=((1, 2, 3, 4),),
-        cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
-        input_size=(2, 3, 8, 8),
-    ),
-    dict(
-        module_name='ReflectionPad2d',
-        constructor_args=((1, 2, 3, 4),),
-        cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
-        input_size=(3, 8, 8),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='ReflectionPad2d',
-        constructor_args=((1, 2, 3, 4),),
-        cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
-        input_fn=lambda: torch.rand(2, 3, 8, 8, dtype=torch.complex128, requires_grad=True),
-        skip_half=True,
-        desc='complex'
-    ),
-    dict(
-        module_name='ReflectionPad3d',
-        constructor_args=((1, 2, 0, 2, 1, 2),),
-        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
-        input_size=(2, 3, 8, 8, 8),
-    ),
-    dict(
-        module_name='ReflectionPad3d',
-        constructor_args=((1, 2, 0, 2, 1, 2),),
-        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
-        input_size=(3, 8, 8, 8),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='ReflectionPad3d',
-        constructor_args=((1, 2, 0, 2, 1, 2),),
-        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
-        input_fn=lambda: torch.rand(2, 3, 8, 8, 8, dtype=torch.complex128, requires_grad=True),
-        skip_half=True,
-        desc='complex'
-    ),
-    dict(
-        module_name='ReplicationPad1d',
-        constructor_args=((1, 2),),
-        cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
-        input_size=(2, 3, 4),
-    ),
-    dict(
-        module_name='ReplicationPad1d',
-        constructor_args=((1, 2),),
-        cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
-        input_size=(3, 4),
-        reference_fn=single_batch_reference_fn,
-        desc='batch',
-    ),
-    dict(
-        module_name='ReplicationPad1d',
-        constructor_args=((1, 2),),
-        cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
-        input_fn=lambda: torch.rand(2, 3, 4, dtype=torch.complex128, requires_grad=True),
-        skip_half=True,
-        desc='complex'
-    ),
-    dict(
-        module_name='ReplicationPad2d',
-        constructor_args=((1, 2, 3, 4),),
-        cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
-        input_size=(2, 3, 4, 4),
-    ),
-    dict(
-        module_name='ReplicationPad2d',
-        constructor_args=((1, 2, 3, 4),),
-        cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
-        input_size=(3, 4, 4),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='ReplicationPad2d',
-        constructor_args=((1, 2, 3, 4),),
-        cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
-        input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
-        skip_half=True,
-        desc='complex'
-    ),
-    dict(
-        module_name='ZeroPad2d',
-        constructor_args=((1, 2, 3, 4),),
-        cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
-        input_size=(2, 3, 4, 4),
-    ),
-    dict(
-        module_name='ZeroPad2d',
-        constructor_args=((1, 2, 3, 4),),
-        cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
-        input_size=(3, 4, 4),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='ZeroPad2d',
-        constructor_args=((1, 2, 3, 4),),
-        cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
-        input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
-        skip_half=True,
-        desc='complex'
-    ),
-    dict(
-        module_name='ZeroPad2d',
-        constructor_args=((-1, -1, -1, -2),),
-        cpp_constructor_args='torch::nn::ZeroPad2dOptions({-1, -1, -1, -2})',
-        input_size=(2, 3, 4, 4),
-        desc='negative_dims'
-    ),
-    dict(
-        module_name='ConstantPad1d',
-        constructor_args=((1, 2), 2.),
-        cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
-        input_size=(2, 3, 4),
-    ),
-    dict(
-        module_name='ConstantPad1d',
-        constructor_args=((1, 2), 2.),
-        cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
-        input_size=(3, 4),
-        reference_fn=single_batch_reference_fn,
-        desc='batch',
-    ),
-    dict(
-        module_name='ConstantPad1d',
-        constructor_args=((1, 2), 2.),
-        cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
-        input_fn=lambda: torch.rand(2, 3, 4, dtype=torch.complex128, requires_grad=True),
-        skip_half=True,
-        desc='complex'
-    ),
-    dict(
-        module_name='ConstantPad2d',
-        constructor_args=((1, 2, 3, 4), 2.),
-        cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
-        input_size=(2, 3, 4, 4),
-    ),
-    dict(
-        module_name='ConstantPad2d',
-        constructor_args=((1, 2, 3, 4), 2.),
-        cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
-        input_size=(3, 4, 4),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim'
-    ),
-    dict(
-        module_name='ConstantPad2d',
-        constructor_args=((1, 2, 3, 4), 2.),
-        cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
-        input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
-        skip_half=True,
-        desc='complex'
-    ),
-    dict(
-        module_name='ConstantPad3d',
-        constructor_args=((1, 2, 3, 4, 1, 0), 2.),
-        cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
-        input_size=(2, 3, 4, 4, 5),
-    ),
-    dict(
-        module_name='ConstantPad3d',
-        constructor_args=((1, 2, 3, 4, 1, 0), 2.),
-        cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
-        input_size=(3, 4, 4, 5),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim'
-    ),
-    dict(
-        module_name='ConstantPad3d',
-        constructor_args=((1, 2, 3, 4, 1, 0), 2.),
-        cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
-        input_fn=lambda: torch.rand(2, 3, 4, 4, 5, dtype=torch.complex128, requires_grad=True),
-        skip_half=True,
-        desc='complex'
-    ),
-    dict(
         module_name='Conv3d',
         constructor_args=(2, 3, (2, 3, 2)),
         cpp_constructor_args='torch::nn::Conv3dOptions(2, 3, {2, 3, 2})',
@@ -3495,262 +3086,6 @@ new_module_tests = [
         precision=3e-4,
         pickle=False,
     ),
-
-
-    dict(
-        module_name='AdaptiveMaxPool1d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool1dOptions(3)',
-        input_fn=lambda: _rand_tensor_non_equal(1, 3, 5),
-    ),
-    dict(
-        module_name='AdaptiveMaxPool1d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool1dOptions(3)',
-        input_fn=lambda: _rand_tensor_non_equal(3, 5),
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='AdaptiveMaxPool2d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
-        input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
-        desc='single',
-    ),
-    dict(
-        module_name='AdaptiveMaxPool2d',
-        constructor_args=((3, 4),),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions({3, 4})',
-        input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
-        desc='tuple',
-    ),
-    dict(
-        module_name='AdaptiveMaxPool2d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
-        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='AdaptiveMaxPool2d',
-        constructor_args=((3, None),),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions({3, c10::nullopt})',
-        input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
-        desc='tuple_none',
-    ),
-    dict(
-        module_name='AdaptiveMaxPool3d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
-        input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
-        desc='single',
-    ),
-    dict(
-        module_name='AdaptiveMaxPool3d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
-        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6, 7),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='AdaptiveMaxPool3d',
-        constructor_args=((3, 4, 5),),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions({3, 4, 5})',
-        input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
-        desc='tuple',
-    ),
-    dict(
-        module_name='AdaptiveMaxPool3d',
-        constructor_args=((3, None, 5),),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions({3, c10::nullopt, 5})',
-        input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
-        desc='tuple_none',
-    ),
-    dict(
-        module_name='AdaptiveMaxPool3d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
-        input_fn=lambda: _rand_tensor_non_equal(2, 3, 12, 9, 3),
-        desc='single_nonatomic',
-    ),
-    dict(
-        module_name='AdaptiveMaxPool3d',
-        constructor_args=((3, 4, 5),),
-        cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions({3, 4, 5})',
-        input_fn=lambda: _rand_tensor_non_equal(2, 3, 6, 4, 10),
-        desc='tuple_nonatomic',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool1d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(3)',
-        input_fn=lambda: torch.rand(1, 3, 5),
-    ),
-    dict(
-        module_name='AdaptiveAvgPool1d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(3)',
-        input_fn=lambda: torch.rand(3, 5),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool1d',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(1)',
-        input_fn=lambda: torch.rand(1, 3, 5),
-        desc='one_output',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool2d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions(3)',
-        input_fn=lambda: torch.rand(1, 3, 5, 6),
-        desc='single',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool2d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions(3)',
-        input_fn=lambda: torch.rand(3, 5, 6),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool2d',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions(1)',
-        input_fn=lambda: torch.rand(1, 3, 5, 6),
-        desc='single_1x1output',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool2d',
-        constructor_args=((3, 4),),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions({3, 4})',
-        input_fn=lambda: torch.rand(1, 3, 5, 6),
-        desc='tuple',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool2d',
-        constructor_args=((3, None),),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions({3, c10::nullopt})',
-        input_fn=lambda: torch.rand(1, 3, 5, 6),
-        desc='tuple_none',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool3d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions(3)',
-        input_fn=lambda: torch.rand(2, 3, 5, 2, 7),
-        desc='single',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool3d',
-        constructor_args=(3,),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions(3)',
-        input_fn=lambda: torch.rand(3, 5, 2, 7),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool3d',
-        constructor_args=((3, 4, 5),),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions({3, 4, 5})',
-        input_fn=lambda: torch.rand(2, 3, 5, 3, 7),
-        desc='tuple',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool3d',
-        constructor_args=((None, 4, 5),),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions({c10::nullopt, 4, 5})',
-        input_fn=lambda: torch.rand(2, 3, 5, 3, 7),
-        desc='tuple_none',
-    ),
-    dict(
-        module_name='AdaptiveAvgPool3d',
-        constructor_args=((3, 2, 2),),
-        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions({3, 2, 2})',
-        input_fn=lambda: torch.rand(1, 1, 3, 2, 6),
-        desc='last_dim',
-    ),
-    dict(
-        module_name='SELU',
-        input_size=(3, 2, 5),
-        check_inplace=True
-    ),
-    dict(
-        module_name='SELU',
-        input_size=(),
-        check_inplace=True,
-        desc='scalar'
-    ),
-    dict(
-        module_name='CELU',
-        input_size=(3, 2, 5),
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::CELUOptions().alpha(2.)',
-        check_inplace=True,
-        reference_fn=lambda x, *_: torch.where(x >= 0, x, 2. * ((.5 * x).exp() - 1)),
-    ),
-    dict(
-        module_name='CELU',
-        input_size=(),
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::CELUOptions().alpha(2.)',
-        check_inplace=True,
-        reference_fn=lambda x, *_: torch.where(x >= 0, x, 2. * ((.5 * x).exp() - 1)),
-        desc='scalar'
-    ),
-    dict(
-        module_name='GLU',
-        input_size=(5, 6),
-    ),
-    dict(
-        module_name='GLU',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::GLUOptions(1)',
-        input_size=(5, 6, 7),
-        desc='dim',
-    ),
-    dict(
-        module_name='GELU',
-        constructor_args=('none',),
-        cpp_constructor_args='torch::nn::GELUOptions().approximate(\"none\")',
-        input_size=(),
-        desc='scalar',
-        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
-    ),
-    dict(
-        module_name='GELU',
-        constructor_args=('none',),
-        cpp_constructor_args='torch::nn::GELUOptions().approximate(\"none\")',
-        input_size=(3, 2, 5),
-        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
-    ),
-    dict(
-        module_name='SiLU',
-        input_size=(),
-        desc='scalar',
-        reference_fn=lambda x, *_: x * torch.sigmoid(x),
-    ),
-    dict(
-        module_name='SiLU',
-        input_size=(5, 6, 7),
-        reference_fn=lambda x, *_: x * torch.sigmoid(x),
-    ),
-    dict(
-        module_name='Mish',
-        input_size=(),
-        desc='scalar',
-        reference_fn=lambda x, *_: x * torch.tanh(F.softplus(x)),
-    ),
-    dict(
-        module_name='Mish',
-        input_size=(5, 6, 7),
-        reference_fn=lambda x, *_: x * torch.tanh(F.softplus(x)),
-    ),
     dict(
         constructor=wrap_functional(F.softmax, dim=-1),
         cpp_options_args='F::SoftmaxFuncOptions(-1)',
@@ -3855,30 +3190,6 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
-        module_name='Softmax2d',
-        input_size=(3, 4, 5),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='Softmax',
-        constructor_args=(-1,),
-        cpp_constructor_args='torch::nn::SoftmaxOptions(-1)',
-        input_size=(4, 5),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='LogSoftmax',
-        constructor_args=(-1,),
-        cpp_constructor_args='torch::nn::LogSoftmaxOptions(1)',
-        input_size=(4, 5),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-
-
-    dict(
         fullname='Unfold',
         constructor=lambda: nn.Unfold((2, 2), (1, 1), (0, 0), (1, 1)),
         cpp_constructor_args='torch::nn::UnfoldOptions({2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
@@ -3929,143 +3240,12 @@ new_module_tests = [
         test_cuda=True,
     ),
     dict(
-        module_name='Threshold',
-        constructor_args=(2., 1.),
-        cpp_constructor_args='torch::nn::ThresholdOptions(2., 1.)',
-        input_size=(),
-        check_inplace=True,
-        desc='threshold_value_scalar'
-    ),
-
-    dict(
-        module_name='ReLU',
-        input_size=(),
-        check_inplace=True,
-        desc='scalar'
-    ),
-    dict(
-        module_name='ReLU6',
-        input_size=(),
-        check_inplace=True,
-        desc='scalar'
-    ),
-    dict(
         module_name='RReLU',
         constructor_args=(0.1, 0.9),
         cpp_constructor_args='torch::nn::RReLUOptions().lower(0.1).upper(0.9)',
         input_size=(),
         desc='with_up_down_scalar',
         test_cuda=False,
-    ),
-    dict(
-        module_name='Hardtanh',
-        input_size=(),
-        reference_fn=lambda i, *_: i.clamp(-1, 1),
-        desc='scalar'
-    ),
-    dict(
-        module_name='Sigmoid',
-        input_size=(),
-        desc='scalar',
-    ),
-    dict(
-        module_name='Tanh',
-        input_size=(),
-        desc='scalar',
-    ),
-    dict(
-        module_name='Softmax',
-        constructor_args=(0,),
-        cpp_constructor_args='torch::nn::SoftmaxOptions(0)',
-        input_size=(),
-        reference_fn=lambda i, *_: torch.exp(i).div(torch.exp(i).sum(0, True)),
-        desc='scalar',
-    ),
-    dict(
-        module_name='LogSoftmax',
-        constructor_args=(0,),
-        cpp_constructor_args='torch::nn::LogSoftmaxOptions(0)',
-        input_size=(),
-        reference_fn=lambda i, *_: torch.exp(i).div_(torch.exp(i).sum(0, False)).log_(),
-        desc='multiparam_scalar',
-    ),
-    dict(
-        module_name='ELU',
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::ELUOptions().alpha(2.)',
-        input_size=(),
-        desc='scalar',
-    ),
-    dict(
-        module_name='Hardshrink',
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::HardshrinkOptions(2.)',
-        input_size=(),
-        desc='scalar',
-    ),
-    dict(
-        module_name='LeakyReLU',
-        constructor_args=(0.5,),
-        cpp_constructor_args='torch::nn::LeakyReLUOptions().negative_slope(0.5)',
-        input_size=(),
-        check_inplace=True,
-        desc='with_negval_scalar'
-    ),
-    dict(
-        module_name='LogSigmoid',
-        input_size=(),
-        reference_fn=lambda i, *_: i.sigmoid().log(),
-        desc='scalar'
-    ),
-    dict(
-        module_name='Softplus',
-        constructor_args=(2, -100),
-        cpp_constructor_args='torch::nn::SoftplusOptions().beta(2).threshold(-100)',
-        input_size=(),
-        reference_fn=(
-            lambda i, *_: ((i * 2) > -100).type_as(i) * i
-            + ((i * 2) <= -100).type_as(i) * 1.0 / 2.0 * torch.log(1 + torch.exp(2 * i))
-        ),
-        desc='beta_threshold_scalar',
-    ),
-    dict(
-        module_name='Softshrink',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::SoftshrinkOptions(1)',
-        input_size=(),
-        desc='lambda_scalar',
-    ),
-    dict(
-        module_name='PReLU',
-        input_size=(),
-        reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-        desc='scalar',
-    ),
-    dict(
-        module_name='Softsign',
-        input_size=(),
-        reference_fn=lambda i, *_: i.div(1 + torch.abs(i)),
-        desc='scalar',
-    ),
-    dict(
-        module_name='Softmin',
-        constructor_args=(0,),
-        cpp_constructor_args='torch::nn::SoftminOptions(0)',
-        input_size=(),
-        desc='scalar',
-    ),
-    dict(
-        module_name='Softmin',
-        constructor_args=(-1,),
-        cpp_constructor_args='torch::nn::SoftminOptions(-1)',
-        input_size=(3, 4, 10),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='Tanhshrink',
-        input_size=(),
-        desc='scalar',
     ),
     dict(
         fullname='Padding12_1dcircular',
@@ -4189,6 +3369,7 @@ new_module_tests = [
         # RuntimeError: The size of tensor a (6) must match the size of tensor b (4)
         # at non-singleton dimension 2
         check_batched_grad=False,
+        check_gradgrad=False,
     ),
     dict(
         module_name='TransformerEncoderLayer',
@@ -4243,7 +3424,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.02,
     ),
     dict(
         module_name='Linear',
@@ -4340,9 +3521,7 @@ for non_linear_activation in non_linear_activations_no_batch:
 
 
 def kldivloss_reference(input, target, reduction='mean'):
-    safe_target = target * (target > 0).type_as(target)
-    safe_target_log = (safe_target + (target <= 0).type_as(target)).log()
-    result = safe_target * (safe_target_log - input)
+    result = target * (target.log() - input)
     if reduction == 'mean':
         return result.mean()
     elif reduction == 'sum':
@@ -4854,10 +4033,12 @@ criterion_tests = [
     ),
     dict(
         module_name='KLDivLoss',
+        constructor=wraps(nn.KLDivLoss)(partial(nn.KLDivLoss, log_target=True)),
+        cpp_constructor_args='torch::nn::KLDivLossOptions().log_target(true)',
         input_fn=lambda: torch.rand(10, 10).log(),
-        target_fn=lambda: torch.rand(10, 10),
+        target_fn=lambda: torch.rand(10, 10).log(),
         reference_fn=lambda i, t, m:
-            kldivloss_log_target_reference(i, t.log(), get_reduction(m)),
+            kldivloss_log_target_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
         desc='log_target',
     ),
@@ -5451,10 +4632,12 @@ criterion_tests = [
     ),
     dict(
         module_name='KLDivLoss',
+        constructor=wraps(nn.KLDivLoss)(partial(nn.KLDivLoss, log_target=True)),
+        cpp_constructor_args='torch::nn::KLDivLossOptions().log_target(true)',
         input_fn=lambda: torch.rand(()).log(),
-        target_fn=lambda: torch.rand(()),
+        target_fn=lambda: torch.rand(()).log(),
         reference_fn=lambda i, t, m:
-            kldivloss_log_target_reference(i, t.log(), get_reduction(m)),
+            kldivloss_log_target_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
         desc='scalar_log_target',
     ),
@@ -5651,7 +4834,7 @@ def single_batch_reference_criterion_fn(*args):
 
 # Check that regression criterion work with no batch dimensions
 regression_criterion_no_batch = [
-    'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'KLDivLoss', 'HuberLoss', 'SmoothL1Loss'
+    'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'HuberLoss', 'SmoothL1Loss'
 ]
 reductions = ['none', 'mean', 'sum']
 for name, reduction in product(regression_criterion_no_batch, reductions):
@@ -5660,6 +4843,18 @@ for name, reduction in product(regression_criterion_no_batch, reductions):
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_size=(3, ),
         target_size=(3, ),
+        reference_fn=single_batch_reference_criterion_fn,
+        test_cpp_api_parity=False,
+    )
+    criterion_tests.append(regression_test_info)
+
+
+for reduction in reductions:
+    regression_test_info = dict(
+        fullname=f"KLDivLoss_no_batch_dim_{reduction}",
+        constructor=lambda: nn.KLDivLoss(reduction=reduction),
+        input_fn=lambda: torch.rand((3,)).log(),
+        target_fn=lambda: torch.rand((3,)),
         reference_fn=single_batch_reference_criterion_fn,
         test_cpp_api_parity=False,
     )
@@ -5833,7 +5028,7 @@ class NNTestCase(TestCase):
             self.assertLessEqual(max(differences), PRECISION)  # type: ignore[type-var]
 
 
-class TestBase(object):
+class TestBase:
 
     _required_arg_names = {'constructor_args', 'input', 'extra_args'}
 
@@ -5937,8 +5132,7 @@ class ModuleTest(TestBase):
             ref_input = deepcopy(input)
             ref_module = deepcopy(module)
             expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0], ref_module)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(out, expected_out)
+            test_case.assertEqual(out, expected_out, exact_dtype=False)
         if self.check_forward_only:
             return
         self.test_noncontig(test_case, module, input)
@@ -6019,6 +5213,9 @@ class ModuleTest(TestBase):
         cpu_input = self._get_input()
         type_map = {torch.double: torch.float}
         cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
+
+        is_any_input_complex = any(map(lambda t: isinstance(t, torch.Tensor) and t.dtype.is_complex, cpu_input_tuple))
+
         gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
         cpu_module = self.constructor(*self.constructor_args)
@@ -6037,8 +5234,7 @@ class ModuleTest(TestBase):
         if getattr(cpu_module, "return_indices", False):
             cpu_output = cpu_output[0]
             gpu_output = gpu_output[0]
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
+        test_case.assertEqual(cpu_output, gpu_output, atol=self.precision, rtol=0, exact_dtype=False)
 
         # Run backwards on CPU and GPU and compare results
         for _ in range(5):
@@ -6046,8 +5242,7 @@ class ModuleTest(TestBase):
             gpu_gradOutput = cpu_gradOutput.type_as(gpu_output)
             cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
             gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
             for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
                 test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
@@ -6075,31 +5270,35 @@ class ModuleTest(TestBase):
                 create_graph=True)
 
             for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
+                test_case.assertEqual(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0, exact_dtype=False)
 
             # We mix output into the second backwards computation so that
             # torch.autograd.grad doesn't complain that some inputs
             # are unreachable (which can happen if you differentiate
             # only on the gradient.
+            if is_any_input_complex:
+                outputs_cpu = cpu_output.sum().abs() + sum(x.sum().abs() for x in cpu_gradInputs)
+                outputs_gpu = gpu_output.sum().abs() + sum(x.sum().abs() for x in gpu_gradInputs)
+            else:
+                outputs_cpu = cpu_output.sum() + sum(x.sum() for x in cpu_gradInputs)
+                outputs_gpu = gpu_output.sum() + sum(x.sum() for x in gpu_gradInputs)
+
             cpu_gg = torch.autograd.grad(
-                cpu_output.sum() + sum(x.sum() for x in cpu_gradInputs),
+                outputs_cpu,
                 cpu_input_tuple + (cpu_gradOutput,) + tuple(cpu_module.parameters()),
                 retain_graph=True)
             gpu_gg = torch.autograd.grad(
-                gpu_output.sum() + sum(x.sum() for x in gpu_gradInputs),
+                outputs_gpu,
                 gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
                 retain_graph=True)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
             for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+                test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0, exact_dtype=False)
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
 
-class InputVariableMixin(object):
+class InputVariableMixin:
     def _get_input(self):
         input = TestBase._get_input(self, False)  # type: ignore[arg-type]
 
@@ -6407,18 +5606,16 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
         gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_output, gpu_output,
-                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
+        test_case.assertEqual(cpu_output, gpu_output,
+                              atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0, exact_dtype=False)
 
         cpu_gradInput = test_case._backward_criterion(
             cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
         gpu_gradInput = test_case._backward_criterion(
             gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
-                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
+        test_case.assertEqual(cpu_gradInput, gpu_gradInput,
+                              atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0, exact_dtype=False)
 
     def _get_target(self):
         return self._get_arg('target', False)
@@ -6430,3 +5627,59 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
     @property
     def extra_args(self):
         return self._get_arg('extra_args', False)
+
+
+def _test_bfloat16_ops(test_case, op, device, inp_dims=(), prec=1e-2, scale_factor=None):
+    # fp32 compute
+    input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
+    if scale_factor is not None:
+        input1 = (torch.rand(inp_dims, dtype=torch.bfloat16, device=device) * scale_factor).float().requires_grad_()
+    out1 = op(input1)
+    grad_input1 = torch.randn_like(out1, device=device)
+    out1.backward(grad_input1)
+
+    # bfloat16 compute
+    op_bfp16 = op.bfloat16()
+    input2 = input1.detach().bfloat16().requires_grad_()
+    grad_input2 = grad_input1.bfloat16()
+    out2 = op_bfp16(input2)
+    out2.backward(grad_input2)
+
+    test_case.assertEqual(out1, out2, atol=prec, rtol=prec, exact_dtype=False)
+    test_case.assertEqual(input1.grad.data, input2.grad.data, atol=prec, rtol=prec, exact_dtype=False)
+
+def _test_module_empty_input(test_case, module, inp, check_size=True, inference=False):
+    if not inference:
+        inp.requires_grad_(True)
+    out = module(inp)
+    if not inference:
+        gO = torch.rand_like(out)
+        out.backward(gO)
+    if check_size:
+        test_case.assertEqual(out.size(), inp.size())
+    if not inference:
+        for p in module.parameters():
+            if p.requires_grad:
+                test_case.assertEqual(p.grad, torch.zeros_like(p.grad))
+        test_case.assertEqual(inp.grad, torch.zeros_like(inp))
+
+
+def _create_basic_net():
+    class Layer(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layer_dummy_param = nn.Parameter(torch.empty(3, 5))
+            self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
+
+    class Net(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.l1 = Layer()
+            self.dummy_param = nn.Parameter(torch.empty(3, 5))
+            self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
+
+    l = Layer()
+    n = Net()
+    s = nn.Sequential(n, n)
+
+    return l, n, s

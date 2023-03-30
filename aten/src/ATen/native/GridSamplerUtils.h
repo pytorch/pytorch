@@ -101,7 +101,7 @@ bool cond_cudnn_grid_sampler(
     at::native::canUse32BitIndexMath(input) &&
     at::native::canUse32BitIndexMath(grid) &&
     input.dim() == 4 &&
-    input.size(1) <= 1024);
+    input.sym_size(1) <= 1024);
 }
 
 } // anonymous namespace

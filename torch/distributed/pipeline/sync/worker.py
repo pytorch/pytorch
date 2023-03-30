@@ -17,7 +17,7 @@ import torch
 from .microbatch import Batch
 from .stream import AbstractStream, use_device, use_stream
 
-__all__: List[str] = []
+__all__: List[str] = ["Task", "worker", "create_workers", "spawn_workers"]
 
 
 ExcInfo = Tuple[Type[BaseException], BaseException, TracebackType]

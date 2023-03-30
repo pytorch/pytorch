@@ -2,7 +2,7 @@
 // https://github.com/JuliaLang/julia/blob/v1.1.0/src/support/strtod.c
 #include <torch/csrc/jit/frontend/strtod.h>
 
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 #include <clocale>
 #include <cstdlib>
 
@@ -28,8 +28,7 @@
 #include <cstring>
 #include <locale>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 #ifdef _MSC_VER
 double strtod_c(const char* nptr, char** endptr) {
@@ -48,5 +47,4 @@ float strtof_c(const char* nptr, char** endptr) {
   return (float)strtod_c(nptr, endptr);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

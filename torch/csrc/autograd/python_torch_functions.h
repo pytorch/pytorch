@@ -2,15 +2,18 @@
 
 #include <vector>
 
-
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 extern PyObject* THPVariableFunctionsModule;
 
 // Wrapper converts a raised TypeError into returning NotImplemented
 // Used to implement binary arithmetic operators
 template <PyObject* (*Func)(PyObject*, PyObject*, PyObject*)>
-inline PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, PyObject* kwargs) {
+inline PyObject* TypeError_to_NotImplemented_(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   PyObject* ret = Func(self, args, kwargs);
   if (!ret && PyErr_ExceptionMatches(PyExc_TypeError)) {
     PyErr_Clear();
@@ -22,4 +25,5 @@ inline PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
 
 void initTorchFunctions();
 
-}}  // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

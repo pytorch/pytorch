@@ -4,8 +4,8 @@
 
 #include <sstream>
 #include <string>
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 namespace {
 namespace onnx_torch = ::torch::onnx;
@@ -61,6 +61,16 @@ void dump(const onnx::TypeProto_Tensor& tensor_type, std::ostream& stream) {
 
 void dump(const onnx::TypeProto& type, std::ostream& stream);
 
+void dump(const onnx::TypeProto_Optional& optional_type, std::ostream& stream) {
+  stream << "Optional<";
+  if (optional_type.has_elem_type()) {
+    dump(optional_type.elem_type(), stream);
+  } else {
+    stream << "None";
+  }
+  stream << ">";
+}
+
 void dump(const onnx::TypeProto_Sequence& sequence_type, std::ostream& stream) {
   stream << "Sequence<";
   if (sequence_type.has_elem_type()) {
@@ -76,6 +86,8 @@ void dump(const onnx::TypeProto& type, std::ostream& stream) {
     dump(type.tensor_type(), stream);
   } else if (type.has_sequence_type()) {
     dump(type.sequence_type(), stream);
+  } else if (type.has_optional_type()) {
+    dump(type.optional_type(), stream);
   } else {
     stream << "None";
   }
@@ -227,5 +239,4 @@ std::string prettyPrint(const ::ONNX_NAMESPACE::ModelProto& model) {
   return ss.str();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

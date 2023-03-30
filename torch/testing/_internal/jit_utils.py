@@ -69,7 +69,7 @@ def get_execution_plan(graph_executor_state):
                            'only have one execution plan, got: {}'.format(num_plans))
     return execution_plans[0]
 
-class _AssertRaisesRegexWithHighlightContext(object):
+class _AssertRaisesRegexWithHighlightContext:
     """
     A context manager that is useful for checking that error messages highlight
     the correct part of the source code.
@@ -149,7 +149,7 @@ class JitTestCase(JitCommonTestCase):
     def tearDown(self):
         super().tearDown()
         # needs to be cleared because python might be unloaded before
-        # the callback gets destucted
+        # the callback gets destructed
         self.clearHooks()
         clear_class_registry()
 
@@ -645,6 +645,14 @@ class JitTestCase(JitCommonTestCase):
 
         return sm
 
+class NoTracerWarnContextManager:
+    def __enter__(self):
+        self.prev = torch._C._jit_get_tracer_state_warn()
+        torch._C._jit_set_tracer_state_warn(False)
+
+    def __exit__(self, *args):
+        torch._C._jit_set_tracer_state_warn(self.prev)
+
 @contextmanager
 def inline_everything_mode(should_inline):
     old = torch._C._jit_get_inline_everything_mode()
@@ -759,7 +767,7 @@ def _get_py3_code(code, fn_name):
         spec = importlib.util.spec_from_file_location(fn_name, script_path)
         module = importlib.util.module_from_spec(spec)
         loader = spec.loader
-        assert isinstance(loader, Loader)  # Assert type to meet MyPy requriement
+        assert isinstance(loader, Loader)  # Assert type to meet MyPy requirement
         loader.exec_module(module)
         fn = getattr(module, fn_name)
         return fn
@@ -779,6 +787,7 @@ class TensorExprTestOptions():
         torch._C._debug_set_fusion_group_inlining(False)
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
+        self.old_nvfuser = torch._C._jit_set_nvfuser_enabled(False)
 
     def restore(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
@@ -789,6 +798,7 @@ class TensorExprTestOptions():
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        torch._C._jit_set_nvfuser_enabled(self.old_nvfuser)
 
 def clone_inputs(args):
     inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []

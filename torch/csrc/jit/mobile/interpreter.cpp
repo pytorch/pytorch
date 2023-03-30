@@ -110,6 +110,10 @@ bool InterpreterState::run(Stack& stack) {
       // Check with iliacher if has been done.
       // Plus this is not safe as if you throw exception record function will be
       // left enabled. That is a TODO
+      // NOTE: this recordFunction logic takes up ~2-3% of cpu cycles in some
+      // workflows. do we need it and/or can we opt-out of
+      // isRecordFunctionEnabled with a macro? if we delete it, things appear to
+      // work just fine.
       bool prev_value = isRecordFunctionEnabled();
       if (!prev_value) {
         // enable only for the RecordFunction
@@ -131,7 +135,7 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case OPN: {
-          stack.push_back(inst.N);
+          stack.emplace_back(inst.N);
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               code.op_names_[inst.X].name, debug_handle, stack);
           code.operators_[inst.X](stack);
@@ -192,8 +196,7 @@ bool InterpreterState::run(Stack& stack) {
           auto userObj = pop(stack).toObject();
           // Mobile only: since the number of slots is not known, resize the
           // numAttributes before setSlot.
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-          while (userObj->type()->numAttributes() <= inst.X) {
+          while (static_cast<int>(userObj->type()->numAttributes()) <= inst.X) {
             std::stringstream ss;
             ss << userObj->type()->numAttributes();
             userObj->type()->addAttribute(ss.str(), c10::NoneType::get());
@@ -228,7 +231,7 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case RET:
           leaveFrame();
-          if (frames_.size() > 0) {
+          if (!frames_.empty()) {
             continue;
           }
           return false;

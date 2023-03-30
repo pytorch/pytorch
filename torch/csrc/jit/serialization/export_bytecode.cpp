@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <utility>
 
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/export.h>
 
@@ -29,8 +30,7 @@
 
 #include <caffe2/serialize/inline_container.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::vector<Method> gatherGetSetStates(ObjectPtr obj) {
   std::vector<Method> methods;
@@ -211,7 +211,7 @@ mobile::Code compileGraphToMobileCode(
           for (const TypePtr& element_type : input_type->containedTypes()) {
             TORCH_CHECK(
                 element_type->kind() != TypeKind::ClassType,
-                "Returining a list or dictionary with pytorch class type ",
+                "Returning a list or dictionary with pytorch class type ",
                 "is not supported in mobile module "
                 "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
                 "Workaround: instead of using pytorch class as their element type, ",
@@ -269,7 +269,7 @@ IValue convertMobileFunctionToCodeTable(
 
   std::vector<IValue> operators;
   operators.reserve(code.op_names_.size());
-  for (int i = 0; i < code.op_names_.size(); ++i) {
+  for (unsigned i = 0; i < code.op_names_.size(); ++i) {
     const auto& opname = code.op_names_[i];
     const int size = code.operator_input_sizes_[i];
     if (compilation_options.enable_default_value_for_unspecified_arg) {
@@ -342,6 +342,25 @@ void getBackendDebugInfoMap(
   }
 }
 
+uint64_t get_min_operator_version_from_version_map(
+    const mobile::Module& module) {
+  uint64_t min_version = caffe2::serialize::kMinSupportedFileFormatVersion;
+  for (const auto& func : module.compilation_unit().methods()) {
+    for (const auto& op_name : func->get_code().op_names_) {
+      auto schema_name = op_name.overload_name.empty()
+          ? op_name.name
+          : op_name.name + "." + op_name.overload_name;
+      auto version_entry = get_operator_version_map().find(schema_name);
+      if (version_entry != get_operator_version_map().end()) {
+        const auto& entry = version_entry->second;
+        min_version = std::max(
+            min_version, uint64_t(entry[entry.size() - 1].bumped_at_version));
+      }
+    }
+  }
+  return min_version;
+}
+
 mobile::Module jitModuleToMobile(
     const Module& module,
     const CompilationOptions& options) {
@@ -376,10 +395,9 @@ mobile::Module jitModuleToMobile(
       backend_debug_info_map.begin(), backend_debug_info_map.end());
   m.setDebugTable(MobileDebugTable(
       debug_handle_cs_ptr_map.begin(), debug_handle_cs_ptr_map.end()));
-
+  m.set_min_operator_version(get_min_operator_version_from_version_map(m));
   m.set_bytecode_version(options.model_version);
   return m;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

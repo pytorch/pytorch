@@ -1,6 +1,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type.h>
 
+#include <utility>
+
 namespace c10 {
 
 namespace {
@@ -193,7 +195,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
       } else if (strides[a] > strides[b]) {
         return 1;
       } else { // strides[a] == strides[b]
-        if (sizes[a] < sizes[b] || a > b ) {
+        if (sizes[a] > sizes[b]) {
           return 1;
         }
       }
@@ -253,7 +255,7 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
   VaryingShape<size_t> stride_indices;
   VaryingShape<int64_t> strides;
   VaryingShape<int64_t> sizes;
-  if (t.layout() == at::kStrided) {
+  if (t.layout() == at::kStrided && !t.is_nested()) {
     sizes = VaryingShape<int64_t>{t.sizes().vec()};
     strides = VaryingShape<int64_t>{t.strides().vec()};
     return TensorType::create(
@@ -416,22 +418,21 @@ VaryingShape<int64_t> TensorType::strides() const {
       ss[*s.stride_index_] = *s.stride_;
     }
   }
-  return VaryingShape<int64_t>(ss);
+  return VaryingShape<int64_t>(std::move(ss));
 }
 
 TensorType::TensorType(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    const SymbolicShape& sizes,
-    const VaryingShape<Stride>& strides,
+    SymbolicShape sizes,
+    VaryingShape<Stride> strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined)
     : SharedType(TypeKind::TensorType),
       scalar_type_(scalar_type),
       device_(device),
-      sizes_(sizes),
-      strides_(strides),
+      sizes_(std::move(sizes)),
+      strides_(std::move(strides)),
       requires_grad_(requires_grad),
       undefined_(undefined) {}
 

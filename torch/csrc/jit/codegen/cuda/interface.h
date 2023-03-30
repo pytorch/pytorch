@@ -2,6 +2,7 @@
 
 #include <c10/macros/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
 /*
@@ -47,9 +48,9 @@ TORCH_API bool profileNode(const Node* node);
 
 TORCH_API bool skipNode(const std::string& symbol_str, bool flip = true);
 
-TORCH_API bool complyWith(
-    const at::Tensor& tensor,
-    const c10::TensorTypePtr& guard_tensor_type);
+TORCH_API bool isEnabled();
+TORCH_API bool setEnabled(bool is_enabled);
+TORCH_API bool canBeEnabled();
 
 } // namespace cuda
 } // namespace fuser

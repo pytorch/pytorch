@@ -1,5 +1,6 @@
-from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+
 
 # This class holds information about a single operator used to determine
 # the outcome of a selective/custom PyTorch build that doesn't include
@@ -158,7 +159,7 @@ def merge_operator_dicts(
     rhs: Dict[str, SelectiveBuildOperator],
 ) -> Dict[str, SelectiveBuildOperator]:
     operators: Dict[str, SelectiveBuildOperator] = {}
-    for (op_name, op) in list(lhs.items()) + list(rhs.items()):
+    for op_name, op in list(lhs.items()) + list(rhs.items()):
         new_op = op
         if op_name in operators:
             new_op = combine_operators(operators[op_name], op)

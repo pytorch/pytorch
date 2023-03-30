@@ -10,15 +10,13 @@ import tempfile
 import subprocess
 import glob
 
-import textwrap
-from multiprocessing import Process
-
 import torch.testing._internal.common_utils as common
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.testing._internal.common_utils import gradcheck, TEST_WITH_ASAN, has_breakpad
+from torch.testing._internal.common_utils import gradcheck
+import torch.multiprocessing as mp
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -33,14 +31,17 @@ IS_WINDOWS = sys.platform == "win32"
 
 
 def remove_build_path():
-    if sys.platform == "win32":
-        print("Not wiping extensions build folder because Windows")
-        return
     default_build_root = torch.utils.cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root)
+        if IS_WINDOWS:
+            # rmtree returns permission error: [WinError 5] Access is denied
+            # on Windows, this is a word-around
+            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+        else:
+            shutil.rmtree(default_build_root)
 
 
+# There's only one test that runs gracheck, run slow mode manually
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).
@@ -148,16 +149,30 @@ class TestCppExtensionJIT(common.TestCase):
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
         try:
             os.environ['TORCH_CUDA_ARCH_LIST'] = flags
-            torch.utils.cpp_extension.load(
-                name="cudaext_archflags",
-                sources=[
+
+            params = {
+                "name": "cudaext_archflags",
+                "sources": [
                     "cpp_extensions/cuda_extension.cpp",
                     "cpp_extensions/cuda_extension.cu",
                 ],
-                extra_cuda_cflags=["-O2"],
-                verbose=True,
-                build_directory=temp_dir,
-            )
+                "extra_cuda_cflags": ["-O2"],
+                "verbose": True,
+                "build_directory": temp_dir,
+            }
+
+            if IS_WINDOWS:
+                p = mp.Process(target=torch.utils.cpp_extension.load, kwargs=params)
+
+                # Compile and load the test CUDA arch in a different Python process to avoid
+                # polluting the current one and causes test_jit_cuda_extension to fail on
+                # Windows. There is no clear way to unload a module after it has been imported
+                # and torch.utils.cpp_extension.load builds and loads the module in one go.
+                # See https://github.com/pytorch/pytorch/issues/61655 for more details
+                p.start()
+                p.join()
+            else:
+                torch.utils.cpp_extension.load(**params)
 
             # Expected output for --list-elf:
             #   ELF file    1: cudaext_archflags.1.sm_61.cubin
@@ -169,7 +184,9 @@ class TestCppExtensionJIT(common.TestCase):
                 _check_cuobjdump_output(expected[1], is_ptx=True)
         finally:
             if IS_WINDOWS:
-                print("Not wiping extensions build folder because Windows")
+                # rmtree returns permission error: [WinError 5] Access is denied
+                # on Windows, this is a word-around
+                subprocess.run(["rm", "-rf", temp_dir], stdout=subprocess.PIPE)
             else:
                 shutil.rmtree(temp_dir)
 
@@ -194,13 +211,15 @@ class TestCppExtensionJIT(common.TestCase):
         archflags = {
             '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
-            "Pascal 3.5": (['35', '60', '61'], None),
             "Volta": (['70'], ['70']),
         }
         if int(torch.version.cuda.split('.')[0]) >= 10:
             # CUDA 9 only supports compute capability <= 7.2
             archflags["7.5+PTX"] = (['75'], ['75'])
             archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
+        if int(torch.version.cuda.split('.')[0]) < 12:
+            # CUDA 12 drops compute capability < 5.0
+            archflags["Pascal 3.5"] = (['35', '60', '61'], None)
 
         for flags, expected in archflags.items():
             self._run_jit_cuda_archflags(flags, expected)
@@ -513,7 +532,7 @@ class TestCppExtensionJIT(common.TestCase):
         # Create a torch.nn.Module which uses the C++ module as a submodule.
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.x = torch.nn.Parameter(torch.tensor(1.0))
                 self.net = extension.Net(3, 5)
 
@@ -566,7 +585,7 @@ class TestCppExtensionJIT(common.TestCase):
         # Try calling zero_grad()
         net.zero_grad()
         for p in net.parameters():
-            self.assertEqual(p.grad, torch.zeros_like(p))
+            assert p.grad is None, "zero_grad defaults to setting grads to None"
 
         # Test train(), eval(), training (a property)
         self.assertTrue(net.training)
@@ -867,81 +886,8 @@ class TestCppExtensionJIT(common.TestCase):
         a = torch.randn(5, 5, requires_grad=True)
         b = torch.randn(5, 5, requires_grad=True)
 
-        gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
-
-    @staticmethod
-    def _crash_handler_test_process(stderr_file, destination):
-        # Code to enable dumps and trigger a segfault
-        if sys.platform == "win32":
-            destination = destination.replace("\\", "\\\\")
-            csrc = textwrap.dedent(f"""
-            #include <torch/torch.h>
-            #include <locale>
-            #include <iostream>
-            #include <codecvt>
-            #include <string>
-
-            int fail() {{
-                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-                std::string narrow("{destination}");
-                std::wstring wide = converter.from_bytes(narrow);
-                torch::crash_handler::enable_minidumps(wide.c_str());
-
-                volatile int* bad = nullptr;
-                return *bad;
-            }}
-            """)
-        else:
-            csrc = textwrap.dedent(f"""
-            #include <torch/torch.h>
-
-            int fail() {{
-                torch::crash_handler::enable_minidumps("{destination}");
-
-                volatile int* bad = nullptr;
-                return *bad;
-            }}
-            """)
-
-        # Some special stuff to overwrite stderr for a C++ extension
-        # Copied from: https://stackoverflow.com/questions/8804893/redirect-stdout-from-python-for-c-calls
-        sys.stdout.flush()
-        newstdout = os.dup(2)
-        devnull = os.open(stderr_file, os.O_WRONLY)
-        os.dup2(devnull, 2)
-        os.close(devnull)
-        sys.stdout = os.fdopen(newstdout, 'w')
-
-        module = torch.utils.cpp_extension.load_inline(
-            name="segfault",
-            cpp_sources=csrc,
-            functions=["fail"],
-        )
-        module.fail()
-
-    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
-    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
-    @unittest.skipIf(os.environ.get("TEST_CONFIG") == "force_on_cpu", "fails on force_on_cpu config, tracked w/ #65253")
-    def test_crash_handler(self):
-        with tempfile.TemporaryDirectory() as temp_dir, tempfile.NamedTemporaryFile(delete=not sys.platform == "win32") as stderr:
-            # Use multiprocessing to spin up a separate process to make catching
-            # the segfault easier
-            p = Process(target=self._crash_handler_test_process, args=(stderr.name, temp_dir))
-            p.start()
-            p.join()
-
-            with open(stderr.name) as f:
-                result = f.read().strip()
-
-            # Check that the signal handler was called
-            self.assertTrue(result.startswith(f"Wrote minidump to {temp_dir}"))
-
-            with open(result.replace("Wrote minidump to ", ""), "rb") as dump_file:
-                dump_bytes = dump_file.read()
-
-                # Check that the file has the correct magic number
-                self.assertEqual(b"MDMP", dump_bytes[0:4])
-
+        for fast_mode in (True, False):
+            gradcheck(torch.ops.my.add, [a, b], eps=1e-2, fast_mode=fast_mode)
 
 
 if __name__ == "__main__":

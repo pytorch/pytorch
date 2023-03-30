@@ -1,4 +1,4 @@
-if((NOT BUILD_CAFFE2) OR (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
+if(NOT BUILD_CAFFE2 OR INTERN_BUILD_MOBILE)
   list(APPEND Caffe2_CPU_SRCS
     utils/string_utils.cc
     utils/threadpool/ThreadPool.cc
@@ -30,7 +30,6 @@ list(APPEND Caffe2_CPU_SRCS
   utils/math/utils.cc
   utils/math_cpu.cc
   utils/murmur_hash3.cc
-  utils/proto_convert.cc
   utils/proto_utils.cc
   utils/proto_wrap.cc
   utils/threadpool/ThreadPool.cc
