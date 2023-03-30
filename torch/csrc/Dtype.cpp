@@ -1,6 +1,7 @@
 #include <torch/csrc/Dtype.h>
 
 #include <structmember.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -57,6 +58,30 @@ PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
   return THPUtils_packString(self->name);
 }
 
+PyObject* THPDtype_to_float(PyObject* self, PyObject* noargs) {
+  if (at::isFloatingType(self->scalar_type)) {
+    auto scalar_type = self->scalar_type;
+  }
+  else {
+    auto scalar_type = toRealValueType(self->scalar_type);
+  }
+  std::string primary_name, legacy_name;
+  std::tie(primary_name, legacy_name) = getDtypeNames(scalar_type);
+  return THPDtype_New(scalar_type, primary_name);
+}
+
+PyObject* THPDtype_to_complex(PyObject* self, PyObject* noargs) {
+  if (at::isComplexType(self->scalar_type)) {
+    auto scalar_type = self->scalar_type;
+  }
+  else {
+    auto scalar_type = toComplexType(self->scalar_type);
+  }
+  std::string primary_name, legacy_name;
+  std::tie(primary_name, legacy_name) = getDtypeNames(scalar_type);
+  return THPDtype_New(scalar_type, primary_name);
+}
+
 typedef PyObject* (*getter)(PyObject*, void*);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
@@ -73,6 +98,8 @@ static struct PyGetSetDef THPDtype_properties[] = {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDtype_methods[] = {
     {"__reduce__", THPDtype_reduce, METH_NOARGS, nullptr},
+    {"to_float", THPDtype_to_float, METH_NOARGS, nullptr},
+    {"to_complex", THPDtype_to_complex, METH_NOARGS, nullptr},
     {nullptr} /* Sentinel */
 };
 
