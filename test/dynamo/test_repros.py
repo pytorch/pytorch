@@ -14,7 +14,7 @@ import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from typing import List
+from typing import List, OrderedDict
 
 import numpy as np
 import torch
@@ -2434,6 +2434,26 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
+
+    def test_dict_subclass_contains(self):
+        # pattern from huggingface
+        class ClassInstantier(collections.OrderedDict):
+            pass
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x, d):
+            if "key1" in d:
+                x = x + 2
+            if "key2" in d:
+                x = x + 4
+            x = x + 8
+            return x
+
+        result = f(torch.ones(8), ClassInstantier({"key1": torch.ones(8)}))
+        self.assertTrue(same(result, torch.full([8], 11.0)))
+
+        result = f(torch.ones(8), ClassInstantier({"key2": torch.ones(8)}))
+        self.assertTrue(same(result, torch.full([8], 13.0)))
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
