@@ -182,6 +182,11 @@ bool hasPrimaryContext(int64_t device_index) {
   return _internal::hasPrimaryContext(device_index);
 }
 
+// Wrappers for raw CUDA device management functions
+cudaError_t GetDeviceCount(int* dev_count) {
+  return cudaGetDeviceCount(dev_count);
+}
+
 // This is a codepath for CUDA 12 that comes with a critical change in behavior
 // of `cudaSetDevice`. Unlike to previous CUDA versions that allocate context
 // lazily CUDA 12.x eagerly allocates primary context the moment `cudaSetDevice`
@@ -202,13 +207,8 @@ bool hasPrimaryContext(int64_t device_index) {
 //
 // That is why we also need to call `cudaSetDevice` at the constructors of
 // `OptionalCUDAGuard` and `OptionalCUDAStreamGuard`.
-
+#if CUDA_VERSION >= 12000
 thread_local int targetDeviceIndex = -1;
-
-// Wrappers for raw CUDA device management functions
-cudaError_t GetDeviceCount(int* dev_count) {
-  return cudaGetDeviceCount(dev_count);
-}
 
 cudaError_t GetDevice(int* device) {
   if (targetDeviceIndex >= 0) {
@@ -226,9 +226,7 @@ cudaError_t SetDevice(int device) {
   if (device == cur_device) {
     return cudaSuccess;
   }
-  cudaError_t err = cudaSetDevice(device);
-  C10_CUDA_CHECK(cudaFree(0));
-  return err;
+  return cudaSetDevice(device);
 }
 
 cudaError_t MaybeSetDevice(int device) {
@@ -270,5 +268,42 @@ void SetTargetDevice() {
     C10_CUDA_CHECK(c10::cuda::SetDevice(targetDeviceIndex));
   }
 }
+#else
+cudaError_t GetDevice(int* device) {
+  return cudaGetDevice(device);
+}
+
+cudaError_t SetDevice(int device) {
+  TORCH_CHECK(device >= 0, "device id must be positive!");
+  int cur_device = -1;
+  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  if (device == cur_device) {
+    return cudaSuccess;
+  }
+  return cudaSetDevice(device);
+}
+
+cudaError_t MaybeSetDevice(int device) {
+  return c10::cuda::SetDevice(device);
+}
+
+int ExchangeDevice(int to_device) {
+  int cur_device = -1;
+  C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
+  if (to_device == cur_device) {
+    return cur_device;
+  }
+  C10_CUDA_CHECK(cudaSetDevice(to_device));
+  return cur_device;
+}
+
+int MaybeExchangeDevice(int to_device) {
+  return c10::cuda::ExchangeDevice(to_device);
+}
+
+void SetTargetDevice() {
+  // no-op on CUDA version < 12.x
+}
+#endif
 
 } // namespace c10::cuda
