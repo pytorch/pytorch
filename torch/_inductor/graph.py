@@ -566,7 +566,19 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
-            if not supported_dtype_of_cpp_wrapper(value.get_dtype()):
+            if isinstance(value, TensorBox):
+                dtype = value.get_dtype()
+            elif isinstance(value, sympy.Symbol):
+                dtype = (
+                    torch.int64
+                    if value.is_integer
+                    else torch.float64
+                    if value.is_float
+                    else None
+                )
+            else:
+                dtype = None
+            if not supported_dtype_of_cpp_wrapper(dtype):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):

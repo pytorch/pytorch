@@ -22,10 +22,11 @@ class TestCppWrapper(TorchTestCase):
     pass
 
 
-def make_test_case(name, device="cpu"):
+def make_test_case(name, dynamic_shapes, device="cpu"):
     test_name = f"{name}_{device}"
 
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
+    @torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes)
     def fn(self):
         tests = test_torchinductor.CpuTests()
         tests.setUpClass()
@@ -49,6 +50,7 @@ for name in [
     "test_bmm1",
     "test_bmm2",
     "test_cat",  # alias
+    "test_int_div",
     "test_linear1",
     "test_linear2",
     "test_lowmem_dropout1",  # None as output
@@ -56,12 +58,15 @@ for name in [
     "test_profiler_mark_wrapper_call",
     "test_reduction1",  # Reduction
     "test_relu",  # multiple inputs
+    "test_scalar_input",
     "test_silu",  # single input, single output
     "test_sum_dtype",  # float64
     "test_sum_int",  # bool, int64, int8, uint8
     "test_transpose",  # multiple outputs, buffer clear
 ]:
-    make_test_case(name)
+    make_test_case(name, dynamic_shapes=False)
+    # TODO: leverage test_inductor_dynamic_shapes.py
+    make_test_case(name, dynamic_shapes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
