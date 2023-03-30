@@ -64,6 +64,21 @@ class ForeachFuncWrapper:
         return inputs[0] if self._is_inplace else actual
 
 
+class InplaceForeachVersionBumpCheck:
+
+    def __init__(self, testcase: TestCase, tensorlist: "List[torch.Tensor]") -> None:
+        self._testcase = testcase
+        self._tensorlist = tensorlist
+        self._orig_version_counts = [t._version for t in tensorlist]
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # note(crcrpar): some methods e.g. `_binary_test` could call the given inplace function multiple times
+        self._testcase.assertGreaterEqual([t._version for t in self._tensorlist], self._orig_version_counts)
+
+
 def get_transform_func(num_tensors, dtype, device, is_fastpath):
     def transform(t):
         if not torch.is_tensor(t):
@@ -74,6 +89,10 @@ def get_transform_func(num_tensors, dtype, device, is_fastpath):
         )
 
     return transform
+
+
+def assert_multiple_grad_fns(tensors, test_case):
+    test_case.assertEqual(len({t.grad_fn for t in tensors}), len(tensors), msg=f"{[t.grad_fn for t in tensors]}")
 
 
 def clone(arg):
@@ -156,11 +175,12 @@ class TestForeach(TestCase):
                 is_fastpath and not disable_fastpath, False,
                 alpha=alpha, zero_size=zero_size, scalar_self_arg=False,
             )
-            self._binary_test(
-                dtype, inplace_op, inplace_ref, [sample.input, rhs_arg],
-                is_fastpath and not disable_fastpath, True,
-                alpha=alpha, zero_size=zero_size, scalar_self_arg=False,
-            )
+            with InplaceForeachVersionBumpCheck(self, sample.input):
+                self._binary_test(
+                    dtype, inplace_op, inplace_ref, [sample.input, rhs_arg],
+                    is_fastpath and not disable_fastpath, True,
+                    alpha=alpha, zero_size=zero_size, scalar_self_arg=False,
+                )
 
             if op.supports_autograd and dtype in floating_types() and not zero_size:
                 transformed_sample = sample.transform(get_transform_func(len(sample.input), dtype, device, is_fastpath))
@@ -179,6 +199,17 @@ class TestForeach(TestCase):
                     self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
                     if isinstance(rhs_arg, list) and isinstance(rhs_arg[0], torch.Tensor):
                         self.assertEqual([t.grad for t in rhs_arg], [t.grad for t in ref_rhs_arg])
+                    tensors = [1 * t.clone().detach().requires_grad_() for t in tensors]
+                    ref_tensors = [1 * t.clone().detach().requires_grad_() for t in tensors]
+                    inplace_op([tensors, rhs_arg], is_cuda=False, is_fastpath=False, zero_size=zero_size)
+                    assert_multiple_grad_fns(tensors, self)
+
+                    inplace_ref([ref_tensors, rhs_arg])
+                    torch.autograd.backward(sum([t.clone() for t in ref_tensors]).sum(), inputs=ref_tensors)
+                    if inplace_op.func not in (torch._foreach_minimum_, torch._foreach_maximum_):
+                        torch.autograd.backward(sum([t.clone() for t in tensors]).sum(), inputs=tensors)
+                        grads = [t.grad for t in tensors]
+                        self.assertEqual(grads, [t.grad for t in ref_tensors])
             if (
                 op.supports_scalar_self_arg
                 and isinstance(rhs_arg, Number)
@@ -217,6 +248,10 @@ class TestForeach(TestCase):
             self._pointwise_test(
                 wrapped_op, ref, inputs, is_fastpath and not disable_fastpath, False, values=values, zero_size=zero_size
             )
+            with InplaceForeachVersionBumpCheck(self, sample.input):
+                self._pointwise_test(
+                    inplace_op, inplace_ref, inputs, is_fastpath and not disable_fastpath,
+                    True, values=values, zero_size=zero_size)
             self._pointwise_test(
                 inplace_op, inplace_ref, inputs, is_fastpath and not disable_fastpath, True,
                 values=values, zero_size=zero_size)
@@ -239,6 +274,14 @@ class TestForeach(TestCase):
                     for op_list, ref_list in zip(rhs_arg, ref_rhs_arg):
                         if isinstance(op_list, list) and isinstance(op_list[0], torch.Tensor):
                             self.assertEqual([t.grad for t in op_list], [t.grad for t in ref_list])
+                    tensors = [1 * t.clone().detach().requires_grad_() for t in tensors]
+                    ref_tensors = [1 * t.clone().detach().requires_grad_() for t in tensors]
+                    inplace_op([tensors, *rhs_arg], is_cuda=False, is_fastpath=False, zero_size=zero_size)
+                    assert_multiple_grad_fns(tensors, self)
+                    inplace_ref([ref_tensors, *rhs_arg])
+                    torch.autograd.backward(sum([t.clone() for t in tensors]).sum(), inputs=tensors)
+                    torch.autograd.backward(sum([t.clone() for t in ref_tensors]).sum(), inputs=ref_tensors)
+                    self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
 
             if is_fastpath and isinstance(values, list) and not zero_size:
                 sample = sample.transform(lambda t: t.clone().detach() if torch.is_tensor(t) else t)
@@ -339,12 +382,13 @@ class TestForeach(TestCase):
     def _inplace_unary_test(self, inplace, inplace_ref, inputs, is_fastpath, **kwargs):
         copied_inputs = [[t.clone().detach() for t in tensors] for tensors in inputs]
         try:
-            inplace(inputs, self.is_cuda, is_fastpath, **kwargs)
+            with InplaceForeachVersionBumpCheck(self, inputs[0]):
+                inplace(inputs, self.is_cuda, is_fastpath, **kwargs)
         except RuntimeError as e:
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 inplace_ref(copied_inputs)
         else:
-            inplace_ref(copied_inputs),
+            inplace_ref(copied_inputs)
             self.assertEqual(copied_inputs, inputs)
 
     @ops(foreach_unary_op_db)
@@ -384,9 +428,47 @@ class TestForeach(TestCase):
                     for _ in range(num_tensors)
                 ]
                 ref_tensors = [t.clone().detach().requires_grad_() for t in tensors]
-                sum(wrapped_op.func(tensors)).mean().backward()
+                out = wrapped_op.func(tensors)
+                sum(out).mean().backward()
                 sum([ref.func(t) for t in ref_tensors]).mean().backward()
                 self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
+                self.assertEqual(len({t.grad_fn for t in out}), 1)
+
+                # per-tensor `grad_fn` check.
+                hook_buffer = []
+
+                def get_hook(i):
+
+                    def hook(_):
+                        hook_buffer.append(i)
+
+                    return hook
+
+                inplace_input_tensors = [(1 - torch.rand(())).requires_grad_() for _ in range(num_tensors)]
+                inplace_inputs = [0.1 + t for t in inplace_input_tensors]
+                # set both to False to skip multi_tensor_apply_kernel check
+                inplace_op([inplace_inputs], False, False, zero_size=zero_size)
+                assert_multiple_grad_fns(inplace_inputs, self)
+
+                cloned_tensors = []
+                for i, t in enumerate(inplace_inputs):
+                    c = t.clone()
+                    c.register_hook(get_hook(i))
+                    cloned_tensors.append(c)
+
+                torch.autograd.grad(cloned_tensors[0] * 1, inputs=(inplace_input_tensors[0],), retain_graph=True)
+                self.assertEqual(hook_buffer, [0])
+                inplace_input_tensors[0].grad = None
+                hook_buffer.clear()
+
+                torch.autograd.grad(sum(cloned_tensors), inputs=tuple(inplace_input_tensors), retain_graph=False)
+                self.assertEqual(hook_buffer, list(range(num_tensors - 1, -1, -1)))
+
+                ref_inplace_input_tensors = [t.clone().detach().requires_grad_() for t in inplace_input_tensors]
+                ref_inplace_inputs = [0.1 + t for t in ref_inplace_input_tensors]
+                ref_output = inplace_ref([ref_inplace_inputs])
+                torch.autograd.grad(sum(ref_output), inputs=tuple(ref_inplace_input_tensors))
+                self.assertEqual([t.grad for t in inplace_input_tensors], [t.grad for t in ref_inplace_input_tensors])
 
     @ops(foreach_reduce_op_db)
     @parametrize("is_fastpath", (True, False))
@@ -711,7 +793,8 @@ class TestForeach(TestCase):
             self.assertEqual(actual, expected)
 
             inplace_inputs = [[t.clone() for t in inputs[0]]] + inputs[1:]
-            inplace_actual = inplace_op(inplace_inputs, self.is_cuda, is_fastpath, **kwargs)
+            with InplaceForeachVersionBumpCheck(self, inplace_inputs[0]):
+                inplace_actual = inplace_op(inplace_inputs, self.is_cuda, is_fastpath, **kwargs)
             self.assertEqual(inplace_actual, expected)
 
             if op.supports_autograd and dtype in floating_types() and not zero_size:
@@ -733,6 +816,9 @@ class TestForeach(TestCase):
                     [t.grad for t in transformed_sample.input],
                     [t.grad for t in ref_tensors],
                 )
+                tensors = [1 * t.clone().detach().requires_grad_() for t in transformed_sample.input]
+                inplace_op((tensors, *inputs[1:]), False, False, **kwargs, zero_size=False)
+                assert_multiple_grad_fns(tensors, self)
 
     @onlyCUDA
     @ops(foreach_reduce_op_db)
