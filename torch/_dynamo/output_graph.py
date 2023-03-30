@@ -585,6 +585,16 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     output.append(create_instruction("POP_TOP"))
             self.add_output_instructions(output + pass2.get_instructions())
 
+        # This is a hack to handle NumpyTensorVariable before returning it. This actually calls Tensor.numpy() to
+        # convert tensor to ndarray. Note that this doesn't handle TupleVariable so if more than one return values
+        # and one of them is NumpyTensorVariable this doesn't convert it and the result will be tensor instead of
+        # ndarray.
+        from .variables.tensor import NumpyTensorVariable
+
+        if stack_values and isinstance(stack_values[-1], NumpyTensorVariable):
+            self.add_output_instructions(
+                stack_values[-1].reconstruct_ndarray(stack_values)
+            )
         # restore all the live local vars
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]

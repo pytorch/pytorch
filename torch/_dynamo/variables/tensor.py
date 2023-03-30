@@ -10,6 +10,7 @@ import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 from .. import config, variables
+from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -674,11 +675,8 @@ class NumpyTensorVariable(TensorVariable):
 
         result = None
         options = VariableTracker.propagate(self)
-        if name == "shape" and self.size is not None:
-            sizes = [ConstantVariable(x) for x in self.size]
-            result = TupleVariable(sizes)
-        elif name == "ndim" and self.ndim is not None:
-            result = ConstantVariable(self.ndim, **options)
+        if name in ["shape", "ndim"]:
+            result = super().var_getattr(tx, name)
         elif name == "T":
             dims = TupleVariable(
                 [ConstantVariable(x) for x in range(self.ndim - 1, -1, -1)]
@@ -732,6 +730,19 @@ class NumpyTensorVariable(TensorVariable):
             raise NotImplementedError()
         return result
 
+    def reconstruct_ndarray(self, stack_values):
+        # returns bytecode to actually convert NumpyTensorVariable to np.ndarray
+        return [
+            create_instruction(
+                name="LOAD_METHOD", arg=len(stack_values) - 1, argval="numpy"
+            ),
+            create_instruction(
+                name="CALL_METHOD",
+                arg=len(stack_values) - 1,
+                argval=len(stack_values) - 1,
+            ),
+        ]
+
     def call_method(
         self,
         tx,
@@ -745,9 +756,12 @@ class NumpyTensorVariable(TensorVariable):
         if name == "astype" and len(args) == 1:
             # converts ndarray to another dtype
             from torch_np import _dtypes
+
             from .builder import TupleVariable, wrap_fx_proxy_cls
 
-            torch_dtype = getattr(_dtypes, args[0].as_python_constant().__name__).torch_dtype
+            torch_dtype = getattr(
+                _dtypes, args[0].as_python_constant().__name__
+            ).torch_dtype
             return wrap_fx_proxy_cls(
                 target_cls=NumpyTensorVariable,
                 tx=tx,
@@ -775,7 +789,9 @@ class NumpyTensorVariable(TensorVariable):
             )
         elif name in ["transpose", "reshape"]:
             from torch_np._detail import implementations
-            from .builder import wrap_fx_proxy_cls, TupleVariable
+
+            from .builder import TupleVariable, wrap_fx_proxy_cls
+
             func = getattr(implementations, name)
 
             if args in [(), None, (None,)]:
