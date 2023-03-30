@@ -53,7 +53,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
 def pin_memory(data, device=None):
     if isinstance(data, torch.Tensor):
         return data.pin_memory(device)
-    elif isinstance(data, str):
+    elif isinstance(data, (str, bytes)):
         return data
     elif isinstance(data, collections.abc.Mapping):
         try:
