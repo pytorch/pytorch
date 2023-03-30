@@ -17,6 +17,25 @@ from torch.distributed._tensor.ops.common_rules import pointwise_rule
 aten = torch.ops.aten  # pyre-ignore
 
 
+@register_prop_rule(  # pyre-ignore
+    [
+        aten._foreach_neg.default,
+        aten._foreach_reciprocal.default,
+        aten._foreach_sqrt.default,
+    ]
+)
+def _prop__foreach_unaop(op_schema: OpSchema) -> OutputSharding:
+    self = op_schema.args_schema[0]
+    assert isinstance(self, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
+    # FIXME(@mrshenli): this is incorrect for sqrt
+    return OutputSharding(output_spec=self)
+
+
+
+
+
 @register_prop_rule(aten._foreach_add.List)  # pyre-ignore
 def _prop__foreach_add(op_schema: OpSchema) -> OutputSharding:
     self, other = op_schema.args_schema

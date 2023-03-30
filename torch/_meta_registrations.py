@@ -1223,15 +1223,16 @@ def _check_foreach_binop_tensor_lists(self, other):
         lambda: (
             "The first two arguments of must be List[Tensor], "
             f"but got {type(self)} and {type(other)}."
-        )
+        ),
     )
     check(
         len(self) > 0 and len(self) == len(other),
         lambda: (
             "self and other must be non-empty and match in length, "
             f"but got {len(self)} and {len(other)}."
-        )
+        ),
     )
+
 
 @register_meta([aten._foreach_add.List])
 def meta__foreach_add(self, other, alpha=1):
