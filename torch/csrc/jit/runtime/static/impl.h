@@ -855,7 +855,7 @@ class TORCH_API ProcessedNodeMetadata {
 
   ProcessedNodeMetadata() : launcher_(nullptr) {}
 
-  // deleted copy ctor/assigment as standard containers (vector) always
+  // deleted copy ctor/assignment as standard containers (vector) always
   // have copy constructors, but their instantiation is not well-formed
   // if the contained type (BlockRunner) is not copyable
   ProcessedNodeMetadata(const ProcessedNodeMetadata&) = delete;

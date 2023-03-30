@@ -68,12 +68,12 @@ from .dicts import (
 )
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lists import (
-    ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
     SizeVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .misc import (
@@ -316,11 +316,11 @@ class VariableBuilder:
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
-            map(
-                lambda k: ConstantVariable.is_literal(k)
+            (
+                ConstantVariable.is_literal(k)
                 or self.tensor_can_be_dict_key(k)
-                or isinstance(k, enum.Enum),
-                value.keys(),
+                or isinstance(k, enum.Enum)
+                for k in value.keys()
             )
         ):
             if not value and self.get_source().is_nn_module():
@@ -618,7 +618,9 @@ class VariableBuilder:
             ).add_guards(guards)
             for i in range(tuple_iterator_len(value))
         ]
-        return ListIteratorVariable(output, mutable_local=MutableLocal(), guards=guards)
+        return TupleIteratorVariable(
+            output, mutable_local=MutableLocal(), guards=guards
+        )
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -1163,7 +1165,10 @@ def wrap_to_fake_tensor_and_record(
                 # Precedence: export constraints > eager constraints
                 constraint = dim2constraint.get(i)
                 if constraint is None:
-                    if i in getattr(e, "_dynamo_dynamic_indices", set()):
+                    if (
+                        i in getattr(e, "_dynamo_dynamic_indices", set())
+                        and not config.allow_ignore_mark_dynamic
+                    ):
                         constraint = RelaxedUnspecConstraint()
                 constraint_dims.append(constraint)
 
