@@ -18,6 +18,7 @@ class DLDeviceType(enum.IntEnum):
     kDLVPI = 9,
     kDLROCM = 10,
     kDLExtDev = 12,
+    kDLOneAPI = 14,
 
 
 torch._C._add_docstr(to_dlpack, r"""to_dlpack(tensor) -> PyCapsule

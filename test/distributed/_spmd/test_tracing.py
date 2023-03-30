@@ -10,6 +10,7 @@ import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
 from torch.distributed._spmd.api import (
+    COMPILED_OBJECT_KEY,
     Override,
     Schema,
     SPMD,
@@ -556,13 +557,13 @@ class TraceTrainStepTest(DTensorTestBase):
         # module parameters.
         torch.manual_seed(1)
         # FIXME(@mrshenli): gradients for bias is missing
-        mod = nn.Linear(10, 10, bias=False).cuda(rank)
+        mod = nn.Linear(10, 10, bias=True).cuda(rank)
         # FIXME(@mrshenli): we have to enable foreach to get better perf
-        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=False)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
         inp = torch.randn(2, 10).cuda(rank)
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
-        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.01, foreach=False)
+        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.01, foreach=True)
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
 
     @skip_if_lt_x_gpu(2)
@@ -581,12 +582,12 @@ class TraceTrainStepTest(DTensorTestBase):
         mod = nn.Linear(10, 10, bias=False).cuda(rank)
         # FIXME(@mrshenli): we have to enable foreach to get better perf
         opt = torch.optim.Adam(
-            mod.parameters(), lr=0.01, foreach=False, capturable=True
+            mod.parameters(), lr=0.01, foreach=True, capturable=True
         )
         inp = torch.randn(2, 10).cuda(rank)
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
-        ddp_opt = torch.optim.Adam(ddp_mod.parameters(), lr=0.01, foreach=False)
+        ddp_opt = torch.optim.Adam(ddp_mod.parameters(), lr=0.01, foreach=True)
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
 
     @skip_if_lt_x_gpu(2)
@@ -641,6 +642,44 @@ class TraceTrainStepTest(DTensorTestBase):
             transform_targets,
             [torch.ops.dummy.ddm.default, torch.ops.dummy.ddm_backward.default],
         )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_gm_cache_and_transformation(self):
+        class GraphOptimization:
+            def __init__(self):
+                self.call_count = 0
+
+            def __call__(self, gm: fx.GraphModule) -> fx.GraphModule:
+                self.call_count += 1
+                return gm
+
+        graph_optimization = GraphOptimization()
+
+        @compile(gm_transformation=graph_optimization)
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        rank = torch.distributed.get_rank()
+        torch.manual_seed(0)
+        mod = nn.Linear(10, 10, bias=False).cuda(rank)
+        opt = torch.optim.Adam(
+            mod.parameters(), lr=0.01, foreach=False, capturable=True
+        )
+        inp = torch.randn(2, 10).cuda(rank)
+
+        # materialize optimizer states
+        mod(inp).sum().backward()
+        opt.step()
+        opt.zero_grad()
+
+        train_step(mod, opt, inp)
+        self.assertEqual(graph_optimization.call_count, 1)
+        gm = train_step.__dict__[COMPILED_OBJECT_KEY].gm
+        train_step(mod, opt, inp)
+        self.assertEqual(id(gm), id(train_step.__dict__[COMPILED_OBJECT_KEY].gm))
+        self.assertEqual(graph_optimization.call_count, 1)
 
 
 if __name__ == "__main__":

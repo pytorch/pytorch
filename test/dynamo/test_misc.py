@@ -4515,6 +4515,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_tuple_from_tuple_iter(self):
+        def inner_fn(*args):
+            acc = torch.ones(10, 10)
+            for arg in args:
+                acc.add_(arg)
+
+            return acc
+
+        @torch._dynamo.optimize("eager")
+        def fn(inputs, params):
+            y = tuple(inputs) + tuple(params)
+            return inner_fn(*y)
+
+        inputs = [torch.randn(10, 10) for _ in range(3)]
+
+        fn(inputs, iter(tuple(inputs)))
+
     def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests
 
@@ -5158,6 +5175,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(seen_frames[1].name, "uwu_inline_me")
         self.assertEqual(seen_frames[2].line, "r2 = uwu_inline_me_deep(y, z)")
 
+    def test_error_on_recompile(self):
+        @torch._dynamo.optimize("eager")
+        def fn(a, b):
+            return a + b
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            with self.assertRaises(torch._dynamo.exc.RecompileError):
+                fn(torch.rand(2, 3), torch.rand(2, 3))
+                fn(torch.rand(2, 3), (1, 2, 3))
+
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
@@ -5203,6 +5230,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ).run(
                 prof.report()
             )
+
+    def test_guards_strip_function_call(self):
+        from torch._dynamo.guards import strip_function_call
+
+        test_case = [
+            ("___odict_getitem(a, 1)", "a"),
+            ("a.layers[slice(2)][0]._xyz", "a"),
+            ("getattr(a.layers[slice(2)][0]._abc, '0')", "a"),
+            ("getattr(getattr(a.x[3], '0'), '3')", "a"),
+            ("a.layers[slice(None, -1, None)][0]._xyz", "a"),
+            ("a.layers[func('offset', -1, None)][0]._xyz", "a"),
+        ]
+        # strip_function_call should extract the object from the string.
+        for name, expect_obj in test_case:
+            self.assertEqual(strip_function_call(name), expect_obj)
 
 
 class CustomFunc1(torch.autograd.Function):

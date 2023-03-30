@@ -184,7 +184,7 @@ def _parse_reveals(file: IO[str]) -> List[str]:
     string = file.read().replace("*", "")
 
     # Grab all `# E:`-based comments
-    comments_array = list(map(lambda str: str.partition("  # E: ")[2], string.split("\n")))
+    comments_array = [str.partition("  # E: ")[2] for str in string.split("\n")]
     comments = "/n".join(comments_array)
 
     # Only search for the `{*}` pattern within comments,
