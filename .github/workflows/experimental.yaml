@@ -16,9 +16,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: t
 jobs:
-  - id: files
+
+  the-test:
+    name: the-test
     uses: jitterbit/get-changed-files@v1
-  - run: |
+    run: |
       echo ${{ steps.files.outputs.all }}
       for changed_file in ${{ steps.files.outputs.all }}; do
         echo "Do something with this ${changed_file}."
