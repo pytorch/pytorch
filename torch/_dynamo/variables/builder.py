@@ -316,11 +316,11 @@ class VariableBuilder:
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
-            map(
-                lambda k: ConstantVariable.is_literal(k)
+            (
+                ConstantVariable.is_literal(k)
                 or self.tensor_can_be_dict_key(k)
-                or isinstance(k, enum.Enum),
-                value.keys(),
+                or isinstance(k, enum.Enum)
+                for k in value.keys()
             )
         ):
             if not value and self.get_source().is_nn_module():
