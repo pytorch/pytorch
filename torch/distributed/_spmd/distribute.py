@@ -204,6 +204,9 @@ def _get_dtensor_dispatch_graph(
         # call_function  _to_copy           aten._to_copy.default     (view_1,)
         gm.graph.eliminate_dead_code()
 
+        if torch.distributed.get_rank() == 0:
+            gm.graph.print_tabular()
+
         return gm
 
 
@@ -385,6 +388,23 @@ def _rebuild_graph(
                     value_remap[dtn] = gm.graph.node_copy(
                         dtn, lambda n: value_remap[n]
                     )
+                    if all(
+                        [
+                            n.target._schema.name.startswith("aten::_foreach")
+                            for n in [dtn, node]
+                        ]
+                    ):
+                        # FIXME(@mrshenli): This is a temporary solution enable
+                        # foreach ops. The problem is that foreach ops returns
+                        # List[Tensor], but make_fx will flatten that before
+                        # passing those tensors to output node, which will
+                        # introduce additional getitem nodes. These redundant
+                        # getitem nodes breaks graph correctness as we cannot do
+                        # getitem(getitem(foreach_out, 0), 0). This temporary
+                        # solution skips getitem nodes in DTensor expanded
+                        # subgraphs.
+                        node.replace_all_uses_with(value_remap[dtn])
+                        break
             # explicitly erase node instead of relying on DCE, as DCE does not
             # remove inplace copy_ correctly.
             gm.graph.erase_node(node)
@@ -461,6 +481,7 @@ def _convert_to_distributed(
             )
 
         elif isinstance(node.target, torch._ops.OpOverload):
+            logger.info("in OpOverload")
             node_replacements[node] = _get_dtensor_dispatch_graph(
                 node, node_to_obj
             )
@@ -484,6 +505,7 @@ def _convert_to_distributed(
                         )
 
         elif node.op == OP.CALL_FUNCTION:
+            logger.info("in CALL_FUNCTION")
 
             def _remap_arg(arg: object) -> object:
                 if isinstance(arg, torch.fx.Node):

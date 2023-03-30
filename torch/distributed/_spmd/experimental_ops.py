@@ -29,24 +29,33 @@ def _prop__foreach_unaop(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(self, list) and all(
         [isinstance(s, DTensorSpec) for s in self]
     )
-    # FIXME(@mrshenli): this is incorrect for sqrt
+    # FIXME(@mrshenli): for sqrt, this is only mathmatically correct for
+    # Replicate and Shard tensor.
     return OutputSharding(output_spec=self)
 
 
-
-
-
-@register_prop_rule(aten._foreach_add.List)  # pyre-ignore
-def _prop__foreach_add(op_schema: OpSchema) -> OutputSharding:
-    self, other = op_schema.args_schema
+@register_prop_rule(  # pyre-ignore
+    [
+        aten._foreach_add.List,
+        aten._foreach_div.List,
+        aten._foreach_mul.List,
+    ]
+)
+def _prop__foreach_binop_list(op_schema: OpSchema) -> OutputSharding:
+    self, other = op_schema.args_schema[:2]
+    scalar = (
+        None if len(op_schema.args_schema) < 3 else op_schema.args_schema[2]
+    )
     assert isinstance(self, list) and all(
         [isinstance(s, DTensorSpec) for s in self]
-    )
+    ), f"Expect a List[DTensorSpec] but got {self}"
     assert isinstance(other, list) and all(
         [isinstance(o, DTensorSpec) for o in other]
+    ), f"Expect a List[DTensorSpec] but got {other}"
+    assert len(self) == len(other), (
+        "Two tensor lists must match in length, "
+        f"but got {len(self)} and {len(other)}"
     )
-    assert len(self) == len(other)
-    assert all([s.shape == o.shape for s, o in zip(self, other)])
 
     if any([s != o for s, o in zip(self, other)]):
         # If DTensorSpec for the two operand do not match, suggest using
@@ -57,7 +66,9 @@ def _prop__foreach_add(op_schema: OpSchema) -> OutputSharding:
             schema_suggestions=[
                 OpSchema(
                     func_schema=op_schema.func_schema,
-                    args_schema=(self, self),
+                    args_schema=(self, self, scalar)
+                    if scalar
+                    else (self, self),
                     kwargs_schema=op_schema.kwargs_schema,
                     is_inplace=op_schema.is_inplace,
                     is_out_variant=op_schema.is_out_variant,
@@ -92,7 +103,19 @@ def _prop__foreach_binop_scalar(op_schema: OpSchema) -> OutputSharding:
     ]
 )
 def _prop__foreach_addcop_scalar(op_schema: OpSchema):
-    self, tensor1, tensor2, scalar = op_schema.args_schema
+    self, tensor1, tensor2 = op_schema.args_schema[:3]
+    scalar = (
+        None if len(op_schema.args_schema) < 4 else op_schema.args_schema[3]
+    )
+    assert isinstance(self, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
+    assert isinstance(tensor1, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
+    assert isinstance(tensor2, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
     if any([s != t1 or s != t2 for s, t1, t2 in zip(self, tensor1, tensor2)]):
         # If DTensorSpec for the two operand do not match, suggest using
         # self's DTensorSpec. This will trigger allreduce if other is partial
@@ -102,7 +125,9 @@ def _prop__foreach_addcop_scalar(op_schema: OpSchema):
             schema_suggestions=[
                 OpSchema(
                     func_schema=op_schema.func_schema,
-                    args_schema=(self, self, self, scalar),
+                    args_schema=(self, self, self, scalar)
+                    if scalar
+                    else (self, self, self),
                     kwargs_schema=op_schema.kwargs_schema,
                     is_inplace=op_schema.is_inplace,
                     is_out_variant=op_schema.is_out_variant,
@@ -113,9 +138,12 @@ def _prop__foreach_addcop_scalar(op_schema: OpSchema):
         return OutputSharding(output_spec=self)
 
 
-@register_prop_rule([aten._foreach_pow.ScalarAndTensor])
+@register_prop_rule([aten._foreach_pow.ScalarAndTensor])  # pyre-ignore
 def _prop__foreach_pow_scalar_and_tensor(op_schema: OpSchema):
-    scalar, exponent = op_schema.args_schema
+    scala, exponent = op_schema.args_schema
+    assert isinstance(exponent, list) and all(
+        [isinstance(s, DTensorSpec) for s in exponent]
+    )
     return OutputSharding(output_spec=exponent)
 
 
