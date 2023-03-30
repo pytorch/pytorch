@@ -743,7 +743,7 @@ def run_doctests(test_module, test_directory, options):
     if 0:
         # TODO: could try to enable some of these
         os.environ["TORCH_DOCTEST_QUANTIZED_DYNAMIC"] = "1"
-        os.environ["TORCH_DOCTEST_ANOMOLY"] = "1"
+        os.environ["TORCH_DOCTEST_ANOMALY"] = "1"
         os.environ["TORCH_DOCTEST_AUTOGRAD"] = "1"
         os.environ["TORCH_DOCTEST_HUB"] = "1"
         os.environ["TORCH_DOCTEST_DATALOADER"] = "1"
