@@ -683,8 +683,7 @@ class GraphLowering(torch.fx.Interpreter):
             from .codecache import AotCodeCache
 
             code, linemap = self.codegen()
-            log.debug("/* AOT-Inductor generated code */")
-            log.debug(code)
+            output_code_log.debug(f"Output code: \n{code}")
 
             libpath = AotCodeCache.compile(
                 code, cuda=(self.get_single_device() == "cuda")
