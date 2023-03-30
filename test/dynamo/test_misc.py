@@ -4843,7 +4843,7 @@ def fn():
             """
             # test with LOAD_GLOBAL since it has a different instruction size
             insts = [
-                new_inst("RESUME", 0),
+                new_inst("RESUME", arg=0),
                 new_inst("JUMP_FORWARD", target=jump_to_target_inst),
                 targets[0],
                 load_global("print", False),

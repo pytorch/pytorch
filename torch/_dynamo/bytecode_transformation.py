@@ -84,9 +84,6 @@ def create_instruction(name, *, arg=None, argval=_NotProvided, target=None):
     `argval` or `target`.
 
     Do not use for LOAD_GLOBAL - use create_load_global instead.
-
-    TODO: make `arg` kwarg-only: def create_instruction(name, *, arg=None, ...)
-    and update callsites
     """
     assert name != "LOAD_GLOBAL"
     cnt = (arg is not None) + (argval is not _NotProvided) + (target is not None)
@@ -134,7 +131,7 @@ def create_load_global(name, push_null):
 
 def create_dup_top():
     if sys.version_info >= (3, 11):
-        return create_instruction("COPY", 1)
+        return create_instruction("COPY", arg=1)
     return create_instruction("DUP_TOP")
 
 
@@ -154,7 +151,7 @@ def create_rot_n(n):
     if sys.version_info >= (3, 11):
         # rotate can be expressed as a sequence of swap operations
         # e.g. rotate 3 is equivalent to swap 3, swap 2
-        return [create_instruction("SWAP", i) for i in range(n, 1, -1)]
+        return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
     # ensure desired rotate function exists
     if sys.version_info < (3, 8) and n >= 4:
@@ -164,7 +161,7 @@ def create_rot_n(n):
 
     if n <= 4:
         return [create_instruction("ROT_" + ["TWO", "THREE", "FOUR"][n - 2])]
-    return [create_instruction("ROT_N", n)]
+    return [create_instruction("ROT_N", arg=n)]
 
 
 def create_call_function(nargs, push_null):
@@ -190,16 +187,19 @@ def create_call_function(nargs, push_null):
         if push_null:
             output.append(create_instruction("PUSH_NULL"))
             output.extend(create_rot_n(nargs + 2))
-        output.append(create_instruction("PRECALL", nargs))
-        output.append(create_instruction("CALL", nargs))
+        output.append(create_instruction("PRECALL", arg=nargs))
+        output.append(create_instruction("CALL", arg=nargs))
         return output
-    return [create_instruction("CALL_FUNCTION", nargs)]
+    return [create_instruction("CALL_FUNCTION", arg=nargs)]
 
 
 def create_call_method(nargs):
     if sys.version_info >= (3, 11):
-        return [create_instruction("PRECALL", nargs), create_instruction("CALL", nargs)]
-    return [create_instruction("CALL_METHOD", nargs)]
+        return [
+            create_instruction("PRECALL", arg=nargs),
+            create_instruction("CALL", arg=nargs),
+        ]
+    return [create_instruction("CALL_METHOD", arg=nargs)]
 
 
 def lnotab_writer(lineno, byteno=0):
@@ -648,16 +648,16 @@ def fix_extended_args(instructions: List[Instruction]):
             inst.arg = 0
         elif inst.arg and inst.arg > 0xFFFFFF:
             maybe_pop_n(3)
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 24))
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 16))
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 24))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 16))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 8))
         elif inst.arg and inst.arg > 0xFFFF:
             maybe_pop_n(2)
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 16))
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 16))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 8))
         elif inst.arg and inst.arg > 0xFF:
             maybe_pop_n(1)
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 8))
         output.append(inst)
 
     added = len(output) - len(instructions)
