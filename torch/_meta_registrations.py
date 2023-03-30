@@ -21,9 +21,10 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch._refs import _broadcast_shapes
 
-from torch.utils._pytree import tree_map
 # register quantized_decomposed ops
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+
+from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
 

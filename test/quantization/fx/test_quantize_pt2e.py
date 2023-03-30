@@ -223,9 +223,7 @@ class TestQuantizePT2E(QuantizationTestCase):
     def test_decomp_and_lowering(self):
         # make sure lowering works on the decomposed representation
         from torch._subclasses.fake_tensor import (
-            FakeTensor,
             FakeTensorMode,
-            FakeTensorConverter,
         )
 
 
