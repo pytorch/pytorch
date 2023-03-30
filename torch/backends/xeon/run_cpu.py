@@ -307,7 +307,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_tc = self.add_lib_preload(lib_type="tcmalloc")
             if not find_tc:
                 msg = f"{self.msg_lib_notfound} you can use \"conda install -c conda-forge gperftools\" to install {{0}}"
-                logger.warning(msg.format("TCmalloc", "tcmalloc"))
+                logger.warning(msg.format("TCmalloc", "tcmalloc"))  # noqa: G001
             else:
                 logger.info("Use TCMalloc memory allocator")
 
@@ -315,7 +315,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_je = self.add_lib_preload(lib_type="jemalloc")
             if not find_je:
                 msg = f"{self.msg_lib_notfound} you can use \"conda install -c conda-forge jemalloc\" to install {{0}}"
-                logger.warning(msg.format("Jemalloc", "jemalloc"))
+                logger.warning(msg.format("Jemalloc", "jemalloc"))  # noqa: G001
             else:
                 logger.info("Use JeMalloc memory allocator")
                 self.set_env("MALLOC_CONF", "oversize_threshold:1,background_thread:true,metadata_thp:auto")
@@ -371,7 +371,7 @@ Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
             find_iomp = self.add_lib_preload(lib_type="iomp5")
             if not find_iomp:
                 msg = f"{self.msg_lib_notfound} you can use \"conda install mkl\" to install {{0}}"
-                logger.warning(msg.format("iomp", "iomp5"))
+                logger.warning(msg.format("iomp", "iomp5"))  # noqa: G001
             else:
                 logger.info("Using Intel OpenMP")
                 if set_kmp_affinity:
@@ -429,9 +429,9 @@ please make sure ninstances <= total_cores)")
                     num_leftover_cores = ncore_per_node % args.ncores_per_instance
                     if args.ncores_per_instance > ncore_per_node:
                         # too many ncores_per_instance to skip cross-node cores
-                        logger.warning("there are {} core(s) per socket, but you specify {} ncores_per_instance and \
+                        logger.warning("there are %s core(s) per socket, but you specify %s ncores_per_instance and \
 skip_cross_node_cores. Please make sure --ncores-per-instance < core(s) per \
-socket".format(ncore_per_node, args.ncores_per_instance))
+socket", ncore_per_node, args.ncores_per_instance)
                         exit(-1)
                     elif num_leftover_cores == 0:
                         # aren't any cross-node cores

@@ -45,9 +45,11 @@ def pretty_print_buckets(buckets: List[Bucket]):
     try:
         from tabulate import tabulate
 
+        # TODO: Do you really want to log.info this?  It would get
+        # suppressed if log level is too low
         log.info(
-            "\nDDPOptimizer bucket assignments\n"
-            + tabulate(rows, headers=headers, tablefmt="simple_grid")
+            "\nDDPOptimizer bucket assignments\n%s",
+            tabulate(rows, headers=headers, tablefmt="simple_grid")
         )
     except ImportError:
         log.info(
@@ -319,7 +321,7 @@ class DDPOptimizer:
                             curr_submod = real_mod
 
                         log.debug(
-                            f"\n---{n.target} graph---\n" + str(curr_submod.graph)
+                            f"\n---{n.target} graph---\n{curr_submod.graph}"
                         )
 
                         # When calling the compiler on the submod, inputs (new_args) are expected to
@@ -348,5 +350,5 @@ class DDPOptimizer:
         submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
-        log.debug("\n---final graph---\n" + str(split_gm.graph) + "\n---------------\n")
+        log.debug(f"\n---final graph---\n{split_gm.graph}\n---------------\n")
         return split_gm
