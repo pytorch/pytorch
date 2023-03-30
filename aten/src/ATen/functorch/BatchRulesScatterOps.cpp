@@ -836,6 +836,7 @@ Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t di
   if (index.dim() == 0) {
     return index.expand(self_size);
   }
+  dim = maybe_wrap_dim(dim, self_size.size());
 
   // setup new_index_shape as [BS, 1, ..., idx_size, ..., 1]
   // to reshape index_
@@ -859,7 +860,6 @@ Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t di
 Tensor index_select_decomp(const Tensor &self, int64_t dim, const Tensor &index)
 {
   Tensor index_ = index;
-  dim = maybe_wrap_dim(dim, self.dim());
   if (self.dim() > index.dim()) {
     index_ = get_expanded_index(index, self.sizes(), dim);
   }
