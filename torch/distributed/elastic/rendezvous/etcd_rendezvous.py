@@ -411,9 +411,8 @@ class EtcdRendezvous:
         state = json.loads(active_version.value)
 
         log.info(
-            "Rendezvous version {} is complete. Final state: {}".format(
-                state["version"], state
-            )
+            "Rendezvous version %s is complete. Final state: %s",
+            state["version"], state
         )
 
         # Rendezvous version number; our rank in it; world size
@@ -432,9 +431,8 @@ class EtcdRendezvous:
         #   2. if keep alives are missing, destroy it and bail out.
         active_state = self.announce_self_waiting(expected_version)
         log.info(
-            "Added self to waiting list. Rendezvous full state: {}".format(
-                active_state.value
-            )
+            "Added self to waiting list. Rendezvous full state: %s",
+            active_state.value
         )
 
         self.wait_for_rendezvous_to_free(expected_version)
@@ -697,9 +695,10 @@ class EtcdRendezvous:
                 if key not in keep_alive_keys:
                     # This participant didn't renew their lease. We'll declare this
                     # rendezvous version as dead (but only if it hadn't changed)
-                    log.info("Keep-alive key {} is not renewed.".format(key))
+                    log.info("Keep-alive key %s is not renewed.", key)
                     log.info(
-                        "Rendevous version {} is incomplete. ".format(expected_version)
+                        "Rendevous version %s is incomplete. ",
+                        expected_version
                     )
                     log.info("Attempting to destroy it.")
 
@@ -712,9 +711,8 @@ class EtcdRendezvous:
                     )
 
                     log.info(
-                        "Destroyed rendezvous version {} successfully.".format(
-                            expected_version
-                        )
+                        "Destroyed rendezvous version %s successfully.",
+                        expected_version
                     )
 
                     # We can return (and retry) immediately

@@ -379,12 +379,7 @@ def break_graph_if_unsupported(*, push):
                 kw_names = self.kw_names.value if self.kw_names is not None else ()
                 if len(kw_names) > 0:
                     self.output.add_output_instructions(
-                        [
-                            create_instruction(
-                                "KW_NAMES",
-                                PyCodegen.get_const_index(self.code_options, kw_names),
-                            ),
-                        ]
+                        [create_instruction("KW_NAMES", argval=kw_names)]
                     )
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
@@ -1769,10 +1764,13 @@ class InstructionTranslator(InstructionTranslatorBase):
         compiler_fn,
         one_graph,
         export,
+        export_constraints,
         mutated_closure_cell_contents: Set[str],
     ):
         super().__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn, self, export),
+            output=OutputGraph(
+                f_globals, code_options, compiler_fn, self, export, export_constraints
+            ),
             instructions=instructions,
             f_locals=f_locals,
             f_globals=f_globals,

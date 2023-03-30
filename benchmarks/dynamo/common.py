@@ -423,7 +423,7 @@ def tensor_is_on_xla(tensors):
     if not isinstance(tensors, (tuple, list)):
         tensors = [tensors]
     tensors = [x for x in tensors if isinstance(x, torch.Tensor)]
-    return any(map(lambda x: x.device.type == "xla", tensors))
+    return any((x.device.type == "xla" for x in tensors))
 
 
 def timed(
@@ -590,8 +590,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     Writes to ./speedups.csv
     """
-    if args.dynamic_shapes:
-        return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
+    # if args.dynamic_shapes:
+    #     return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
 
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
@@ -757,12 +757,9 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
     shapes = [x[0].shape for x in example_inputs]
     shape_keys = sorted(set(shapes))
     shape_speedups = {
-        shape: list(
-            map(
-                lambda it: it[1],
-                filter(lambda it: it[0] == shape, zip(shapes, speedups)),
-            )
-        )
+        shape: [
+            it[1] for it in filter(lambda it: it[0] == shape, zip(shapes, speedups))
+        ]
         for shape in shape_keys
     }
     output_str = (
@@ -1776,6 +1773,11 @@ def parse_args(args=None):
         help="Disables cudagraphs for Inductor",
     )
     parser.add_argument(
+        "--inductor-compile-mode",
+        default=None,
+        help="torch.compile mode argument for inductor runs.",
+    )
+    parser.add_argument(
         "--print-graph-breaks",
         action="store_true",
         help="Show a warning whenever graph break",
@@ -2166,7 +2168,12 @@ def run(runner, args, original_dir=None):
         if args.threads:
             inductor_config.cpp.threads = args.threads
 
-        optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
+        optimize_ctx = functools.partial(
+            torch.compile,
+            backend="inductor",
+            fullgraph=args.nopython,
+            mode=args.inductor_compile_mode,
+        )
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.speedup_dynamo_ts:
