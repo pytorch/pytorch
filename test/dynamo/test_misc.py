@@ -4723,6 +4723,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_if_tensor_is_none(self):
+        """
+        Python 3.11 adds new jump instructions that check if
+        TOS is None. We do not support these instructions.
+        """
+
+        def f(x, y):
+            z = 1
+            if x is None:
+                z *= 2
+            if y is not None:
+                z *= 3
+            return z
+
+        # TODO remove condition once 3.11 is fully supported
+        if sys.version_info < (3, 11):
+            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            self.assertEqual(opt_f(None, torch.ones(2)), 6)
+
+        if sys.version_info >= (3, 11):
+            insts = bytecode_transformation.cleaned_instructions(f.__code__)
+            for inst in insts:
+                self.assertNotIn("_NONE", inst.opname)
+
     @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
     def test_py311_jump_offset(self):
         new_inst = bytecode_transformation.create_instruction

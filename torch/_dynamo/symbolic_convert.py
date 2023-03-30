@@ -408,14 +408,6 @@ def break_graph_if_unsupported(*, push):
     return decorator
 
 
-def is_none(x):
-    return x is None
-
-
-def is_not_none(x):
-    return x is not None
-
-
 class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
@@ -1580,11 +1572,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     POP_JUMP_BACKWARD_IF_TRUE = generic_jump(operator.truth, False)
     POP_JUMP_FORWARD_IF_FALSE = generic_jump(operator.not_, False)
     POP_JUMP_BACKWARD_IF_FALSE = generic_jump(operator.not_, False)
-
-    POP_JUMP_FORWARD_IF_NOT_NONE = generic_jump(is_not_none, False)
-    POP_JUMP_BACKWARD_IF_NOT_NONE = generic_jump(is_not_none, False)
-    POP_JUMP_FORWARD_IF_NONE = generic_jump(is_none, False)
-    POP_JUMP_BACKWARD_IF_NONE = generic_jump(is_none, False)
 
     def CACHE(self, inst):
         pass
