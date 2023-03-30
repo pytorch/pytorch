@@ -1915,7 +1915,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             for i, var in enumerate(reversed(self.stack)):
                 if isinstance(var, NullVariable):
                     for j in range(2, i + 2 - null_cnt):
-                        cg.append_output(create_instruction("SWAP", j))
+                        cg.append_output(create_instruction("SWAP", arg=j))
                     cg.extend_output(cg.pop_null())
                     null_cnt += 1
 
