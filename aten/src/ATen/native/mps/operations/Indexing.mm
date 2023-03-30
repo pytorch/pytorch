@@ -39,7 +39,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
   if (iter.numel() == 0) {
     return true;
   }
-  bool serial_index_put = at::globalContext().deterministicAlgorithms() && !accumulate && !index_select;
+  const bool serial_index_put = at::globalContext().deterministicAlgorithms() && !accumulate && !index_select;
 
   const Tensor& inputTensor = iter.tensor(1);
   Tensor outputTensor = iter.tensor(0);
@@ -100,7 +100,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       MTLFunctionConstantValues* constantValues = [[MTLFunctionConstantValues new] autorelease];
       [constantValues setConstantValue:&num_indices type:MTLDataTypeUInt atIndex:0];
 
-      std::string indexFunction = getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate);
+      std::string indexFunction =
+          getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate, serial_index_put);
       id<MTLFunction> indexKernelFunction =
           MPSDevice::getInstance()->metalIndexingFunction(indexFunction, constantValues);
       id<MTLArgumentEncoder> argumentEncoder = [[indexKernelFunction newArgumentEncoderWithBufferIndex:0] autorelease];
@@ -135,10 +136,14 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       [computeEncoder setBuffer:outputBuffer
                          offset:outputTensor.storage_offset() * outputTensor.element_size()
                         atIndex:5];
-      [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:6];
-
-      gridSize = MTLSizeMake(serial_index_put ? 1 : numThreads, 1, 1);
-      numThreads = serial_index_put ? 1 : numThreads;
+      if (serial_index_put) {
+        [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:6];
+        gridSize = MTLSizeMake(1, 1, 1);
+        numThreads = 1;
+      } else {
+        gridSize = MTLSizeMake(numThreads, 1, 1);
+        numThreads = numThreads;
+      }
 
       NSUInteger tgSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads)
