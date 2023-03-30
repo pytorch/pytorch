@@ -33,7 +33,6 @@ extra_deps = []
 extra_imports = ""
 if use_buck:
     extra_deps = [
-        "//caffe2/fb/custom_ops/sparsenn:sparsenn-all_operators",
         "//caffe2/torch/fb/sparsenn:sparsenn_operators_gpu",
         "//caffe2/torch/fb/sparsenn:sparsenn_operators",
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu",
