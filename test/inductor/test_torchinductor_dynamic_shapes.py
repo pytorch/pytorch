@@ -47,8 +47,6 @@ importlib.import_module("filelock")
 test_failures = {
     "test_cpp_wrapper_dynamic_shapes": TestFailure(("cpu",)),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
-    # test_roi_align uses torchvision, which doesn't work with dynamic shapes
-    "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 
