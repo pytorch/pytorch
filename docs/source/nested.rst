@@ -196,8 +196,12 @@ NestedTensor and any constraints they have.
    :func:`torch.nn.Dropout`; "Behavior is the same as on regular tensors."
    :func:`torch.relu`; "Behavior is the same as on regular tensors."
    :func:`torch.gelu`; "Behavior is the same as on regular tensors."
+   :func:`torch.silu`; "Behavior is the same as on regular tensors."
+   :func:`torch.abs`; "Behavior is the same as on regular tensors."
+   :func:`torch.sgn`; "Behavior is the same as on regular tensors."
    :func:`torch.neg`; "Behavior is the same as on regular tensors."
-   :func:`torch.add`; "Supports elementwise addition of two nested tensors.
+   :func:`torch.sub`; "Supports elementwise subtraction of two nested tensors."
+  :func:`torch.add`; "Supports elementwise addition of two nested tensors.
    Supports addition of a scalar to a nested tensor."
    :func:`torch.mul`; "Supports elementwise multiplication of two nested tensors.
    Supports multiplication of a nested tensor by a scalar."
