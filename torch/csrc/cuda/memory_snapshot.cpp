@@ -1,3 +1,4 @@
+#include <ATen/Context.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -113,6 +114,7 @@ void _record_memory_history(
       recorder = gather;
     }
   }
+  at::globalContext().lazyInitCUDA();
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled, recorder, trace_alloc_max_entries, trace_alloc_record_context);
 }

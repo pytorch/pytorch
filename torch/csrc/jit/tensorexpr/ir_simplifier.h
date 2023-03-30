@@ -12,7 +12,7 @@
 
 /* IR Simplification
  *
- * Simplfies expressions in two stages:
+ * Simplifies expressions in two stages:
  *  1. Recursively traverse the map combining similar operations into Terms
  * (interacted via Multiplication) and Polynomials (interacted via Addition). We
  * reorder the components of each Term or Polynomial into a consistent order to
