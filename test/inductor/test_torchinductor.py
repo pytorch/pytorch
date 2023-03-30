@@ -36,6 +36,7 @@ from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
@@ -271,7 +272,7 @@ def clone_preserve_strides(x):
 
 
 @patch.object(config, "debug", True)
-def run_and_get_cpp_code(fn, args):
+def run_and_get_cpp_code(fn, *args, **kwargs):
     torch._dynamo.reset()
     import io
     import logging
@@ -281,7 +282,7 @@ def run_and_get_cpp_code(fn, args):
     from torch._inductor.graph import output_code_log
 
     output_code_log.addHandler(ch)
-    fn(*args)
+    fn(*args, **kwargs)
     s = log_capture_string.getvalue()
     output_code_log.removeHandler(ch)
     return s
@@ -2147,7 +2148,7 @@ class CommonTemplate:
                 return mod(*ex, **kwargs)
 
             run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, (v,))
+            code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
@@ -4530,6 +4531,22 @@ class CommonTemplate:
             ),
         )
 
+    def test_index_put_deterministic_fallback(self):
+        with DeterministicGuard(True):
+
+            def fn(a, b, c):
+                return torch.index_put(a, [b], c, True)
+
+            self.common(
+                fn,
+                [
+                    torch.randn([100, 32]),
+                    torch.randint(0, 100, size=[600], dtype=torch.int64),
+                    torch.randn([600, 32]),
+                ],
+                check_lowp=False,
+            )
+
     def test_index_put_index(self):
         def fn(ind, x, src):
             y = torch.ops.aten.index_put.default(x, [ind], src)
@@ -5763,7 +5780,7 @@ class CommonTemplate:
 
         inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
         fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, inps)
+        code = run_and_get_cpp_code(fn_opt, *inps)
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
 
@@ -6462,7 +6479,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
                 f_opt = torch.compile()(f)
 
-                code = run_and_get_cpp_code(f_opt, (inps[0], inps[1]))
+                code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
                 FileCheck().check_not("void kernel").run(code)
 
                 self.assertEqual(
@@ -6475,7 +6492,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
                     return x[torch.tensor(1) :] * 2
 
                 f_opt = torch.compile()(f)
-                code = run_and_get_cpp_code(f_opt, (inps[0],))
+                code = run_and_get_cpp_code(f_opt, inps[0])
                 FileCheck().check_not("void kernel").run(code)
                 self.assertEqual(f_opt(inps[0]), f(inps[0]))
 
@@ -7576,6 +7593,49 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             fn_optimized = torch._dynamo.optimize("inductor")(fn)
             assert same(fn(a, b), fn_optimized(a, b))
+
+        @requires_cuda()
+        def test_issue97695_1input(self):
+            def fn(arg3_1, relu, permute_1):
+                addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+                cat_2 = torch.ops.aten.cat.default([addmm_1], 1)
+                return (cat_2,)
+
+            args = [
+                ((96,), (1,), torch.float32, "cuda"),
+                ((10, 256), (256, 1), torch.float32, "cuda"),
+                ((256, 96), (1, 256), torch.float32, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            correct = fn(*args)
+
+            mod = make_fx(fn, tracing_mode="real")(*args)
+            compiled = compile_fx_inner(mod, args)
+            ref = compiled(list(args))
+            assert same(ref, correct)
+
+            ref = torch.compile(fn, fullgraph=True)(*args)
+            assert same(ref, correct)
+
+        @requires_cuda()
+        def test_issue97695_2input(self):
+            def fn(arg3_1, arg3_2, relu, permute_1):
+                addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+                addmm_2 = torch.ops.aten.addmm.default(arg3_2, relu, permute_1)
+                cat_2 = torch.ops.aten.cat.default([addmm_1, addmm_2], 1)
+                return (cat_2,)
+
+            args = [
+                ((96,), (1,), torch.float32, "cuda"),
+                ((96,), (1,), torch.float32, "cuda"),
+                ((10, 256), (256, 1), torch.float32, "cuda"),
+                ((256, 96), (1, 256), torch.float32, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            correct = fn(*args)
+
+            ref = torch.compile(fn, fullgraph=True)(*args)
+            assert same(ref, correct)
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_heuristics import CachingAutotuner
