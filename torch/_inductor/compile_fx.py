@@ -13,12 +13,13 @@ import torch._dynamo.config as dynamo_config
 
 import torch.fx
 import torch.utils._pytree as pytree
-
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics, overrides, pattern_matcher
@@ -164,14 +165,23 @@ def compile_fx_inner(
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
-    fake_mode = fake_mode_from_tensors(
-        example_inputs
-    ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+    fake_mode = fake_mode_from_tensors(example_inputs)
+    if not fake_mode:
+        fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+    else:
+        FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
+            *example_inputs
+        )
+    # pattern matcher passes might not preserve striding information
+    # on node.meta["val"]. if in the future we rely on these being
+    # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
         pattern_matcher.fx_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
+    with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
             gm,
             shape_env=shape_env,
@@ -492,10 +502,6 @@ def compile_fx(
         )
 
     if isinstance(model_, torch.fx.GraphModule):
-        with overrides.patch_functions():
-            model_ = overrides.replace_fx(model_)
-            model_ = overrides.fuse_fx(model_, example_inputs_)
-
         if isinstance(model_.graph._codegen, _PyTreeCodeGen):
             # this graph is the result of dynamo.export()
             return handle_dynamo_export_graph(
@@ -503,6 +509,12 @@ def compile_fx(
                 example_inputs_,
                 recursive_compile_fx,
             )
+
+        # Since handle_dynamo_export_graph will trigger compile_fx again,
+        # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
+        with overrides.patch_functions():
+            model_ = overrides.replace_fx(model_, example_inputs_)
+            model_ = overrides.fuse_fx(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -586,6 +598,11 @@ def _shape_env_from_inputs(inputs):
 
     if fake_mode is not None:
         return fake_mode.shape_env
+
+    # When there are no tensor inputs, get shape_env from the first SymInt.
+    for input in inputs:
+        if isinstance(input, torch.SymInt):
+            return input.node.shape_env
 
     # TODO(voz): Should we always have one anyway?
     return None
