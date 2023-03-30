@@ -44,7 +44,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
-  void* dBias, *dA_compressed; 
+  void* dBias;  
   float alpha{1.0};
   float beta{0.0};
   unsigned alignment{16};
