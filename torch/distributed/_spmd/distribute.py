@@ -385,6 +385,9 @@ def _rebuild_graph(
                     value_remap[dtn] = gm.graph.node_copy(
                         dtn, lambda n: value_remap[n]
                     )
+            # explicitly erase node instead of relying on DCE, as DCE does not
+            # remove inplace copy_ correctly.
+            gm.graph.erase_node(node)
 
     gm.graph.eliminate_dead_code()
     gm.recompile()
