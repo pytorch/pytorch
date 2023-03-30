@@ -917,12 +917,14 @@ class MultiheadAttention(Module):
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
-    ``forward()`` will use the optimized implementation described in
-    `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_ if all of the following
-    conditions are met:
+    ``nn.MultiHeadAttention`` will use the optimized implementations of
+    ``scaled_dot_product_attention()`` when possible.
 
-    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This
-      restriction will be loosened in the future.)
+    In addition to support for the new ``scaled_dot_product_attention()``
+    function, for speeding up Inference, MHA will use
+    fastpath inference with support for Nested Tensors, iff:
+
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor.
     - inputs are batched (3D) with ``batch_first==True``
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
@@ -934,7 +936,7 @@ class MultiheadAttention(Module):
       nor ``attn_mask`` is passed
     - autocast is disabled
 
-    If the optimized implementation is in use, a
+    If the optimized inference fastpath implementation is in use, a
     `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
     ``query``/``key``/``value`` to represent padding more efficiently than using a
     padding mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_
@@ -965,6 +967,7 @@ class MultiheadAttention(Module):
          https://arxiv.org/abs/2205.14135
 
     """
+
     __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
     bias_v: Optional[torch.Tensor]
@@ -1074,8 +1077,13 @@ class MultiheadAttention(Module):
             corresponding position is not allowed to attend. For a float mask, the mask values will be added to
             the attention weight.
             If both attn_mask and key_padding_mask are supplied, their types should match.
-        is_causal: If specified, applies a causal mask as attention mask. Mutually exclusive with providing attn_mask.
+        is_causal: If specified, applies a causal mask as attention mask.
             Default: ``False``.
+            Warning:
+            ``is_causal`` provides a hint that ``attn_mask`` is the
+            causal mask. Providing incorrect hints can result in
+            incorrect execution, including forward and backward
+            compatibility.
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
             heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
             effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
@@ -1094,8 +1102,6 @@ class MultiheadAttention(Module):
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
         """
-        if attn_mask is not None and is_causal:
-            raise AssertionError("Only allow causal mask or attn_mask")
 
         is_batched = query.dim() == 3
 
