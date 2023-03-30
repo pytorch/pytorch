@@ -17,6 +17,38 @@ from torch.distributed._tensor.ops.common_rules import pointwise_rule
 aten = torch.ops.aten  # pyre-ignore
 
 
+@register_prop_rule(aten._foreach_add.List)  # pyre-ignore
+def _prop__foreach_add(op_schema: OpSchema) -> OutputSharding:
+    self, other = op_schema.args_schema
+    assert isinstance(self, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
+    assert isinstance(other, list) and all(
+        [isinstance(o, DTensorSpec) for o in other]
+    )
+    assert len(self) == len(other)
+    assert all([s.shape == o.shape for s, o in zip(self, other)])
+
+    if any([s != o for s, o in zip(self, other)]):
+        # If DTensorSpec for the two operand do not match, suggest using
+        # self's DTensorSpec. This will trigger allreduce if other is partial
+        # and self is replicated.
+        return OutputSharding(
+            output_spec=None,
+            schema_suggestions=[
+                OpSchema(
+                    func_schema=op_schema.func_schema,
+                    args_schema=(self, self),
+                    kwargs_schema=op_schema.kwargs_schema,
+                    is_inplace=op_schema.is_inplace,
+                    is_out_variant=op_schema.is_out_variant,
+                )
+            ],
+        )
+    else:
+        return OutputSharding(output_spec=self)
+
+
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
 def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:
     input, normalized_shape, weight, bias, eps = op_schema.args_schema
