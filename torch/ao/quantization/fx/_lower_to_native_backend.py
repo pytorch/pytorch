@@ -811,11 +811,6 @@ def _lower_static_weighted_ref_functional(
                 for i in [2, 3, 4, 6]:
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
                         prepack_args[i] = (prepack_args[i],)
-            # swap dilation and groups
-            # prepack op has arguments: {w, b, stride, padding, output_padding, dilation, groups}
-            # transposed conv op has arguments: {x, w, b, stride, padding, output_padding, groups, dilation}
-            if (len(prepack_args) > 6):
-                prepack_args[5], prepack_args[6] = prepack_args[6], prepack_args[5]
         else:
             raise ValueError("Lowering is not supported for op '%s'" % func_node.target)
         with model.graph.inserting_before(output_scale_node):
