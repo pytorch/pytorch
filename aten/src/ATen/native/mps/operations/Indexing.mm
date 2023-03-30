@@ -142,7 +142,6 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
         numThreads = 1;
       } else {
         gridSize = MTLSizeMake(numThreads, 1, 1);
-        numThreads = numThreads;
       }
 
       NSUInteger tgSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
