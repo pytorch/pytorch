@@ -2,8 +2,10 @@ import copy
 import logging
 import random
 import weakref
+from typing import Optional
 
 import torch
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch import _prims
 from torch._dynamo.utils import fake_mode_from_tensors
@@ -19,8 +21,8 @@ from torch.overrides import TorchFunctionMode
 
 from . import config
 from .fx_utils import matches_module_function_pattern
-
 from .mkldnn import mkldnn_fuse_fx
+from .utils import is_cpu_device
 
 log = logging.getLogger(__name__)
 
@@ -30,8 +32,11 @@ class AutogradMonkeypatch(TorchFunctionMode):
         if not kwargs:
             kwargs = {}
         if func in replacements and not (
-            config.fallback_random
-            and replacements[func] in replacements_using_triton_random
+            (
+                config.fallback_random
+                and replacements[func] in replacements_using_triton_random
+            )
+            or (is_cpu_device(args) and func in fallback_cpu_random)
         ):
             return replacements[func](*args, **kwargs)
         return func(*args, **kwargs)
@@ -40,14 +45,16 @@ class AutogradMonkeypatch(TorchFunctionMode):
 patch_functions = AutogradMonkeypatch
 
 
-def replace_fx(gm: torch.fx.GraphModule):
+def replace_fx(gm: torch.fx.GraphModule, example_inputs):
     # Sometimes patch_functions() misses things already in the graph
+    is_cpu = is_cpu_device(example_inputs)
+
     for node in reversed(list(gm.graph.nodes)):
         if node.op == "call_function" and node.target in replacements:
             if (
                 config.fallback_random
                 and replacements[node.target] in replacements_using_triton_random
-            ):
+            ) or (is_cpu and node.target in fallback_cpu_random):
                 continue
             with gm.graph.inserting_before(node):
                 node.replace_all_uses_with(
@@ -62,9 +69,7 @@ def replace_fx(gm: torch.fx.GraphModule):
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
-    is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
-    )
+    is_cpu = is_cpu_device(example_inputs)
 
     fake_mode = fake_mode_from_tensors(example_inputs)
 
@@ -85,7 +90,12 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
     # do mkldnn fusion(conv(linear)+unary(binary)
-    gm = mkldnn_fuse_fx(gm, example_inputs)
+    # This is skipped when dynamic shapes is enabled, as the resulting
+    # mkl packing ops don't support dynamic shapes.  Once they do support,
+    # you can remove this.  A good test case is wav2vec2, see
+    # https://github.com/pytorch/pytorch/issues/91719
+    if not dynamo_config.dynamic_shapes:
+        gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
 
 
@@ -223,7 +233,7 @@ class NormalizedLinearNode:
         if len(self.node.args) > 2:
             return self.node.args[2]
         else:
-            return self.node.kwargs["bias"]
+            return self.node.kwargs["bias"] if "bias" in self.node.kwargs else None
 
 
 class NormalizedMatmulNode:
@@ -290,17 +300,22 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 
         if user and is_pointwise_unary(user):
             with g.inserting_before(node):
-                new_args = (
-                    [
-                        g.create_node(
-                            user.op, user.target, args=(arg,), kwargs=user.kwargs
-                        )
-                        for arg in node.args[0]
-                    ],
+
+                def cat_args(tensors, dim):
+                    return tensors, dim
+
+                tensors, dim = cat_args(*node.args, **node.kwargs)
+                new_tensors = [
+                    g.create_node(user.op, user.target, args=(arg,), kwargs=user.kwargs)
+                    for arg in tensors
+                ]
+                new_cat = g.create_node(
+                    "call_function", torch.cat, args=(new_tensors, dim)
                 )
-                node.args = new_args
                 user.replace_all_uses_with(cat_or_view)
+                node.replace_all_uses_with(new_cat)
                 g.erase_node(user)
+                g.erase_node(node)
     g.lint()
     module.recompile()
     return module
@@ -344,8 +359,10 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = (W * X^T + bias.unsqueeze(-1))^T
 def linear_transpose(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
+    if bias is None:
+        return torch.matmul(weight, input.transpose(-1, -2))
     return torch.matmul(weight, input.transpose(-1, -2)) + bias.unsqueeze(-1)
 
 
@@ -438,8 +455,10 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = X1.transpose(-1, -2) * W1^T + bias1
 def transpose_linear(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
+    if bias is None:
+        return torch.matmul(input.transpose(-1, -2), weight.t())
     return torch.matmul(input.transpose(-1, -2), weight.t()) + bias
 
 
@@ -452,7 +471,7 @@ def transpose_matmul(A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: boo
 
 
 philox_rand_like = _prims._make_prim(
-    schema="philox_rand_like(Tensor input, Tensor seed, int offset) -> Tensor",
+    schema="philox_rand_like(Tensor input, Tensor seed, SymInt offset) -> Tensor",
     return_type=_prims.RETURN_TYPE.NEW,
     meta=_philox_rand_like_meta,
     impl_aten=_philox_rand_like,
@@ -571,3 +590,5 @@ replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: ra
 # Keep track of any replacement functions that use triton random,
 # so they can be avoided when fallback_random is set
 replacements_using_triton_random = {lowmem_dropout, rand_like}
+
+fallback_cpu_random = {torch.nn.functional.dropout}

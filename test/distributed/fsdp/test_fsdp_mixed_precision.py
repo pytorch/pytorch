@@ -21,7 +21,6 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from torch.nn.modules.batchnorm import _BatchNorm
-from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
@@ -37,7 +36,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -48,7 +47,9 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 
-skipIfNoTorchVision = sandcastle_skip_if(not HAS_TORCHVISION, "no torchvision")
+skipIfNoTorchVision = skip_but_pass_in_sandcastle_if(
+    not HAS_TORCHVISION, "no torchvision"
+)
 
 
 if not dist.is_available():
@@ -81,9 +82,7 @@ mp_only_param_and_buf = MixedPrecision(
 # Nothing is cast (thus param, comm, grad, and buffer should be in the full precision)
 mp_no_mixed_precision = MixedPrecision()
 
-nccl_supports_bf16 = (
-    CUDA11OrLater and dist.is_nccl_available() and nccl.version() >= (2, 10)
-)
+nccl_supports_bf16 = dist.is_nccl_available() and nccl.version() >= (2, 10)
 
 mp_configs = [default_mp, mp_only_reduce, mp_only_param_and_buf, mp_no_mixed_precision]
 if nccl_supports_bf16:
@@ -667,7 +666,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     def test_mp_batchnorm(self, convert_sync_bn):
         class BatchNormNet(nn.Module):
             def __init__(self, affine=True):
-                super(BatchNormNet, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 40, bias=False)
                 self.bn = nn.BatchNorm1d(4, affine=affine)
                 self.fc2 = nn.Linear(40, 4, bias=False)
@@ -1013,6 +1012,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         self.assertEqual(forward_inputs["model_input_x"].dtype, torch.float16)
         self.assertEqual(forward_inputs["l2_input_x"].dtype, torch.float16)
         self.assertEqual(forward_inputs["l2_input_y"].dtype, torch.float32)
+
 
 if __name__ == "__main__":
     run_tests()

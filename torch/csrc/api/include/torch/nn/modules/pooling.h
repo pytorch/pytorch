@@ -13,7 +13,6 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) avgpool modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AvgPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   AvgPoolImpl(ExpandingArray<D> kernel_size)
@@ -42,7 +41,6 @@ class TORCH_API AvgPoolImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// AvgPool1d model(AvgPool1dOptions(3).stride(2));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AvgPool1dImpl : public AvgPoolImpl<1, AvgPool1dImpl> {
  public:
   using AvgPoolImpl<1, AvgPool1dImpl>::AvgPoolImpl;
@@ -69,7 +67,6 @@ TORCH_MODULE(AvgPool1d);
 /// ```
 /// AvgPool2d model(AvgPool2dOptions({3, 2}).stride({2, 2}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AvgPool2dImpl : public AvgPoolImpl<2, AvgPool2dImpl> {
  public:
   using AvgPoolImpl<2, AvgPool2dImpl>::AvgPoolImpl;
@@ -96,7 +93,6 @@ TORCH_MODULE(AvgPool2d);
 /// ```
 /// AvgPool3d model(AvgPool3dOptions(5).stride(2));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AvgPool3dImpl : public AvgPoolImpl<3, AvgPool3dImpl> {
  public:
   using AvgPoolImpl<3, AvgPool3dImpl>::AvgPoolImpl;
@@ -114,7 +110,6 @@ TORCH_MODULE(AvgPool3d);
 
 /// Base class for all (dimension-specialized) maxpool modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MaxPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   MaxPoolImpl(ExpandingArray<D> kernel_size)
@@ -143,7 +138,6 @@ class TORCH_API MaxPoolImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// MaxPool1d model(MaxPool1dOptions(3).stride(2));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MaxPool1dImpl : public MaxPoolImpl<1, MaxPool1dImpl> {
  public:
   using MaxPoolImpl<1, MaxPool1dImpl>::MaxPoolImpl;
@@ -174,7 +168,6 @@ TORCH_MODULE(MaxPool1d);
 /// ```
 /// MaxPool2d model(MaxPool2dOptions({3, 2}).stride({2, 2}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MaxPool2dImpl : public MaxPoolImpl<2, MaxPool2dImpl> {
  public:
   using MaxPoolImpl<2, MaxPool2dImpl>::MaxPoolImpl;
@@ -205,7 +198,6 @@ TORCH_MODULE(MaxPool2d);
 /// ```
 /// MaxPool3d model(MaxPool3dOptions(3).stride(2));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MaxPool3dImpl : public MaxPoolImpl<3, MaxPool3dImpl> {
  public:
   using MaxPoolImpl<3, MaxPool3dImpl>::MaxPoolImpl;
@@ -227,7 +219,6 @@ TORCH_MODULE(MaxPool3d);
 
 /// Base class for all (dimension-specialized) adaptive maxpool modules.
 template <size_t D, typename output_size_t, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   AdaptiveMaxPoolImpl(output_size_t output_size)
@@ -263,7 +254,6 @@ class TORCH_API AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// AdaptiveMaxPool1d model(AdaptiveMaxPool1dOptions(3));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AdaptiveMaxPool1dImpl
     : public AdaptiveMaxPoolImpl<1, ExpandingArray<1>, AdaptiveMaxPool1dImpl> {
  public:
@@ -297,7 +287,6 @@ TORCH_MODULE(AdaptiveMaxPool1d);
 /// ```
 /// AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AdaptiveMaxPool2dImpl : public AdaptiveMaxPoolImpl<
                                             2,
                                             ExpandingArrayWithOptionalElem<2>,
@@ -335,7 +324,6 @@ TORCH_MODULE(AdaptiveMaxPool2d);
 /// ```
 /// AdaptiveMaxPool3d model(AdaptiveMaxPool3dOptions(3));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AdaptiveMaxPool3dImpl : public AdaptiveMaxPoolImpl<
                                             3,
                                             ExpandingArrayWithOptionalElem<3>,
@@ -364,7 +352,6 @@ TORCH_MODULE(AdaptiveMaxPool3d);
 
 /// Base class for all (dimension-specialized) adaptive avgpool modules.
 template <size_t D, typename output_size_t, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AdaptiveAvgPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   AdaptiveAvgPoolImpl(output_size_t output_size)
@@ -400,7 +387,6 @@ class TORCH_API AdaptiveAvgPoolImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// AdaptiveAvgPool1d model(AdaptiveAvgPool1dOptions(5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AdaptiveAvgPool1dImpl
     : public AdaptiveAvgPoolImpl<1, ExpandingArray<1>, AdaptiveAvgPool1dImpl> {
  public:
@@ -430,7 +416,6 @@ TORCH_MODULE(AdaptiveAvgPool1d);
 /// ```
 /// AdaptiveAvgPool2d model(AdaptiveAvgPool2dOptions({3, 2}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AdaptiveAvgPool2dImpl : public AdaptiveAvgPoolImpl<
                                             2,
                                             ExpandingArrayWithOptionalElem<2>,
@@ -464,7 +449,6 @@ TORCH_MODULE(AdaptiveAvgPool2d);
 /// ```
 /// AdaptiveAvgPool3d model(AdaptiveAvgPool3dOptions(3));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AdaptiveAvgPool3dImpl : public AdaptiveAvgPoolImpl<
                                             3,
                                             ExpandingArrayWithOptionalElem<3>,
@@ -489,7 +473,6 @@ TORCH_MODULE(AdaptiveAvgPool3d);
 
 /// Base class for all (dimension-specialized) maxunpool modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MaxUnpoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   MaxUnpoolImpl(ExpandingArray<D> kernel_size)
@@ -518,7 +501,6 @@ class TORCH_API MaxUnpoolImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// MaxUnpool1d model(MaxUnpool1dOptions(3).stride(2).padding(1));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MaxUnpool1dImpl : public MaxUnpoolImpl<1, MaxUnpool1dImpl> {
  public:
   using MaxUnpoolImpl<1, MaxUnpool1dImpl>::MaxUnpoolImpl;
@@ -551,7 +533,6 @@ TORCH_MODULE(MaxUnpool1d);
 /// ```
 /// MaxUnpool2d model(MaxUnpool2dOptions(3).stride(2).padding(1));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MaxUnpool2dImpl : public MaxUnpoolImpl<2, MaxUnpool2dImpl> {
  public:
   using MaxUnpoolImpl<2, MaxUnpool2dImpl>::MaxUnpoolImpl;
@@ -584,7 +565,6 @@ TORCH_MODULE(MaxUnpool2d);
 /// ```
 /// MaxUnpool3d model(MaxUnpool3dOptions(3).stride(2).padding(1));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MaxUnpool3dImpl : public MaxUnpoolImpl<3, MaxUnpool3dImpl> {
  public:
   using MaxUnpoolImpl<3, MaxUnpool3dImpl>::MaxUnpoolImpl;
@@ -618,13 +598,12 @@ TORCH_MODULE(MaxUnpool3d);
 /// ```
 /// FractionalMaxPool2d model(FractionalMaxPool2dOptions(5).output_size(1));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FractionalMaxPool2dImpl
     : public torch::nn::Cloneable<FractionalMaxPool2dImpl> {
  public:
   FractionalMaxPool2dImpl(ExpandingArray<2> kernel_size)
       : FractionalMaxPool2dImpl(FractionalMaxPool2dOptions(kernel_size)) {}
-  explicit FractionalMaxPool2dImpl(const FractionalMaxPool2dOptions& options_);
+  explicit FractionalMaxPool2dImpl(FractionalMaxPool2dOptions options_);
 
   void reset() override;
 
@@ -664,13 +643,12 @@ TORCH_MODULE(FractionalMaxPool2d);
 /// ```
 /// FractionalMaxPool3d model(FractionalMaxPool3dOptions(5).output_size(1));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FractionalMaxPool3dImpl
     : public torch::nn::Cloneable<FractionalMaxPool3dImpl> {
  public:
   FractionalMaxPool3dImpl(ExpandingArray<3> kernel_size)
       : FractionalMaxPool3dImpl(FractionalMaxPool3dOptions(kernel_size)) {}
-  explicit FractionalMaxPool3dImpl(const FractionalMaxPool3dOptions& options_);
+  explicit FractionalMaxPool3dImpl(FractionalMaxPool3dOptions options_);
 
   void reset() override;
 
@@ -700,7 +678,6 @@ TORCH_MODULE(FractionalMaxPool3d);
 
 /// Base class for all (dimension-specialized) lppool modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LPPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   LPPoolImpl(double norm_type, ExpandingArray<D> kernel_size)
@@ -728,7 +705,6 @@ class TORCH_API LPPoolImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// LPPool1d model(LPPool1dOptions(1, 2).stride(5).ceil_mode(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LPPool1dImpl : public LPPoolImpl<1, LPPool1dImpl> {
  public:
   using LPPoolImpl<1, LPPool1dImpl>::LPPoolImpl;
@@ -757,7 +733,6 @@ TORCH_MODULE(LPPool1d);
 /// LPPool2d model(LPPool2dOptions(1, std::vector<int64_t>({3, 4})).stride({5,
 /// 6}).ceil_mode(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LPPool2dImpl : public LPPoolImpl<2, LPPool2dImpl> {
  public:
   using LPPoolImpl<2, LPPool2dImpl>::LPPoolImpl;

@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
 
-class kernel_arena_scope(object):
+class kernel_arena_scope:
     def __enter__(self):
         self.scope = te.KernelScope()
 
@@ -247,7 +247,7 @@ def dump_plot(df, sizes):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Runs NNC microbenchmarks')
-    parser.add_argument('--multi_threaded', action='store_true', help='Run with more than one thread')
+    parser.add_argument('--multi-threaded', '--multi_threaded', action='store_true', help='Run with more than one thread')
     args = parser.parse_args()
     if not args.multi_threaded:
         torch.set_num_threads(1)

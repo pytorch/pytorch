@@ -51,8 +51,8 @@
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             set -x
 
-            chmod a+x .jenkins/pytorch/macos-build.sh
-            unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+            chmod a+x .ci/pytorch/macos-build.sh
+            unbuffer .ci/pytorch/macos-build.sh 2>&1 | ts
 
       - persist_to_workspace:
           root: /Users/distiller/workspace/
@@ -87,8 +87,8 @@
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             set -x
 
-            chmod a+x .jenkins/pytorch/macos-build.sh
-            unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+            chmod a+x .ci/pytorch/macos-build.sh
+            unbuffer .ci/pytorch/macos-build.sh 2>&1 | ts
 
       - persist_to_workspace:
           root: /Users/distiller/workspace/
@@ -169,7 +169,7 @@
             brew link --force libomp
 
             echo "export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${BASH_ENV}"
-            .jenkins/pytorch/macos-build.sh
+            .ci/pytorch/macos-build.sh
 
       - when:
           condition: << parameters.build-generates-artifacts >>
@@ -252,7 +252,7 @@
             export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
 
             python3 -mpip install dist/*.whl
-            .jenkins/pytorch/macos-test.sh
+            .ci/pytorch/macos-test.sh
       - run:
           name: Copy files for uploading test stats
           command: |
@@ -282,7 +282,7 @@
               exit 0
             fi
             cp -r ~/workspace/test-reports/* ~/project
-            pip3 install requests==2.26 rockset==0.8.3 boto3==1.19.12 six==1.16.0
+            pip3 install requests==2.26 rockset==1.0.3 boto3==1.19.12
             export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
             export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
             # i dont know how to get the run attempt number for reruns so default to 1
@@ -304,23 +304,8 @@
             set -e
             export JOB_BASE_NAME=$CIRCLE_JOB
 
-            chmod a+x .jenkins/pytorch/macos-test.sh
-            unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
-      - run:
-          name: Report results
-          no_output_timeout: "5m"
-          command: |
-            set -ex
-            source /Users/distiller/workspace/miniconda3/bin/activate
-            python3 -m pip install boto3==1.19.12
-
-            export JOB_BASE_NAME=$CIRCLE_JOB
-
-            # Using the same IAM user to write stats to our OSS bucket
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-          when: always
+            chmod a+x .ci/pytorch/macos-test.sh
+            unbuffer .ci/pytorch/macos-test.sh 2>&1 | ts
       - store_test_results:
           path: test/test-reports
 
@@ -341,8 +326,8 @@
             set -e
             export BUILD_LITE_INTERPRETER=1
             export JOB_BASE_NAME=$CIRCLE_JOB
-            chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
-            unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
+            chmod a+x ${HOME}/project/.ci/pytorch/macos-lite-interpreter-build-test.sh
+            unbuffer ${HOME}/project/.ci/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
       - store_test_results:
           path: test/test-reports
 
@@ -577,7 +562,7 @@
                 $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
             }
 
-            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
+            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake requests typing-extensions --yes
 
             # sync submodules
             cd ${PROJ_ROOT}
@@ -641,7 +626,7 @@
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             mkdir -p ../models
             if [ ${USE_COREML_DELEGATE} == 1 ]; then
-              pip install coremltools==5.0b5 protobuf==3.20.1 six==1.16.0
+              pip install coremltools==5.0b5 protobuf==3.20.1
               python coreml_backend.py
             else
               cd "${PROJ_ROOT}"
@@ -691,7 +676,7 @@
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .ci/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -737,9 +722,9 @@
           trap "retrieve_test_reports" ERR
 
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
-            export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .ci/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           else
-            export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .ci/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 

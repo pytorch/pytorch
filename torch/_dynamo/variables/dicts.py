@@ -5,7 +5,7 @@ import inspect
 from typing import Dict, List
 
 from .. import variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
@@ -17,9 +17,7 @@ from .tensor import TensorVariable
 
 class ConstDictVariable(VariableTracker):
     def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
-        super(ConstDictVariable, self).__init__(
-            recursively_contains=recursively_contains, **kwargs
-        )
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
 
         self.guards.update(VariableTracker.propagate(items.values())["guards"])
         self.items = items
@@ -28,23 +26,40 @@ class ConstDictVariable(VariableTracker):
     def as_proxy(self):
         return {k: v.as_proxy() for k, v in self.items.items()}
 
+    def as_python_constant(self):
+        return {k: v.as_python_constant() for k, v in self.items.items()}
+
     def python_type(self):
         return self.user_cls
 
     def reconstruct(self, codegen):
-        for key, value in self.items.items():
+        # instructions to load collections.OrderedDict if necessary
+        if self.user_cls is collections.OrderedDict:
+            codegen.extend_output(
+                [
+                    codegen.create_load_python_module(collections, True),
+                    codegen.create_load_attr("OrderedDict"),
+                ]
+            )
+        # instructions to build the dict keys and values
+        for key in self.items.keys():
             if istensor(key):
-                codegen.extend_output(
-                    [
-                        codegen.create_load_global(global_key_name(key), add=True),
-                        create_instruction("CALL_FUNCTION", 0),
-                    ]
+                codegen.append_output(
+                    codegen.create_load_global(global_key_name(key), True, add=True)
                 )
+                codegen.extend_output(create_call_function(0, False))
             else:
                 codegen.append_output(codegen.create_load_const(key))
             codegen(self.items[key])
-
-        return [create_instruction("BUILD_MAP", len(self.items))]
+        # BUILD_MAP and calling collections.OrderedDict if necessary
+        if self.user_cls is collections.OrderedDict:
+            return [
+                create_instruction("BUILD_MAP", len(self.items)),
+                *create_call_function(1, False),
+            ]
+        # BUILD_MAP only if user_cls is dict
+        else:
+            return [create_instruction("BUILD_MAP", len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
         return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
@@ -218,7 +233,7 @@ class ConstDictVariable(VariableTracker):
 
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs):
-        super(DefaultDictVariable, self).__init__(items, user_cls, **kwargs)
+        super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
 
@@ -355,7 +370,7 @@ class DataClassVariable(ConstDictVariable):
         )
 
     def __init__(self, items, user_cls, **options):
-        super(DataClassVariable, self).__init__(items, user_cls, **options)
+        super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
@@ -366,10 +381,7 @@ class DataClassVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
-        return [
-            codegen.create_load_const(keys),
-            create_instruction("CALL_FUNCTION_KW", len(keys)),
-        ]
+        return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
         self,
@@ -395,7 +407,7 @@ class DataClassVariable(ConstDictVariable):
             return variables.TupleVariable(list(self.items.values()), **options)
         elif name == "__setattr__":
             name = "__setitem__"
-        return super(DataClassVariable, self).call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self.items:
@@ -407,7 +419,7 @@ class DataClassVariable(ConstDictVariable):
             if name in defaults:
                 assert variables.ConstantVariable.is_literal(defaults[name])
                 return variables.ConstantVariable(defaults[name]).add_options(self)
-        super(DataClassVariable, self).var_getattr(tx, name)
+        super().var_getattr(tx, name)
 
 
 class HFPretrainedConfigVariable(VariableTracker):
@@ -429,7 +441,7 @@ class HFPretrainedConfigVariable(VariableTracker):
         return cls.is_matching_cls(type(obj))
 
     def __init__(self, obj, **kwargs):
-        super(HFPretrainedConfigVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.obj = obj
         assert self.is_matching_cls(type(obj))
 

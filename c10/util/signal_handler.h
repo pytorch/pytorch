@@ -20,7 +20,7 @@
 
 namespace c10 {
 
-class TORCH_API SignalHandler {
+class C10_API SignalHandler {
  public:
   enum class Action { NONE, STOP };
 
@@ -40,13 +40,13 @@ class TORCH_API SignalHandler {
 };
 
 #if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
-class TORCH_API FatalSignalHandler {
+class C10_API FatalSignalHandler {
   // This works by setting up certain fatal signal handlers. Previous fatal
   // signal handlers will still be called when the signal is raised. Defaults
   // to being off.
  public:
-  TORCH_API void setPrintStackTracesOnFatalSignal(bool print);
-  TORCH_API bool printStackTracesOnFatalSignal();
+  C10_API void setPrintStackTracesOnFatalSignal(bool print);
+  C10_API bool printStackTracesOnFatalSignal();
   static FatalSignalHandler& getInstance();
   virtual ~FatalSignalHandler();
 

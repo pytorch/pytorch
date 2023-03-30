@@ -13,6 +13,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
+#include <ATen/ops/_propagate_xla_data.h>
 #include <ATen/ops/_to_copy.h>
 #endif
 
@@ -51,6 +52,8 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
     ),
     value_(value)
 {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
+  TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   set_constructor_metadata();
 }
 
@@ -130,9 +133,11 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
     ),
     value_(view_value)
 {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
+  TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   set_constructor_metadata();
   // Copy the original tensor's ViewMeta vector and push the current one.
-  if (base->view_metas_.size() > 0) {
+  if (!base->view_metas_.empty()) {
       view_metas_ = base->view_metas_;  // copy
   }
   view_metas_.push_back(meta);
@@ -168,7 +173,9 @@ void FunctionalTensorWrapper::mutate_view_meta(at::functionalization::ViewMeta m
   // So, these ops are special - they're mutation AND view ops. They get special codegen.
   // An example is transpose_, e.g. `a.transpose_()`
   // Calling transpose_() should ensure that a gets an alias, and append the new ViewMeta to a's current list of ViewMetas.
+  at::AutoDispatchSkipFunctionalize guard;
   value_ = meta.forward_fn(value_, meta.out_index);
+  TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
 }
 
 // Note [Functionalization: Mutation Removal]
@@ -200,15 +207,20 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
   value_ = other;
+  TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
   // We need to propagate that metadata mutation to the wrapper (new size).
-  set_sizes_and_strides(value_.sym_sizes(), value_.sym_strides(), value_.sym_storage_offset());
+  auto sizes_ = value_.sym_sizes();
+  auto strides_ = value_.sym_strides();
+  auto storage_offset_ = value_.sym_storage_offset();
+  set_sizes_and_strides(sizes_, strides_, storage_offset_);
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
     // .to() should not re-entrantly go through functionalization.
     at::AutoDispatchSkipFunctionalize guard;
     // and we want _to_copy() to show up in the graph, not the composite .to() operator
     // (this can happen if autograd has already run by the time we enter this code)
     value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
+    TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   }
 }
 
@@ -238,11 +250,12 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   //
   // Given all of the above, for now we're just banning the above usage.
   TORCH_CHECK(storage().use_count() == 1, "Attempted to resize a view tensor to a larger size. This is not allowed in the functionalization pass");
-  TORCH_CHECK(view_metas_.size() == 0, "Attempted to resize a view tensor to a larger size. This is not allowed in the functionalization pass");
+  TORCH_CHECK(view_metas_.empty(), "Attempted to resize a view tensor to a larger size. This is not allowed in the functionalization pass");
   // If this tensor is not a view (and has no outstanding views taken out on it),
   // Then it's safe to throw out the old storage and replace it with the new, larger one.
   storage_ = c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(other));
   value_ = other;
+  TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   generation_ = 0;
   // And update the metadata on the wrapper to reflect the new sizes and strides
   set_sizes_and_strides(value_.sizes(), value_.strides());
@@ -343,7 +356,7 @@ int64_t FunctionalTensorWrapper::numel_custom() const {
   return value_.unsafeGetTensorImpl()->numel();
 }
 bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  return value_.unsafeGetTensorImpl()->is_contiguous();
+  return value_.unsafeGetTensorImpl()->is_contiguous(memory_format);
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sym_sizes();
@@ -463,7 +476,7 @@ void sync(ITensorListRef t_list) {
     sync(t);
   }
 }
-void sync(const c10::List<c10::optional<Tensor>> t_list) {
+void sync(const c10::List<c10::optional<Tensor>>& t_list) {
   for (const auto i : c10::irange(t_list.size())) {
     sync(t_list[i]);
   }
@@ -481,6 +494,24 @@ void replace_(const ITensorListRef functional_tensor, ITensorListRef other) {
   for (const auto i : c10::irange(functional_tensor.size())) {
     (void)i; // Suppress unused variable warning
     replace_(*functional_tensor_it++, *other_it++);
+  }
+}
+
+void propagate_xla_data(const Tensor& functional_tensor, const Tensor& other) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
+  if (functional_tensor.key_set().has(c10::DispatchKey::XLA)) {
+    at::_propagate_xla_data(at::functionalization::impl::unsafeGetFunctionalWrapper(functional_tensor)
+        ->value(), other);
+  }
+}
+
+void propagate_xla_data(const ITensorListRef functional_tensor, ITensorListRef other) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
+  auto functional_tensor_it = functional_tensor.begin();
+  auto other_it = other.begin();
+  for (const auto i : c10::irange(functional_tensor.size())) {
+    (void)i; // Suppress unused variable warning
+    propagate_xla_data(*functional_tensor_it++, *other_it++);
   }
 }
 
@@ -508,7 +539,7 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
 }
 
 bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
-  if (t_list.size() == 0) return false;
+  if (t_list.empty()) return false;
   auto functional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
     if (!t_list[i].has_value() || !t_list[i]->defined()) continue;

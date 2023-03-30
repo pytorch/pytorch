@@ -20,7 +20,7 @@ TensorOrTensors = Union[Tensor, Tensors]
 Function = Callable[[TensorOrTensors], Union[List[Any], Tensor]]
 
 
-class NoChunk(object):
+class NoChunk:
     """
     Wrapper for a Tensor in :meth:`Pipe.forward` indicating that the tensor
     should not be chunked on the batch dimension and instead be replicated
@@ -60,7 +60,7 @@ class Batch:
 
     @property
     def values(self):
-        """Retreives the underlying values for the batch"""
+        """Retrieves the underlying values for the batch"""
         return self._values
 
     def find_tensor_idx(self):

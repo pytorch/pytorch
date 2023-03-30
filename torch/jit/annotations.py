@@ -7,13 +7,13 @@ import builtins
 import torch
 import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
+    is_optional, _qualified_name, Any, Future, is_future, _Await, is_await, is_ignored_fn, Union, is_union
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
-    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType, NumberType
+    NoneType, DeviceObjType, StreamObjType, FutureType, AwaitType, EnumType, UnionType, NumberType
 
 
 from textwrap import dedent
@@ -26,7 +26,7 @@ if torch.distributed.rpc.is_available():
 
 from torch._ops import OpOverloadPacket
 
-class Module(object):
+class Module:
     def __init__(self, name, members):
         self.name = name
         self.members = members
@@ -38,7 +38,7 @@ class Module(object):
             raise RuntimeError(f"Module {self.name} has no member called {name}") from None
 
 
-class EvalEnv(object):
+class EvalEnv:
     env = {
         'torch': Module('torch', {'Tensor': torch.Tensor}),
         'Tensor': torch.Tensor,
@@ -48,7 +48,8 @@ class EvalEnv(object):
         'Dict': Dict,
         'Optional': Optional,
         'Union': Union,
-        'Future': Future
+        'Future': Future,
+        'Await': _Await
     }
 
     def __init__(self, rcb):
@@ -314,8 +315,11 @@ def is_tensor(ann):
     return False
 
 
+def _fake_rcb(inp):
+    return None
 
-def try_ann_to_type(ann, loc):
+
+def try_ann_to_type(ann, loc, rcb=None):
     if ann is inspect.Signature.empty:
         return TensorType.getInferred()
     if ann is None:
@@ -346,12 +350,12 @@ def try_ann_to_type(ann, loc):
         else:
             contained = ann.__args__[1]
         valid_type = try_ann_to_type(contained, loc)
-        msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
-        assert valid_type, msg.format(repr(ann), repr(contained))
+        msg = "Unsupported annotation {} could not be resolved because {} could not be resolved. At\n{}"
+        assert valid_type, msg.format(repr(ann), repr(contained), repr(loc))
         return OptionalType(valid_type)
     if is_union(ann):
         # TODO: this is hack to recognize NumberType
-        if set(ann.__args__) == set([int, float, complex]):
+        if set(ann.__args__) == {int, float, complex}:
             return NumberType.get()
         inner: List = []
         # We need these extra checks because both `None` and invalid
@@ -361,14 +365,17 @@ def try_ann_to_type(ann, loc):
             if a is None:
                 inner.append(NoneType.get())
             maybe_type = try_ann_to_type(a, loc)
-            msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
-            assert maybe_type, msg.format(repr(ann), repr(maybe_type))
+            msg = "Unsupported annotation {} could not be resolved because {} could not be resolved. At\n{}"
+            assert maybe_type, msg.format(repr(ann), repr(maybe_type), repr(loc))
             inner.append(maybe_type)
         return UnionType(inner)    # type: ignore[arg-type]
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
+    if is_await(ann):
+        elementType = try_ann_to_type(ann.__args__[0], loc) if hasattr(ann, "__args__") else AnyType.get()
+        return AwaitType(elementType)
     if ann is float:
         return FloatType.get()
     if ann is complex:
@@ -406,13 +413,13 @@ def try_ann_to_type(ann, loc):
             return torch.jit._script._recursive_compile_class(ann, loc)
 
     # Maybe resolve a NamedTuple to a Tuple Type
-    def fake_rcb(key):
-        return None
-    return torch._C._resolve_type_from_object(ann, loc, fake_rcb)
+    if rcb is None:
+        rcb = _fake_rcb
+    return torch._C._resolve_type_from_object(ann, loc, rcb)
 
 
-def ann_to_type(ann, loc):
-    the_type = try_ann_to_type(ann, loc)
+def ann_to_type(ann, loc, rcb=None):
+    the_type = try_ann_to_type(ann, loc, rcb)
     if the_type is not None:
         return the_type
     raise ValueError(f"Unknown type annotation: '{ann}' at {loc.highlight()}")

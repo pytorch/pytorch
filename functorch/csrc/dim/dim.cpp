@@ -166,7 +166,7 @@ struct Dim : public py::base<Dim> {
         return batchtensor_;
     }
 private:
-    int64_t size_;
+    int64_t size_{-1};
     at::Tensor range_;
     at::Tensor batchtensor_;
 };
@@ -223,10 +223,10 @@ std::ostream& operator<<(std::ostream& ss, DimEntry entry) {
 
 static int Dim_init(py::hdl<Dim> self, PyObject *args, PyObject *kwds) {
     PY_BEGIN
-    static char* kwlist[] = {"name", "size", nullptr};
+    static constexpr const char* kwlist[] = {"name", "size", nullptr};
     py::handle name;
     py::handle size = nullptr;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O", kwlist, &name, &size)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O", const_cast<char **>(kwlist), &name, &size)) {
         return -1;
     }
     self->init(py::object::borrow(name), (size.ptr() && !py::is_none(size)) ? py::to_int(size) : -1);
@@ -561,10 +561,10 @@ PyTypeObject DimList::Type = {
 
 static int DimList_init(DimList *self, PyObject *args, PyObject *kwds) {
     PY_BEGIN
-    static char* kwlist[] = {"len_or_dims", "name", nullptr};
+    static constexpr const char* kwlist[] = {"len_or_dims", "name", nullptr};
     py::handle len_or_dims = nullptr;
     PyObject* name = nullptr;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OO", kwlist, &len_or_dims, &name)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OO", const_cast<char**>(kwlist), &len_or_dims, &name)) {
         return -1;
     }
     self->init(py::object::borrow(name ? name : Py_None));
@@ -1472,15 +1472,17 @@ py::object create_dimlist(py::object name, py::handle size) {
 struct PyInstDecoder {
     PyInstDecoder(PyCodeObject* code_object, int lasti)
     : code_object_(code_object), code_(_PyCode_CODE(code_object)), offset_(lasti / sizeof(_Py_CODEUNIT))  {}
+    // On Windows, _PyOpcode_Caches and _PyOpcode_Deopt are private symbols
+    // See https://github.com/pytorch/pytorch/issues/93854
     void next() {
-    #if IS_PYTHON_3_11_PLUS
+    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
         offset_ += _PyOpcode_Caches[opcode()];
     #endif
         offset_ += 1;
     }
     int opcode() {
         auto r = _Py_OPCODE(code_[offset_]);
-    #if IS_PYTHON_3_11_PLUS
+    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
         r = _PyOpcode_Deopt[r];
     #endif
         return r;
@@ -2874,7 +2876,7 @@ struct WrappedOperator : public py::base<WrappedOperator> {
         name = orig.attr("__name__");
         doc = orig.attr("__doc__");
         dim_name = std::move(dim_name_);
-        if (!py::is_none(doc) && dim_name.size() > 0) {
+        if (!py::is_none(doc) && !dim_name.empty()) {
             doc = py::unicode_from_format("%S\nArgument '%s' can be either an integer or a torchdim.Dim object.\n", doc.ptr(), dim_name.c_str());
         }
         method_def.ml_name = py::is_none(name) ? "" : PyUnicode_AsUTF8(name.ptr());

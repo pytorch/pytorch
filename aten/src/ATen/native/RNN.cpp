@@ -5,12 +5,14 @@
 #include <ATen/core/List.h>
 #include <ATen/Context.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/mps/MPSDevice.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+#include <ATen/Config.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -50,7 +52,6 @@
 #include <ATen/ops/tanh_backward.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/zeros_like_ops.h>
-
 #include <utility>
 #endif
 
@@ -67,6 +68,17 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
                                 (input.is_cuda()) &&
                                 (at::globalContext().userEnabledCuDNN());
     return is_miopen_acceptable;
+}
+
+bool use_mkldnn(const Tensor& input) {
+#if AT_MKLDNN_ENABLED()
+  if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  return input.options().backend() == at::Backend::CPU &&
+      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16);
+#endif
+  return false;
 }
 
 template<typename T>
@@ -290,14 +302,10 @@ struct QuantizedCellParams : public CellParamsBase {
         /*packed_hh=*/std::move(packed_hh),
         /*col_offsets_ih=*/std::move(col_offsets_ih),
         /*col_offsets_hh=*/std::move(col_offsets_hh),
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        /*scale_ih=*/std::move(scale_ih),
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        /*scale_hh=*/std::move(scale_hh),
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        /*zero_point_ih=*/std::move(zero_point_ih),
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        /*zero_point_hh=*/std::move(zero_point_hh));
+        /*scale_ih=*/scale_ih,
+        /*scale_hh=*/scale_hh,
+        /*zero_point_ih=*/zero_point_ih,
+        /*zero_point_hh=*/zero_point_hh);
   }
 };
 
@@ -331,13 +339,9 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
       /*packed_hh=*/std::move(packed_hh),
       /*col_offsets_ih=*/std::move(col_offsets_ih),
       /*col_offsets_hh=*/std::move(col_offsets_hh),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*scale_ih=*/std::move(scale_ih),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*scale_hh=*/std::move(scale_hh),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*zero_point_ih=*/std::move(zero_point_ih),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*zero_point_hh=*/std::move(zero_point_hh));
 }
 
@@ -400,11 +404,6 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     return b_hh_;
   }
   CellParamsSerializationType __getstate__() const override {
-    // Boxed dispatch nonsense
-    // This will be cleaned up in the subsequent PR
-    auto unpacked_ih = packed_w_ih->unpack();
-    auto unpacked_hh = packed_w_hh->unpack();
-
     std::vector<at::Tensor> tensors_to_serialize{
         /*b_ih=*/b_ih_,
         /*b_hh=*/b_hh_,
@@ -416,11 +415,9 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(tensors_to_serialize),
         {},
         {reduce_range_},
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -497,7 +494,6 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
-        // NOLINTNEXTLINE(performance-move-const-arg)
         "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -728,6 +724,19 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       auto hy = params.matmul_hr(std::get<0>(result));
       // Slice off the workspace argument (it's needed only for AD).
       return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
+    } else if (input.is_mps()) {
+      // MPS has issues with inplace ops, workaround to prevent using inplace ops for mps.
+      const auto gates = params.linear_hh(hx).add_(
+        pre_compute_input ? input : params.linear_ih(input));
+      auto chunked_gates = gates.unsafe_chunk(4, 1);
+      auto ingate = chunked_gates[0].sigmoid();
+      auto forgetgate = chunked_gates[1].sigmoid();
+      auto cellgate = chunked_gates[2].tanh();
+      auto outgate = chunked_gates[3].sigmoid();
+      auto cy = (forgetgate * cx).add_(ingate * cellgate);
+      auto hy = outgate * cy.tanh();
+      hy = params.matmul_hr(hy);
+      return std::make_tuple(std::move(hy), std::move(cy));
     }
 
     const auto gates = params.linear_hh(hx).add_(
@@ -1409,6 +1418,7 @@ DEFINE_DISPATCH(lstm_cudnn_stub);
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
 DEFINE_DISPATCH(lstm_miopen_stub);
 DEFINE_DISPATCH(lstm_packed_miopen_stub);
+DEFINE_DISPATCH(lstm_mkldnn_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub);
@@ -1426,11 +1436,15 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 #ifdef USE_MPS
-  if (_input.is_mps() && !bidirectional) {
-    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
+  if (_input.is_mps() && (mps::is_macos_13_or_newer() || num_layers == 1)) {
+    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
     return return_values;
+  } else if (_input.is_mps()) {
+    TORCH_WARN_ONCE("Native multi-layer LSTM support in MPS available only on MacOS 13 onwards.",
+                    " Falling back to LSTMCell iteration.",
+                    " This may have performance implications.");
   }
 #endif
   // if cells are of different size, that means projections are used
@@ -1444,6 +1458,23 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     } else {
       TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");
+    }
+  }
+
+  if (use_mkldnn(_input)) {
+    if (!has_projections) {
+      if (hx[0].unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+        TORCH_WARN_ONCE(
+          "LSTM with symbolic sizes and strides is not supported with oneDNN. Using default implementation.");
+      } else {
+        Tensor output, hy, cy;
+        lstm_mkldnn_stub(_input.device().type(), output, hy, cy,_input, hx, _params, has_biases,
+            num_layers, dropout_p, train, bidirectional, batch_first);
+        return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      }
+    } else {
+      TORCH_WARN_ONCE(
+          "LSTM with projections is not supported with oneDNN. Using default implementation.");
     }
   }
 

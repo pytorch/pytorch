@@ -1,5 +1,6 @@
 import uuid
 from collections import OrderedDict
+from functools import wraps
 from typing import Callable, Dict, List, Optional, Type
 
 import torch.nn as nn
@@ -10,7 +11,7 @@ from torch.distributed._composable_state import _State
 # properties.
 # TODO: since all composable distributed features can share the same slot.
 class _StateKey(str):
-    # Make _StateKey as str to satify the assumption that object.__dict__.keys()
+    # Make _StateKey as str to satisfy the assumption that object.__dict__.keys()
     # are strings.
     def __new__(cls, string="__composable_api_state_key"):
         return super().__new__(cls, f"{string}_{str(uuid.uuid4())}")
@@ -65,7 +66,10 @@ def contract(state_cls: Type[_State] = _State):
         >>> model(torch.randn(2, 10)).sum().backward()
     """
 
+    # wraps will make functions decorated with contract() pickleable - needed for integration with torch.package
+    @wraps(state_cls)
     def inner(func):
+        @wraps(func)
         def wrapper(module: nn.Module, *args, **kwargs) -> Optional[nn.Module]:
             # get existing global states
             default_all_state: Dict[Callable, _State] = OrderedDict()

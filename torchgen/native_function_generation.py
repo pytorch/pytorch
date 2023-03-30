@@ -72,7 +72,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "qscheme",  # returns a QScheme
     "record_stream",  # no return
     "sparse_dim",  # returns an int
-    "_nested_tensor_offsets",  # returns a vector of ints
+    "_nested_tensor_storage_offsets",  # returns a vector of ints
     "_chunk_grad_outputs_efficient_attention",  # returns a bool
     "_fused_sdp_choice",  # returns an int
 ]
@@ -85,6 +85,7 @@ INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
     # (which would require changing its overload name to prevent overload ambiguity).
     "polygamma_"
 ]
+
 
 # Groups "similar" NativeFunctions together
 # example add.Tensor, add_.Tensor, add.out
@@ -194,7 +195,7 @@ def generate_out_args_from_schema(
     # - If every return is a plain tensor, then the new returns == the old returns, but with the out= alias annotations added.
     # - Otherwise, none of the out arguments show up in the returns (and we're only left with non-tensor-like returns, if any).
     new_returns: List[Return] = []
-    for (i, r) in enumerate(func.returns):
+    for i, r in enumerate(func.returns):
         if r.type.is_tensor_like():
             new_out = Argument(
                 name="out" if len(func.returns) == 1 else f"out{i}",
@@ -319,13 +320,14 @@ def generate_function(
             )
         }
     }
+    tags = {"generated"} | set(f.tags & {"nondeterministic_seeded", "view_copy"})
 
     return (
         NativeFunction(
             func=func,
             use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
             # These generated fn's aren't meant to be user friendly- don't generate methods.
-            variants=set([Variant.function]),
+            variants={Variant.function},
             structured=False,
             structured_delegate=None,
             structured_inherits=None,
@@ -347,7 +349,7 @@ def generate_function(
             has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
-            tags=set(["generated"]) | (f.tags & {"nondeterministic_seeded"}),
+            tags=tags,
             namespace=f.namespace,
         ),
         backend_metadata,
@@ -383,7 +385,6 @@ def add_generated_native_functions(
         #     variant, mostly so we can easily pair up functions into NativeFunctionsGroup,
         #     while maintaining the constraint that the out= variant is "required".
         if has_mutable or has_inplace or has_out or has_functional:
-
             # Don't bother generating functions trio's for native functions that bypass the dispatcher.
             are_manual = all(f.manual_cpp_binding for f in d.values())
             # Don't bother generating functional + out= variants for view operators
@@ -498,7 +499,7 @@ def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> List[str
     aliased_rets = func.aliased_return_names()
     non_aliased_names = []
     is_out_var_a_tuple = len(func.returns) > 1
-    for (i, r) in enumerate(aliased_rets):
+    for i, r in enumerate(aliased_rets):
         if r is None:
             non_aliased_names.append(
                 f"std::get<{i}>({out_var})" if is_out_var_a_tuple else out_var

@@ -453,6 +453,12 @@ class Vectorized<ComplexDbl> {
   Vectorized<ComplexDbl> exp() const {
     return map(std::exp);
   }
+  Vectorized<ComplexDbl> exp2() const {
+    return map(exp2_impl);
+  }
+  Vectorized<ComplexDbl> expm1() const {
+    return map(std::expm1);
+  }
 
   Vectorized<ComplexDbl> pow(const Vectorized<ComplexDbl>& exp) const {
     __at_align__ ComplexDbl x_tmp[size()];
@@ -492,10 +498,6 @@ class Vectorized<ComplexDbl> {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<ComplexDbl> erfc() const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> expm1() const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 

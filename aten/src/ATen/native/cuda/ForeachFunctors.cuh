@@ -1,11 +1,20 @@
 #pragma once
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
+#include <ATen/native/cuda/Pow.cuh>
 #include <ATen/OpMathType.h>
 
 namespace at { namespace native {
 
 namespace {
+
+// TODO(crcrpar): Handle version bump in codegen.
+// rel: https://github.com/pytorch/pytorch/blob/9cf84347767c8abb8feba18a9a1baba321eeb8b9/tools/autograd/gen_inplace_or_view_type.py#L481-L482
+inline void increment_version(TensorList tensors) {
+  for (const auto & t : tensors) {
+    t.unsafeGetTensorImpl()->bump_version();
+  }
+}
 
 // Initializes args and checks if all args are aligned
 template<int depth, typename T>
@@ -536,6 +545,20 @@ struct TernaryOpScalarFunctor {
         store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
       }
     }
+  }
+};
+
+template <typename T>
+struct power_functor {
+  C10_DEVICE T operator()(const T& a, const T& b) const {
+    return at::native::pow_(a, b);
+  }
+};
+
+template <typename T>
+struct reverse_power_functor {
+  C10_DEVICE T operator()(const T& a, const T& b) const {
+    return at::native::pow_(b, a);
   }
 };
 
