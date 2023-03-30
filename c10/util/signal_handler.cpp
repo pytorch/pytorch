@@ -40,14 +40,18 @@ void handleSignal(int signal) {
     // TODO: what if the previous handler uses sa_sigaction?
     case SIGHUP:
       sighupCount += 1;
-      if (previousSighup.sa_handler) {
+      if (previousSighup.sa_handler != SIG_DFL) {
         previousSighup.sa_handler(signal);
+      } else {
+        signal(SIGHUP, SIG_DFL); 
       }
       break;
     case SIGINT:
       sigintCount += 1;
-      if (previousSigint.sa_handler) {
+      if (previousSigint.sa_handler != SIG_DFL) {
         previousSigint.sa_handler(signal);
+      } else {
+        signal(SIGINT, SIG_DFL); 
       }
       break;
   }
