@@ -52,6 +52,7 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Sequence, Set
 import torch.fx
 from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
+from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.compile_fx import (
     get_expanded_dims,
     index_expanded_dims,
@@ -250,7 +251,22 @@ def get_container(device_index: int):
         return container_dict[device_index]
 
 
-def cudagraphify_impl(
+def cudagraphify_impl(model, inputs, *args, **kwargs):
+    fn = None
+
+    def deferred_cudagraphify(second_inputs):
+        nonlocal fn
+        if fn is not None:
+            return fn(second_inputs)
+
+        assert inputs is second_inputs
+        fn, out = cudagraphify(model, inputs, *args, **kwargs)
+        return out
+
+    return deferred_cudagraphify
+
+
+def cudagraphify(
     model,
     inputs,
     static_input_idxs=(),
@@ -555,10 +571,6 @@ class CUDAGraphNode:
         # of CUDAGraphNodes. We should not be freeing parameters, not do we need to account for
         # their liveness (they are static), so we need to compute which outputs are aliases of
         # parameters
-        self.static_input_storage_ptrs: Set[int] = {
-            inputs[i].untyped_storage().data_ptr()
-            for i in self.wrapped_function.static_input_idxs
-        }
         self.output_is_alias_of_static_inputs: OutputList[int] = []
 
         # precompute expanded dims to avoid computing in the hot path
@@ -619,10 +631,12 @@ class CUDAGraphNode:
         # do more recording, because we have a valid caching allocator state.
         # NB: This relies on run() being called immediately after the
         # constructor, otherwise this optimization would not be valid.
+
+        # initialized below in _record
+        self.checkpointed_caching_state: Optional[AllocatorState] = None
         self.recording_outputs: OutputList[Optional[torch.Tensor]] = self._record(
             wrapped_function.model, recording_inputs
         )
-
         self.outputs_metadata: OutputList[Optional[Dict[str, Any]]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
@@ -637,8 +651,7 @@ class CUDAGraphNode:
                 assert out is None
                 self.outputs_metadata.append(None)
 
-        # initialized on first run
-        self.checkpointed_caching_state: Optional[AllocatorState] = None
+        self.graph.replay()
 
     def _copy_input(self, idx, dst, src):
         expanded_dims = self.expanded_dims[idx]
@@ -672,6 +685,9 @@ class CUDAGraphNode:
         else:
             # inputs are copied over in _allocate_recording_inputs and subsequently cleared
             assert len(new_inputs) == 0
+            outputs = self.recording_outputs
+            self.recording_outputs = None
+            return outputs
 
         new_inputs.clear()
         self.graph.replay()
@@ -680,8 +696,6 @@ class CUDAGraphNode:
         if self.recording_outputs is not None:
             outputs = self.recording_outputs
             self.recording_outputs = None
-            self._add_first_outputs(outputs)
-
             return outputs
 
         outputs = [
@@ -708,6 +722,12 @@ class CUDAGraphNode:
     def _record(self, model, inputs):
         "Record the model"
 
+        static_input_non_cudagraph_storage_ptrs: Set[int] = {
+            inputs[i].untyped_storage().data_ptr()
+            for i in self.wrapped_function.static_input_idxs
+            if not self._is_cuda_graph_recorded_tensor(inputs[i])
+        }
+
         if config.triton.fast_cudagraph_asserts:
             # need to use parent live weakrefs because live_indices isnt set yet
             memory = (
@@ -720,20 +740,25 @@ class CUDAGraphNode:
             ]
             check_memory_pool(self.cuda_graphs_pool, memory)
 
-        with torch.cuda.device(self.device), clear_cublas_manager(), torch.cuda.graph(
-            self.graph, stream=self.stream, pool=self.cuda_graphs_pool
-        ):
-            static_outputs = model(inputs)
+        with preserve_rng_state():
+            with torch.cuda.device(
+                self.device
+            ), clear_cublas_manager(), torch.cuda.graph(
+                self.graph, stream=self.stream, pool=self.cuda_graphs_pool
+            ):
+                static_outputs = model(inputs)
 
-        # running model should reclaim memory
-        assert len(inputs) == 0
+            # running model should reclaim memory
+            assert len(inputs) == 0
 
         if not isinstance(static_outputs, (list, tuple)):
             static_outputs = (static_outputs,)
 
+        self._add_first_outputs(static_outputs, static_input_non_cudagraph_storage_ptrs)
+
         return static_outputs
 
-    def _add_first_outputs(self, outputs):
+    def _add_first_outputs(self, outputs, static_input_non_cudagraph_storage_ptrs):
         "Add the outputs from the first invocation of the node and set up metadata"
 
         # getting liveness before we have added the outputs to path, so the length
@@ -748,7 +773,8 @@ class CUDAGraphNode:
         for i, o in enumerate(outputs):
             self.output_is_alias_of_static_inputs.append(
                 o is not None
-                and o.untyped_storage().data_ptr() in self.static_input_storage_ptrs
+                and o.untyped_storage().data_ptr()
+                in static_input_non_cudagraph_storage_ptrs
             )
 
         if self.stack_traces is None:
@@ -970,6 +996,8 @@ class CUDAGraphNode:
                     # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
                     self._copy_input(i, recording_inputs[-1], inp)
+                    inputs[i] = None
+                    del inp
                 else:
                     recording_inputs.append(inp)
 
@@ -1028,21 +1056,27 @@ def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}
     segments = get_cudagraph_segments(pool_id)
 
+    allocated_not_in_live_storages = []
+
     for segment in segments:
         addr = segment["address"]
         for block in segment["blocks"]:
             if block["state"] == "active_allocated":
-                check(
-                    addr in unique_storages,
-                    lambda: f"{addr} allocated but not in live storages",
-                )
-                unique_storages.remove(addr)
+                if addr not in unique_storages:
+                    allocated_not_in_live_storages.append(addr)
+                else:
+                    unique_storages.remove(addr)
 
             addr += block["size"]
 
     check(
         len(unique_storages) == 0,
         lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
+    )
+
+    check(
+        len(allocated_not_in_live_storages) == 0,
+        lambda: f"These live storage data ptrs are in the cudagraph pool but not accounted for as an output of cudagraph trees {allocated_not_in_live_storages}",
     )
 
 
@@ -1298,7 +1332,7 @@ class CUDAGraphTreeManager:
 
         # container needs to set clean up when fn dies
         get_container(self.device_index).add_strong_reference(fn)
-        return fn
+        return fn, fn(inputs)
 
     @property
     def in_recording(self):
