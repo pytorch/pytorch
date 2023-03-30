@@ -2183,26 +2183,37 @@ class TestJac(TestCase):
     def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
         # With chunk_size=1, we shouldn't `vmap` and hence not be limited
         # by it's constraints.
-
-        x = torch.randn(3, device=device)
-        idx_1 = torch.tensor([0, ], device=device)
-        idx_2 = torch.tensor([0, 1], device=device)
+        x = torch.randn(3, 3, device=device)
         chunk_size = 1
 
-        def f(x, idx):
-            # `take` doesn't work with vmap
-            # as it returns an output with dynamic shape.
-            return torch.take(x, idx)
+        # Function with Dynamic Op in Backward.
+        # This should cause jacrev/vmap(vjp) to fail.
+        class IdentityWithDynamicBackwardOp(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input
 
-        for fn, idx in ((f, idx_1), (f, idx_2)):
-            jacfn = jacrev(fn, chunk_size=chunk_size, _preallocate_and_copy=_preallocate_and_copy)
-            actual = jacfn(x, idx)
-            expected = torch.autograd.functional.jacobian(partial(fn, idx=idx), x, vectorize=False)
-            self.assertEqual(actual, expected)
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
 
-            # msg = r"vmap: .* is not possible because there exists a Tensor"
-            # with self.assertRaisesRegex(RuntimeError, msg):
-            #     jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
+            @staticmethod
+            def backward(ctx, grad_output):
+                # dynamic op in backward pass.
+                grad_output.nonzero()
+                return grad_output
+
+        def f(x):
+            return IdentityWithDynamicBackwardOp.apply(x)
+
+        jacfn = jacrev(f, chunk_size=chunk_size, _preallocate_and_copy=_preallocate_and_copy)
+        actual = jacfn(x)
+        expected = torch.autograd.functional.jacobian(f, x, vectorize=False)
+        self.assertEqual(actual, expected)
+
+        msg = r"vmap: We do not support batching operators that can output dynamic shape."
+        with self.assertRaisesRegex(RuntimeError, msg):
+            jacrev(f, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x)
 
     def test_complex_error(self, device):
         # Verify complex input raises error
