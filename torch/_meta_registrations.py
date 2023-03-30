@@ -1189,6 +1189,34 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
+def _check_foreach_binop_tensor_lists(self, other):
+    check(
+        isinstance(self, List) and isinstance(other, List),
+        lambda: (
+            "The first two arguments of must be List[Tensor], "
+            f"but got {type(self)} and {type(other)}."
+        ),
+    )
+    check(
+        len(self) > 0 and len(self) == len(other),
+        lambda: (
+            "self and other must be non-empty and match in length, "
+            f"but got {len(self)} and {len(other)}."
+        ),
+    )
+
+
+@register_meta([aten._foreach_add.List])
+def meta__foreach_add(self, other, alpha):
+    _check_foreach_binop_tensor_lists(self, other)
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta([aten._foreach_add_.List])
+def meta__foreach_add_(self, other, alpha):
+    _check_foreach_binop_tensor_lists(self, other)
+
+
 @register_meta([aten._int_mm])
 @out_wrapper()
 def meta__int_mm(a, b):
