@@ -20,7 +20,7 @@ hf_Bert,0
 hf_Bert_large,0
 hf_DistilBert,0
 hf_GPT2,0
-hf_Reformer,5
+hf_Reformer,26
 hf_T5_large,0
 lennard_jones,0
 maml_omniglot,0

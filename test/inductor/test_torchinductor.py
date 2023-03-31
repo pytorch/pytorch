@@ -2514,6 +2514,24 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    def test_adaptive_avg_pool2d_low_prec(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+            def forward(self, x):
+                x = self.avgpool(x)
+                return x
+
+        mod = Model()
+        for dtype in [torch.half, torch.bfloat16]:
+            x = torch.randn(4, 3, 7, 7).to(dtype=dtype)
+            opt_mod = torch.compile(mod)
+            res = opt_mod(x)
+            expected = mod(x)
+            self.assertTrue(torch.allclose(res, expected))
+
     def test_max_pool2d1(self):
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
