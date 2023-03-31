@@ -746,7 +746,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     @cache_on_self
     def get_output_refs(self):
-        # return [x.codegen_reference() for x in V.graph.graph_outputs]
         from ..ir import NoneAsConstantBuffer
 
         return [
