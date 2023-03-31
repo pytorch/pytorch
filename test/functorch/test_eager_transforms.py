@@ -1568,6 +1568,17 @@ class TestJac(TestCase):
         expected = expected.view(2, 3, 2, 3)
         assert torch.allclose(y, expected)
 
+    @jacrev_and_jacfwd
+    def test_take(self, device, jacapi):
+        x = torch.rand(5)
+
+        def func(x):
+            y = torch.ones(3, dtype=torch.long)
+            z = torch.take(x, y)
+            return z
+
+        self.assertEqual(jacrev(func)(x), torch.autograd.functional.jacobian(func, x))
+
     @FIXME_jacrev_only
     def test_diff_numel(self, device, jacapi):
         x = torch.randn(2, 4, device=device)
@@ -2094,26 +2105,38 @@ class TestJac(TestCase):
     def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
         # With chunk_size=1, we shouldn't `vmap` and hence not be limited
         # by it's constraints.
+        x = torch.randn(3, 3, device=device)
 
-        x = torch.randn(3, device=device)
-        idx_1 = torch.tensor([0, ], device=device)
-        idx_2 = torch.tensor([0, 1], device=device)
-        chunk_size = 1
+        # Function with Dynamic Op in Backward.
+        # This should cause jacrev/vmap(vjp) to fail.
+        class IdentityWithDynamicBackwardOp(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input
 
-        def f(x, idx):
-            # `take` doesn't work with vmap
-            # as it returns an output with dynamic shape.
-            return torch.take(x, idx)
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
 
-        for fn, idx in ((f, idx_1), (f, idx_2)):
-            jacfn = jacrev(fn, chunk_size=chunk_size, _preallocate_and_copy=_preallocate_and_copy)
-            actual = jacfn(x, idx)
-            expected = torch.autograd.functional.jacobian(partial(fn, idx=idx), x, vectorize=False)
-            self.assertEqual(actual, expected)
+            @staticmethod
+            def backward(ctx, grad_output):
+                # dynamic op in backward pass.
+                grad_output.nonzero()
+                return grad_output
 
-            msg = r"vmap: .* is not possible because there exists a Tensor"
-            with self.assertRaisesRegex(RuntimeError, msg):
-                jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
+        def f(x):
+            return IdentityWithDynamicBackwardOp.apply(x)
+
+        # With `chunk_size=1`, we don't use vmap. So the following should work.
+        jacfn = jacrev(f, chunk_size=1, _preallocate_and_copy=_preallocate_and_copy)
+        actual = jacfn(x)
+        expected = torch.autograd.functional.jacobian(f, x, vectorize=False)
+        self.assertEqual(actual, expected)
+
+        # Should fail with `chunk_size=2`.
+        msg = r"vmap: We do not support batching operators that can output dynamic shape."
+        with self.assertRaisesRegex(RuntimeError, msg):
+            jacrev(f, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x)
 
     def test_complex_error(self, device):
         # Verify complex input raises error
@@ -2142,6 +2165,16 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all outputs"):
             jacfwd(fn)(x)
 
+    @jacrev_and_jacfwd
+    def test_jac_with_non_tensor_args(self, device, jacapi):
+        def f(t, int_x):
+            return t + int_x
+
+        t = torch.randn(3, 3, device=device)
+
+        actual = jacapi(f)(t, 3)
+        expected = torch.autograd.functional.jacobian(partial(f, int_x=3), t)
+        self.assertEqual(actual, expected)
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):

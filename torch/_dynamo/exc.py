@@ -74,6 +74,10 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
+class RecompileError(TorchDynamoException):
+    pass
+
+
 class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
 
