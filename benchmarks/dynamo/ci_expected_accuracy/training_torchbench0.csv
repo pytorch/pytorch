@@ -16,7 +16,7 @@ hf_Bert,8
 hf_Bert_large,8
 hf_DistilBert,8
 hf_GPT2,8
-hf_Reformer,98
+hf_Reformer,67
 hf_T5_large,0
 lennard_jones,9
 maml_omniglot,9
