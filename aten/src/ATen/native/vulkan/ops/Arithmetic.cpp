@@ -217,7 +217,7 @@ Tensor arithmetic_tensor(
   const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
   const struct Block final {
     uvec3 extents;
-    uint32_t fill0;
+    uint32_t channelSize;
     uvec3 input1Extents;
     uint32_t channelBatchSize1;
     uvec3 input2Extents;
@@ -225,7 +225,7 @@ Tensor arithmetic_tensor(
     float alpha;
   } block{
       v_output.extents(),
-      0u,
+      get_dim<Dim4D::Channel>(v_output),
       v_self.extents(),
       get_dim<Dim4D::Channel>(self) * get_dim<Dim4D::Batch>(self),
       v_other.extents(),
@@ -291,7 +291,7 @@ Tensor quantized_arithmetic_tensor(
   const int64_t zero_point2 = v_other.get_zero_point();
   const struct Block final {
     uvec3 extents;
-    uint32_t fill0;
+    uint32_t channelSize;
     uvec3 input1Extents;
     uint32_t channelBatchSize1;
     uvec3 input2Extents;
@@ -306,7 +306,7 @@ Tensor quantized_arithmetic_tensor(
     int32_t fill2;
   } block{
       v_output.extents(),
-      0u,
+      get_dim<Dim4D::Channel>(v_output),
       v_self.extents(),
       get_dim<Dim4D::Channel>(self) * get_dim<Dim4D::Batch>(self),
       v_other.extents(),
@@ -379,13 +379,13 @@ Tensor& arithmetic_tensor_(
   const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
   const struct Block final {
     uvec3 extents;
-    uint32_t fill0;
+    uint32_t channelSize;
     uvec3 inputExtents;
     uint32_t channelBatchSizeOther;
     float alpha;
   } block{
       v_self.extents(),
-      0u,
+      get_dim<Dim4D::Channel>(v_self),
       v_other.extents(),
       get_dim<Dim4D::Channel>(other) * get_dim<Dim4D::Batch>(other),
       safe_downcast<float>(alpha),
