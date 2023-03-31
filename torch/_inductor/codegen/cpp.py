@@ -865,6 +865,18 @@ class CppOverrides(OpOverrides):
         return f"{a} || {b}"
 
     @staticmethod
+    def bitwise_and(x, y):
+        return f"decltype({x})({x} & {y})"
+
+    @staticmethod
+    def bitwise_or(x, y):
+        return f"decltype({x})({x} | {y})"
+
+    @staticmethod
+    def bitwise_xor(x, y):
+        return f"decltype({x})({x} ^ {y})"
+
+    @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
 
