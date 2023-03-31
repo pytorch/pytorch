@@ -2172,10 +2172,7 @@ class CppKernelProxy(CppKernel):
 
         scalar_kernel = codegen_kernel(CppKernel)
         inner_most_idx = len(scalar_kernel.itervars) - 1
-        # TODO(jgong5): call self.set_ranges directly
-        self.call_ranges = scalar_kernel.call_ranges
-        self.itervars = scalar_kernel.itervars
-        self.reduction_depth = scalar_kernel.reduction_depth
+        self.set_ranges(group, reduction_group)
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
         if not self.picked_vec_isa:
@@ -2200,14 +2197,21 @@ class CppKernelProxy(CppKernel):
                         non_contig_stride_const.add(int(var.name[1:]))
                     else:
                         non_contig_stride_other.add(int(var.name[1:]))
-            candidates = contig_vars - non_contig_stride_other
-            contig_only = candidates - non_contig_stride_const
-            if not candidates or (len(candidates) == 1 and not contig_only):
-                return []
+            contig_only = (
+                contig_vars - non_contig_stride_const - non_contig_stride_other
+            )
             if contig_only:
                 return sorted(contig_only)[-1:]
-            assert len(candidates) > 1
-            return sorted(candidates)[-2:]
+            contig_and_const_stride = (
+                contig_vars & non_contig_stride_const
+            ) - non_contig_stride_other
+            contig_vars_sorted = sorted(contig_vars)
+            if (
+                len(contig_vars_sorted) == 2
+                and contig_vars_sorted[-1] in contig_and_const_stride
+            ):
+                return contig_vars_sorted
+            return []
 
         def select_tiling():
             # TODO(jgong5): support alternative tiling factors and data types
