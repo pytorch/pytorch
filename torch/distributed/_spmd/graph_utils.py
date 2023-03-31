@@ -1,9 +1,9 @@
 from enum import Enum
-from typing import List, Optional, Set, Tuple, Union
+from typing import Dict, List, Set, Tuple, Union
 
 import torch.fx as fx
 from torch.fx.passes.shape_prop import TensorMetadata
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 class OP(str, Enum):

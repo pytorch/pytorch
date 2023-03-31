@@ -6,7 +6,7 @@ from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
 
 import torch.nn as nn
 from torch import fx
-from torch.fx.graph import PythonCode
+from torch.fx.graph import _PyTreeCodeGen, PythonCode
 from torch.fx.node import Argument
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
@@ -131,29 +131,6 @@ class IterGraph(fx.Graph):
                     continue
                 inputs.append(_input)
 
-        # Add all the extra output nodes into a list and append the list to
-        # the original output.args[0].
-        if self.num_extra_output:
-            # If the extra-output list already exist, just use it.
-            output.args[0][-1].extend(inputs)
-            new_output = output.args[0]
-        else:
-            # When adding the extra-output list, out_spec of _PyTreeCodeGen
-            # must be updated accordingly.
-            if hasattr(graph._codegen, "pytree_info"):
-                new_output = list(output.args[0])
-                new_output.append(inputs)
-                original_tree_out = tree_unflatten(
-                    output.args[0], graph._codegen.pytree_info.out_spec
-                )
-                # Use None as a placeholder. If we use the extra-output list
-                # the list will be flatten as well and put into out_spec.
-                _, out_spec = tree_flatten((original_tree_out, None))
-                graph._codegen.pytree_info = graph._codegen.pytree_info._replace(
-                    out_spec=out_spec
-                )
-            else:
-                new_output = (output.args[0], inputs)
         if erase_node:
             # We have to remove the node in the reversed order to ensure the
             # node has zero users.
@@ -163,7 +140,7 @@ class IterGraph(fx.Graph):
                     key = next(iter(node.users.keys()))
                     # This is the optimizer case where IterGraph functionalize
                     # the optimizer. Remove the dependency.
-                    if key not in new_output and key == output:
+                    if key not in cast(List[Any], output.args[0]) and key == output:
                         node.users.clear()
                 # This is the step case where there is a virtual data dependency
                 # (in-place update) between step and optimizer. And
@@ -179,6 +156,29 @@ class IterGraph(fx.Graph):
                     )
                 self._fx_graph_call(graph, "erase_node", node)
                 erased.add(node)
+
+        # Add all the extra output nodes into a list and append the list to
+        # the original output.args[0].
+        if self.num_extra_output:
+            # If the extra-output list already exist, just use it.
+            cast(List[fx.Node], output.args[0][-1]).extend(inputs)  # type: ignore[index]
+            new_output = output.args[0]
+        else:
+            # When adding the extra-output list, out_spec of _PyTreeCodeGen
+            # must be updated accordingly.
+            if isinstance(graph._codegen, _PyTreeCodeGen):
+                codegen = cast(_PyTreeCodeGen, graph._codegen)
+                new_output = list(output.args[0])  # type: ignore[arg-type]
+                new_output.append(inputs)
+                original_tree_out = tree_unflatten(
+                    output.args[0], codegen.pytree_info.out_spec
+                )
+                # Use None as a placeholder. If we use the extra-output list
+                # the list will be flatten as well and put into out_spec.
+                _, out_spec = tree_flatten((original_tree_out, None))
+                codegen.pytree_info = codegen.pytree_info._replace(out_spec=out_spec)
+            else:
+                new_output = (output.args[0], inputs)
         self._fx_graph_call(graph, "erase_node", output)
         self._fx_graph_call(graph, "output", new_output)
 
@@ -228,19 +228,14 @@ class IterGraph(fx.Graph):
         ), f"More inputs than needed {len(new_input_nodes)} > {new_input_index}"
 
         # Update the in_spec of _PyTreeCodeGen
-        if hasattr(graph._codegen, "pytree_info"):
-            original_tree_in = tree_unflatten(
-                placeholders, graph._codegen.pytree_info.in_spec
-            )
+        if isinstance(graph._codegen, _PyTreeCodeGen):
+            codegen = cast(_PyTreeCodeGen, graph._codegen)
+            original_tree_in = tree_unflatten(placeholders, codegen.pytree_info.in_spec)
             _, in_spec = tree_flatten(tuple(list(original_tree_in) + new_input_nodes))
-            graph._codegen.pytree_info = graph._codegen.pytree_info._replace(
-                in_spec=in_spec
-            )
+            codegen.pytree_info = codegen.pytree_info._replace(in_spec=in_spec)
             for new_input in new_input_nodes:
-                graph._codegen.pytree_info.orig_args.append(new_input.name)
-            graph._codegen.pytree_info = graph._codegen.pytree_info._replace(
-                in_spec=in_spec
-            )
+                codegen.pytree_info.orig_args.append(new_input.name)
+            codegen.pytree_info = codegen.pytree_info._replace(in_spec=in_spec)
 
     def move_to_next_iter_before(
         self, subgraph: List[fx.Node], target_node: fx.Node
