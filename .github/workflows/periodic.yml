@@ -376,22 +376,22 @@ jobs:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
-  linux-bionic-py3_8-clang9-slow-build:
-    name: linux-bionic-py3.8-clang9-slow
+  linux-bionic-py3_8-clang9-build:
+    name: linux-bionic-py3.8-clang9
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-py3.8-clang9-slow
+      build-environment: linux-bionic-py3.8-clang9
       docker-image-name: pytorch-linux-bionic-py3.8-clang9
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-bionic-py3_8-clang9-slow-test:
-    name: linux-bionic-py3.8-clang9-slow
+  linux-bionic-py3_8-clang9-test:
+    name: linux-bionic-py3.8-clang9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-py3_8-clang9-slow-build
+    needs: linux-bionic-py3_8-clang9-build
     with:
-      build-environment: linux-bionic-py3.8-clang9-slow
-      docker-image: ${{ needs.linux-bionic-py3_8-clang9-slow-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-py3_8-clang9-slow-build.outputs.test-matrix }}
+      build-environment: linux-bionic-py3.8-clang9
+      docker-image: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.test-matrix }}
