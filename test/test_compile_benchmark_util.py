@@ -3,7 +3,6 @@
 import torch
 import torch._dynamo as torchdynamo
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.utils.benchmark.utils.compile import bench_all
 import unittest
 
 # We cannot import TEST_CUDA from torch.testing._internal.common_cuda here, because if we do that,
@@ -13,6 +12,7 @@ import unittest
 TEST_CUDA = torch.cuda.is_available()
 try:
     import tabulate # type: ignore[import]
+    from torch.utils.benchmark.utils.compile import bench_all
     HAS_TABULATE = True
 except ImportError:
     HAS_TABULATE = False
