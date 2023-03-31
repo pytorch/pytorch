@@ -903,8 +903,6 @@ class CppKernel(Kernel):
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = IndentedBuffer()
-        self.reduction_prefix_prepend = []
-        self.reduction_suffix_prepend = []
         self.reduction_var_map = {}
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.preloads = IndentedBuffer()
@@ -977,11 +975,11 @@ class CppKernel(Kernel):
             )
         else:
             if dtype in (torch.float16, torch.bfloat16):
-                self.reduction_prefix_prepend.append(
+                self.reduction_prefix.writeline(
                     f"float {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
             else:
-                self.reduction_prefix_prepend.append(
+                self.reduction_prefix.writeline(
                     f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
             self.stores.writeline(
@@ -991,8 +989,10 @@ class CppKernel(Kernel):
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
             member_name = ".index" if argmax_or_argmin else ""
-            self.reduction_suffix_prepend.append(
-                (name, f"{var}[{cexpr_index(index)}] = {tmpvar}{member_name};")
+            self.reduction_suffix.writeline(
+                DeferredLine(
+                    name, f"{var}[{cexpr_index(index)}] = {tmpvar}{member_name};"
+                )
             )
         self.cse.store_cache[name] = tmpvar
 
@@ -1046,38 +1046,19 @@ class CppKernel(Kernel):
                     code.splice(kernel.poststores)
 
             def get_reduction_code_buffer(loops, is_suffix=True):
-                """Dedup the lines in prefix/suffix prepended list for all the kernels under loops"""
-                code = IndentedBuffer()
-                dedup = set()
                 for loop in loops:
                     for kernel in loop.get_kernels():
-                        reduction_prepend = (
-                            kernel.reduction_suffix_prepend
-                            if is_suffix
-                            else kernel.reduction_prefix_prepend
-                        )
-                        for item in reduction_prepend:
-                            line = item[1] if is_suffix else item
-                            if line not in dedup:
-                                if is_suffix:
-                                    code.writeline(DeferredLine(item[0], line))
-                                else:
-                                    code.writeline(line)
-                                dedup.add(line)
-                        code.splice(
-                            kernel.reduction_suffix
-                            if is_suffix
-                            else kernel.reduction_prefix
-                        )
-                return code
+                        if is_suffix:
+                            return kernel.reduction_suffix
+                        else:
+                            return kernel.reduction_prefix
+                return None
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
                 with contextlib.ExitStack() as stack_outer:
                     if loops:
                         loop = loops[0]
                         if loop.is_reduction() and not in_reduction:
-                            kernels = loop.get_kernels()
-                            assert kernels
                             reduction_prefix = get_reduction_code_buffer(
                                 loops, is_suffix=False
                             )
@@ -1289,7 +1270,7 @@ class CppVecKernel(CppKernel):
             vec_reduc_prefix += f"{reduction_init(reduction_type, dtype)}"
             vec_reduc_prefix += "}})"
             self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
-            self.reduction_prefix_prepend.append(vec_reduc_prefix)
+            self.reduction_prefix.writeline(vec_reduc_prefix)
 
         tmpvar = self.reduction_cse.generate(
             self.loads, f"reduction {name} {cexpr_index(index)}", write=False
@@ -1298,10 +1279,10 @@ class CppVecKernel(CppKernel):
 
         index = self.rename_indexing(index)
         self.reduction_var_map[tmpvar_vec] = reduction_type
-        self.reduction_prefix_prepend.append(
+        self.reduction_prefix.writeline(
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
-        self.reduction_prefix_prepend.append(
+        self.reduction_prefix.writeline(
             f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
         )
         self.stores.writeline(
@@ -1310,9 +1291,6 @@ class CppVecKernel(CppKernel):
 
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            # NOTE(jgong5): we do not generate the real stores here with the assumption that
-            # the scalar kernel that handles the loop tail would be generated and generates
-            # the stores there.
             reduce_all_body = "{"
             if reduction_type == "sum":
                 reduce_all_body += "return x + y;"
@@ -1323,18 +1301,30 @@ class CppVecKernel(CppKernel):
             reduce_all_body += "}"
             vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
             next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
-            self.reduction_suffix_prepend.append(
-                (name, f"{reduction_combine(reduction_type, tmpvar, next_value)};")
+            self.reduction_suffix.writeline(
+                DeferredLine(
+                    name, f"{reduction_combine(reduction_type, tmpvar, next_value)};"
+                )
             )
-        elif name not in V.graph.removed_buffers:
-            # Vertical reduction
+
+        if name not in V.graph.removed_buffers:
             var = self.args.output(name)
-            new_index = self.scale_index_with_offset(
-                index, self.tiling_factor, itervar_idx=self.tiling_idx
-            )
-            self.reduction_suffix_prepend.append(
-                (name, f"{tmpvar_vec}.store({var} + {cexpr_index(new_index)});")
-            )
+            if self.tiling_idx >= self.reduction_depth:
+                # Horizontal reduction
+                self.reduction_suffix.writeline(
+                    DeferredLine(name, f"{var}[{cexpr_index(index)}] = {tmpvar};")
+                )
+            else:
+                # Vertical reduction
+                new_index = self.scale_index_with_offset(
+                    index, self.tiling_factor, itervar_idx=self.tiling_idx
+                )
+                self.reduction_suffix.writeline(
+                    DeferredLine(
+                        name, f"{tmpvar_vec}.store({var} + {cexpr_index(new_index)});"
+                    )
+                )
+
         self.cse.store_cache[name] = tmpvar
 
 
