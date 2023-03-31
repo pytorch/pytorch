@@ -8,7 +8,7 @@ import torch
 from torch import nn
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import sample_inputs_cat_concat
-from torch.testing._internal.common_utils import make_tensor, skipIfTorchDynamo
+from torch.testing._internal.common_utils import make_tensor
 from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 from typing import List, Any
 
@@ -18,7 +18,6 @@ if __name__ == '__main__':
                        "instead.")
 
 # XXX: still in prototype
-@skipIfTorchDynamo()
 class TestSymbolicShapeAnalysis(JitTestCase):
     def setUp(self):
         super(JitTestCase, self).setUp()
@@ -164,7 +163,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inputs[1].setType(inputs[1].type().with_sizes(size_2))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
-            break
 
     def test_binary_shape_fns_inplace(self):
         def div_inplace_tensor(x: torch.Tensor, y: torch.Tensor):

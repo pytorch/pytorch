@@ -1,14 +1,19 @@
 import contextlib
 import copy
-from typing import Callable, Tuple, Generator, Dict
+from typing import Callable, Tuple, Generator, Dict, Optional
 from unittest.mock import patch
+import dataclasses
 
 import torch
+import weakref
 import torch._dynamo as torchdynamo
 from torch._decomp import core_aten_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.utils import stateless
 from torch.utils import _pytree as pytree
+from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+from torch.utils._sympy.value_ranges import ValueRanges
+import sympy
 
 from torch._functorch.aot_autograd import (
     AOTConfig,
@@ -69,7 +74,7 @@ def _aot_capture(mod, flat_args):
     out_spec = None
 
     with enable_python_dispatcher():
-        fw_metadata, _ = run_functionalized_fw_and_collect_metadata(
+        fw_metadata = run_functionalized_fw_and_collect_metadata(
             lambda *args: pytree.tree_flatten(functional_call(*args))[0],
             keep_input_mutations=False,
         )(*copy.deepcopy(full_args))  # type: ignore[operator]
@@ -116,18 +121,8 @@ def _aot_capture(mod, flat_args):
         num_params_buffers=params_len,
         aot_id=-1,
         keep_inference_input_mutations=False,
+        dynamic_shapes=True,
     )
-
-    @contextlib.contextmanager
-    def setup_dynamic_shape():
-        prev, torch._functorch.config.use_dynamic_shapes = (
-            torch._functorch.config.use_dynamic_shapes,
-            True,
-        )
-        try:
-            yield
-        finally:
-            torch._functorch.config.use_dynamic_shapes = prev
 
     def exported_call(*args):
         state_args = args[:params_len]
@@ -141,7 +136,7 @@ def _aot_capture(mod, flat_args):
         outputs, out_spec = pytree.tree_flatten(outputs)
         return outputs
 
-    with torch.enable_grad(), setup_dynamic_shape():
+    with torch.enable_grad():
         create_aot_dispatcher_function(
             exported_call,
             full_args,
@@ -192,7 +187,7 @@ def _aot_capture(mod, flat_args):
 @patch.object(torchdynamo.config, "dynamic_shapes", True)
 @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
 @patch.object(torchdynamo.config, "guard_nn_modules", True)
-@patch.object(torchdynamo.config, "specialize_int_float", True)
+@patch.object(torchdynamo.config, "specialize_int", True)
 @patch.object(torchdynamo.config, "allow_rnn", True)
 @patch.object(torchdynamo.config, "verbose", True)
 def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
@@ -213,3 +208,42 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
     # TODO (tmanlaibaatar) do sth with guards?
     graph_module, _, out_spec = _aot_capture(graph_module, flat_args)
     return ExportedProgram(fw_module=graph_module, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)
+
+
+
+# Note - [On Export Dynamic Dimension UX]
+#
+# After a lot of discussion, we have settled on a dynamic marking API
+# for export that meets the following constraints:
+# 1) Stateless
+# 2) Safe for numerous .export calls within a single process
+# 3) Simple to use
+# 4) Can be extended to constraints easily
+#
+# While the underlying API is still torch._dynamo.mark_dynamic, we offer a higher
+# level API that meets the constraints above.
+#
+# This API produces an object that is meant to be passed into torch._dynamo.export
+# constraints field. See docs on torch._dynamo.export for more details.
+#
+# Note - The output type and structure here is NOT BC and NOT A CONTRACT, we reserve
+# the right to change the output here at any time, and will do so as we extend the API.
+#
+# result = torch._dynamo.export(
+#     my_model,
+#     *sixtyfour_tensors,
+#     constraints=[
+#         # if you do only dynamic_dim, this is sugar for
+#         # -Inf <= dynamic_dim(blah, 0) <= Inf; we don’t otherwise
+#         # permit direct int->bool conversion
+#         dynamic_dim(blah, 0),
+#         # operator overloading because it makes it clear whether
+#         # or not you’re inclusive-exclusive range or not
+#         0 <= dynamic_dim(blah, 1) <= 100,
+#         # NB: But we actually truncate ranges to be >= 2, because of
+#         # 0/1 specialization
+#     ]
+# )
+def dynamic_dim(t: torch.Tensor, index: int):
+    from torch._dynamo.eval_frame import Constraint
+    return Constraint(weakref.ref(t), id(t), index, StrictMinMaxConstraint(ValueRanges(lower=2, upper=sympy.oo)))

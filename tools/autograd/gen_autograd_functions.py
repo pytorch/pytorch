@@ -420,7 +420,6 @@ UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 def get_infos_with_derivatives_list(
     differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]]
 ) -> List[DifferentiabilityInfo]:
-
     diff_info_list = [
         info
         for diffinfo_dict in differentiability_infos.values()
@@ -444,8 +443,8 @@ def gen_autograd_functions_lib(
     # get a 1D list of diffinfos, we do not need them to be per FunctionSchema/DispatchKey here
     # infos with the diff dispatchkeys but the same name will still be in the same shard.
     infos = get_infos_with_derivatives_list(differentiability_infos)
-    declarations = list(map(lambda f: process_function(f, FUNCTION_DECLARATION), infos))
-    definitions = list(map(lambda f: process_function(f, FUNCTION_DEFINITION), infos))
+    declarations = [process_function(f, FUNCTION_DECLARATION) for f in infos]
+    definitions = [process_function(f, FUNCTION_DEFINITION) for f in infos]
 
     file_basename = "Functions"
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
@@ -469,7 +468,6 @@ def gen_autograd_functions_python(
     differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
-
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     num_shards = 5
     fm.write(
