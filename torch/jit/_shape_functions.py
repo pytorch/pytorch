@@ -427,13 +427,19 @@ def squeeze(li: List[int], dim: int):
     return out
 
 def squeeze_dims(li: List[int], dims: List[int]):
-    wrapped_dims : List[int] = []
-    for i in dims:
-        wrapped_dims.append(maybe_wrap_dim(i, len(li)))
-    wrapped_dims.sort(reverse=True)
-    for i in wrapped_dims:
-        li = squeeze(li, i)
-    return li
+    if len(dims) == 0:
+        return li
+    wrapped_dims = _copy(dims)
+    for i in range(len(dims)):
+        wrapped_dims[i] = maybe_wrap_dim(wrapped_dims[i], len(li))
+    result: List[int] = []
+    for i in range(len(li)):
+        if li[i] == 1:
+            if i not in wrapped_dims:
+                result.append(li[i])
+        else:
+            result.append(li[i])
+    return result
 
 def index_select(self: List[int], dim: int, index: List[int]):
     dim = maybe_wrap_dim(dim, len(self))
