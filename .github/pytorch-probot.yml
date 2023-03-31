@@ -6,7 +6,7 @@ ciflow_push_tags:
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
 - ciflow/inductor
-- ciflow/inductor-perf-test-nightly
+- ciflow/inductor-perf-compare
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic

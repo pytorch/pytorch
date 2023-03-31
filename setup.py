@@ -923,16 +923,7 @@ def configure_extension_build():
                   include_dirs=[],
                   library_dirs=library_dirs,
                   extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
-    C_flatbuffer = Extension("torch._C_flatbuffer",
-                             libraries=main_libraries,
-                             sources=["torch/csrc/stub_with_flatbuffer.c"],
-                             language='c',
-                             extra_compile_args=main_compile_args + extra_compile_args,
-                             include_dirs=[],
-                             library_dirs=library_dirs,
-                             extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
-    extensions.append(C_flatbuffer)
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
@@ -1028,11 +1019,14 @@ def main():
         'opt-einsum': ['opt-einsum>=3.3']
     }
     if platform.system() == 'Linux':
-        triton_pin_file = os.path.join(cwd, ".github", "ci_commit_pins", "triton.txt")
-        if os.path.exists(triton_pin_file):
+        triton_pin_file = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", "triton.txt")
+        triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
+        if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
             with open(triton_pin_file) as f:
                 triton_pin = f.read().strip()
-                extras_require['dynamo'] = ['pytorch-triton==2.0.0+' + triton_pin[:10], 'jinja2']
+            with open(triton_version_file) as f:
+                triton_version = f.read().strip()
+            extras_require['dynamo'] = ['pytorch-triton==' + triton_version + '+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1063,7 +1057,6 @@ def main():
         'bin/*',
         'test/*',
         '_C/*.pyi',
-        '_C_flatbuffer/*.pyi',
         'cuda/*.pyi',
         'optim/*.pyi',
         'autograd/*.pyi',
@@ -1214,6 +1207,16 @@ def main():
         'utils/model_dump/code.js',
         'utils/model_dump/*.mjs',
     ]
+    if get_cmake_cache_vars()['BUILD_NVFUSER']:
+        torch_package_data.extend([
+            'share/cmake/nvfuser/*.cmake',
+            'include/nvfuser/*.h',
+            'include/nvfuser/kernel_db/*.h',
+            'include/nvfuser/multidevice/*.h',
+            'include/nvfuser/ops/*.h',
+            'include/nvfuser/python_frontend/*.h',
+            'include/nvfuser/scheduler/*.h',
+        ])
 
     if get_cmake_cache_vars()['BUILD_CAFFE2']:
         torch_package_data.extend([
