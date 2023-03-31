@@ -167,11 +167,12 @@ class IterGraph(fx.Graph):
             # When adding the extra-output list, out_spec of _PyTreeCodeGen
             # must be updated accordingly.
             if isinstance(graph._codegen, _PyTreeCodeGen):
-                codegen = cast(_PyTreeCodeGen, graph._codegen)
+                codegen = graph._codegen
                 new_output = list(output.args[0])  # type: ignore[arg-type]
                 new_output.append(inputs)
+                assert codegen.pytree_info.out_spec is not None
                 original_tree_out = tree_unflatten(
-                    output.args[0], codegen.pytree_info.out_spec
+                    cast(List[Any], output.args[0]), codegen.pytree_info.out_spec
                 )
                 # Use None as a placeholder. If we use the extra-output list
                 # the list will be flatten as well and put into out_spec.
@@ -229,7 +230,7 @@ class IterGraph(fx.Graph):
 
         # Update the in_spec of _PyTreeCodeGen
         if isinstance(graph._codegen, _PyTreeCodeGen):
-            codegen = cast(_PyTreeCodeGen, graph._codegen)
+            codegen = graph._codegen
             original_tree_in = tree_unflatten(placeholders, codegen.pytree_info.in_spec)
             _, in_spec = tree_flatten(tuple(list(original_tree_in) + new_input_nodes))
             codegen.pytree_info = codegen.pytree_info._replace(in_spec=in_spec)
