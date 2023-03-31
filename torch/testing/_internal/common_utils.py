@@ -410,9 +410,7 @@ class parametrize(_TestParametrizer):
                                        'values and {} names for test "{}"'.format(
                                            len(values), len(self.arg_names), test.__name__))
 
-                param_kwargs = {
-                    name: value for name, value in zip(self.arg_names, values)
-                }
+                param_kwargs = dict(zip(self.arg_names, values))
 
                 test_name = self._get_subtest_name(values, explicit_name=maybe_name)
 
@@ -1170,6 +1168,18 @@ class DeterministicGuard:
             self.deterministic_restore,
             warn_only=self.warn_only_restore)
 
+class AlwaysWarnTypedStorageRemoval:
+    def __init__(self, always_warn):
+        assert isinstance(always_warn, bool)
+        self.always_warn = always_warn
+
+    def __enter__(self):
+        self.always_warn_restore = torch.storage._get_always_warn_typed_storage_removal()
+        torch.storage._set_always_warn_typed_storage_removal(self.always_warn)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.storage._set_always_warn_typed_storage_removal(self.always_warn_restore)
+
 # Context manager for setting cuda sync debug mode and reset it
 # to original value
 # we are not exposing it to the core because sync debug mode is
@@ -1597,7 +1607,7 @@ class CudaMemoryLeakCheck():
 
             discrepancy_detected = True
 
-            # Query memory multiple tiems to ensure leak was not transient
+            # Query memory multiple items to ensure leak was not transient
             for n in range(3):
                 caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
                 bytes_free, bytes_total = torch.cuda.mem_get_info(i)
@@ -1661,7 +1671,7 @@ def skip_exception_type(exc_type):
     except exc_type as e:
         raise unittest.SkipTest(f"not implemented: {e}") from e
 
-#  "min_satisfying_examples" setting has been deprecated in hypythesis
+#  "min_satisfying_examples" setting has been deprecated in hypothesis
 #  3.56.0 and removed in hypothesis 4.x
 try:
     import hypothesis
@@ -1968,7 +1978,7 @@ class UnittestPair(Pair):
 
 
 class StringPair(UnittestPair):
-    CLS = str
+    CLS = (str, bytes)
     TYPE_NAME = "string"
 
 
@@ -2345,7 +2355,7 @@ class TestCase(expecttest.TestCase):
         we'll find a maximal window in (n_rows + 1, n_cols + 1)-grid
         that is able to hold a sequence of sawteeth and so-called
         final correction, while the external part of the window is
-        filled with counts to meet the nnz contraint exactly.
+        filled with counts to meet the nnz constraint exactly.
         """
         assert 0 <= nnz <= n_rows * n_cols, (nnz, n_rows, n_cols)
 
@@ -3069,6 +3079,29 @@ class TestCase(expecttest.TestCase):
             return context.handle('assertRaisesRegex', args, kwargs)  # type: ignore[attr-defined]
         else:
             return super().assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)
+
+    # Verifies that no unraisable exceptions are raised by callable.  Unlike regular
+    # exceptions, these do not actually propagate to the caller and are
+    # suppressed.  We must test for them specially.
+    def assertNoUnraisable(self, callable, *args, **kwargs):
+        raised = None
+
+        def record_unraisable(unraisable):
+            nonlocal raised
+            raised = unraisable
+
+        # Disable GC when running the callable to prevent spurious flakiness
+        # from unlucky GCs inside the callable
+        prev = gc.isenabled()
+        gc.disable()
+        try:
+            with unittest.mock.patch("sys.unraisablehook", record_unraisable):
+                callable(*args, **kwargs)
+        finally:
+            if prev:
+                gc.enable()
+
+        self.assertIsNone(raised)
 
     # TODO: Support context manager interface
     # NB: The kwargs forwarding to callable robs the 'subname' parameter.
@@ -4158,7 +4191,7 @@ def clone_input_helper(input):
 
 @contextmanager
 def custom_op(opname, symbolic_fn, opset_version):
-    """Context manager/decorator to test ONNX export with custom oeprator"""
+    """Context manager/decorator to test ONNX export with custom operator"""
     try:
         register_custom_op_symbolic(opname, symbolic_fn, opset_version)
         yield

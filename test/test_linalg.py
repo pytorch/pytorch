@@ -274,14 +274,11 @@ class TestLinalg(TestCase):
                     return np.linalg.lstsq(a, b, rcond=rcond)
                 check_correctness_ref(a, b, res, numpy_ref)
 
-        version = torch.testing._internal.common_cuda._get_torch_cuda_version()
-        cusolver_available = (version >= (10, 2))
-
         ms = [2 ** i for i in range(5)]
         m_ge_n_sizes = [(m, m // 2) for m in ms] + [(m, m) for m in ms]
         # cases m < n are only supported on CPU and for cuSOLVER path on CUDA
         m_l_n_sizes = [(m // 2, m) for m in ms]
-        include_m_l_n_case = (cusolver_available or device == 'cpu')
+        include_m_l_n_case = (has_cusolver() or device == 'cpu')
         matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if include_m_l_n_case else [])
         batches = [(), (2,), (2, 2), (2, 2, 2)]
         # we generate matrices with singular values sampled from a normal distribution,
@@ -2764,7 +2761,6 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
     @skipCUDAIfRocm
-    @skipCUDAVersionIn([(11, 3), (11, 6), (11, 7)])  # https://github.com/pytorch/pytorch/issues/57482
     @dtypes(*floating_and_complex_types())
     def test_inverse_errors_large(self, device, dtype):
         # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
@@ -6794,7 +6790,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for fn in [torch.det, torch.logdet, torch.slogdet, torch.linalg.slogdet]:
                 expected_value = []
                 actual_value = fn(full_tensor)
-                for full_idx in itertools.product(*map(lambda x: list(range(x)), batchdims)):
+                for full_idx in itertools.product(*(list(range(x)) for x in batchdims)):
                     expected_value.append(fn(full_tensor[full_idx]))
 
                 if fn == torch.slogdet or fn == torch.linalg.slogdet:
@@ -7464,6 +7460,53 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         c = a.permute(0, 1, 3, 2).matmul(b)
         self.assertEqual([c.min(), c.max(), c.sum()], [24, 24, 414720])
 
+    def test_bfloat16_accumulation_with_ref_path(self):
+        # fix https://github.com/pytorch/pytorch/issues/95125
+        # and https://github.com/pytorch/pytorch/issues/83863
+        # for bf16 accumulation in gemm ref path
+        def check_correctness(fn, *args):
+            expected = fn(*args).bfloat16()
+            with torch.backends.mkldnn.flags(enabled=False):
+                def test():
+                    bf16_args = (arg.bfloat16() for arg in args)
+                    tmp_result = fn(*bf16_args)
+                    return tmp_result
+                c = test()
+                assert (torch.all(c == expected)), "Incorrect result with\n" \
+                                                   f"expected: {expected}\n" \
+                                                   f"got: {c}\n"
+        # test matmul
+        for transa in [True, False]:
+            for transb in [True, False]:
+                a = torch.ones(300, 300)
+                b = torch.ones(300, 300)
+                if transa:
+                    a = a.transpose(0, 1).contiguous().transpose(0, 1)
+                if transb:
+                    b = b.transpose(0, 1).contiguous().transpose(0, 1)
+                check_correctness(torch.matmul, a, b)
+        # test bmm
+        a = torch.ones(1, 1, 300)
+        b = torch.ones(1, 300, 1)
+        check_correctness(torch.bmm, a, b)
+        # test baddbmm
+        a = torch.ones(1, 1, 300)
+        b = torch.ones(1, 300, 1)
+        c = torch.ones(1, 1, 1)
+        check_correctness(torch.baddbmm, c, a, b)
+        # test mv/addmv
+        for trans in [True, False]:
+            c = torch.ones(300) * -300
+            a = torch.ones(300, 300)
+            if trans:
+                a = a.transpose(0, 1).contiguous().transpose(0, 1)
+            b = torch.ones(300)
+            check_correctness(torch.mv, a, b)
+            check_correctness(torch.addmv, c, a, b)
+        # test dot
+        a = torch.ones(300)
+        b = torch.ones(300)
+        check_correctness(torch.dot, a, b)
 
 instantiate_device_type_tests(TestLinalg, globals())
 

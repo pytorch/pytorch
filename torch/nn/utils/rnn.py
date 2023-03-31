@@ -136,7 +136,7 @@ class PackedSequence(PackedSequence_):
             return self
         else:
             # Does not forward device or dtype arg/kwargs, device is set from data.device
-            kwargs = {k : v for k, v in filter(lambda t: t[0] != 'device' and t[0] != 'dtype', kwargs.items())}
+            kwargs = dict(filter(lambda t: t[0] != 'device' and t[0] != 'dtype', kwargs.items()))
             sorted_indices = bind(self.sorted_indices, lambda t: t.to(data.device, **kwargs))
             unsorted_indices = bind(self.unsorted_indices, lambda t: t.to(data.device, **kwargs))
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
@@ -241,13 +241,17 @@ def pack_padded_sequence(
     Returns:
         a :class:`PackedSequence` object
     """
-    if torch._C._get_tracing_state() and not isinstance(lengths, torch.Tensor):
-        warnings.warn('pack_padded_sequence has been called with a Python list of '
-                      'sequence lengths. The tracer cannot track the data flow of Python '
-                      'values, and it will treat them as constants, likely rendering '
-                      'the trace incorrect for any other combination of lengths.',
-                      stacklevel=2)
-    lengths = torch.as_tensor(lengths, dtype=torch.int64)
+    if not isinstance(lengths, torch.Tensor):
+        if torch._C._get_tracing_state():
+            warnings.warn('pack_padded_sequence has been called with a Python list of '
+                          'sequence lengths. The tracer cannot track the data flow of Python '
+                          'values, and it will treat them as constants, likely rendering '
+                          'the trace incorrect for any other combination of lengths.',
+                          stacklevel=2)
+        lengths = torch.as_tensor(lengths, dtype=torch.int64)
+    else:
+        lengths = lengths.to(dtype=torch.int64)
+
     if enforce_sorted:
         sorted_indices = None
     else:
@@ -436,7 +440,7 @@ def unpad_sequence(
         padded_sequences.transpose_(0, 1)
 
     max_length = padded_sequences.shape[1]
-    idx = torch.arange(max_length)
+    idx = torch.arange(max_length, device=lengths.device)
 
     for seq, length in zip(padded_sequences, lengths):
         mask = idx < length

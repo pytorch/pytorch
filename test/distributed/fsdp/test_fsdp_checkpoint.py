@@ -116,7 +116,7 @@ class TestFSDPCheckpoint(FSDPTest):
         assert outputs
         assert models
 
-        for (l, o) in zip(losses[1:], outputs[1:]):
+        for l, o in zip(losses[1:], outputs[1:]):
             self.assertEqual(losses[0], l)
             self.assertEqual(outputs[0], o)
 
@@ -260,7 +260,7 @@ class TestFSDPCheckpoint(FSDPTest):
                             else contextlib.suppress()
                         )
                         with offload_ctx:
-                            out = checkpoint(m, inp)
+                            out = checkpoint(m, inp, use_reentrant=True)
                     else:
                         # _save_on_cpu should not be called yet
                         self.assertFalse(_save_on_cpu_called)
@@ -324,7 +324,6 @@ class TestModel(nn.Module):
 
 
 class TestFSDPCheckpointSubmodule(FSDPTest):
-
     # TODO: grad value checks occasionally fails when use_reentrant = True
     @skip_if_lt_x_gpu(2)
     @parametrize("use_reentrant", [False])
