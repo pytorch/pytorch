@@ -4726,12 +4726,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
     def test_py311_jump_offset(self):
         new_inst = bytecode_transformation.create_instruction
+        load_global = bytecode_transformation.create_load_global
         consts = (None, 1, 2, 3, 4)
 
         def create_test_code(jump_opname, target_idx):
             targets = [
-                new_inst("LOAD_CONST", 1),
-                new_inst("LOAD_CONST", 3),
+                new_inst("LOAD_CONST", argval=1),
+                new_inst("LOAD_CONST", argval=3),
             ]
             jump_to_target_inst = new_inst(jump_opname, target=targets[target_idx])
             """
@@ -4752,17 +4753,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 new_inst("RESUME", 0),
                 new_inst("JUMP_FORWARD", target=jump_to_target_inst),
                 targets[0],
-                new_inst("LOAD_GLOBAL", argval="print"),
+                load_global("print", False),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 jump_to_target_inst,
-                new_inst("LOAD_CONST", 2),
-                new_inst("LOAD_GLOBAL", argval="print"),
+                new_inst("LOAD_CONST", argval=2),
+                load_global("print", False),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 targets[1],
                 new_inst("RETURN_VALUE"),
-                new_inst("LOAD_CONST", 4),
+                new_inst("LOAD_CONST", argval=4),
                 new_inst("RETURN_VALUE"),
             ]
             code_options = collections.OrderedDict(
@@ -5229,6 +5230,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ).run(
                 prof.report()
             )
+
+    def test_guards_strip_function_call(self):
+        from torch._dynamo.guards import strip_function_call
+
+        test_case = [
+            ("___odict_getitem(a, 1)", "a"),
+            ("a.layers[slice(2)][0]._xyz", "a"),
+            ("getattr(a.layers[slice(2)][0]._abc, '0')", "a"),
+            ("getattr(getattr(a.x[3], '0'), '3')", "a"),
+            ("a.layers[slice(None, -1, None)][0]._xyz", "a"),
+            ("a.layers[func('offset', -1, None)][0]._xyz", "a"),
+        ]
+        # strip_function_call should extract the object from the string.
+        for name, expect_obj in test_case:
+            self.assertEqual(strip_function_call(name), expect_obj)
 
 
 class CustomFunc1(torch.autograd.Function):
