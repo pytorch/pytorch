@@ -88,7 +88,7 @@ def tf32_on(self, tf32_precision=1e-5):
 
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
-# allow_tf32=True, it will use reduced precision as pecified by the
+# allow_tf32=True, it will use reduced precision as specified by the
 # argument. For example:
 #    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
 #    @tf32_on_and_off(0.005)

@@ -208,5 +208,17 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         t.start()
         t.join()
 
+    def test_gather(self):
+        if dist.get_rank() == 0:
+            gather_list = [torch.empty(3, 3) for _ in range(self.world_size)]
+        else:
+            gather_list = None
+        input_tensor = torch.ones(3, 3) * dist.get_rank()
+
+        dist.gather(input_tensor, gather_list)
+        if dist.get_rank() == 0:
+            for i in range(self.world_size):
+                self.assertEqual(gather_list[i], torch.ones(3, 3) * i)
+
 if __name__ == "__main__":
     run_tests()

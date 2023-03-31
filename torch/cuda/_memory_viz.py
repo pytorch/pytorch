@@ -1071,9 +1071,11 @@ function createEvents() {
                 t.version = block_version(t.addr, false)
                 break
             case 'segment_free':
+            case 'segment_unmap':
                 t.version = segment_version(t.addr, true)
                 break;
             case 'segment_alloc':
+            case 'segment_map':
                 t.version = segment_version(t.addr, false)
                 break
             default:
@@ -1157,7 +1159,7 @@ function formatSize(num) {
 function formatEvent(event) {
     function formatAddr(event) {
         let version = event.version == 0 ? "" : `_${event.version}`
-        let prefix = (event.action == "segment_free" || event.action == "segment_alloc") ? "s" : "b"
+        let prefix = event.action.startsWith("segment") ? "s" : "b"
         return `${prefix}${event.addr.toString(16)}_${event.version}`
     }
     let stream = event.stream == 0 ? "" : `\n              (stream ${event.stream})`
@@ -1212,14 +1214,15 @@ function MemoryView(outer, stack_info, trace_data, events) {
     })
     svg.call(seg_zoom)
 
-    let segments_map = {}
+    let sorted_segments = []
     let block_map = {}
 
     let segments_data = trace_data.segments
     for (let [i, addr] of trace_data.segments.addr.entries()) {
-        segments_map[addr] = Segment(addr, segments_data.size[i], segments_data.stream[i],
-                                     null, trace_data.segment_version(addr, false))
+        sorted_segments.push(Segment(addr, segments_data.size[i], segments_data.stream[i],
+                                     null, trace_data.segment_version(addr, false)))
     }
+    sorted_segments.sort((x, y) => x.addr - y.addr)
 
     let blocks_data = trace_data.blocks
     for (let [i, addr] of trace_data.blocks.addr.entries()) {
@@ -1229,8 +1232,60 @@ function MemoryView(outer, stack_info, trace_data, events) {
     }
 
     function simulate_memory(idx) {
-        let l_segment_map = {...segments_map}
+        // create a copy of segments because we edit size properties below
+        let l_segments = sorted_segments.map((x) => { return {...x} })
         let l_block_map = {...block_map}
+
+        function map_segment(merge, seg) {
+            let idx = l_segments.findIndex(e => e.addr > seg.addr)
+            if (!merge) {
+                l_segments.splice(idx, 0, seg)
+                return
+            }
+            if (idx == -1) {
+                idx = l_segments.length
+            }
+            l_segments.splice(idx, 0, seg)
+            if (idx + 1 < l_segments.length) {
+                let next = l_segments[idx + 1]
+                if (seg.addr + seg.size == next.addr && seg.stream == next.stream) {
+                    seg.size += next.size
+                    l_segments.splice(idx + 1, 1)
+                }
+            }
+            if (idx > 0) {
+                let prev = l_segments[idx - 1]
+                if (prev.addr + prev.size == seg.addr && prev.stream == seg.stream) {
+                    prev.size += seg.size
+                    l_segments.splice(idx, 1)
+                }
+            }
+        }
+        function unmap_segment(merge, seg) {
+            if (!merge) {
+                l_segments.splice(l_segments.findIndex(x => x.addr == seg.addr), 1)
+                return
+            }
+            let seg_end = seg.addr + seg.size
+            let idx = l_segments.findIndex(e => e.addr <= seg.addr && seg_end <= e.addr + e.size)
+            let existing = l_segments[idx]
+            let existing_end = existing.addr + existing.size
+            if (existing.addr == seg.addr) {
+                existing.addr += seg.size
+                existing.size -= seg.size
+                if (existing.size == 0) {
+                    l_segments.splice(idx, 1)
+                }
+            } else if (existing_end == seg_end) {
+                existing.size -= seg.size
+            } else {
+                existing.size = seg.addr - existing.addr
+                seg.addr = seg_end
+                seg.size = existing_end - seg_end
+                l_segments.splice(idx + 1, 0, seg)
+            }
+        }
+
         for (let i = events.length - 1; i > idx; i--) {
             let event = events[i]
             switch (event.action) {
@@ -1247,14 +1302,14 @@ function MemoryView(outer, stack_info, trace_data, events) {
                     delete l_block_map[event.addr]
                     break
                 case 'segment_free':
-                    l_segment_map[event.addr] = Segment(event.addr, event.size, event.stream, event.frames_idx, event.version)
+                case 'segment_unmap':
+                    map_segment(event.action == 'segment_unmap',
+                                Segment(event.addr, event.size, event.stream, event.frames_idx, event.version))
                     break
                 case 'segment_alloc':
-                    // a pair of free/alloc on the same address is a segment expand, we want to keep it mapped
-                    // because there may still be blocks in this segment
-                    if (i == 0 || events[i - 1].action != 'segment_free' || events[i - 1].addr != event.addr) {
-                        delete l_segment_map[event.addr]
-                    }
+                case 'segment_map':
+                    unmap_segment(event.action == 'segment_map',
+                                  Segment(event.addr, event.size, event.stream, event.frames_idx, event.version))
                     break
                 case 'oom':
                     break
@@ -1263,9 +1318,8 @@ function MemoryView(outer, stack_info, trace_data, events) {
                     break
             }
         }
-        let new_segments = Object.values(l_segment_map)
         let new_blocks = Object.values(l_block_map)
-        return [new_segments, new_blocks]
+        return [l_segments, new_blocks]
     }
 
     return {
