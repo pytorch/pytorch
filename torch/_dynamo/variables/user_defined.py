@@ -20,7 +20,7 @@ from ..utils import (
     object_has_getattribute,
 )
 from .base import MutableLocal, VariableTracker
-from .misc import NullContextVariable
+from .ctx_manager import NullContextVariable
 
 
 class UserDefinedVariable(VariableTracker):
