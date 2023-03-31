@@ -7160,10 +7160,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @requires_cuda()
         def test_shape_padding_via_compile(self):
             import torch._inductor.config as inductorconfig
-            inductorconfig.shape_padding = True
+            inductorconfig.fx_shape_padding = True
+
+            inp_tensor = torch.randn(3,3)
+            
             m = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3,3))
+            
+            a = m(inp_tensor)
             m = torch.compile(m)
-            m(torch.randn(3,3))
+            b = m(inp_tensor)
+
+            assert torch.equal(a, b)
+            
         
         @requires_cuda
         def test_shape_padding_pass_standalone(self):
