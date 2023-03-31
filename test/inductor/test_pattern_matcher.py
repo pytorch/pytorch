@@ -126,6 +126,61 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
+    def test_splitwithsizes_cat(self):
+        # Good case
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], 1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        counters.clear()
+
+        # Not all getitems are passed to cat
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 8, 16], 1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            getitem_2 = split_with_sizes[2]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2 + getitem_2
+
+        args = [
+            torch.randn(2, 32, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+        counters.clear()
+
+        # Different dimensions  (TODO this case should be handled by replacing with a reshape)
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                a, [8, 8, 8, 8], 1
+            )
+            cat = torch.ops.aten.cat.default(split_with_sizes, 0)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA:
