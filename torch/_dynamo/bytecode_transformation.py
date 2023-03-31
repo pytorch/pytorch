@@ -482,16 +482,32 @@ def get_const_index(code_options, val):
     return len(code_options["co_consts"]) - 1
 
 
-def fix_vars(instructions: List[Instruction], code_options):
+def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=None):
     # compute instruction arg from argval if arg is not provided
-    varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
-    freenames = {
-        name: idx
-        for idx, name in enumerate(
-            code_options["co_cellvars"] + code_options["co_freevars"]
-        )
-    }
+    if sys.version_info < (3, 11):
+        assert varname_from_oparg is None
+        varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
+        freenames = {
+            name: idx
+            for idx, name in enumerate(
+                code_options["co_cellvars"] + code_options["co_freevars"]
+            )
+        }
+    else:
+        assert callable(varname_from_oparg)
+        allnames = {}
+        for idx in itertools.count():
+            try:
+                name = varname_from_oparg(idx)
+                allnames[name] = idx
+            except IndexError:
+                break
+        varnames = {name: allnames[name] for name in code_options["co_varnames"]}
+        freenames = {
+            name: allnames[name]
+            for name in code_options["co_cellvars"] + code_options["co_freevars"]
+        }
     for i in range(len(instructions)):
 
         def should_compute_arg():
@@ -577,7 +593,13 @@ def transform_code_object(code, transformations, safe=False):
 def clean_and_assemble_instructions(
     instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
 ) -> Tuple[List[Instruction], types.CodeType]:
-    fix_vars(instructions, code_options)
+    code_options["co_nlocals"] = len(code_options["co_varnames"])
+    varname_from_oparg = None
+    if sys.version_info >= (3, 11):
+        # temporary code object with updated names
+        tmp_code = types.CodeType(*[code_options[k] for k in keys])
+        varname_from_oparg = tmp_code._varname_from_oparg
+    fix_vars(instructions, code_options, varname_from_oparg=varname_from_oparg)
 
     dirty = True
     while dirty:
@@ -594,7 +616,6 @@ def clean_and_assemble_instructions(
         code_options["co_linetable"] = lnotab
 
     code_options["co_code"] = bytecode
-    code_options["co_nlocals"] = len(code_options["co_varnames"])
     code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
         "co_posonlyargcount"
