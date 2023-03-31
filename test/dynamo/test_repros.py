@@ -6,6 +6,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
+import functools
 import inspect
 import itertools
 import random
@@ -26,11 +27,6 @@ import torch._dynamo.utils
 import torch._functorch.config
 import torch.library
 
-try:
-    from test_minifier import requires_cuda
-except ImportError:
-    from .test_minifier import requires_cuda
-
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
@@ -44,6 +40,11 @@ _orig_module_call = torch.nn.Module.__call__
 lib = torch.library.Library("test_sample", "DEF")
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
+
+
+requires_cuda = functools.partial(
+    unittest.skipIf, not torch.cuda.is_available(), "requires cuda"
+)
 
 
 def is_fx_tracing_test() -> bool:
