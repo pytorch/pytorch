@@ -1302,8 +1302,8 @@ def main():
         x for x in selected_tests if x not in selected_tests_parallel
     ]
     print_to_stderr(
-        "parallel (file granularity) tests:\n {}".format(
-            "\n ".join(str(x) for x in selected_tests_parallel)
+        "parallel (file granularity) tests ({} procs):\n {}".format(
+            NUM_PROCS, "\n ".join(str(x) for x in selected_tests_parallel)
         )
     )
     print_to_stderr(
