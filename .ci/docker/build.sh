@@ -260,6 +260,7 @@ case "$image" in
     if [[ "$image" == *rocm* ]]; then
       extract_version_from_image_name rocm ROCM_VERSION
       NINJA_VERSION=1.9.0
+      CONDA_CMAKE=yes
     fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2
