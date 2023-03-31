@@ -1416,7 +1416,8 @@ class CUDAGraphTreeManager:
             device, state, stale_storages, live_storages_weak_refs
         )
 
-        for ptr in ptrs_to_deallocate:
+        # NB: deduplicate aliased outputs
+        for ptr in set(ptrs_to_deallocate):
             torch._C._cuda_cudaCachingAllocator_raw_delete(ptr)
 
         # Now the live blocks should be exactly equal to the live storages in private pool
