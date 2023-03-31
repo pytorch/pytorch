@@ -1168,6 +1168,10 @@ class CUDAGraphTreeManager:
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
+
+        if function_id == 0:
+            breakpoint()
+
         if self.in_recording:
             self.try_end_curr_recording()
 
@@ -1228,6 +1232,7 @@ class CUDAGraphTreeManager:
 
     def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
         torch.cuda.synchronize()
+        print(f"Recording {function_id}")
         node = CUDAGraphNode(
             self.ids_to_funcs[function_id],
             self.new_graph_id(),
@@ -1327,9 +1332,8 @@ class CUDAGraphTreeManager:
         return GenerationTracker.generation
 
     def can_start_new_generation(self) -> bool:
-        if self.forwards_with_pending_backwards != 0:
-            return False
-
+        # if self.forwards_with_pending_backwards != 0:
+        #     return False
         return self.current_gen != self.get_curr_generation()
 
     def try_end_curr_recording(self) -> None:
@@ -1382,10 +1386,11 @@ class CUDAGraphTreeManager:
     def dealloc_current_path_weakrefs(self):
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
+        deleted = set()
         for t, stack_trace in self.current_node.path_live_weakrefs_and_stacktraces():
-            # TODO: dont need to test t(), but would need to deduplicate storages
-            if t():
+            if t() and t() not in deleted:
                 torch._C._free_And_Remove_DeleterFn(t())
+                deleted.add(t())
                 stack_trace = (
                     stack_trace.strip()
                     if stack_trace
