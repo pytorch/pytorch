@@ -6972,9 +6972,9 @@ if HAS_CPU and not torch.backends.mps.is_available():
                     metrics.reset()
                     x = torch.randn(64, 58, 28, 28)
                     opt_fn = torch._dynamo.optimize("inductor")(channel_shuffle)
-                    same(channel_shuffle(x, 2), opt_fn(x, 2))
+                    assert same(channel_shuffle(x, 2), opt_fn(x, 2))
                     if simdlen != 1:
-                        assert metrics.generated_cpp_vec_kernel_count == 1
+                        assert metrics.generated_cpp_vec_kernel_count == 2
 
         @slow()
         @unittest.skipIf(
