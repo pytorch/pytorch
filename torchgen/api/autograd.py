@@ -344,6 +344,7 @@ def gen_foreach_derivativeinfo(
     for function_schema in functional_info_by_signature:
         if not is_reference_for_foreach(foreach_function, function_schema):
             continue
+        # TODO(crcrpar): Avoid hard coding "Default" ideally.
         if function_schema in differentiability_infos:
             ref_diff_info = differentiability_infos[function_schema]["Default"]
         elif (
@@ -505,7 +506,7 @@ def match_differentiability_info(
         # (2) If no exact match, check if the out-of-place variant
         # of this operator has a match.
         # i.e mul() for mul_() or mul_out()
-        # Check foreach or not because in-place foreach functions use backward defined for the existing
+        # note(crcrpar): Check foreach or not because in-place foreach functions use backward defined for the existing
         # native functions instead of the out-place counterparts.
         f_sig = f.func.signature(strip_default=True)
         if f_sig in functional_info_by_signature and not is_foreach_func(f):
@@ -530,13 +531,15 @@ Attempted to convert a derivative formula for a mutable operator
 
         # (4) Generate derivative information of foreach functions if none is defined in `derivatives.yaml`
         if is_foreach_func(f):
+            assert f.func not in differentiability_infos
             diff_info, is_generated = gen_foreach_derivativeinfo(
                 f, differentiability_infos, functional_info_by_signature
             )
             if diff_info is None:
                 return None, False
+            # TODO(crcrpar): Avoid hard coding "Default" ideally.
             diff_info_dict = {"Default": diff_info}
-            if is_generated and f.func not in differentiability_infos:
+            if is_generated:
                 differentiability_infos[f.func] = diff_info_dict
                 functional_info_by_signature[f.func] = diff_info_dict
             return diff_info_dict, is_generated
