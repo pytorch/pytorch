@@ -928,9 +928,10 @@ def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
             "triton_pointwise",
             "triton_reduction",
             "triton_persistent_reduction",
+            "triton_unknown",
             "unknown",
         ]
-        assert set(all_events.keys()).issubset(set(category_list))
+        assert set(all_events.keys()).issubset(set(category_list)), f"{list(all_events.keys())}"
 
         per_category_wall_time = {}
         total_cuda_ms = 0.0
