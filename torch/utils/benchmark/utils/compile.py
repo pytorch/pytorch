@@ -112,21 +112,8 @@ if HAS_TABULATE:
         It also tries out all the main backends and prints a table of results so you can easily compare them all
         Many of the backendds have their own optional dependencies so please pip install them seperately
 
-        The tables will look like the below, one for inference and one for training
+        You will get one table for inference and another for training
         If you'd like to leverage this utility for training make sure to pass in a torch.optim.Optimizer
-
-        | Train/Inference   | Backend         | Mode            | Compilation Time      |   Average Running Time | Speedup            |
-        |-------------------|-----------------|-----------------|-----------------------|------------------------|--------------------|
-        | Inference         | Eager           | -               | -                     |            0.000146246 | -                  |
-        | Inference         | aot_ts_nvfuser  | -               | 0.014810323715209961  |            0.000166035 | 0.8808156232050546 |
-        | Inference         | cudagraphs      | -               | 0.013611078262329102  |            0.000135565 | 1.0787900105522334 |
-        | Inference         | inductor        | reduce-overhead | 0.002624988555908203  |            0.000135946 | 1.07576289021396   |
-        | Inference         | inductor        | max-autotune    | 0.0026438236236572266 |            0.000134993 | 1.0833627693394559 |
-        | Inference         | inductor        |                 | 0.0025985240936279297 |            0.00013566  | 1.0780316344463972 |
-        | Inference         | ipex            | -               | 0.0026051998138427734 |            0.000132751 | 1.1016522988505748 |
-        | Inference         | nvprims_nvfuser | -               | 0.002631664276123047  |            0.000132751 | 1.1016522988505748 |
-        | Inference         | onnxrt          | -               | 0.0026395320892333984 |            0.000138378 | 1.0568573397656789 |
-        | Inference         | tvm             | -               | 0.0026519298553466797 |            0.000141668 | 1.032312352743184  |
 
         The important warnings are
         Your GPU supports tensor cores
@@ -172,7 +159,8 @@ if HAS_TABULATE:
 
             else:
                 torch._dynamo.reset()
-                compilation_time, running_time = benchmark_compile(model, sample_input, num_iters, backend, None, optimizer, loss_fn)
+                compilation_time, running_time = benchmark_compile(
+                    model, sample_input, num_iters, backend, None, optimizer, loss_fn)
 
                 if running_time is not None:
                     speedup = eager_time / running_time

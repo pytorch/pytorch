@@ -11,7 +11,7 @@ import unittest
 # CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
 try:
-    import tabulate # type: ignore[import]
+    import tabulate  # noqa: F401  # type: ignore[import]
     from torch.utils.benchmark.utils.compile import bench_all
     HAS_TABULATE = True
 except ImportError:
