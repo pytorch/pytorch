@@ -82,6 +82,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   template <typename T>
+  inline T* data() const {
+    return unsafe_data<T>();
+  }
+
+  template <typename T>
   inline T* unsafe_data() const {
     return static_cast<T*>(data_ptr_.get());
   }
