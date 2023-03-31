@@ -310,7 +310,7 @@ class WrapperCodeGen(CodeGen):
         codegen_args,
         cpp_op_schema,
         cpp_kernel_key,
-        cpp_kernel_overlad_name="",
+        cpp_kernel_overload_name="",
     ):
         self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
 
@@ -938,7 +938,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         codegen_args,
         cpp_op_schema,
         cpp_kernel_key,
-        cpp_kernel_overlad_name="",
+        cpp_kernel_overload_name="",
     ):
         if cpp_kernel_key not in self.extern_call_ops:
             self.writeline(
@@ -947,7 +947,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     c10::Dispatcher::singleton()
         .findSchemaOrThrow(
             \"{cpp_kernel}\",
-            \"{cpp_kernel_overlad_name}\")
+            \"{cpp_kernel_overload_name}\")
         .typed<{cpp_op_schema}>();
             """
             )
