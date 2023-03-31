@@ -99,7 +99,7 @@ void gemm_grouped_cuda_internal(
   // Number of gmm args not including *problem_sizes
   at::Tensor gmm_args = at::empty(
       {problem_count * 6 + gemm_coord_size},
-      at::TensorOptions().dtype(at::kLong).pinned_memory(true));
+      at::TensorOptions().dtype(at::kLong));
 
   // Obtain pointers for each argument (on host)
   int64_t* lda_data = gmm_args.data_ptr<int64_t>(); // Base pointer
@@ -124,6 +124,7 @@ void gemm_grouped_cuda_internal(
   const int threadblock_count =
       GemmGrouped::sufficient(problem_sizes_data, problem_count);
 
+  gmm_args.pin_memory();
   // Transfer arguments to GPU
   gmm_args = gmm_args.to(device, true);
 
@@ -184,6 +185,8 @@ bool group_gemm_dispatch(
     const std::vector<int64_t>& ldb,
     const std::vector<int64_t>& ldd,
     std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
+    bool a_is_row_major,
+    bool b_is_row_major,
     int64_t ntensors) {
   return false;
 }
@@ -198,20 +201,81 @@ bool group_gemm_dispatch(
     const std::vector<int64_t>& ldb,
     const std::vector<int64_t>& ldd,
     std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
+    bool a_is_row_major,
+    bool b_is_row_major,
     int64_t ntensors) {
 
-  gemm_grouped_cuda_internal<
-      float,
-      1,
-      cutlass::layout::RowMajor,
-      cutlass::layout::RowMajor,
-      cutlass::arch::OpClassSimt,
-      cutlass::arch::Sm80,
-      cutlass::gemm::GemmShape<128, 128, 8>,
-      cutlass::gemm::GemmShape<64, 32, 8>,
-      cutlass::gemm::GemmShape<1, 1, 1>>(
-      lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-  return true;
+  // Check alignment
+  bool all_pad_8 = true;
+  for (int i = 0; i < ntensors; i++) {
+    all_pad_8 = all_pad_8 && (gemm_sizes[i].n() % 8 == 0);
+    all_pad_8 = all_pad_8 && (gemm_sizes[i].k() % 8 == 0);
+
+    // Not sure if this is a requirement, on the safe side
+    all_pad_8 = all_pad_8 && (lda[i] % 8 == 0);
+    all_pad_8 = all_pad_8 && (ldb[i] % 8 == 0);
+    all_pad_8 = all_pad_8 && (ldd[i] % 8 == 0);
+  }
+
+  if (all_pad_8) {
+    if (a_is_row_major && b_is_row_major) {
+      gemm_grouped_cuda_internal<
+          float,
+          4,
+          cutlass::layout::RowMajor,
+          cutlass::layout::RowMajor,
+          cutlass::arch::OpClassTensorOp,
+          cutlass::arch::Sm80,
+          cutlass::gemm::GemmShape<128, 128, 16>,
+          cutlass::gemm::GemmShape<64, 64, 16>,
+          cutlass::gemm::GemmShape<16, 8, 8>>(
+          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+      return true;
+    }
+    if (a_is_row_major && !b_is_row_major) {
+      gemm_grouped_cuda_internal<
+          float,
+          4,
+          cutlass::layout::RowMajor,
+          cutlass::layout::ColumnMajor,
+          cutlass::arch::OpClassTensorOp,
+          cutlass::arch::Sm80,
+          cutlass::gemm::GemmShape<128, 128, 16>,
+          cutlass::gemm::GemmShape<64, 64, 16>,
+          cutlass::gemm::GemmShape<16, 8, 8>>(
+          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+      return true;
+    }
+  }
+  if (a_is_row_major && b_is_row_major) {
+    gemm_grouped_cuda_internal<
+        float,
+        1,
+        cutlass::layout::RowMajor,
+        cutlass::layout::RowMajor,
+        cutlass::arch::OpClassSimt,
+        cutlass::arch::Sm80,
+        cutlass::gemm::GemmShape<128, 128, 8>,
+        cutlass::gemm::GemmShape<64, 32, 8>,
+        cutlass::gemm::GemmShape<1, 1, 1>>(
+        lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+    return true;
+  }
+  if (a_is_row_major && !b_is_row_major) {
+    gemm_grouped_cuda_internal<
+        float,
+        1,
+        cutlass::layout::RowMajor,
+        cutlass::layout::ColumnMajor,
+        cutlass::arch::OpClassSimt,
+        cutlass::arch::Sm80,
+        cutlass::gemm::GemmShape<128, 128, 8>,
+        cutlass::gemm::GemmShape<64, 32, 8>,
+        cutlass::gemm::GemmShape<1, 1, 1>>(
+        lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+    return true;
+  }
+  return false;
 }
 
 template <>
@@ -224,6 +288,8 @@ bool group_gemm_dispatch(
     const std::vector<int64_t>& ldb,
     const std::vector<int64_t>& ldd,
     std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
+    bool a_is_row_major,
+    bool b_is_row_major,
     int64_t ntensors) {
 
   // Check alignment
@@ -247,31 +313,63 @@ bool group_gemm_dispatch(
     dptr.push_back(reinterpret_cast<cutlass::half_t*>(dptr_[i]));
   }
   if (all_pad_8) {
-    gemm_grouped_cuda_internal<
-        cutlass::half_t,
-        8,
-        cutlass::layout::RowMajor,
-        cutlass::layout::RowMajor,
-        cutlass::arch::OpClassTensorOp,
-        cutlass::arch::Sm80,
-        cutlass::gemm::GemmShape<128, 128, 32>,
-        cutlass::gemm::GemmShape<64, 64, 32>,
-        cutlass::gemm::GemmShape<16, 8, 16>>(
-        lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-    return true;
+    if (a_is_row_major && b_is_row_major) {
+      gemm_grouped_cuda_internal<
+          cutlass::half_t,
+          8,
+          cutlass::layout::RowMajor,
+          cutlass::layout::RowMajor,
+          cutlass::arch::OpClassTensorOp,
+          cutlass::arch::Sm80,
+          cutlass::gemm::GemmShape<128, 128, 32>,
+          cutlass::gemm::GemmShape<64, 64, 32>,
+          cutlass::gemm::GemmShape<16, 8, 16>>(
+          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+      return true;
+    }
+    if (a_is_row_major && !b_is_row_major) {
+      gemm_grouped_cuda_internal<
+          cutlass::half_t,
+          8,
+          cutlass::layout::RowMajor,
+          cutlass::layout::ColumnMajor,
+          cutlass::arch::OpClassTensorOp,
+          cutlass::arch::Sm80,
+          cutlass::gemm::GemmShape<128, 128, 32>,
+          cutlass::gemm::GemmShape<64, 64, 32>,
+          cutlass::gemm::GemmShape<16, 8, 16>>(
+          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+      return true;
+    }
   } else {
-    gemm_grouped_cuda_internal<
-        cutlass::half_t,
-        1,
-        cutlass::layout::RowMajor,
-        cutlass::layout::RowMajor,
-        cutlass::arch::OpClassSimt,
-        cutlass::arch::Sm80,
-        cutlass::gemm::GemmShape<128, 128, 8>,
-        cutlass::gemm::GemmShape<64, 32, 8>,
-        cutlass::gemm::GemmShape<1, 1, 1>>(
-        lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-    return true;
+    if (a_is_row_major && b_is_row_major) {
+      gemm_grouped_cuda_internal<
+          cutlass::half_t,
+          1,
+          cutlass::layout::RowMajor,
+          cutlass::layout::RowMajor,
+          cutlass::arch::OpClassSimt,
+          cutlass::arch::Sm80,
+          cutlass::gemm::GemmShape<128, 128, 8>,
+          cutlass::gemm::GemmShape<64, 32, 8>,
+          cutlass::gemm::GemmShape<1, 1, 1>>(
+          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+      return true;
+    }
+    if (a_is_row_major && !b_is_row_major) {
+      gemm_grouped_cuda_internal<
+          cutlass::half_t,
+          1,
+          cutlass::layout::RowMajor,
+          cutlass::layout::ColumnMajor,
+          cutlass::arch::OpClassSimt,
+          cutlass::arch::Sm80,
+          cutlass::gemm::GemmShape<128, 128, 8>,
+          cutlass::gemm::GemmShape<64, 32, 8>,
+          cutlass::gemm::GemmShape<1, 1, 1>>(
+          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+      return true;
+    }
   }
   // Did not perform GEMM
   return false;
@@ -358,7 +456,10 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
         std::vector<int64_t> ldb(ntensors);
         std::vector<int64_t> ldd(ntensors);
         std::vector<cutlass::gemm::GemmCoord> gemm_sizes;
-        bool all_row_major = true;
+        bool self_row_major = true;
+        bool mat2_row_major = true;
+        bool self_column_major = true;
+        bool mat2_column_major = true;
         for (int64_t i = 0; i < ntensors; i++) {
           const IntArrayRef& self_shape = self_sizes[i];
           const IntArrayRef& mat2_shape = mat2_sizes[i];
@@ -371,17 +472,35 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
           aptr[i] = self_buffer.data_ptr<scalar_t>() + self_offsets_ptr[i];
           bptr[i] = mat2_buffer.data_ptr<scalar_t>() + mat2_offsets_ptr[i];
           dptr[i] = out_buffer.data_ptr<scalar_t>() + out_offsets_ptr[i];
-          all_row_major = all_row_major && (self_strides[i][1] == 1);
-          all_row_major = all_row_major && (mat2_strides[i][1] == 1);
-          lda[i] = self_strides[i][0];
-          ldb[i] = mat2_strides[i][0];
+
+          self_row_major = self_row_major && (self_strides[i][1] == 1);
+          self_column_major = self_column_major && (self_strides[i][0] == 1);
+
+          mat2_row_major = mat2_row_major && (mat2_strides[i][1] == 1);
+          mat2_column_major = mat2_column_major && (mat2_strides[i][0] == 1);
+
           ldd[i] = mat2_size1;
         }
-        auto dprops = at::cuda::getCurrentDeviceProperties();
-        bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-        if (all_row_major &&
-            self.is_contiguous() &&
-            mat2.is_contiguous() &&
+
+        for (int64_t i = 0; i < ntensors; i++) {
+
+          if (self_row_major) {
+            lda[i] = self_strides[i][0];
+          }
+          if (self_column_major) {
+            lda[i] = self_strides[i][1];
+          }
+
+          if (mat2_row_major) {
+            ldb[i] = mat2_strides[i][0];
+          }
+          if (mat2_column_major) {
+            ldb[i] = mat2_strides[i][1];
+          }
+        }
+         bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
+        if ((self_row_major || self_column_major) &&
+            (mat2_row_major || mat2_column_major) &&
             is_sm8x) {
           success = group_gemm_dispatch<scalar_t>(
               output.device(),
@@ -392,6 +511,8 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
               ldb,
               ldd,
               gemm_sizes,
+              self_row_major,
+              mat2_row_major,
               ntensors);
         }
       });
