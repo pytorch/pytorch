@@ -113,6 +113,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.NamedTupleVariable(
                 items, self.value, **VariableTracker.propagate(self, items)
             )
+        elif variables.EphemeralNNModule.can_use(self.value, args, kwargs):
+            return variables.EphemeralNNModule(
+                self.value,
+                [v.as_python_constant() for v in args],
+                {k: v.as_python_constant() for k, v in kwargs.items()},
+                **options,
+            )
         elif (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
             and SideEffects.cls_supports_mutation_side_effects(self.value)

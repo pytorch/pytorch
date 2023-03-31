@@ -1,6 +1,7 @@
 import collections
 import functools
 import inspect
+import sys
 import types
 from typing import Dict, List
 
@@ -11,7 +12,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource
+from ..source import AttrSource, ODictGetItemSource, SuperSource
 from ..utils import check_constant_args, identity, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
 from .functions import (
@@ -77,6 +78,20 @@ class SuperVariable(VariableTracker):
             return variables.UserMethodVariable(
                 inner_fn.__func__, self.objvar, source=source, **options
             ).call_function(tx, args, kwargs)
+        elif (
+            inner_fn is collections.OrderedDict.__getitem__
+            and isinstance(self.objvar, variables.UserDefinedObjectVariable)
+            and self.objvar.source
+            and len(args) == 1
+            and len(kwargs) == 0
+            and args[0].is_python_constant()
+        ):
+            from .builder import VariableBuilder
+
+            key = args[0].as_python_constant()
+            return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
+                collections.OrderedDict.__getitem__(self.objvar.value, key)
+            )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -199,9 +214,7 @@ class ContextWrappingVariable(VariableTracker):
         assert len(args) == 1
         if isinstance(args[0], NestedUserFunctionVariable):
             args[0] = UserFunctionVariable(args[0].get_function())
-        assert isinstance(args[0], UserMethodVariable) or isinstance(
-            args[0], UserFunctionVariable
-        )
+        assert isinstance(args[0], (UserMethodVariable, UserFunctionVariable))
 
         if isinstance(args[0], UserMethodVariable):
             return WrappedUserMethodVariable(args[0], self)
