@@ -3,7 +3,7 @@ import torch
 def needs_padding(args):
   
   for arg in args:
-    size = arg.meta['val'].shape
+    size = arg.meta["val"].shape
     for i in size:
       if i % get_alignment_size(i) or i < 512:
         return False
