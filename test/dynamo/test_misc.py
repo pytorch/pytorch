@@ -4406,9 +4406,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, y)
 
         if torch._dynamo.config.dynamic_shapes:
-            self.assertEqual(len(all_guards), 13)
+            self.assertEqual(len(all_guards), 17)
         else:
-            self.assertEqual(len(all_guards), 9)
+            self.assertEqual(len(all_guards), 13)
         for guard in all_guards:
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
@@ -5230,6 +5230,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ).run(
                 prof.report()
             )
+
+    def test_guards_strip_function_call(self):
+        from torch._dynamo.guards import strip_function_call
+
+        test_case = [
+            ("___odict_getitem(a, 1)", "a"),
+            ("a.layers[slice(2)][0]._xyz", "a"),
+            ("getattr(a.layers[slice(2)][0]._abc, '0')", "a"),
+            ("getattr(getattr(a.x[3], '0'), '3')", "a"),
+            ("a.layers[slice(None, -1, None)][0]._xyz", "a"),
+            ("a.layers[func('offset', -1, None)][0]._xyz", "a"),
+        ]
+        # strip_function_call should extract the object from the string.
+        for name, expect_obj in test_case:
+            self.assertEqual(strip_function_call(name), expect_obj)
 
 
 class CustomFunc1(torch.autograd.Function):

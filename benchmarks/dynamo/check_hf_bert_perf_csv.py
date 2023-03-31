@@ -18,7 +18,8 @@ def check_hf_bert_perf_csv(filename):
         speedup = row["speedup"]
         # Reduce from 1.165 to 1.160, see https://github.com/pytorch/pytorch/issues/96530
         # Reduce from 1.160 to 1.140 after a transformer version upgrade, see https://github.com/pytorch/benchmark/pull/1406
-        if speedup < 1.140:
+        # The speedup is not backed to 1.16 after the extra graph break issue is fixed in transformer upstream
+        if speedup < 1.150:
             failed.append(model_name)
 
         print(f"{model_name:34} {speedup}")
