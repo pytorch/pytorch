@@ -379,12 +379,7 @@ def break_graph_if_unsupported(*, push):
                 kw_names = self.kw_names.value if self.kw_names is not None else ()
                 if len(kw_names) > 0:
                     self.output.add_output_instructions(
-                        [
-                            create_instruction(
-                                "KW_NAMES",
-                                PyCodegen.get_const_index(self.code_options, kw_names),
-                            ),
-                        ]
+                        [create_instruction("KW_NAMES", argval=kw_names)]
                     )
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
