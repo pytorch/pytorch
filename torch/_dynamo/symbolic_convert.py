@@ -59,6 +59,7 @@ from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable, EnumVariable
+from .variables.ctx_manager import ContextWrappingVariable, WithExitFunctionVariable
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
@@ -75,12 +76,10 @@ from .variables.lists import (
 )
 from .variables.misc import (
     ClosureVariable,
-    ContextWrappingVariable,
     GetAttrVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
-    WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
