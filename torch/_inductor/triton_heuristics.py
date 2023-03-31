@@ -662,6 +662,15 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 Config({"XBLOCK": 512}, num_warps=2, num_stages=1),
                 # improve 1.016x for https://gist.github.com/shunting314/a5e6ee5cf8700ad3d43ec6853db4b236
                 Config({"XBLOCK": 512}, num_warps=4, num_stages=1),
+                # improve 1.02x for
+                #   https://gist.github.com/shunting314/deecb85f7b15d5cd3331de589c230df2,
+                #   https://gist.github.com/shunting314/07a541af896b7f4f099a1195419e407f,
+                #   https://gist.github.com/shunting314/cfdd0c07479de3afdd415636e72b9e04
+                Config({"XBLOCK": 512}, num_warps=1, num_stages=1),
+                # improve 1.012x for https://gist.github.com/shunting314/3c2df5cb11062195203afab3f6b08c4d 
+                Config({"XBLOCK": 256}, num_warps=2, num_stages=1),
+                # improve 1.011x for https://gist.github.com/shunting314/600ecb80dc7339be4f08bea75c40cdbd
+                Config({"XBLOCK": 512}, num_warps=8, num_stages=1),
             ])
         return cached_autotune(configs, meta=meta, filename=filename)
     if len(size_hints) == 2:
@@ -747,6 +756,8 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 Config({"XBLOCK": 2, "RBLOCK": 1024}, num_warps=8, num_stages=1),
                 # imporve 1.035x for https://gist.github.com/shunting314/5258e534ce028871a5b0d1be9033f67c
                 Config({"XBLOCK": 2, "RBLOCK": 256}, num_warps=8, num_stages=1),
+                # improve 1.014x for https://gist.github.com/shunting314/fd73b6ce32e8fd3ebd9d3c7a8a5e9995
+                Config({"XBLOCK": 2, "RBLOCK": 512}, num_warps=8, num_stages=1),
             ],
             meta=meta,
             filename=filename,
