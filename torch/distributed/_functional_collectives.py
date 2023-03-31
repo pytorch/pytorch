@@ -105,7 +105,7 @@ class AsyncCollectiveTensor(torch.Tensor):
     Use it inside functional collective pytorch wrappers like the following:
     def functional_collective(self, group, tag):
         tag, rankset, group_size = _expand_group(group, tag)
-        tensor = torch._C._dist.{collective}(self, tag, rankset, group_size)
+        tensor = torch._C._nn.{collective}(self, tag, rankset, group_size)
         res = AsyncCollectiveTensor(tensor)
         _register_wrapper_tensor(res, tensor)
         return res
@@ -254,7 +254,7 @@ def wait_tensor(tensor):
 
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
-    return torch._C._dist.wait_tensor(tensor)  # type: ignore[attr-defined]
+    return torch._C._nn.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
@@ -275,7 +275,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch._C._dist.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+    tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     res = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     return res
@@ -307,9 +307,7 @@ def reduce_scatter_tensor(
     assert (
         self.size(0) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
-    tensor = torch._C._dist.reduce_scatter_tensor(  # type: ignore[attr-defined]
-        self, reduceOp, scatter_dim, tag, rankset, group_size
-    )
+    tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, scatter_dim, tag, rankset, group_size)  # type: ignore[attr-defined]
     res = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     return res
