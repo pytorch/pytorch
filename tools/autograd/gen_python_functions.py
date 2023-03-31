@@ -239,6 +239,10 @@ def is_py_special_function(f: NativeFunction) -> bool:
     return f.python_module == "special"
 
 
+def is_py_dist_function(f: NativeFunction) -> bool:
+    return f.python_module == "dist"
+
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                            Main Function
@@ -343,6 +347,15 @@ def gen(
         "python_special_functions.cpp",
         method=False,
         symint=symint,
+    )
+
+    create_python_bindings(
+        fm,
+        functions,
+        is_py_dist_function,
+        "torch.distributed.functional",
+        "python_dist_functions.cpp",
+        method=False,
     )
 
     # Currently, we only use `functions` to generate `return_types` bindings.
@@ -902,6 +915,7 @@ if(check_has_torch_function(self_)) {{
             "torch.nested": "THPNestedVariableFunctionsModule",
             "torch.sparse": "THPSparseVariableFunctionsModule",
             "torch.special": "THPSpecialVariableFunctionsModule",
+            "torch.distributed.functional": "THPDistVariableFunctionsModule",
         }[module]
         if module
         else "THPVariableClass"
