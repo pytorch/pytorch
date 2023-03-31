@@ -842,9 +842,9 @@ def _maybe_insert_observers_before_graph_output(
 
     def _recursive_maybe_replace_node_with_obs(
         maybe_node: Argument,
-        model: torch.nn.Module,
         target_dtype: torch.dtype,
         node_name_to_qconfig: Dict[str, QConfigAny],
+        model: torch.nn.Module,
         named_modules: Dict[str, torch.nn.Module],
         graph: Graph,
     ) -> Argument:
@@ -886,7 +886,7 @@ def _maybe_insert_observers_before_graph_output(
             results = []
             for inner_node in maybe_node:
                 results.append(_recursive_maybe_replace_node_with_obs(
-                    inner_node, model, target_dtype, node_name_to_qconfig, named_modules, graph))
+                    inner_node, target_dtype, node_name_to_qconfig, model, named_modules, graph))
             if isinstance(maybe_node, list):
                 return results
             else:
@@ -895,7 +895,7 @@ def _maybe_insert_observers_before_graph_output(
             results_dict = {}
             for k, inner_v in maybe_node.items():
                 results_dict[k] = _recursive_maybe_replace_node_with_obs(
-                    inner_v, model, target_dtype, node_name_to_qconfig, named_modules, graph)
+                    inner_v, target_dtype, node_name_to_qconfig, model, named_modules, graph)
             return results_dict
         else:
             return results
@@ -904,7 +904,7 @@ def _maybe_insert_observers_before_graph_output(
     for old_arg in graph_output_node.args:
         new_args.append(
             _recursive_maybe_replace_node_with_obs(
-                old_arg, model, output_target_dtype, node_name_to_qconfig, named_modules, graph))
+                old_arg, output_target_dtype, node_name_to_qconfig, model, named_modules, graph))
 
     graph_output_node.args = tuple(new_args)  # type: ignore[assignment]
 
@@ -1212,12 +1212,6 @@ def insert_observers_for_model(
                     "output_act_obs_or_fq_ctr": None,
                 }
         elif node.op == "output" and output_node_to_output_index[node] in output_quantized_idxs:
-            # TODO(future PR): update the output_quantized_idxs API to match
-            # arbitrary data structures. There is always a single output, and
-            # that output can have arbitrary nesting of values. List[int] is
-            # not the right data type for this.
-
-            # TODO(future PR): support more dtypes in model outputs, if necessary
             node.meta["target_dtype_info"] = copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
     # Step 2.2, for nodes with known input dtypes, propagate them throughout the
