@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import traceback
 import types
+import unittest
 from copy import deepcopy
 from typing import Tuple
 from unittest.mock import patch
@@ -1056,6 +1058,40 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_lazy_module3(self):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # move to cuda and second iteration
+        m = m.to("cuda")
+        x = x.to("cuda")
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_lazy_module4(self):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # input shape changed and second iteration
+        x = torch.rand([20, 20])
+        try:
+            opt_m(x)
+        except RuntimeError:
+            self.assertIn("must have same reduction dim", traceback.format_exc())
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):

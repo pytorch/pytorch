@@ -1191,7 +1191,7 @@ def get_fake_value(node, tx):
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
 
-        if is_lazy_module(nnmodule):
+        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it
             nnmodule._infer_parameters(nnmodule, args)

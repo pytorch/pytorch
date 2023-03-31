@@ -103,6 +103,16 @@ unittest.expectedFailure(
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
 )
 
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module3_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module4_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

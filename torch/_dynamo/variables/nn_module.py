@@ -259,11 +259,12 @@ class NNModuleVariable(VariableTracker):
                 elif is_lazy:
                     # Initialize lazy module eagerly to reduce graph breaks.
                     assert len(kwargs) == 0
-                    input = [
-                        get_fake_value(x.node, tx)
-                        for x in proxy_args_kwargs(args, {})[0]
-                    ]
-                    mod._infer_parameters(mod, input)
+                    if hasattr(mod, "_initialize_hook"):
+                        input = [
+                            get_fake_value(x.node, tx)
+                            for x in proxy_args_kwargs(args, {})[0]
+                        ]
+                        mod._infer_parameters(mod, input)
                     fn = mod.__call__
                 else:
                     fn = mod.__call__
