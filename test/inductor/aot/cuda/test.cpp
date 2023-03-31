@@ -4,7 +4,7 @@
 
 #include <torch/torch.h>
 
-extern std::vector<at::Tensor> aot_inductor_entry(const std::vector<at::Tensor>& args);
+extern std::vector<at::Tensor> inductor_cpp_entry(const std::vector<at::Tensor>& args);
 
 /*
 class Net(torch.nn.Module):
@@ -38,7 +38,7 @@ int main() {
       inputs.push_back(pair.value());
     }
     inputs.push_back(x);
-    auto results_opt = aot_inductor_entry(inputs);
+    auto results_opt = inductor_cpp_entry(inputs);
 
     assert(torch::allclose(results_ref, results_opt[0]));
     printf("PASS\n");
