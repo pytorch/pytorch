@@ -1751,16 +1751,16 @@ class ShapeEnv:
         if isinstance(expr, sympy.Eq) and isinstance(expr.lhs, FloorDiv):
             numerator, denominator = expr.lhs.args
             expr = sympy.And(
-                sympy.Ge(numerator, (expr.rhs * denominator)),  # type: ignore
-                sympy.Lt(numerator, ((expr.rhs + 1) * denominator))  # type: ignore
+                sympy.Ge(numerator, (expr.rhs * denominator)),  # type: ignore[arg-type]
+                sympy.Lt(numerator, ((expr.rhs + 1) * denominator))  # type: ignore[arg-type]
             )
         # a // b != expr
         # => a < (b * expr) or a >= ((b + 1) * expr)
         if isinstance(expr, sympy.Ne) and isinstance(expr.lhs, FloorDiv):
             numerator, denominator = expr.lhs.args
             expr = sympy.Or(
-                sympy.Lt(numerator, (expr.rhs * denominator)),  # type: ignore
-                sympy.Ge(numerator, ((expr.rhs + 1) * denominator))  # type: ignore
+                sympy.Lt(numerator, (expr.rhs * denominator)),  # type: ignore[arg-type]
+                sympy.Ge(numerator, ((expr.rhs + 1) * denominator))  # type: ignore[arg-type]
             )
 
         # The transformations below only work if b is positive.
@@ -1774,13 +1774,13 @@ class ShapeEnv:
         # a // b > expr  => a >= (b + 1) * expr
         # a // b >= expr => a >= b * expr
         if isinstance(expr, (sympy.Gt, sympy.Ge)) and is_floordiv_with_positive_denominator(expr.lhs):
-            quotient = expr.rhs if isinstance(expr, sympy.Ge) else (expr.rhs + 1)  # type: ignore
-            expr = sympy.Ge(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore
+            quotient = expr.rhs if isinstance(expr, sympy.Ge) else (expr.rhs + 1)  # type: ignore[arg-type]
+            expr = sympy.Ge(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore[arg-type]
         # a // b < expr  => a < b * expr
         # a // b <= expr => a < (b + 1) * expr
         if isinstance(expr, (sympy.Lt, sympy.Le)) and is_floordiv_with_positive_denominator(expr.lhs):
-            quotient = expr.rhs if isinstance(expr, sympy.Lt) else (expr.rhs + 1)  # type: ignore
-            expr = sympy.Lt(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore
+            quotient = expr.rhs if isinstance(expr, sympy.Lt) else (expr.rhs + 1)  # type: ignore[arg-type]
+            expr = sympy.Lt(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore[arg-type]
 
         return expr
 
@@ -1840,7 +1840,7 @@ class ShapeEnv:
                     and rhs_const is not None
                     and lhs_const != 0
             ):
-                expr = type(expr)(expr.lhs - lhs_const, expr.rhs - lhs_const)  # type: ignore
+                expr = type(expr)(expr.lhs - lhs_const, expr.rhs - lhs_const)  # type: ignore[arg-type]
 
         return expr
 
@@ -2050,7 +2050,7 @@ class ShapeEnv:
         exprs = [guard.expr]
 
         if type(guard.expr) in RELOP_MIRROR:
-            exprs.append(RELOP_MIRROR[type(guard.expr)](guard.expr.rhs, guard.expr.lhs))  # type: ignore
+            exprs.append(RELOP_MIRROR[type(guard.expr)](guard.expr.rhs, guard.expr.lhs))  # type: ignore[arg-type]
 
         for expr in exprs:
             # First, try to simplify the left-hand side.
@@ -2074,7 +2074,7 @@ class ShapeEnv:
             vr = self.var_to_range[symbol]
             lower, upper = vr.lower, vr.upper
 
-            rhs_vr = sympy_interp(ValueRangeAnalysis, self.var_to_range, expr.rhs)  # type: ignore
+            rhs_vr = sympy_interp(ValueRangeAnalysis, self.var_to_range, expr.rhs)  # type: ignore[arg-type]
             lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
 
             # Let's suppose that we have a preexisting range for x [0, 100].
