@@ -433,7 +433,8 @@ class Module:
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
     call_super_init: bool = False
-    _optimized_module = None
+    _compiled_call_impl : Optional[Callable] = None
+
 
 
     def __init__(self, *args, **kwargs) -> None:
@@ -1495,6 +1496,8 @@ class Module:
         return result
 
     def _call_impl(self, *args, **kwargs):        
+        if self._compiled_call_impl is not None:
+            return self._compiled_call_impl(*input, **kwargs)
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
@@ -1575,22 +1578,17 @@ class Module:
 
         return result
 
-    def __call__(self, *args, **kwargs):
-        return self._optimized_module.forward(*args, **kwargs) if self._optimized_module else self._call_impl 
-
+    __call__ : Callable[..., Any] = _call_impl
+    
     def __getstate__(self):
         state = self.__dict__.copy()
-        state.pop("_optimized_module", None)
+        state.pop("_compiled_call_impl", None)
         return state 
     
     def __setstate__(self, state):
-        # Alban's idea so we can autoatically compile a model as we load it
-        # self.__dict__.update(state)
-        # self._optimized_module = None
-        # if self.autocompile:
-        #     self.compile()
-
-        # del self.__dict__["_optimized_module"]
+        self.__dict__.update(state)
+        if "_compiled_call_impl" in self.__dict__:
+            del self.__dict__["_compiled_call_impl"]
         
         # Support loading old checkpoints that don't have the following attrs:
         if '_forward_pre_hooks' not in self.__dict__:
@@ -2440,5 +2438,4 @@ class Module:
         return replica
 
     def compile(self, *args, **kwargs):
-        optimized_module = torch.compile(self, *args, **kwargs)
-        super().__setattr__("_optimized_module", optimized_module)
+       self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
