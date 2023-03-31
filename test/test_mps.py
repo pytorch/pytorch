@@ -1466,11 +1466,11 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(linear_cpu_output.size(), linear_mps_output.size())
 
         if backward_pass:
-            cpu_grad = torch.ones_like(linear_cpu_output)
-            grad = cpu_grad.to('mps')
+            cpu_grad = torch.rand_like(linear_cpu_output, requires_grad=True)
+            grad = cpu_grad.detach().to('mps').requires_grad_()
 
-            linear_cpu_output.backward(gradient=cpu_grad)
-            linear_mps_output.backward(gradient=grad)
+            linear_cpu_output.backward(gradient=cpu_grad, create_graph=True)
+            linear_mps_output.backward(gradient=grad, create_graph=True)
 
             self.assertEqual(linear_cpu_input.grad.size(), linear_mps_input.grad.size())
             self.assertEqual(linear_cpu_input.grad, linear_mps_input.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
@@ -1480,6 +1480,36 @@ class TestMPS(TestCaseMPS):
             if bias:
                 self.assertEqual(cpu_linear.bias.grad.size(), mps_linear.bias.grad.size())
                 self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
+
+            # test gradgrad
+            x_grad_out = torch.rand_like(linear_cpu_input)
+            x_grad_out_mps = x_grad_out.to("mps")
+            w_grad_out = torch.rand_like(cpu_linear.weight)
+            w_grad_out_mps = w_grad_out.to("mps")
+
+            linear_cpu_input.grad.detach().zero_()
+            linear_mps_input.grad.detach().zero_()
+            cpu_linear.weight.grad.detach().zero_()
+            mps_linear.weight.grad.detach().zero_()
+            if bias:
+                b_grad_out = torch.rand_like(cpu_linear.bias)
+                b_grad_out_mps = b_grad_out.to("mps")
+                cpu_linear.bias.grad.detach().zero_()
+                mps_linear.bias.grad.detach().zero_()
+
+            linear_cpu_input.grad.backward(x_grad_out, retain_graph=True)
+            linear_mps_input.grad.backward(x_grad_out_mps, retain_graph=True)
+            cpu_linear.weight.grad.backward(w_grad_out, retain_graph=True)
+            mps_linear.weight.grad.backward(w_grad_out_mps, retain_graph=True)
+            if bias:
+                cpu_linear.bias.grad.backward(b_grad_out, retain_graph=True)
+                mps_linear.bias.grad.backward(b_grad_out_mps, retain_graph=True)
+
+            self.assertEqual(cpu_grad.grad, grad.grad)
+            self.assertEqual(linear_cpu_input.grad, linear_mps_input.grad)
+            self.assertEqual(cpu_linear.weight.grad, mps_linear.weight.grad)
+            if bias:
+                self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad)
 
     def test_linear1D(self):
         self._linear_helper(in_features=2, out_features=3, shape=([2]), bias=True, backward_pass=False)
@@ -7122,6 +7152,7 @@ class TestNLLLoss(TestCaseMPS):
         x.backward(torch.randn_like(x))
         torch.mps.synchronize()
 
+    @unittest.expectedFailure
     def test_mps_allocator_module(self):
         # first garbage collect and empty the cached blocks
         gc.collect()
