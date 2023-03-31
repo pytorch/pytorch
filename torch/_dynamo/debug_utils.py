@@ -25,23 +25,29 @@ log = logging.getLogger(__name__)
 inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
 
+if use_buck:
+    import libfb.py.build_info
+
 
 extra_deps = []
 extra_imports = ""
 if use_buck:
     extra_deps = [
-        "//caffe2/fb/custom_ops/sparsenn:sparsenn-all_operators",
         "//caffe2/torch/fb/sparsenn:sparsenn_operators_gpu",
         "//caffe2/torch/fb/sparsenn:sparsenn_operators",
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu",
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops",
     ]
+    cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")
     extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
+
+
+BUCK_CMD_PREFIX = ["buck2", "run", "@mode/dev-nosan"]
 
 
 class BuckTargetWriter:
     def __init__(self, filename):
-        self.subdir, self.py_file = os.path.split(filename)
+        self.subdir, self.py_file = os.path.split(os.path.abspath(filename))
         self.target = self.py_file.replace(".py", "")
 
         # Get main_module path from fbcode
@@ -68,6 +74,7 @@ python_binary(
         "//caffe2:torch",
         "//caffe2/functorch:functorch",
         "//triton:triton",
+        "{cur_target}",
     ],
     cpp_deps = [
 {extra_cpp_deps}
@@ -82,12 +89,12 @@ python_binary(
         with open(target_file, "w") as fd:
             fd.write(self.build())
         # log.warning(f"Wrote isolation TARGETS file at {target_file}")
-        cmd = ["buck2", "run", "@mode/dev-nosan", self.cmd_line_path]
+        cmd_split = BUCK_CMD_PREFIX + [self.cmd_line_path]
         if print_msg:
             log.warning(
-                f'Found an example that reproduces the error. Run this cmd to repro - {" ".join(cmd)}'
+                f"Found an example that reproduces the error. Run this cmd to repro - {' '.join(cmd_split)}"
             )
-        return cmd
+        return cmd_split
 
 
 def minifier_dir():
@@ -264,10 +271,26 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
     model_str += NNModuleToString.convert(gm)
 
-    model_str += f"args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type) for a in args]!r}\n"
-    model_str += (
-        "args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]\n"
-    )
+    model_str += "args = []\n"
+
+    # get hint shape/stride when dynamic shape enabled
+    def hint_if_symint(x):
+        return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
+
+    for arg in args:
+        if isinstance(arg, int):
+            model_str += f"args.append({arg})\n"
+        elif isinstance(arg, torch.SymInt):
+            model_str += f"args.append({arg.node.hint})  # {arg}\n"
+        elif isinstance(arg, torch.Tensor):
+            model_str += (
+                "args.append(rand_strided"
+                + f"{hint_if_symint(arg.shape), hint_if_symint(arg.stride()), arg.dtype, arg.device.type})"
+                + f"  # shape {tuple(arg.shape)}, stride {arg.stride()}\n"
+            )
+        else:
+            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
+
     # TODO: fake may be better for performance here
     tracing_mode = "real"
     if config.dynamic_shapes:
@@ -314,7 +337,7 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 def save_graph_repro(fd, gm, args, compiler_name):
     sync_line = ""
     for arg in args:
-        if arg.is_cuda:
+        if isinstance(arg, torch.Tensor) and arg.is_cuda:
             sync_line = "torch.cuda.synchronize() # Ensures that segfaults are surfaced"
             break
 
@@ -504,7 +527,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
     inductor or nvfuser. Intercepting after Aot Autograd presents neat
-    abstration, where all the params are lifted as graph inputs, making it easy
+    abstraction, where all the params are lifted as graph inputs, making it easy
     to save the graph as a string.
     """
 
@@ -522,9 +545,9 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             """
             Aot Autograd fw_compiler and bw_compiler can have fake tensors. So,
             example_inputs can be fake tensors. We can call compiler_fn (which is
-            inductor or nvfuser) with fake tensors but the actualy compiled_fn
+            inductor or nvfuser) with fake tensors but the actually compiled_fn
             should be called with real tensors. Therefore, the actual invocation
-            is deffered.
+            is deferred.
             """
             # Avoid re-compiling when we call the compiled function twice. This happens
             # when we run the model inference or training in a for loop like here
@@ -534,7 +557,10 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             # because inductor clears the tensor list in its codegen. And example_inputs
             # are available only for the first invocation.
             fake_mode = FakeTensorMode()
-            copy_tensor_attrs = [fake_mode.from_tensor(x) for x in real_inputs]
+            copy_tensor_attrs = [
+                fake_mode.from_tensor(x) if isinstance(x, torch.Tensor) else x
+                for x in real_inputs
+            ]
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
                 dump_to_minify(
@@ -571,7 +597,13 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     if inner_compiled_fn is None:
                         inner_compiled_fn = compiler_fn(gm, example_inputs)
                     # Call the compiled function with real inputs
-                    return inner_compiled_fn(real_inputs)
+                    out = inner_compiled_fn(real_inputs)
+                    # sync cuda kernels to ensure IMA detection
+                    for arg in example_inputs:
+                        if isinstance(arg, torch.Tensor) and arg.is_cuda:
+                            torch.cuda.synchronize()
+                            break
+                    return out
                 except Exception as e:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
@@ -1004,7 +1036,17 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
     def debug_wrapper(gm, example_inputs, **kwargs):
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
         assert config.repro_after in ("dynamo", "aot", None)
+
         if config.repro_after == "dynamo":
+
+            def add_paths(exc):
+                exc.minifier_path = os.path.join(minifier_dir(), "minifier_launcher.py")
+                if use_buck:
+                    exc.buck_command = " ".join(
+                        BUCK_CMD_PREFIX
+                        + [BuckTargetWriter(exc.minifier_path).cmd_line_path]
+                    )
+
             if config.repro_level == 3:
                 dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
 
@@ -1014,7 +1056,7 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                 compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
-                        "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
+                        "Accuracy failed for the TorchDynamo produced graph. Creating script to minify the error."
                     )
                     dump_to_minify_after_dynamo(
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)),
@@ -1022,9 +1064,7 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                         compiler_name,
                     )
                     exc = AccuracyError("Bad accuracy detected.")
-                    exc.minifier_path = os.path.join(
-                        minifier_dir(), "minifier_launcher.py"
-                    )
+                    add_paths(exc)
                     raise exc
             else:
                 try:
@@ -1047,9 +1087,7 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    exc.minifier_path = os.path.join(
-                        minifier_dir(), "minifier_launcher.py"
-                    )
+                    add_paths(exc)
                     raise
         else:
             compiled_gm = compiler_fn(gm, example_inputs)

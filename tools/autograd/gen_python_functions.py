@@ -154,15 +154,14 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
     "normal_functional",  # only used by the functionalization pas
-    "_nested_tensor_offsets",  # don't want to expose this to python
     "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
     "_nested_view_from_buffer_copy",
     "_nested_view_from_buffer_copy_out",
 ]
 
-SKIP_PYTHON_BINDINGS = list(
-    map(lambda pattern: re.compile(rf"^{pattern}$"), _SKIP_PYTHON_BINDINGS)
-)
+SKIP_PYTHON_BINDINGS = [
+    re.compile(rf"^{pattern}$") for pattern in _SKIP_PYTHON_BINDINGS
+]
 
 # These function signatures are not exposed to Python. Note that this signature
 # list does not support regex.
@@ -238,6 +237,10 @@ def is_py_sparse_function(f: NativeFunction) -> bool:
 
 def is_py_special_function(f: NativeFunction) -> bool:
     return f.python_module == "special"
+
+
+def is_py_dist_function(f: NativeFunction) -> bool:
+    return f.python_module == "dist"
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -344,6 +347,15 @@ def gen(
         "python_special_functions.cpp",
         method=False,
         symint=symint,
+    )
+
+    create_python_bindings(
+        fm,
+        functions,
+        is_py_dist_function,
+        "torch.distributed.functional",
+        "python_dist_functions.cpp",
+        method=False,
     )
 
     # Currently, we only use `functions` to generate `return_types` bindings.
@@ -865,7 +877,7 @@ def method_impl(
         name=name,
         pycname=pycname,
         method_header=method_header,
-        max_args=max(map(lambda o: o.signature.arguments_count(), overloads)),
+        max_args=max((o.signature.arguments_count() for o in overloads)),
         signatures=signatures,
         traceable=traceable,
         check_has_torch_function=gen_has_torch_function_check(
@@ -903,6 +915,7 @@ if(check_has_torch_function(self_)) {{
             "torch.nested": "THPNestedVariableFunctionsModule",
             "torch.sparse": "THPSparseVariableFunctionsModule",
             "torch.special": "THPSpecialVariableFunctionsModule",
+            "torch.distributed.functional": "THPDistVariableFunctionsModule",
         }[module]
         if module
         else "THPVariableClass"
@@ -1217,7 +1230,7 @@ def sort_overloads(
                 del larger_than[j]
                 sorted_ids.append(j)
 
-    return list(map(lambda x: grouped_overloads[x], sorted_ids))
+    return [grouped_overloads[x] for x in sorted_ids]
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -1251,9 +1264,9 @@ def emit_single_dispatch(
         # dispatch lambda signature
         name = cpp.name(f.func)
         lambda_formals = ", ".join(
-            map(
-                lambda a: f"{a.type_str} {a.name}",
-                dispatch_lambda_args(ps, f, symint=symint),
+            (
+                f"{a.type_str} {a.name}"
+                for a in dispatch_lambda_args(ps, f, symint=symint)
             )
         )
         lambda_return = dispatch_lambda_return_str(f)

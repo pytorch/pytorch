@@ -62,7 +62,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #mkl-devel
 # see mkl
 
-#mock # breaks ci/circleci: docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+#mock
 #Description: A testing library that allows you to replace parts of your
 #system under test with mock objects
 #Pinned versions:
@@ -159,7 +159,7 @@ pytest-flakefinder==1.1.0
 #Pinned versions: 1.1.0
 #test that import:
 
-pytest-rerunfailures
+pytest-rerunfailures>=10.3
 #Description: plugin for rerunning failure tests in pytest
 #Pinned versions:
 #test that import:
@@ -244,9 +244,9 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #Pinned versions:
 #test that import:
 
-lintrunner==0.9.2
-#Description: all about linters
-#Pinned versions: 0.9.2
+lintrunner==0.10.7
+#Description: all about linters!
+#Pinned versions: 0.10.7
 #test that import:
 
 rockset==1.0.3
@@ -257,4 +257,9 @@ rockset==1.0.3
 ghstack==0.7.1
 #Description: ghstack tool
 #Pinned versions: 0.7.1
+#test that import:
+
+jinja2==3.1.2
+#Description: jinja2 template engine
+#Pinned versions: 3.1.2
 #test that import:

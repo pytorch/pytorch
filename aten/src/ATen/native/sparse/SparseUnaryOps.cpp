@@ -1,5 +1,5 @@
 // #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -72,8 +72,7 @@
 #include <ATen/ops/trunc_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 template <typename Ufunc>
@@ -261,4 +260,4 @@ Tensor& nan_to_num_sparse_(
   return nan_to_num_sparse_out(self, nan, posinf, neginf, self);
 }
 
-}}  // namespace at::native
+}  // namespace at::native

@@ -344,6 +344,71 @@ class FooToPickle(torch.nn.Module):
 
 
 @skipIfTorchDynamo()
+class TestJitProfiler(JitTestCase):
+    """
+    This runs tests that requires setting some global states like torch._C._set_graph_executor_optimize
+    and restore the values afterward, i.e. test_profiler. This is to address the flaky issue in
+    https://github.com/pytorch/pytorch/issues/91483 in which test_profiler was flaky and failed in the
+    middle without the chance to restore torch._C._set_graph_executor_optimize to its original value.
+    This causes issues for all future tests running after.
+
+    Using a separate test class here, so that there is no need to run setup and teardown for all tests
+    in TestJit.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.graph_executor_optimize_opt = torch._C._get_graph_executor_optimize()
+
+    def tearDown(self):
+        super().tearDown()
+        # Resetting
+        torch._C._set_graph_executor_optimize(
+            self.graph_executor_optimize_opt
+        )
+
+    def test_profiler(self):
+        torch._C._set_graph_executor_optimize(False)
+
+        def other_fn(x):
+            return x * 2
+
+        x = torch.rand(3, 4)
+        traced_other_fn = torch.jit.trace(other_fn, x)
+
+        def fn(x):
+            y = traced_other_fn(x)
+            fut = torch.jit._fork(traced_other_fn, x)
+            y = torch.jit._wait(fut)
+            return y
+
+        traced_fn = torch.jit.trace(fn, x)
+        with torch.autograd.profiler.profile() as prof:
+            traced_fn(x)
+
+        # expecting to see other_fn TS function call
+        # with cpu time >= mul cpu time and
+        # a forked other_fn
+
+        mul_events = defaultdict(int)
+        other_fn_events = defaultdict(int)
+        for e in prof.function_events:
+            if e.name == "aten::mul":
+                self.assertTrue(e.thread not in mul_events)
+                mul_events[e.thread] = e.time_range.elapsed_us()
+            elif e.name == "other_fn":
+                self.assertTrue(e.thread not in other_fn_events)
+                other_fn_events[e.thread] = e.time_range.elapsed_us()
+
+        self.assertTrue(len(mul_events) == 2)
+        self.assertTrue(len(other_fn_events) == 2)
+
+        for thread, mul_time in mul_events.items():
+            self.assertTrue(thread in other_fn_events)
+            self.assertTrue(other_fn_events[thread] >= mul_time)
+
+
+@skipIfTorchDynamo()
 class TestJit(JitTestCase):
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
@@ -2066,7 +2131,7 @@ graph(%Ra, %Rb):
     def test_sparse_tensors(self):
         @torch.jit.ignore
         def get_sparse():
-            return torch.sparse.FloatTensor(2, 3)
+            return torch.sparse_coo_tensor((2, 3), dtype=torch.float32)
 
         @torch.jit.script
         def test_is_sparse(input):
@@ -2925,50 +2990,6 @@ graph(%Ra, %Rb):
         self.assertRegex(s, r'torch.ops')
         s = str(torch._ops.ops.atan)
         self.assertRegex(s, r'torch.ops')
-
-    @unittest.skipIf(IS_WINDOWS, 'TODO: fix occasional windows failure')
-    def test_profiler(self):
-        prev_opt = torch._C._get_graph_executor_optimize()
-        torch._C._set_graph_executor_optimize(False)
-
-        def other_fn(x):
-            return x * 2
-
-        x = torch.rand(3, 4)
-        traced_other_fn = torch.jit.trace(other_fn, x)
-
-        def fn(x):
-            y = traced_other_fn(x)
-            fut = torch.jit._fork(traced_other_fn, x)
-            y = torch.jit._wait(fut)
-            return y
-
-        traced_fn = torch.jit.trace(fn, x)
-        with torch.autograd.profiler.profile() as prof:
-            traced_fn(x)
-
-        # expecting to see other_fn TS function call
-        # with cpu time >= mul cpu time and
-        # a forked other_fn
-
-        mul_events = defaultdict(int)
-        other_fn_events = defaultdict(int)
-        for e in prof.function_events:
-            if e.name == "aten::mul":
-                self.assertTrue(e.thread not in mul_events)
-                mul_events[e.thread] = e.time_range.elapsed_us()
-            elif e.name == "other_fn":
-                self.assertTrue(e.thread not in other_fn_events)
-                other_fn_events[e.thread] = e.time_range.elapsed_us()
-
-        self.assertTrue(len(mul_events) == 2)
-        self.assertTrue(len(other_fn_events) == 2)
-
-        for thread, mul_time in mul_events.items():
-            self.assertTrue(thread in other_fn_events)
-            self.assertTrue(other_fn_events[thread] >= mul_time)
-
-        torch._C._set_graph_executor_optimize(prev_opt)
 
     def test_hide_source_ranges_context_manager(self):
         @torch.jit.script
@@ -9164,6 +9185,15 @@ dedent """
         dims = 2
         self.checkScript(tensordot_dims_int, (a, b, dims))
 
+        for dims in [-1, 5]:
+            try:
+                tensordot_dims_int(a, b, dims)
+            except RuntimeError as error:
+                if dims < 0:
+                    self.assertEqual(str(error), "tensordot expects dims >= 0, but got dims=" + str(dims))
+                if dims > min(a.dim(), b.dim()):
+                    self.assertEqual(str(error), "tensordot expects dims < ndim_a or ndim_b, but got dims=" + str(dims))
+
     def test_torch_functional_tensordot_tensor(self):
         def tensordot_dims_tensor(a: torch.Tensor, b: torch.Tensor, dims: torch.Tensor):
             return torch.tensordot(a, b, dims=dims)
@@ -11491,6 +11521,16 @@ dedent """
         g = {'Tuple' : typing.Tuple}
         python_type = eval(empty_tuple_type.annotation_str, g)
         assert python_type is typing.Tuple[()]
+
+    def test_tuple_str(self):
+        tuple1_type = torch._C.TupleType([torch._C.StringType.get()])
+        self.assertEqual(tuple1_type.annotation_str, "Tuple[str]")
+        tuple2_type = torch._C.TupleType([torch._C.StringType.get(), torch._C.StringType.get()])
+        self.assertEqual(tuple2_type.annotation_str, "Tuple[str, str]")
+
+    def test_dict_str(self):
+        dict_type = torch._C.DictType(torch._C.StringType.get(), torch._C.StringType.get())
+        self.assertEqual(dict_type.annotation_str, "Dict[str, str]")
 
     def test_none_type_str(self):
         none_type = torch._C.NoneType.get()
