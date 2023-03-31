@@ -667,7 +667,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
             submodule._state_dict_type = state_dict_type
             submodule._state_dict_config = state_dict_config
-            submodule._optimstate_dict_config = optim_state_dict_config
+            submodule._optim_state_dict_config = optim_state_dict_config
 
         return StateDictSettings(
             prev_state_dict_type, prev_state_dict_config, prev_optim_state_dict_config
