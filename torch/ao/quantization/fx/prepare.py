@@ -83,7 +83,6 @@ from ..utils import (
     _parent_name,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
-    activation_is_statically_quantized,
 )
 
 from ..backend_config.utils import (
@@ -862,6 +861,7 @@ def _maybe_insert_observers_before_graph_output(
             )
             if need_obs:
                 # insert observer
+                observer_mod = qconfig.activation()
                 observer_node = _insert_observer(
                     maybe_node, observer_mod, model, named_modules, graph)
                 return observer_node
