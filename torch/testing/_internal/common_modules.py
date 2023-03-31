@@ -2456,10 +2456,8 @@ module_db: List[ModuleInfo] = [
                dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=False),
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
-                   # Don't run cpu-gpu parity tests for bfloat16.
-                   DecorateInfo(
-                       unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity', dtypes=[torch.bfloat16]
-                   ),
+                   # Tracking at https://github.com/pytorch/pytorch/issues/98089
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
                    # No channels_last support for GroupNorm currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
