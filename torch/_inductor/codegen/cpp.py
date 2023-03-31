@@ -1436,7 +1436,6 @@ class CppTile2DKernel(CppVecKernel):
         inner = self.inner_itervar()
         index = self.rename_indexing(index)
         assert mode is None
-        # TODO(jgong5): assert the index is an affine expression on the itervars in concern
         expanded_index = sympy.expand(index)
         if self.need_vec_transpose(expanded_index):
             tile_var = self.gen_transposed_tile_load_store(
