@@ -3,7 +3,8 @@ import torch
 __all__ = ["bench_all", "benchmark_compile"]
 
 import torch._dynamo
-import time
+from torch.utils.benchmark import Timer
+
 from typing import Optional, List, Callable, Union, Any, cast
 
 try:
@@ -34,36 +35,37 @@ if HAS_TABULATE:
     def bench_loop(
         model: Union[torch.nn.Module, Callable],
         sample_input: Union[torch.Tensor, Any],
-        num_iters: int,
+        num_iters: int = 5,
         optimizer: torch.optim.Optimizer = None,
         loss_fn: Callable = None,
     ):
-        """
-        This is a simple loop that can be used to benchmark a model for either training or inference
-        It takes care of taking several measurements and averaging them
-        It also takes care of calling `cuda.synchronize()` if the model is on GPU
-        """
-        durations = []
-        for _ in range(num_iters):
-            start = time.time()
+        # Define the statement and setup for the benchmark
+        if optimizer and loss_fn:
+            # Training mode
+            stmt = """
+    output = model(sample_input)
+    loss = loss_fn(output) if loss_fn else output.sum()
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+            """
+        else:
+            # Inference mode
+            stmt = "model(sample_input)"
 
-            if optimizer:
-                optimizer.zero_grad()
-                output = model(sample_input)
-                loss = loss_fn(output) if loss_fn else output.sum()
-                loss.backward()
-                optimizer.step()
-            else:
-                model(sample_input)
+        # Create the Timer object
+        timer = Timer(
+            stmt=stmt,
+            globals={"model": model, "sample_input": sample_input, "optimizer": optimizer, "loss_fn": loss_fn}
+        )
 
-            # Synchronize CUDA operations before measuring the end time
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
 
-            end = time.time()
-            durations.append(end - start)
+        result = timer.timeit(number=num_iters)
 
-        return sum(durations) / num_iters
+        # Get the average time per iteration
+        avg_time = result.mean
+
+        return avg_time
 
     def benchmark_compile(
         model: Union[torch.nn.Module, Callable],
