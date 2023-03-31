@@ -422,6 +422,8 @@ LlgaGraphHelper::LlgaGraphHelper(
     }
   }
 
+  dnnl_graph_->finalize();
+
   GRAPH_DEBUG("Get Partitions");
   std::vector<dnnl::graph::partition> partitions =
       dnnl_graph_->get_partitions(policy);
