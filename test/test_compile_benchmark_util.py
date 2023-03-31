@@ -11,8 +11,13 @@ import unittest
 # as well during the execution of this test suite, and it will cause
 # CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
+try:
+    import tabulate # type: ignore[import]
+    HAS_TABULATE = True
+except ImportError:
+    HAS_TABULATE = False
 
-@unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+@unittest.skipIf(not TEST_CUDA and HAS_TABULATE, "CUDA unavailable")
 class TestCompileBenchmarkUtil(TestCase):
     def test_training_and_inference(self):
         class ToyModel(torch.nn.Module):
