@@ -157,66 +157,49 @@ def squeeze(li: List[int],
 )=====")
 + std::string(R"=====(def squeeze_dims(li: List[int],
     dims: List[int]) -> List[int]:
-  wrapped_dims = annotate(List[int], [])
-  for _0 in range(torch.len(dims)):
-    i = dims[_0]
-    _1 = torch.len(li)
-    if torch.le(_1, 0):
-      dim_post_expr = 1
-    else:
-      dim_post_expr = _1
-    min = torch.neg(dim_post_expr)
-    max = torch.sub(dim_post_expr, 1)
-    if torch.lt(i, min):
-      _2 = True
-    else:
-      _2 = torch.gt(i, max)
-    if torch.__not__(_2):
-      pass
-    else:
-      ops.prim.RaiseException("AssertionError: ")
-    if torch.lt(i, 0):
-      dim = torch.add(i, dim_post_expr)
-    else:
-      dim = i
-    _3 = torch.append(wrapped_dims, dim)
-  torch.sort(wrapped_dims, True)
-  li0 = li
-  for _4 in range(torch.len(wrapped_dims)):
-    i0 = wrapped_dims[_4]
-    li1 = annotate(List[int], [])
-    _5 = torch.len(li0)
-    if torch.le(_5, 0):
-      dim_post_expr0 = 1
-    else:
-      dim_post_expr0 = _5
-    min0 = torch.neg(dim_post_expr0)
-    max0 = torch.sub(dim_post_expr0, 1)
-    if torch.lt(i0, min0):
-      _6 = True
-    else:
-      _6 = torch.gt(i0, max0)
-    if torch.__not__(_6):
-      pass
-    else:
-      ops.prim.RaiseException("AssertionError: ")
-    if torch.lt(i0, 0):
-      wrapped_dim = torch.add(i0, dim_post_expr0)
-    else:
-      wrapped_dim = i0
-    for i1 in range(torch.len(li0)):
-      if torch.eq(i1, wrapped_dim):
-        if torch.ne(li0[i1], 1):
-          _7 = torch.append(li1, li0[i1])
+  if torch.eq(torch.len(dims), 0):
+    _0 = li
+  else:
+    wrapped_dims = annotate(List[int], [])
+    for _1 in range(torch.len(dims)):
+      elem = dims[_1]
+      _2 = torch.append(wrapped_dims, elem)
+    for i in range(torch.len(dims)):
+      _3 = wrapped_dims[i]
+      _4 = torch.len(li)
+      if torch.le(_4, 0):
+        dim_post_expr = 1
+      else:
+        dim_post_expr = _4
+      min = torch.neg(dim_post_expr)
+      max = torch.sub(dim_post_expr, 1)
+      if torch.lt(_3, min):
+        _5 = True
+      else:
+        _5 = torch.gt(_3, max)
+      if torch.__not__(_5):
+        pass
+      else:
+        ops.prim.RaiseException("AssertionError: ")
+      if torch.lt(_3, 0):
+        dim = torch.add(_3, dim_post_expr)
+      else:
+        dim = _3
+      _6 = torch._set_item(wrapped_dims, i, dim)
+    result = annotate(List[int], [])
+    for i0 in range(torch.len(li)):
+      if torch.eq(li[i0], 1):
+        _7 = torch.__contains__(wrapped_dims, i0)
+        if torch.__not__(_7):
+          _8 = torch.append(result, li[i0])
         else:
           pass
       else:
-        _8 = torch.append(li1, li0[i1])
-    li0 = li1
-  return li0
+        _9 = torch.append(result, li[i0])
+    _0 = result
+  return _0
 
-)=====")
-+ std::string(R"=====(def unsqueeze(li: List[int],
+def unsqueeze(li: List[int],
     dim: int) -> List[int]:
   _0 = torch.add(torch.len(li), 1)
   if torch.le(_0, 0):

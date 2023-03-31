@@ -772,12 +772,7 @@ def tuple_iterator_getitem(it, index):
 
 
 def enum_repr(value):
-    # Workaround repr(Enum) returning invalid global reference before python 3.11
-    # https://peps.python.org/pep-0663/
-    if sys.version_info < (3, 11):
-        return str(value)
-    else:
-        return repr(value)
+    return str(value)
 
 
 def dict_param_key_ids(value):
