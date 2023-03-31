@@ -67,10 +67,23 @@ CLOSURE_VARS = collections.OrderedDict(
 def strip_function_call(name):
     """
     "___odict_getitem(a, 1)" => "a"
+    "a.layers[slice(2)][0]._xyz" ==> "a"
+    "getattr(a.layers[slice(2)][0]._abc, '0')" ==> "a"
+    "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
+    "a.layers[slice(None, -1, None)][0]._xyz" ==> "a"
     """
-    m = re.search(r"([a-z0-9_]+)\(([^(),]+)[^()]*\)", name)
-    if m and m.group(1) != "slice":
-        return strip_function_call(m.group(2))
+    # recursively find valid object name in fuction
+    valid_name = re.compile("[A-Za-z_].*")
+    curr = ""
+    for char in name:
+        if char in " (":
+            curr = ""
+        elif char in "),[]":
+            if curr and curr != "None" and valid_name.match(curr):
+                return strip_function_call(curr)
+        else:
+            curr += char
+
     return strip_getattr_getitem(name)
 
 
@@ -422,9 +435,11 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
+        constraint_inputs = [a.constraint_dims for a in fs]
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
+            constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
         )
         for shape_guard in guards:
@@ -521,9 +536,10 @@ class GuardBuilder(GuardBuilderBase):
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
             else:
-                assert not hasattr(
-                    value, "_dynamo_dynamic_indices"
-                ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
+                if not config.allow_ignore_mark_dynamic:
+                    assert not hasattr(
+                        value, "_dynamo_dynamic_indices"
+                    ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
 
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
@@ -639,7 +655,7 @@ class CheckFunctionManager:
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
-                and "hooks" not in guard.name
+                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
             ):
                 continue
             guard.create(local_builder, global_builder)

@@ -1158,6 +1158,21 @@ class TestVmapAPI(TestCase):
         self.assertEqual(out, f(None, y))
         self.assertEqual(out_dims, (None, None, None))
 
+    def test_data_attribute(self):
+        def foo(x):
+            y = x.data
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "accessing `data` under vmap transform"):
+            torch.func.vmap(foo)(torch.randn(3, 3))
+
+        def foo(x):
+            x.data = torch.ones(3, 3)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "mutating directly with `.data` under vmap"):
+            torch.func.vmap(foo)(torch.randn(3, 3))
+
 
 def slice_inputs(inputs, bdims, i):
     result = []
@@ -3412,7 +3427,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             check_shape_only = op.name in ('empty_like', 'new_empty')
             for sample_input in sample_inputs_itr:
                 args = (sample_input.input,) + sample_input.args
-                if not any(map(lambda arg: isinstance(arg, torch.Tensor), args)):
+                if not any((isinstance(arg, torch.Tensor) for arg in args)):
                     # Atleast one tensor required for vmap.
                     continue
                 kwargs = sample_input.kwargs
