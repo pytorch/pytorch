@@ -47,7 +47,7 @@ def pad_and_slice_matrices(new_graph, a, b, pad_amount, batched=False):
     # Perform the matrix multiplication with the padded matrices
     new_mm_pad = new_graph.call_function(torch.ops.aten.bmm if batched else torch.ops.aten.matmul, (new_a_pad, new_b_pad))
 
-    # Slice the result to get the desired shape
+    # Slice the result to get the desired shape and not modify user code semantics
     new_mm = new_graph.call_function(torch.ops.aten.slice, (new_mm_pad, 2 if batched else 1, 0, a.shape[-1], 1))
 
     return new_mm
