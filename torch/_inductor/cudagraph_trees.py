@@ -1376,9 +1376,10 @@ class CUDAGraphTreeManager:
     def dealloc_current_path_weakrefs(self):
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
+        deleted = set()
         for t, stack_trace in self.current_node.path_live_weakrefs_and_stacktraces():
-            # TODO: dont need to test t(), but would need to deduplicate storages
-            if t():
+            if t() and t() not in deleted:
+                deleted.add(t())
                 torch._C._free_And_Remove_DeleterFn(t())
                 stack_trace = (
                     stack_trace.strip()
