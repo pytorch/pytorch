@@ -17,7 +17,8 @@ try:
 except ImportError:
     HAS_TABULATE = False
 
-@unittest.skipIf(not TEST_CUDA and HAS_TABULATE, "CUDA unavailable")
+@unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+@unittest.skipIf(not HAS_TABULATE, "tabulate not available")
 class TestCompileBenchmarkUtil(TestCase):
     def test_training_and_inference(self):
         class ToyModel(torch.nn.Module):
