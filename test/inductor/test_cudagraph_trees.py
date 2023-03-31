@@ -13,7 +13,6 @@ import torch._dynamo
 import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
-from torch._dynamo.testing import same
 
 from torch.testing._internal.common_utils import (
     IS_CI,
