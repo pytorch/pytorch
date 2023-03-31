@@ -498,7 +498,8 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
             ldb[i] = mat2_strides[i][1];
           }
         }
-         bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
+        auto dprops = at::cuda::getCurrentDeviceProperties();
+        bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
         if ((self_row_major || self_column_major) &&
             (mat2_row_major || mat2_column_major) &&
             is_sm8x) {
