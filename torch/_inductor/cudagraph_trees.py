@@ -788,8 +788,7 @@ class CUDAGraphNode:
     def _path_from_root(self):
         "Returns all nodes in the path starting at the root and ending at self"
         nodes = reversed(list(self._path_to_root))
-        for node in nodes:
-            yield node
+        yield from nodes
 
     def _is_cuda_graph_recorded_tensor(self, t: torch.Tensor):
         "Is this tensor an output of a node in this path"
@@ -797,7 +796,7 @@ class CUDAGraphNode:
             for storage_weak_ref in output_refs:
                 if storage_weak_ref is None:
                     continue
-                # dont need to check liveness of storage since the cuda graph managed
+                # don't need to check liveness of storage since the cuda graph managed
                 # memory is never released.
                 data_ptr = storage_weak_ref.data_ptr()
                 if t.untyped_storage().data_ptr() == data_ptr:
@@ -1305,8 +1304,7 @@ class CUDAGraphTreeManager:
 
     def get_roots(self) -> Generator[CUDAGraphNode]:
         for nodes in self.roots.values():
-            for node in nodes:
-                yield node
+            yield from nodes
 
     @property
     def current_node(self):
