@@ -167,5 +167,5 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CPU:
+    if IS_LINUX and HAS_CPU and torch._C.has_mkldnn:
         run_tests()
