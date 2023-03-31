@@ -92,6 +92,9 @@ class GraphLowering(torch.fx.Interpreter):
             # TODO: this should not be needed once #93059 lands
             # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
             # TODO: make a dedicated UnknownSource for this?
+            # NB: This is using the legacy default behavior from
+            # create_symbolic_sizes_strides_storage_offset but we hope we can
+            # just delete this entirely
             source = ConstantSource(
                 f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
             )
@@ -99,7 +102,10 @@ class GraphLowering(torch.fx.Interpreter):
                 size,
                 stride,
                 _,
-            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(ex, source)
+            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(
+                ex,
+                source,
+            )
 
         size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
@@ -120,7 +126,6 @@ class GraphLowering(torch.fx.Interpreter):
         num_static_inputs=None,
         graph_id=None,
         aot_mode=False,
-        cpp_wrapper=False,
     ):
         super().__init__(gm)
         self.extra_traceback = False  # we do our own error wrapping
@@ -150,7 +155,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
-        self.cpp_wrapper = cpp_wrapper
+        self._can_use_cpp_wrapper = config.cpp_wrapper
         self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.scheduler = None
@@ -225,9 +230,8 @@ class GraphLowering(torch.fx.Interpreter):
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
-        self.cpp_wrapper = False
-        assert not self.aot_mode, "AOT compilation failed"
-        log.debug("Set cpp_wrapper to False due to %s", cond)
+        self._can_use_cpp_wrapper = False
+        log.debug("Set _can_use_cpp_wrapper to False due to %s", cond)
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
@@ -235,7 +239,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
-        if self.cpp_wrapper:
+        if config.cpp_wrapper:
             self.check_buffer_for_cpp_wrapper(buffer)
 
         name = f"buf{len(self.buffers)}"
@@ -305,6 +309,11 @@ class GraphLowering(torch.fx.Interpreter):
             expr = example.node.expr
             self.graph_inputs[target] = expr
             return expr
+        elif isinstance(example, (int, bool, float)):
+            expr = sympy.sympify(example)
+            self.graph_inputs[target] = expr
+            return expr
+        assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
@@ -572,15 +581,15 @@ class GraphLowering(torch.fx.Interpreter):
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
-        if self.aot_mode:
+        if config.cpp_wrapper:
             self.check_cpp_wrapper()
-            self.wrapper_code = CppAotWrapperCodeGen()
-            return
-        elif self.cpp_wrapper:
-            self.check_cpp_wrapper()
-            if self.cpp_wrapper:
-                self.wrapper_code = CppWrapperCodeGen()
+            if self._can_use_cpp_wrapper:
+                self.wrapper_code = (
+                    CppAotWrapperCodeGen() if self.aot_mode else CppWrapperCodeGen()
+                )
                 return
+            else:
+                assert not self.aot_mode, "Model does not support AOT compilation"
         self.wrapper_code = WrapperCodeGen()
 
     def codegen(self):
@@ -657,7 +666,7 @@ class GraphLowering(torch.fx.Interpreter):
         if self.aot_mode:
             from .codecache import AotCodeCache
 
-            code, linemap = self.codegen()
+            code = self.codegen()
             if config.debug:
                 print(code)
 
