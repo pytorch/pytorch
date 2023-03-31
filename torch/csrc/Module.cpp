@@ -41,6 +41,7 @@
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
+#include <torch/csrc/autograd/python_dist_functions.h>
 #include <torch/csrc/autograd/python_enum_tag.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -188,7 +189,7 @@ static PyObject* THPModule_crashIfCsrcUBSAN(PyObject* module, PyObject* arg) {
 }
 
 static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
-  // This code shoud work perfectly fine, as vtables are idential for Foo and
+  // This code should work perfectly fine, as vtables are identical for Foo and
   // Baz unless rtti and ubsan are enabled
   struct Foo {
     virtual int bar() = 0;
@@ -1328,6 +1329,7 @@ PyObject* initModule() {
   torch::autograd::initNestedFunctions(module);
   torch::autograd::initSparseFunctions(module);
   torch::autograd::initSpecialFunctions(module);
+  torch::autograd::initDistFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::profiler::initPythonBindings(module);
   torch::python::init_bindings(module);
