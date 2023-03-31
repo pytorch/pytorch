@@ -240,7 +240,7 @@ class triton:
     descriptive_names = "original_aten"
 
     # use alternate codegen for smaller reductions
-    persistent_reductions = True
+    persistent_reductions = os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
 
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
