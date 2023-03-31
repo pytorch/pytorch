@@ -25,6 +25,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   OP_DECOMPOSE(feature_dropout_);
 }
 
+void unsupportedData(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+    TORCH_CHECK(false, "mutating directly with `.data` under vmap transform is not allowed.");
+}
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(__and__, Scalar);
   OP_DECOMPOSE2(__and__, Tensor);
@@ -333,6 +337,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(less_equal, Scalar);
   OP_DECOMPOSE2(less, Scalar);
   OP_DECOMPOSE2(not_equal, Scalar);
+  m.impl("_has_compatible_shallow_copy_type", torch::CppFunction::makeFromBoxedFunction<&unsupportedData>());
 }
 
 }}

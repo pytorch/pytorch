@@ -344,7 +344,7 @@ def _safe_zero_index(x):
 def error_if_complex(func_name, args, is_input):
     flat_args, _ = tree_flatten(args)
     for idx, arg in enumerate(flat_args):
-        if arg.dtype.is_complex:
+        if isinstance(arg, torch.Tensor) and arg.dtype.is_complex:
             input_or_output = ("inputs" if is_input else "outputs")
             err_msg = (f"{func_name}: Expected all {input_or_output} "
                        f"to be real but received complex tensor at flattened input idx: {idx}")
@@ -544,7 +544,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             # Iterate and concat the jacobians of different
             # inputs.
             for idx in range(len(flat_primals)):
-                r = tuple(map(lambda r_: r_[idx], chunked_results))
+                r = tuple((r_[idx] for r_ in chunked_results))
                 flat_results.append(torch.cat(r, 0))
 
             return flat_results
@@ -567,7 +567,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                     for t in flat_basis_chunk:
                         assert t.size(0) == 1
 
-                    flat_basis_chunk = list(map(lambda t: torch.squeeze(t, 0), flat_basis_chunk))
+                    flat_basis_chunk = [torch.squeeze(t, 0) for t in flat_basis_chunk]
 
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
 
