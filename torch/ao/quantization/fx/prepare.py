@@ -814,6 +814,8 @@ def _maybe_insert_output_observer_for_node(
 
 def _maybe_insert_observers_before_graph_output(
     graph_output_node: Node,
+    output_quantized_idxs: List[int],
+    node_name_to_qconfig: Dict[str, QConfigAny],
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
     graph: Graph,
@@ -824,9 +826,25 @@ def _maybe_insert_observers_before_graph_output(
     for those nodes.
     """
 
+    # TODO(future PR): update the output_quantized_idxs API to match
+    # arbitrary data structures. There is always a single output, and
+    # that output can have arbitrary nesting of values. List[int] is
+    # not the right data type for this.
+    assert output_quantized_idxs == [0] or output_quantized_idxs == [], \
+        'unrecognized format of output_quantized_idxs'
+
+    # Currently dequants are inserted in the convert step. So, we only
+    # have to do anything if the output is hardcoded to be quantized
+    if output_quantized_idxs == []:
+        return
+    # TODO(future PR): support more dtypes in model outputs, if necessary
+    output_target_dtype = torch.quint8
+
     def _recursive_maybe_replace_node_with_obs(
         maybe_node: Argument,
         model: torch.nn.Module,
+        target_dtype: torch.dtype,
+        node_name_to_qconfig: Dict[str, QConfigAny],
         named_modules: Dict[str, torch.nn.Module],
         graph: Graph,
     ) -> Argument:
@@ -848,11 +866,17 @@ def _maybe_insert_observers_before_graph_output(
         """
         if isinstance(maybe_node, Node):
             # check dtype of this node
-            this_node_dtype = _get_arg_target_dtype_as_output(maybe_node, named_modules)
-            observer_mod = maybe_node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"]()
-            target_dtype = observer_mod.dtype
+            this_node_dtype = _get_arg_target_dtype_as_output(
+                maybe_node, named_modules)
+
             if this_node_dtype != target_dtype:
                 # insert observer
+                qconfig = node_name_to_qconfig.get(maybe_node.name)
+                # TODO(future PR): see if we need to allow specifying qconfig
+                #   on output nodes, to remove the restriction below.
+                assert qconfig is not None, \
+                    'Quantizing the output node without a qconfig is not supported'
+                observer_mod = qconfig.activation()
                 observer_node = _insert_observer(
                     maybe_node, observer_mod, model, named_modules, graph)
                 return observer_node
@@ -862,7 +886,7 @@ def _maybe_insert_observers_before_graph_output(
             results = []
             for inner_node in maybe_node:
                 results.append(_recursive_maybe_replace_node_with_obs(
-                    inner_node, model, named_modules, graph))
+                    inner_node, model, target_dtype, node_name_to_qconfig, named_modules, graph))
             if isinstance(maybe_node, list):
                 return results
             else:
@@ -871,7 +895,7 @@ def _maybe_insert_observers_before_graph_output(
             results_dict = {}
             for k, inner_v in maybe_node.items():
                 results_dict[k] = _recursive_maybe_replace_node_with_obs(
-                    inner_v, model, named_modules, graph)
+                    inner_v, model, target_dtype, node_name_to_qconfig, named_modules, graph)
             return results_dict
         else:
             return results
@@ -880,7 +904,7 @@ def _maybe_insert_observers_before_graph_output(
     for old_arg in graph_output_node.args:
         new_args.append(
             _recursive_maybe_replace_node_with_obs(
-                old_arg, model, named_modules, graph))
+                old_arg, model, output_target_dtype, node_name_to_qconfig, named_modules, graph))
 
     graph_output_node.args = tuple(new_args)  # type: ignore[assignment]
 
@@ -1401,7 +1425,10 @@ def insert_observers_for_model(
                                         _swap_custom_module_to_observed(node, qconfig, named_modules, prepare_custom_config)
 
                 else:  # output
-                    _maybe_insert_observers_before_graph_output(node, model, named_modules, model.graph)
+                    _maybe_insert_observers_before_graph_output(
+                        node, output_quantized_idxs,
+                        node_name_to_qconfig,
+                        model, named_modules, model.graph)
 
         #
         # After this point, the current node has input and output observers
