@@ -701,6 +701,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str free_completed_s = "free_completed";
   py::str segment_alloc_s = "segment_alloc";
   py::str segment_free_s = "segment_free";
+  py::str segment_map_s = "segment_map";
+  py::str segment_unmap_s = "segment_unmap";
+
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
@@ -723,6 +726,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         return oom_s;
       case TraceEntry::SNAPSHOT:
         return snapshot_s;
+      case TraceEntry::SEGMENT_UNMAP:
+        return segment_unmap_s;
+      case TraceEntry::SEGMENT_MAP:
+        return segment_map_s;
     }
     throw std::runtime_error("unreachable");
   };
