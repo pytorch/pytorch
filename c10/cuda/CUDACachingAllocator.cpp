@@ -2055,7 +2055,6 @@ class DeviceCachingAllocator {
       }
       return bytes >= size;
     };
-    Block* candidate = nullptr;
     for (auto it = pool->unmapped.lower_bound(&key);
          it != pool->unmapped.end() && (*it)->stream == stream;
          ++it) {
@@ -2064,19 +2063,15 @@ class DeviceCachingAllocator {
         c = c->prev;
       }
       if (has_available_address_space(c)) {
-        candidate = c;
-        break;
+        return c;
       }
-    }
-    if (candidate) {
-      return candidate;
     }
     auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
     expandable_segments_.emplace_back(new ExpandableSegment(
         device, stream, segment_size, devices_with_peer_access_));
 
     ExpandableSegment* es = expandable_segments_.back();
-    candidate = new Block(device, stream, es->size(), pool, es->ptr());
+    Block* candidate = new Block(device, stream, es->size(), pool, es->ptr());
     candidate->mapped = false;
     candidate->expandable_segment_ = es;
     pool->unmapped.insert(candidate);
