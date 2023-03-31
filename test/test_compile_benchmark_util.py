@@ -33,10 +33,10 @@ class TestCompileBenchmarkUtil(TestCase):
         model = ToyModel().cuda()
 
         inference_table = bench_all(model, torch.ones(1024, 2, 2).cuda(), 5)
-        assert("Training" in inference_table) and "Eager" in inference_table and "-" in inference_table
+        self.assertTrue("Training" in inference_table and "Eager" in inference_table and "-" in inference_table)
 
         training_table = bench_all(model, torch.ones(1024, 2, 2).cuda(), 5, optimizer=torch.optim.SGD(model.parameters(), lr=0.01))
-        assert("Training" in training_table) and "Eager" in training_table and "-" in training_table
+        self.assertTrue("Training" in training_table and "Eager" in training_table and "-" in training_table)
 
 
 if __name__ == '__main__':
