@@ -17,7 +17,7 @@ from torch._dynamo.utils import dynamo_timed
 
 from . import config
 from .codecache import cache_dir, cubin_cache_dir
-from .codegen.wrapper import KernelParamCache
+
 from .ir import ReductionHint, TileHint
 from .utils import (
     ceildiv,
@@ -190,6 +190,8 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(self.launchers[0].config)
 
     def save_cuda_kernel(self, grid, stream, launcher):
+        from .codegen.wrapper import KernelParamCache
+
         # Make sure kernel_name is enough for distiguishing kernels
         assert config.triton.unique_kernel_names
 
