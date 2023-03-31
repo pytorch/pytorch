@@ -217,7 +217,9 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
-            if variables.EphemeralNNModule.can_use(self.value, args, kwargs):
+            if self.value is torch.nn.CrossEntropyLoss:
+                return self._call_cross_entropy_loss(tx, args, kwargs, options)
+            elif variables.EphemeralNNModule.can_use(self.value, args, kwargs):
                 return variables.EphemeralNNModule(
                     self.value,
                     [v.as_python_constant() for v in args],
@@ -655,6 +657,83 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return locals()[self.value.__name__](*args, **kwargs)
 
         return False
+
+    def _call_cross_entropy_loss(self, tx, args, kwargs, options):
+        """
+        functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
+
+        non functional ctor: weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
+
+        non functional loss call: input, target, optional_output
+        """
+        from . import ConstantVariable
+
+        def normalize_args(
+            weight=ConstantVariable(None),
+            size_average=ConstantVariable(None),
+            ignore_index=ConstantVariable(-100),
+            reduce=ConstantVariable(None),
+            reduction=ConstantVariable("mean"),
+            label_smoothing=ConstantVariable(0.0),
+        ):
+            return (
+                weight,
+                size_average,
+                ignore_index,
+                reduce,
+                reduction,
+                label_smoothing,
+            )
+
+        (
+            weight,
+            size_average,
+            ignore_index,
+            reduce_arg,
+            reduction,
+            label_smoothing,
+        ) = normalize_args(*args, **kwargs)
+
+        def fake_cross_entropy_loss(input, target):
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.nn.functional.cross_entropy,
+                    *proxy_args_kwargs(
+                        [
+                            input,
+                            target,
+                            weight,
+                            size_average,
+                            ignore_index,
+                            reduce_arg,
+                            reduction,
+                            label_smoothing,
+                        ],
+                        {},
+                    ),
+                ),
+                **VariableTracker.propagate(
+                    [
+                        self,
+                        weight,
+                        size_average,
+                        ignore_index,
+                        reduce_arg,
+                        reduction,
+                        label_smoothing,
+                        input,
+                        target,
+                    ]
+                ),
+            )
+
+        return variables.LambdaVariable(fake_cross_entropy_loss, **options)
 
     def _call_ntuple(self, tx, args, kwargs, options):
         """inline behavior of torch.nn.modules.utils._ntuple"""

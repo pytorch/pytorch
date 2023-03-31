@@ -720,7 +720,6 @@ class EphemeralNNModule(VariableTracker):
 
     allowlist = {
         # everything in this list must be stateless
-        torch.nn.CrossEntropyLoss,
         torch.nn.GELU,
         torch.nn.ReLU,
         torch.nn.ReLU6,
