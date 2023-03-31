@@ -191,6 +191,7 @@ class TorchVariable(VariableTracker):
             ConstantVariable,
             CUDAStreamContextVariable,
             CUDAStreamVariable,
+            DeterministicAlgorithmsVariable,
             GradModeVariable,
             SymNodeVariable,
             TensorVariable,
@@ -282,6 +283,15 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
                 GradModeVariable._guards_singleton
             )
+        elif self.value is torch.use_deterministic_algorithms and len(args) == 1:
+            return DeterministicAlgorithmsVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
+        elif self.value is torch.are_deterministic_algorithms_enabled:
+            assert not (args or kwargs)
+            return ConstantVariable(
+                torch.are_deterministic_algorithms_enabled(), **options
+            ).add_guards(DeterministicAlgorithmsVariable._guards_singleton)
         elif self.value is torch.cuda.stream:
             log.warning(
                 "torch.cuda.stream() not fully supported, streams may be ignored"
