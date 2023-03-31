@@ -417,7 +417,7 @@ Tensor mkl_linear(
     const Tensor& origin_weight_t,
     const c10::optional<Tensor>& bias_opt,
     const int64_t prepack_batch_size) {
-  TORCH_CHECK(false, "mkl_linear: ATen not compiled with MKL and MKLDNN support");
+  TORCH_CHECK(false, "mkl_linear: ATen not compiled with MKL support");
 }
 
 #endif// AT_MKL_ENABLED
