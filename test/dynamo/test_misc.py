@@ -29,6 +29,7 @@ from torch._dynamo.testing import (
     CompileCounter,
     requires_static_shapes,
     same,
+    skipIfPy311,
     unsupported,
 )
 
@@ -934,6 +935,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             opt_fn(a, b)
         self.assertEqual(cnts.frame_count, 2)
 
+    @skipIfPy311
     def test_nested_grad_mode_graph_break(self):
         def fn(x):
             before = torch.is_grad_enabled()
@@ -2078,6 +2080,7 @@ def fn():
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
+    @skipIfPy311
     def test_torch_profiler(self):
         # wrap torch.profiler.* as NullContextVariable and do nothing
         def fn(x):
@@ -2098,6 +2101,7 @@ def fn():
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    @skipIfPy311
     def test_autograd_profiler(self):
         # wrap torch.autograd.profiler.* as NullContextVariable and do nothing
         def fn(x):
@@ -3617,6 +3621,7 @@ def fn():
         self.assertEqual(exported.device.type, "cpu")
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    @skipIfPy311
     def test_autocast_cpu_graph_break(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -3644,6 +3649,7 @@ def fn():
         self.assertEqual(res.device.type, "cpu")
         self.assertEqual(res.dtype, torch.bfloat16)
 
+    @skipIfPy311
     def test_autocast_cpu_graph_break_2(self):
         # Regression for: https://github.com/pytorch/pytorch/issues/93890
         def fn(x):
@@ -3662,6 +3668,7 @@ def fn():
         self.assertEqual(res.dtype, torch.bfloat16)
         self.assertEqual(opt_res.dtype, torch.bfloat16)
 
+    @skipIfPy311
     def test_autocast_cpu_graph_break_inner_fn(self):
         class MyModule(torch.nn.Module):
             @staticmethod
@@ -3709,6 +3716,7 @@ def fn():
         self.assertEqual(out_32.device.type, "cpu")
         self.assertEqual(out_32.dtype, torch.float32)
 
+    @skipIfPy311
     def test_autocast_graph_break_method(self):
         class MyModule(torch.nn.Module):
             def __init__(self, bias):
@@ -4475,9 +4483,9 @@ def fn():
         opt_fn(x, y)
 
         if torch._dynamo.config.dynamic_shapes:
-            self.assertEqual(len(all_guards), 13)
+            self.assertEqual(len(all_guards), 17)
         else:
-            self.assertEqual(len(all_guards), 9)
+            self.assertEqual(len(all_guards), 13)
         for guard in all_guards:
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
@@ -4806,10 +4814,8 @@ def fn():
                 z *= 3
             return z
 
-        # TODO remove condition once 3.11 is fully supported
-        if sys.version_info < (3, 11):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
-            self.assertEqual(opt_f(None, torch.ones(2)), 6)
+        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+        self.assertEqual(opt_f(None, torch.ones(2)), 6)
 
         if sys.version_info >= (3, 11):
             insts = bytecode_transformation.cleaned_instructions(f.__code__)

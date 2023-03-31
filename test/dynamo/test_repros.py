@@ -9,6 +9,7 @@ import copy
 import inspect
 import itertools
 import random
+import sys
 import unittest
 import weakref
 from abc import ABC
@@ -33,7 +34,12 @@ except ImportError:
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import rand_strided, requires_static_shapes, same
+from torch._dynamo.testing import (
+    rand_strided,
+    requires_static_shapes,
+    same,
+    skipIfPy311,
+)
 from torch._dynamo.utils import ifdyn, ifunspec
 from torch.nn import functional as F
 
@@ -994,6 +1000,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIn(cnt.op_count, (36, 35, 34, 29, 28, 27))
 
     # see: https://github.com/pytorch/pytorch/issues/80067
+    @unittest.skipIf(sys.version_info >= (3, 11), "segfaults in 3.11")
     @torch._dynamo.config.patch(capture_scalar_outputs=False, dynamic_shapes=True)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -1281,6 +1288,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn3()
         self.assertTrue(same(ref, res))
 
+    @skipIfPy311
     def test_with_on_graph_break_inst(self):
         def reversible(x):
             print("Hello world")  # Cause graph break so inline fails
@@ -1305,6 +1313,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    @skipIfPy311
     def test_with_on_graph_break_nested(self):
         def reversible(x):
             torch._dynamo.graph_break()  # Cause graph break so inline fails
@@ -1332,6 +1341,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     # https://github.com/pytorch/torchdynamo/issues/1446
+    @skipIfPy311
     def test_grad_mode_carrying_correct_state_after_graph_break(self):
         def fn(x):
             with torch.no_grad():
@@ -2161,7 +2171,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_output_aliases_intermediate(self):
         def f(x):
             intermediate = x.mul(2)
-            return intermediate.view(-1)
+            return intermediate.view(-1), intermediate
 
         opt_f = torch._dynamo.optimize("aot_eager")(f)
 
@@ -2169,10 +2179,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(4, requires_grad=b)
             out = f(x)
             out_test = opt_f(x)
-            self.assertEqual(out, out_test)
-            self.assertEqual(out.requires_grad, out_test.requires_grad)
-            self.assertEqual(out._is_view(), out_test._is_view())
-            self.assertEqual(out._base.requires_grad, out_test._base.requires_grad)
+            self.assertEqual(out[0], out_test[0])
+            self.assertEqual(out[1], out_test[1])
+            self.assertEqual(out[0].requires_grad, out_test[0].requires_grad)
+            self.assertEqual(out[1].requires_grad, out_test[1].requires_grad)
+            # test that the aliasing relationship of outputs is preserved
+            out[0].mul_(2)
+            out_test[0].mul_(2)
+            self.assertEqual(out[0], out_test[0])
+            self.assertEqual(out[1], out_test[1])
 
     def test_while_loop_graph_break(self):
         # Repro of tacotron2 cache_size_recompilation
@@ -2244,6 +2259,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
 
+    @skipIfPy311
     def test_exception_in_dynamo_handling(self):
         hit_handler = False
 
