@@ -76,10 +76,10 @@ CI_SKIP = collections.defaultdict(list)
 CI_SKIP[CI("eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    "gat",  # does not work with fp32
-    "gcn",  # does not work with fp32
+    "gat",  # only works on CPU
+    "gcn",  # only works on CPU
     "llama",  # does not support complex32
-    "sage",  # does not work with fp32
+    "sage",  # only works on CPU
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
