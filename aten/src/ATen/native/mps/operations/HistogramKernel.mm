@@ -264,7 +264,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength:stridedIndicesNumThreads * sizeof(uint)
                                                                 options:0] autorelease];
       id<MTLFunction> stridedIndicesFunction =
-          MPSDevice::getInstance()->metalIndexingFunction("get_strided_indices_2", nil);
+          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offset", nil);
       id<MTLComputePipelineState> stridedIndicesPSO =
           [[device newComputePipelineStateWithFunction:stridedIndicesFunction error:&error] autorelease];
       TORCH_CHECK(
@@ -273,6 +273,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:1];
       [computeEncoder setBytes:inputShapeData.data() length:sizeof(uint32_t) * inputShape.size() atIndex:2];
+      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
 
       NSUInteger stridedIndicesTGSize = stridedIndicesPSO.maxTotalThreadsPerThreadgroup;
       if (stridedIndicesTGSize > stridedIndicesNumThreads)

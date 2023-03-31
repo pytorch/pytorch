@@ -33,7 +33,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
 /* Implements a numpy-like histogramdd function running on cpu
  * https://numpy.org/doc/stable/reference/generated/numpy.histogramdd.html
