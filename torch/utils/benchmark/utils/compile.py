@@ -7,7 +7,7 @@ import time
 from typing import Optional, List, Callable, Union, Any, cast
 
 try:
-    import tabulate # type: ignore[import]
+    from tabulate import tabulate
     HAS_TABULATE = True
 except ImportError:
     HAS_TABULATE = False
