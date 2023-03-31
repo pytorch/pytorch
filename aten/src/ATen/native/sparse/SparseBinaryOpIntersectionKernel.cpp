@@ -5,8 +5,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/AccumulateType.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -110,6 +109,8 @@ struct CPUValueSelectionIntersectionKernel {
   }
 };
 
+using OptTensor = c10::optional<Tensor>;
+
 void mul_sparse_sparse_out_cpu_kernel(
     Tensor& result,
     const Tensor& x,
@@ -123,10 +124,11 @@ void mul_sparse_sparse_out_cpu_kernel(
 void sparse_mask_intersection_out_cpu_kernel(
     Tensor& result,
     const Tensor& x,
-    const Tensor& y) {
+    const Tensor& y,
+    const OptTensor& x_hash_opt = c10::nullopt) {
   using CPUValueRhsProjKernel = CPUValueSelectionIntersectionKernel<RhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, CPUValueRhsProjKernel>(
-      result, x, y, true
+      result, x, y, x_hash_opt
   );
 }
 
@@ -143,4 +145,4 @@ REGISTER_AVX512_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_interse
 REGISTER_AVX2_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
 REGISTER_VSX_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
 REGISTER_ZVECTOR_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
-}}
+} // namespace at::native

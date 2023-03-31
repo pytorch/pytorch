@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import inspect
 import logging
@@ -11,6 +12,7 @@ import threading
 import traceback
 import types
 import warnings
+import weakref
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
@@ -28,12 +30,10 @@ from .hooks import Hooks
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
-        clear_profiler_hooks,
         reset_code,
         set_eval_frame,
         set_guard_error_hook,
         set_guard_fail_hook,
-        set_profiler_hooks,
         skip_code,
         unsupported,
     )
@@ -61,23 +61,6 @@ null_context = contextlib.nullcontext
 class Unset(Enum):
     token = 0
 
-
-def enable_cache_lookup_profiler(enable: bool):
-    if enable:
-
-        def _profiler_start(name):
-            return torch.ops.profiler._record_function_enter_new(name, None)
-
-        def _profiler_end(record):
-            torch.ops.profiler._record_function_exit._RecordFunction(record)
-
-        set_profiler_hooks(_profiler_start, _profiler_end)
-    else:
-        clear_profiler_hooks()
-
-
-# TODO can we enable by default? (check perf CI) otherwise, guard behind config
-enable_cache_lookup_profiler(config.profile_cache_lookup)
 
 unset = Unset.token
 
@@ -581,6 +564,23 @@ def explain(f, *args, **kwargs):
     )
 
 
+@dataclasses.dataclass
+class Constraint:
+    """
+    This represents constraints on input tensor dimensions, e.g., requiring
+    them to be fully polymorphic or within some range.  Don't create this
+    class directly; instead, use :func:`torch._export.dynamic_dim`.
+    """
+
+    w_tensor: weakref.ReferenceType[torch.Tensor]
+    # TODO: We don't need t_id; we can get it off of w_tensor
+    t_id: int
+    dim: int
+    constraint_range: Optional[
+        torch.fx.experimental.symbolic_shapes.StrictMinMaxConstraint
+    ]
+
+
 def export(
     f: Callable[..., Any],
     *args,
@@ -589,6 +589,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "real",
+    constraints: List[Constraint] = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -700,6 +701,7 @@ def export(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
+            export_constraints=constraints,
             dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
@@ -772,12 +774,52 @@ def export(
         graph,
     ).transform()
 
+    def signature_to_fullargspec(sig: inspect.Signature):
+        # Get a list of Parameter objects from the Signature object
+        params = list(sig.parameters.values())
+        # Separate positional arguments, keyword-only arguments and varargs/varkw
+        args = [
+            p.name for p in params if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+        ]
+        kwonlyargs = [
+            p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
+        ]
+        varargs = next(
+            (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL), None
+        )
+        varkw = next(
+            (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD), None
+        )
+        # Get default values for positional arguments and keyword-only arguments
+        defaults = tuple(
+            p.default
+            for p in params
+            if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+            and p.default is not inspect.Parameter.empty
+        )
+        kwonlydefaults = {
+            p.name: p.default
+            for p in params
+            if p.kind == inspect.Parameter.KEYWORD_ONLY
+            and p.default is not inspect.Parameter.empty
+        }
+        # Get annotations for parameters and return value
+        annotations = {}
+        if sig.return_annotation:
+            annotations = {"return": sig.return_annotation}
+        for parameter in params:
+            annotations[parameter.name] = parameter.annotation
+        # Return a FullArgSpec object with the extracted attributes
+        return inspect.FullArgSpec(
+            args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations
+        )
+
     # Make dynamo graph to have same input/output spec as user code
     def argument_names(f: Callable[..., Any], *args, **kwargs) -> List[str]:
         call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
-        fullargspec = inspect.getfullargspec(call_to_inspect)
-        if inspect.ismethod(call_to_inspect):
-            fullargspec.args.pop(0)
+
+        sig = inspect.signature(call_to_inspect)
+        fullargspec = signature_to_fullargspec(sig)
 
         # 1. Map `args` 1-to-1 to positional arguments in original signature.
         input_strs = fullargspec.args[: len(args)]
@@ -832,7 +874,14 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=False):
+def optimize_assert(
+    backend,
+    *,
+    hooks=Hooks(None, None),
+    export=False,
+    export_constraints=None,
+    dynamic=False,
+):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -842,7 +891,9 @@ def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=F
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, export=export),
+        convert_frame.convert_frame_assert(
+            backend, export=export, export_constraints=export_constraints
+        ),
         hooks,
         backend_ctx_ctor,
         export=export,

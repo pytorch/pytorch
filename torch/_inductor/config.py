@@ -12,6 +12,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Name for generated .h and .so files
+aot_codegen_output_prefix = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -34,7 +37,7 @@ inplace_buffers = True
 benchmark_harness = True
 
 # fuse pointwise into templates
-epilogue_fusion = False
+epilogue_fusion = True
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
@@ -48,8 +51,17 @@ reordering = False
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
+# enable slow autotuning passes to select pointwise/reductions algorithms
+max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
+
+# enable slow autotuning passes to select gemm algorithms
+max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+
+# We will disable creating subprocess for autotuning if this is False
+autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
@@ -66,9 +78,6 @@ fallback_random = False
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
-# do bench to decide best layout, currently only for aten.conv
-tune_layout = False
-
 # fuse even in cases without common reads
 aggressive_fusion = False
 
@@ -78,7 +87,12 @@ max_fusion_size = 64
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
+# Add extra comments to output code (causes compile cache misses)
 comment_origin = False
+
+# Convert 1x1 convs into matmuls
+conv_1x1_as_mm = False
+
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -88,7 +102,8 @@ def is_fbcode():
 
 
 # warnings intended for PyTorch developers, disable for point releases
-developer_warnings = is_fbcode() or "+" in torch.__version__
+is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
+developer_warnings = is_fbcode() or is_nightly_or_source
 
 
 def decide_compile_threads():
@@ -142,6 +157,8 @@ _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
+disable_cpp_codegen = is_fbcode()
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -174,9 +191,20 @@ class cpp:
 
 # config specific to codegen/triton.py
 class triton:
-
     # Use cudagraphs on output code
     cudagraphs = False
+
+    # Use cudagraph trees for memory pooling if `cudagraphs` is True
+    cudagraph_trees = not is_fbcode()
+
+    # assertions not on the fast path, steady state
+    fast_cudagraph_asserts = True
+
+    # assertions on the fast path
+    slow_cudagraph_asserts = False
+
+    # skip warmup for cudagraph trees
+    skip_cudagraph_warmup = False
 
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
@@ -206,14 +234,15 @@ class triton:
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
-    # "torch": Maps to the fx node in the Dynamo graph (module name, method name, etc.)
-    # "aten": Maps to the highest-level aten op (i.e. pre-decompositions)
-    descriptive_names = "aten"
+    # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
+    # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
+    # "inductor_node": Maps to the node name in the FX graph passed to Inductor
+    descriptive_names = "original_aten"
 
     # use alternate codegen for smaller reductions
     persistent_reductions = True
 
-    # theses are not enforced, but they are used by asserts in triton_ops/autotune.py
+    # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
 
@@ -253,6 +282,12 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar = None
+
+
+_save_config_ignore = {
+    # workaround: "Can't pickle <function ...>"
+    "trace.upload_tar",
+}
 
 
 from .._dynamo.config_utils import install_config_module
