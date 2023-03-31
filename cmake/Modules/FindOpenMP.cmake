@@ -227,9 +227,8 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
     #   http://openmp.llvm.org/
     #
     # So here, before we test each flag combination, we first try directly
-    # linking against any `libomp` MKL has linked to (if any and when MKL is
-    # specified). This allows us to do sensible things in tricky (yet common)
-    # conditions like:
+    # linking against any `libomp` MKL has found (if any). This allows us to
+    # do sensible things in tricky (yet common) conditions like:
     #   - using `clang` (so no native GNU OpenMP), and
     #   - having `brew` `libomp` installed at `/usr/local/`, and
     #   - having `conda` `mkl` installed at `$HOME/conda/`, with includes a copy
@@ -237,23 +236,26 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
     # Rather than blindly picking one, we pick what ever `FindMKL.cmake` choses
     # to avoid conflicts.
     #
+    # Crucially, we only do so for non-GNU compilers. For GNU ones,
     # `FindMKL.cmake` calls `FindOpenMP.cmake` when trying to find `gomp` and
-    # thus will cause infinite recursion if this is not taken care of. Therefore,
-    # we record an internal flag to detect repeatedly inclusion.
+    # thus will cause infinite recursion if this is not taken care of. Moreover,
+    # for them, since the compiler provices the OpenMP library, it is most
+    # likely that only one viable gomp library can be found in search path by
+    # `FindOpenMP.cmake`, so the chance of having conflicts is slow.
+    #
+    # TODO: refactor to solve this weird dependency where
+    #         - for non-GNU, FindOpenMP.cmake replies on FindMKL.cmake to finish first, but
+    #         - for GNU,     FindMKL.cmake replies on FindOpenMP.cmake to finish first.
 
-    if(NOT "${CMAKE_${LANG}_COMPILER_ID}" STREQUAL "GNU" AND BLAS STREQUAL "MKL" AND NOT IN_FIND_OMP)
-      set(IN_FIND_OMP ON CACHE BOOL "" FORCE)
+    if(NOT "${CMAKE_${LANG}_COMPILER_ID}" STREQUAL "GNU")
       find_package(MKL QUIET)
-      unset(IN_FIND_OMP CACHE)
       if(MKL_FOUND AND MKL_OPENMP_LIBRARY)
         # If we already link OpenMP via MKL, use that. Otherwise at run-time
         # OpenMP will complain about being initialized twice (OMP: Error #15),
         # can may cause incorrect behavior.
         set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
-        if(OpenMP_libomp_LIBRARY MATCHES "iomp5")
-          if("-fopenmp=libiomp5" IN_LIST OpenMP_${LANG}_FLAG_CANDIDATES)
-            set(OPENMP_FLAGS_TEST "-fopenmp=libiomp5")
-          endif()
+        if("-fopenmp=libiomp5" IN_LIST OpenMP_${LANG}_FLAG_CANDIDATES)
+          set(OPENMP_FLAG "-fopenmp=libiomp5")
         endif()
       else()
         find_library(OpenMP_libomp_LIBRARY
