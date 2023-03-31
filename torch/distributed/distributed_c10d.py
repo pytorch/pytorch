@@ -288,7 +288,7 @@ class BackendConfig:
                 self.device_backend_map[device] = Backend(backend)
 
     def __repr__(self):
-        # string with all the device:backend pairs separared by commas
+        # string with all the device:backend pairs separated by commas
         return ",".join(f"{device}:{backend}" for device, backend in self.device_backend_map.items())
 
     def get_device_backend_map(self):
@@ -482,7 +482,7 @@ def _store_based_barrier(rank, store, timeout):
     world_size = get_world_size()
     # Use 'add' instead of 'get' since for some store implementations 'add'
     # doesn't work well with 'get'. Ideally the store implementations should
-    # be fixed, but for backward compatiblity reasons it is risky to change
+    # be fixed, but for backward compatibility reasons it is risky to change
     # the store implementations. Once, we completely migrate away from these
     # legacy stores, we can use 'get' here instead.
     worker_count = store.add(store_key, 0)
@@ -826,7 +826,7 @@ def init_process_group(
     Args:
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            ``nccl``, and ``ucc``. If the backend is not provied, then both a ``gloo``
+            ``nccl``, and ``ucc``. If the backend is not provided, then both a ``gloo``
             and ``nccl`` backend will be created, see notes below for how multiple
             backends are managed. This field can be given as a lowercase string
             (e.g., ``"gloo"``), which can also be accessed via
@@ -2170,7 +2170,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         _warn_not_in_group("gather_object")
         return
 
-    # Ensure object_gather_list is specified appopriately.
+    # Ensure object_gather_list is specified appropriately.
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
     current_device = _get_pg_device(group)
@@ -3092,7 +3092,7 @@ def all_to_all_single(
     Complex tensors are supported.
 
     Args:
-        output (Tensor): Gathered cancatenated output tensor.
+        output (Tensor): Gathered concatenated output tensor.
         input (Tensor): Input tensor to scatter.
         output_split_sizes: (list[Int], optional): Output split sizes for dim 0
             if specified None or empty, dim 0 of ``output`` tensor must divide
