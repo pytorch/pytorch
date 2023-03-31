@@ -86,8 +86,7 @@ inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
   #pragma unroll
   for (int64_t i = 0; i < at::vec::Vectorized<float>::size(); i++) {
-    uint32_t* dst_u32 = (uint32_t*)dst_tmp;
-    dst_u32[i] = flag_to_float_scalar(src[i]);
+    dst_tmp[i] = flag_to_float_scalar(src[i]);
   }
   return at::vec::Vectorized<float>::loadu(dst_tmp);
 }
