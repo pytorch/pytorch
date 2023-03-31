@@ -1326,7 +1326,7 @@ class CUDAGraphTreeManager:
         static_input_idxs,
         stack_traces,
         mode,
-    ) -> Callable:
+    ) -> Tuple[Callable, List[Optional[Tensor]]]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
