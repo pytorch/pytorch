@@ -1978,7 +1978,7 @@ class UnittestPair(Pair):
 
 
 class StringPair(UnittestPair):
-    CLS = str
+    CLS = (str, bytes)
     TYPE_NAME = "string"
 
 

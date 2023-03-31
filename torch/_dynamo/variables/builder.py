@@ -6,7 +6,7 @@ import inspect
 import operator
 import re
 import types
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, List, NamedTuple, Optional, Union
 
 import torch
 
@@ -14,6 +14,11 @@ from torch import SymInt
 from torch._guards import GuardSource
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.symbolic_shapes import (
+    DimConstraint,
+    DimDynamic,
+    RelaxedUnspecConstraint,
+)
 from torch.fx.immutable_collections import immutable_list
 
 from .. import config, mutation_guard, replay_record, skipfiles
@@ -46,7 +51,6 @@ from ..utils import (
     odict_values,
     preserve_rng_state,
     tensor_always_has_static_shape,
-    tensor_static_reason_to_message,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -64,12 +68,12 @@ from .dicts import (
 )
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lists import (
-    ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
     SizeVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .misc import (
@@ -99,6 +103,9 @@ from .torch import (
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+
+
+DimList = List
 
 
 class _missing:
@@ -309,11 +316,11 @@ class VariableBuilder:
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
-            map(
-                lambda k: ConstantVariable.is_literal(k)
+            (
+                ConstantVariable.is_literal(k)
                 or self.tensor_can_be_dict_key(k)
-                or isinstance(k, enum.Enum),
-                value.keys(),
+                or isinstance(k, enum.Enum)
+                for k in value.keys()
             )
         ):
             if not value and self.get_source().is_nn_module():
@@ -611,7 +618,9 @@ class VariableBuilder:
             ).add_guards(guards)
             for i in range(tuple_iterator_len(value))
         ]
-        return ListIteratorVariable(output, mutable_local=MutableLocal(), guards=guards)
+        return TupleIteratorVariable(
+            output, mutable_local=MutableLocal(), guards=guards
+        )
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -825,12 +834,41 @@ class VariableBuilder:
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
             ):
+                if value < 0 or torch._dynamo.config.specialize_int:
+                    # Negative values don't create_symbol correctly,
+                    # so make sure we do a constant in this case.
+                    #
+                    # Also, if specialize_int is False, also return
+                    # a constant (but this should have been handled
+                    # in the caller, TBH)
+                    return ConstantVariable(
+                        value=value,
+                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
+
                 shape_env = self.tx.output.shape_env
+
+                # TODO: This should be dynamic, as we in general do not
+                # know if bare integers are actually going to be sizevars
+                # and it is inappropriate to eagerly duck size them with
+                # real sizevars
+                dynamic_dim = DimDynamic.DUCK
+
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, source=self.source), hint=value
+                    # TODO: This is wrong wrong wrong, create_symbol will
+                    # generate something that is non-negative, but this is
+                    # not a sound assumption to make.
+                    # Not fixing as this was a preexisting condition.
+                    shape_env.create_symbol(
+                        value,
+                        source=self.source,
+                        dynamic_dim=dynamic_dim,
+                        constraint_dim=None,
+                    ),
+                    hint=value,
                 )
                 self.tx.output.tracked_fakes.append(
-                    TrackedFake(wrapped_value, self.source)
+                    TrackedFake(wrapped_value, self.source, None)
                 )
             else:
                 wrapped_value = torch.tensor(value)
@@ -1086,6 +1124,8 @@ def wrap_fx_proxy_cls(
 class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
+    # Is None when fake is SymInt
+    constraint_dims: Optional[DimList[DimConstraint]]
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name()))
@@ -1105,19 +1145,56 @@ def wrap_to_fake_tensor_and_record(
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
 
+        # TODO: index export_constraints ahead of time so we don't have to
+        # do a linear scan every time here
+        t_id = id(e)
+        dim2constraint = {}
+        if tx.output.export_constraints:
+            for constraint in tx.output.export_constraints:
+                if constraint.t_id == t_id:
+                    dim2constraint[constraint.dim] = constraint.constraint_range
+
+        dynamic_dims = None
+        constraint_dims = None
+        if tx.fake_mode.shape_env is not None:
+            dynamic_dims = []
+            constraint_dims = []
+            for i in range(e.dim()):
+                # We will process constraints first, as they will imply that we
+                # have a dynamic dimension
+                # Precedence: export constraints > eager constraints
+                constraint = dim2constraint.get(i)
+                if constraint is None:
+                    if (
+                        i in getattr(e, "_dynamo_dynamic_indices", set())
+                        and not config.allow_ignore_mark_dynamic
+                    ):
+                        constraint = RelaxedUnspecConstraint()
+                constraint_dims.append(constraint)
+
+                # Now, figure out if the dim is dynamic/duck/static
+                if constraint is not None:
+                    # NB: We could assert static_shapes is False here, but it
+                    # seems better to allow the user to override policy in this
+                    # case
+                    dynamic = DimDynamic.DYNAMIC
+                elif static_shapes or config.assume_static_by_default:
+                    dynamic = DimDynamic.STATIC
+                else:
+                    dynamic = DimDynamic.DUCK
+                dynamic_dims.append(dynamic)
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
-                static_shapes=static_shapes,
                 ignore_subclass=ignore_subclass,
                 source=source,
+                dynamic_dims=dynamic_dims,
+                constraint_dims=constraint_dims,
             )
         )
-        if hasattr(e, "_dynamo_dynamic_indices"):
-            fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
-            assert not static_shapes, tensor_static_reason_to_message(reason)
         if is_tensor:
-            tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
+            tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
         return fake_e
     else:
         return e
