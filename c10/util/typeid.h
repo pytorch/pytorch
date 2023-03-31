@@ -520,6 +520,7 @@ class C10_API TypeMeta final {
 
   static uint16_t existingMetaDataIndexForType(TypeIdentifier identifier);
 
+ public:
 #ifdef __CUDACC__
   // NOTE [ TypeIdentifier::Get nvcc/clang discrepancy]
   // nvcc and clang do not produce identical results for
@@ -563,6 +564,7 @@ class C10_API TypeMeta final {
   }
 #endif
 
+ private:
   // specializations return indexes into typeMetaDataInstances()
   template <class T>
   C10_API static uint16_t _typeMetaData() noexcept;
@@ -658,21 +660,25 @@ inline std::ostream& operator<<(
 // C10_ALWAYS_INLINE so that it doesn't need to see a definition for
 // _addTypeMeta. See NOTE [ TypeIdentifier::Get nvcc/clang discrepancy
 // ].
-#define CAFFE_DECLARE_KNOWN_TYPE(T)                                         \
-  extern template uint16_t TypeMeta::addTypeMetaData<T>();                  \
-  template <>                                                               \
+#define CAFFE_DECLARE_KNOWN_TYPE(T, ident)                              \
+  extern template uint16_t TypeMeta::addTypeMetaData<T>();              \
+  namespace detail {                                                    \
+  static const uint16_t ident##_metadata_index = TypeMeta::addTypeMetaData<T>(); \
+  }                                                                     \
+  template <>                                                           \
   EXPORT_IF_NOT_GCC inline uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
-    static const uint16_t index = addTypeMetaData<T>();                     \
-    return index;                                                           \
+    return detail::ident##_metadata_index;                              \
   }
 #else
-#define CAFFE_DECLARE_KNOWN_TYPE(T)                        \
-  extern template uint16_t TypeMeta::addTypeMetaData<T>(); \
-  template <>                                              \
-  EXPORT_IF_NOT_GCC C10_ALWAYS_INLINE uint16_t             \
-  TypeMeta::_typeMetaData<T>() noexcept {                  \
-    static const uint16_t index = addTypeMetaData<T>();    \
-    return index;                                          \
+#define CAFFE_DECLARE_KNOWN_TYPE(T, ident)                              \
+  extern template uint16_t TypeMeta::addTypeMetaData<T>();              \
+  namespace detail {                                                    \
+  static const uint16_t ident##_metadata_index = TypeMeta::addTypeMetaData<T>(); \
+  }                                                                     \
+  template <>                                                           \
+  EXPORT_IF_NOT_GCC C10_ALWAYS_INLINE uint16_t                          \
+  TypeMeta::_typeMetaData<T>() noexcept {                               \
+    return detail::ident##_metadata_index;                              \
   }
 #endif
 
@@ -683,17 +689,17 @@ inline std::ostream& operator<<(
     return index;                                       \
   }
 
-CAFFE_DECLARE_KNOWN_TYPE(std::string)
-CAFFE_DECLARE_KNOWN_TYPE(uint16_t)
-CAFFE_DECLARE_KNOWN_TYPE(char)
-CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<std::mutex>)
-CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>)
-CAFFE_DECLARE_KNOWN_TYPE(std::vector<int32_t>)
-CAFFE_DECLARE_KNOWN_TYPE(std::vector<int64_t>)
-CAFFE_DECLARE_KNOWN_TYPE(std::vector<unsigned long>)
-CAFFE_DECLARE_KNOWN_TYPE(bool*)
-CAFFE_DECLARE_KNOWN_TYPE(char*)
-CAFFE_DECLARE_KNOWN_TYPE(int*)
+CAFFE_DECLARE_KNOWN_TYPE(std::string, std_string)
+CAFFE_DECLARE_KNOWN_TYPE(uint16_t, uint16_t)
+CAFFE_DECLARE_KNOWN_TYPE(char, char)
+CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<std::mutex>, std_unique_ptr_std_mutex)
+CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>, std_unique_ptr_std_atomic_bool)
+CAFFE_DECLARE_KNOWN_TYPE(std::vector<int32_t>, std_vector_int32_t)
+CAFFE_DECLARE_KNOWN_TYPE(std::vector<int64_t>, std_vector_int64_t)
+CAFFE_DECLARE_KNOWN_TYPE(std::vector<unsigned long>, std_vector_unsigned_long)
+CAFFE_DECLARE_KNOWN_TYPE(bool*, bool_ptr)
+CAFFE_DECLARE_KNOWN_TYPE(char*, char_ptr)
+CAFFE_DECLARE_KNOWN_TYPE(int*, int_ptr)
 
 // For some of the compilers, long is defined separately from int32_t and
 // int64_t. As a result we will need to actually define them separately.
@@ -714,10 +720,10 @@ using _guard_long_unique = std::conditional_t<
     T>;
 } // namespace detail
 
-CAFFE_DECLARE_KNOWN_TYPE(detail::_guard_long_unique<long>);
-CAFFE_DECLARE_KNOWN_TYPE(detail::_guard_long_unique<std::vector<long>>)
+CAFFE_DECLARE_KNOWN_TYPE(detail::_guard_long_unique<long>, detail_guard_long_unique_long);
+CAFFE_DECLARE_KNOWN_TYPE(detail::_guard_long_unique<std::vector<long>>, detail_guard_long_unique_std_vector_long)
 
-CAFFE_DECLARE_KNOWN_TYPE(float*)
-CAFFE_DECLARE_KNOWN_TYPE(at::Half*)
+CAFFE_DECLARE_KNOWN_TYPE(float*, float_ptr)
+CAFFE_DECLARE_KNOWN_TYPE(at::Half*, at_Half)
 
 } // namespace caffe2
