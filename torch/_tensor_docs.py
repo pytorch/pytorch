@@ -701,6 +701,15 @@ See :func:`torch.as_strided`
 )
 
 add_docstr_all(
+    "as_strided_",
+    r"""
+as_strided_(size, stride, storage_offset=None) -> Tensor
+
+In-place version of :meth:`~Tensor.as_strided`
+""",
+)
+
+add_docstr_all(
     "atan",
     r"""
 atan() -> Tensor
@@ -5360,9 +5369,15 @@ See :func:`torch.topk`
 add_docstr_all(
     "to_dense",
     r"""
-to_dense() -> Tensor
+to_dense(dtype=None, *, masked_grad=True) -> Tensor
 
 Creates a strided copy of :attr:`self` if :attr:`self` is not a strided tensor, otherwise returns :attr:`self`.
+
+Keyword args:
+    {dtype}
+    masked_grad (bool, optional): If set to ``True`` (default) and
+      :attr:`self` has a sparse layout then the backward of
+      :meth:`to_dense` returns ``grad.sparse_mask(self)``.
 
 Example::
 

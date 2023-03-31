@@ -653,7 +653,7 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(const Vectorized<BF
 Vectorized<BFloat16> inline Vectorized<BFloat16>::operator!=(const Vectorized<BFloat16>& other) const {
   return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
     auto zero_vec = _mm512_set1_epi32(0);
-    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_NEQ_OQ);
+    auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_NEQ_UQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
   });
 }

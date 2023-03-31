@@ -9,8 +9,7 @@ import torch.distributed as dist
 
 import torch.distributed.distributed_c10d as c10d
 
-from torch._C import _disabled_torch_function_impl
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map_only
 
 """
 New traceable, functional collectives.
@@ -57,7 +56,7 @@ We use this dictionary when AsyncCollectiveTensor is used to invoke Work::wait()
 Finally, we setup a finalizer against the tensor wrapper to observe it getting collected so we
 can clean up stale entries in the dictionary.
 
-To eliminate the possiblity of races we have a global version counter that is used by the finalizer.
+To eliminate the possibility of races we have a global version counter that is used by the finalizer.
 
 As a wise man said once: Don't cross the streams (https://www.youtube.com/watch?v=wyKQe_i9yyo)
 
@@ -66,16 +65,18 @@ data_ptr_to_work = dict()
 work_version = 0
 
 def _register_tensor_work(tensor, work):
+    # Note: called directly by inductor codegen currently
     global data_ptr_to_work
     global work_version
     data_ptr_to_work[tensor.data_ptr()] = (work_version, work)
     work_version += 1
 
-def _clear_tensor(data_ptr, version):
+def _wait_and_clear_tensor(data_ptr, version):
     global data_ptr_to_work
     version_and_work = data_ptr_to_work.get(data_ptr)
 
     if version_and_work is not None and version_and_work[0] == version:
+        version_and_work[1].wait()
         del data_ptr_to_work[data_ptr]
 
 def _register_wrapper_tensor(tensor_wrapper, tensor):
@@ -86,54 +87,61 @@ def _register_wrapper_tensor(tensor_wrapper, tensor):
             "Trying to register finalizers to AsyncCollectiveTensor but the inner tensor is already gone"
         )
     else:
-        weakref.finalize(tensor_wrapper, _clear_tensor, tensor.data_ptr(), version)
+        # We force the collective to be waited in the case this tensor goes away to reduce the change of deadlocks.
+        weakref.finalize(tensor_wrapper, _wait_and_clear_tensor, tensor.data_ptr(), version)
 
 def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     global data_ptr_to_work
     data_ptr = tensor.data_ptr()
     version_and_work = data_ptr_to_work.get(data_ptr)
     if version_and_work is not None:
-        version_and_work[1].wait()
-        _clear_tensor(data_ptr, version_and_work[0])
+        _wait_and_clear_tensor(data_ptr, version_and_work[0])
     return tensor
-
 
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
-    A Tensor subclass that is only used in eager mode, to hold a 'work' object
-    and then wait on it before invoking a real op.
-
-    Usage, from inside functional collective:
-    def functional_collective(input):
-        input = input.clone()
-        mutated_input, work = c10d.{inplace_collective}(input)
-        return AsyncCollectiveTensor(mutated_input, work)
+    A Tensor wrapper subclass that is used to trigger a call to wait
+    prior to first use of the underlying tensor.
+    Use it inside functional collective pytorch wrappers like the following:
+    def functional_collective(self, group, tag):
+        tag, rankset, group_size = _expand_group(group, tag)
+        tensor = torch._C._dist.{collective}(self, tag, rankset, group_size)
+        res = AsyncCollectiveTensor(tensor)
+        _register_wrapper_tensor(res, tensor)
+        return res
     """
-    _tensor: torch.Tensor
+    elem: torch.Tensor
 
-    __torch_function__ = _disabled_torch_function_impl
+    __slots__ = ['elem']
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
-    def __new__(cls, tensor: torch.Tensor):
-        t = tensor
-        r = torch.Tensor._make_subclass(cls, t, require_grad=t.requires_grad)
-        r._tensor = tensor  # type: ignore[attr-defined]
+    def __new__(cls, elem: torch.Tensor):
+
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls, elem.size(),
+            strides=elem.stride(), storage_offset=elem.storage_offset(),
+            dtype=elem.dtype, layout=elem.layout,
+            device=elem.device, requires_grad=False
+        )
+        r.elem = elem
         return r
 
     def __repr__(self):
-        return f"AsyncCollectiveTensor({self._tensor})"
+        return f"AsyncCollectiveTensor({self.elem})"
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(e: Any):
-            if isinstance(e, AsyncCollectiveTensor):
-                return wait_tensor(e._tensor)
-            return e
+            return wait_tensor(e.elem)
 
-        unwrapped_args = tree_map(unwrap, args)
-        unwrapped_kwargs = tree_map(unwrap, kwargs)
+        unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
+        unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
 
+        # we don't wrap the result as it doesn't need to be waited on.
         out = func(*unwrapped_args, **unwrapped_kwargs)
+
         return out
 
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
@@ -218,17 +226,20 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         group_size = len(rankset)
         tag = tag or c10d._get_group_tag(group)
     elif isinstance(group, dt.DeviceMesh):
-        rankset = group.mesh.flatten().tolist()
-        group_size = group.mesh.size(0)
-        rankset = group.mesh.swapdims(-1, 0).reshape(-1, group_size).flatten().tolist()
-        tag = tag or c10d._get_group_tag(group.get_dim_groups()[0])
+        assert group.ndim == 1, "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
+        # TODO: it should run collective in the whole mesh instead of dim 0
+        mesh_pg = group.get_dim_groups()[0]
+        rankset = dist.get_process_group_ranks(mesh_pg)
+        group_size = len(rankset)
+        tag = tag or c10d._get_group_tag(mesh_pg)
     elif isinstance(group, tuple):
         if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
             dmesh = group[0]
             dim = group[1]
-            group_size = dmesh.mesh.size(dim)
-            rankset = dmesh.mesh.swapdims(-1, dim).reshape(-1, group_size).flatten().tolist()
-            tag = tag or c10d._get_group_tag(dmesh.get_dim_groups()[dim])
+            dim_group = dmesh.get_dim_groups()[dim]
+            rankset = dist.get_process_group_ranks(dim_group)
+            group_size = len(rankset)
+            tag = tag or c10d._get_group_tag(dim_group)
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
@@ -243,7 +254,7 @@ def wait_tensor(tensor):
 
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
-    return torch._C._nn.wait_tensor(tensor)  # type: ignore[attr-defined]
+    return torch._C._dist.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
@@ -264,7 +275,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+    tensor = torch._C._dist.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     res = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     return res
@@ -296,7 +307,9 @@ def reduce_scatter_tensor(
     assert (
         self.size(0) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
-    tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, scatter_dim, tag, rankset, group_size)  # type: ignore[attr-defined]
+    tensor = torch._C._dist.reduce_scatter_tensor(  # type: ignore[attr-defined]
+        self, reduceOp, scatter_dim, tag, rankset, group_size
+    )
     res = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     return res

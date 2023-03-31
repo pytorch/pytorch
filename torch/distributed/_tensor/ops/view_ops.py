@@ -13,6 +13,7 @@ from torch.distributed._tensor.ops.utils import (
     prod,
     register_prop_rule,
 )
+from torch.distributed._tensor._utils import compute_local_shape
 
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 
@@ -381,7 +382,7 @@ def dim_squeeze(shape: Shape, dim: Optional[int] = None) -> DimMap:
     # FIXME: this is wrong when dim=None and one of the dimensions
     # equals size of the mesh. For example squeeze(DTensor(tensor(4), Shard[0])) could
     # end up as squeeze(tensor(1)) if we have 4 devices; this would lead to
-    # removal of a dimension that is not acutally a singleton.
+    # removal of a dimension that is not actually a singleton.
     return tuple(
         InputDim(i)
         for i, s in enumerate(shape)
@@ -594,7 +595,8 @@ def register_prop_rule_map(
     @register_prop_rule(aten_op_overload)
     def reshape_prop(op_schema: OpSchema) -> OutputSharding:
         rules = spec.dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
-        input_dtensor_spec = op_schema.args_schema[0]
+        input_dtensor_spec = cast(DTensorSpec, op_schema.args_schema[0])
+        mesh = input_dtensor_spec.mesh
 
         assert isinstance(
             input_dtensor_spec, DTensorSpec
@@ -606,16 +608,13 @@ def register_prop_rule_map(
             input_dtensor_spec.placements,
             tuple(global_in_shape),
             rules,
-            tuple(input_dtensor_spec.mesh.mesh.shape),
+            tuple(mesh.mesh.shape),
         )
 
         if shard_out is not None:
             # no reshard needed
-            output_dtensor_spec = DTensorSpec(
-                mesh=input_dtensor_spec.mesh,
-                placements=shard_out,
-            )
-            local_out_shape = output_dtensor_spec._local_shape_from_global_shape(list(global_out_shape))
+            output_dtensor_spec = DTensorSpec(mesh=mesh, placements=shard_out)
+            local_out_shape = compute_local_shape(list(global_out_shape), mesh, shard_out)
 
             # We only need the local shape to lower the call into the local op
             args = op_schema.args_schema
