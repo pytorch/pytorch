@@ -1581,7 +1581,7 @@ class Module:
     __call__ : Callable[..., Any] = _call_impl
 
     def __getstate__(self):
-        state = self.__dict__.copy()
+        state = super().__getstate__()
         state.pop("_compiled_call_impl", None)
         return state
 
