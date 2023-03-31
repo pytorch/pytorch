@@ -8,7 +8,6 @@
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <array>
 #include <iostream>
 #include <utility>
 
@@ -914,35 +913,10 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
     return "Tuple[()]";
   }
 
-  // Fast path for expectedly-small Tuples.
-  const auto elts = elements();
-  if (elts.size() <= 3) {
-    std::array<std::string, 3> elements_strs;
-    size_t total_length = 0;
-    int idx = 0;
-    for (const auto& element: elts) {
-      elements_strs[idx] = element->annotation_str(printer);
-      total_length += elements_strs[idx].size();
-      idx++;
-    }
-    std::string result;
-    result.reserve(strlen("Tuple[") + strlen(", ") * (elts.size() - 1) + total_length + 1);
-    result.append("Tuple[");
-    for (const auto ii : c10::irange(elts.size())) {
-      if (ii > 0) {
-        result.push_back(',');
-        result.push_back(' ');
-      }
-      result.append(elements_strs[ii]);
-    }
-    result.push_back(']');
-    return result;
-  }
-
   std::ostringstream ss;
   ss << "Tuple[";
   size_t i = 0;
-  for (const auto& element: elts) {
+  for (const auto& element: elements()) {
     if (i > 0) {
       ss << ", ";
     }

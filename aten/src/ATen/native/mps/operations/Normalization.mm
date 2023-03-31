@@ -11,7 +11,7 @@
 #include <torch/library.h>
 
 namespace at::native {
-namespace mps {
+
 void get_shapes(MPSShape* input_shape_readonly,
                 NSMutableArray<NSNumber*>*& input_shape,
                 NSMutableArray<NSNumber*>*& new_mean_shape,
@@ -53,7 +53,6 @@ void get_shapes(MPSShape* input_shape_readonly,
       axes[i] = [NSNumber numberWithInt:i];
   }
 }
-} // namespace mps
 
 // Inverse standard deviation now becomes variance (without epsilon)
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
@@ -124,8 +123,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
     // Reduction axes
     NSMutableArray<NSNumber*>* axes = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_input_dims - 1)];
 
-    native_mps::get_shapes(
-        input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, false);
+    get_shapes(input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, false);
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
@@ -578,8 +576,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
     // Reduction axes
     NSMutableArray<NSNumber*>* axes = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_input_dims - 1)];
 
-    native_mps::get_shapes(
-        input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, true);
+    get_shapes(input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, true);
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
