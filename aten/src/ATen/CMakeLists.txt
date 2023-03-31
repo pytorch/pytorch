@@ -452,7 +452,7 @@ if(USE_CUDA AND NOT USE_ROCM)
      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
        list(APPEND ATen_CUDA_DEPENDENCY_LIBS
          CUDA::cusolver_static
-	 ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+         ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
        )
      endif()
    endif()
