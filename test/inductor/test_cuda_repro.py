@@ -13,7 +13,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
+from torch.testing._internal.common_utils import DeterministicGuard, TEST_WITH_ASAN
 
 try:
     try:
@@ -591,6 +591,25 @@ class CudaReproTests(TestCase):
 
         ref = torch.compile(fn, fullgraph=True)(*args)
         assert same(ref, correct)
+
+    def test_deterministic_algorithms(self):
+        N = 10000
+
+        @torch.compile
+        def fn(idx, values):
+            x = torch.zeros(1, device="cuda")
+            x[idx] += values
+            return x
+
+        idx = torch.zeros(N, dtype=torch.int64, device="cuda")
+        values = torch.randn(N, device="cuda")
+
+        r0 = fn(idx, values)
+        with DeterministicGuard(True):
+            r1 = fn(idx, values)
+            for _ in range(10):
+                rn = fn(idx, values)
+                self.assertEqual(r1, rn, atol=0, rtol=0)
 
 
 if __name__ == "__main__":
