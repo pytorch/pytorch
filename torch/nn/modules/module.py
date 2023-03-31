@@ -2263,8 +2263,7 @@ class Module:
                 if module is None:
                     continue
                 submodule_prefix = prefix + ('.' if prefix else '') + name
-                for m in module.named_modules(memo, submodule_prefix, remove_duplicate):
-                    yield m
+                yield from module.named_modules(memo, submodule_prefix, remove_duplicate)
 
     def train(self: T, mode: bool = True) -> T:
         r"""Sets the module in training mode.
@@ -2331,7 +2330,7 @@ class Module:
         return self
 
     def zero_grad(self, set_to_none: bool = True) -> None:
-        r"""Sets gradients of all model parameters to zero. See similar function
+        r"""Resets gradients of all model parameters. See similar function
         under :class:`torch.optim.Optimizer` for more context.
 
         Args:

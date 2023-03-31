@@ -6,7 +6,11 @@ from typing import Any, Dict, List, Optional
 import torch.nn
 
 from . import utils, variables
-from .bytecode_transformation import create_instruction
+from .bytecode_transformation import (
+    create_call_function,
+    create_call_method,
+    create_instruction,
+)
 from .codegen import PyCodegen
 from .source import LocalSource, Source
 from .utils import object_new
@@ -294,14 +298,14 @@ class SideEffects:
                 var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)
             ) and isinstance(var, variables.NewCellVariable):
                 cg.load_import_from(utils.__name__, "make_cell")
-                cg.extend_output([create_instruction("CALL_FUNCTION", 0)])
+                cg.extend_output(create_call_function(0, True))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
                     var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 cg.load_import_from(utils.__name__, "object_new")
                 cg(var.mutable_local.cls_source)
-                cg.extend_output([create_instruction("CALL_FUNCTION", 1)])
+                cg.extend_output(create_call_function(1, True))
                 cg.add_cache(var)
                 var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif var in cg.tempvars:
@@ -330,17 +334,17 @@ class SideEffects:
                 cg.tx.output.update_co_names("update")
 
                 cg(var.mutable_local.source)
-                cg.extend_output([create_instruction("LOAD_METHOD", "update")])
+                cg.extend_output([create_instruction("LOAD_METHOD", argval="update")])
                 cg(var, allow_cache=False)
 
                 cg(var.mutable_local.source)
-                cg.extend_output([create_instruction("LOAD_METHOD", "clear")])
+                cg.extend_output([create_instruction("LOAD_METHOD", argval="clear")])
 
                 suffixes.append(
                     [
-                        create_instruction("CALL_METHOD", 0),  # clear
+                        *create_call_method(0),  # clear
                         create_instruction("POP_TOP"),
-                        create_instruction("CALL_METHOD", 1),  # update
+                        *create_call_method(1),  # update
                         create_instruction("POP_TOP"),
                     ]
                 )
@@ -351,12 +355,14 @@ class SideEffects:
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
-                        suffixes.append([create_instruction("STORE_GLOBAL", name)])
+                        suffixes.append(
+                            [create_instruction("STORE_GLOBAL", argval=name)]
+                        )
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
                         cg(var.mutable_local.source)
-                        suffixes.append([create_instruction("STORE_ATTR", name)])
+                        suffixes.append([create_instruction("STORE_ATTR", argval=name)])
             else:
                 raise AssertionError(type(var))
 

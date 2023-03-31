@@ -13,7 +13,7 @@ import torch.testing._internal.dist_utils
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributed.rpc import RRef
-from torch.testing._internal.common_utils import IS_MACOS, sandcastle_skip_if
+from torch.testing._internal.common_utils import IS_MACOS, skip_but_pass_in_sandcastle_if
 from torch.testing._internal.dist_utils import (
     dist_init,
     initialize_pg,
@@ -81,7 +81,9 @@ def create_tensor():
 def build_sparse_tensor(coalesce=False, requires_grad=True, dtype=torch.float32):
     i = [[0, 1, 1], [2, 0, 2]]
     v = [3.2, 4.1, 5.3]
-    tensor = torch.sparse_coo_tensor(i, v, (3, 3), requires_grad=requires_grad, dtype=dtype)
+    tensor = torch.sparse_coo_tensor(
+        i, v, (3, 3), requires_grad=requires_grad, dtype=dtype
+    )
     if coalesce:
         tensor = tensor.coalesce()
     return tensor
@@ -157,7 +159,7 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
     return success
 
 
-# This function creates a dis atugorad context, run rpc_sync on the given ps,
+# This function creates a dis autograd context, run rpc_sync on the given ps,
 # and then blocks until the ps has verified the grads are correctly accumulated.
 def _run_trainer(rref_t1, t2, ps, rank_diff, sparse):
     with dist_autograd.context() as context_id:
@@ -172,7 +174,7 @@ def _run_trainer(rref_t1, t2, ps, rank_diff, sparse):
         rpc.rpc_sync(ps, _check_rpc_done, args=(0,))
 
 # This function is the same as _run_trainer, except rpc calls torchscript
-# function "my_script_ref_add" instead of python funciton "my_rref_add"
+# function "my_script_ref_add" instead of python function "my_rref_add"
 def _run_trainer_torchscript(rref_t1, t2, ps, rank_diff, sparse):
     with dist_autograd.context() as context_id:
         ret = rpc.rpc_sync(ps, my_script_ref_add, args=(rref_t1, t2))
@@ -997,7 +999,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         )
         self.assertEqual(next_funcs[0][0], next_funcs[1][0])
 
-        # For send function when returning resonpose to previous call
+        # For send function when returning response to previous call
         # next function of the send function is the recv function
         # for received tensor result returned from nested call
         next_funcs = list(send_functions.values())[1].next_functions
@@ -1702,7 +1704,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 dist_autograd.backward(context_id, [val.sum()])
 
     @dist_init(clean_shutdown=False)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         IS_MACOS,
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
@@ -1899,7 +1901,7 @@ class DistAutogradTest(CommonDistAutogradTest):
     _backward_done = False
 
     @dist_init(clean_shutdown=False)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         IS_MACOS,
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
@@ -2369,13 +2371,13 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             @staticmethod
             def backward(ctx, grad):
-                # Create a sparse tensor with non-contigous indices and values
+                # Create a sparse tensor with non-contiguous indices and values
                 # and return as grad.
                 v = torch.rand(1, 3)
                 i = torch.ones(1, 1, dtype=torch.long)
                 nv = v.expand(8, 3)
                 ni = i.expand(1, 8)
-                ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))
+                ngrad = torch.sparse_coo_tensor(ni, nv, (10, 3), dtype=torch.float32)
                 NonContGradFunc.static_grad_ptr = ngrad._values().data_ptr()
                 return ngrad, ngrad
 

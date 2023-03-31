@@ -57,6 +57,7 @@ from torch.profiler._pattern_matcher import (
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
+    IS_JETSON,
     IS_WINDOWS,
     instantiate_parametrized_tests,
     parametrize,
@@ -924,6 +925,7 @@ class TestProfiler(TestCase):
                 ]
             )
 
+    @unittest.skipIf(IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared")
     def test_oom_tracing(self):
         def run_profiler(tensor_creation_fn):
             with _profile(profile_memory=True, record_shapes=True) as prof:
@@ -1272,7 +1274,6 @@ class TestProfiler(TestCase):
                 assert is_int, "Invalid stacks record"
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
     def test_tensorboard_trace_handler(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         with _profile(use_cuda=use_cuda, use_kineto=True):
@@ -2685,6 +2686,7 @@ class TestExperimentalUtils(TestCase):
 0 [CPU (After GPU)]
 100000 [CPU (After GPU)]""")
 
+    @unittest.skipIf(IS_JETSON, "JSON not behaving as expected on Jetson")
     def test_utils_get_optimizable_events(self):
         basic_evaluation = _utils.BasicEvaluation(self.load_mock_profile())
         optimizable_events = basic_evaluation.get_optimizable_events(

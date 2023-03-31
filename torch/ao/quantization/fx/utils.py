@@ -146,7 +146,10 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
     prepack_ops = {
         torch.nn.functional.conv1d: torch.ops.quantized.conv1d_prepack,
         torch.nn.functional.conv2d: torch.ops.quantized.conv2d_prepack,
-        torch.nn.functional.conv3d: torch.ops.quantized.conv3d_prepack
+        torch.nn.functional.conv3d: torch.ops.quantized.conv3d_prepack,
+        torch.nn.functional.conv_transpose1d: torch.ops.quantized.conv_transpose1d_prepack,
+        torch.nn.functional.conv_transpose2d: torch.ops.quantized.conv_transpose2d_prepack,
+        torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
     }
     prepack_op = prepack_ops.get(conv_op, None)
     assert prepack_op, "Didn't find prepack op for {}".format(conv_op)
@@ -463,6 +466,25 @@ def _is_custom_module_lstm(
             qhandler.is_custom_module()
     else:
         return isinstance(mod, torch.ao.nn.quantizable.LSTM)
+
+def _is_custom_module_mha(
+        node: Node,
+        named_modules: Dict[str, torch.nn.Module],
+        qconfig: QConfigAny = None,
+        # QuantizeHandler, but we cannot include the type here due to circular imports
+        qhandler: Optional[Any] = None,
+) -> bool:
+    """
+    Return whether this refers to the custom module MultiheadAttention flow.
+    """
+    mod = _get_module(node, named_modules)
+    if qconfig is not None and qhandler is not None:
+        assert isinstance(qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler)  # type: ignore[attr-defined]
+        return isinstance(mod, torch.nn.MultiheadAttention) and \
+            activation_is_statically_quantized(qconfig) and \
+            qhandler.is_custom_module()
+    else:
+        return isinstance(mod, torch.ao.nn.quantizable.MultiheadAttention)
 
 def _get_module(node: Node, named_modules: Dict[str, torch.nn.Module]) -> Optional[torch.nn.Module]:
     """

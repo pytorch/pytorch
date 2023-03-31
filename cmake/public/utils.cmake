@@ -429,18 +429,6 @@ function(torch_compile_options libname)
         ${MSVC_RUNTIME_LIBRARY_OPTION}
         $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
-        /DNOMINMAX
-        /wd4267
-        /wd4251
-        /wd4522
-        /wd4522
-        /wd4838
-        /wd4305
-        /wd4244
-        /wd4190
-        /wd4101
-        /wd4996
-        /wd4275
         /bigobj>
       )
   else()
@@ -451,15 +439,12 @@ function(torch_compile_options libname)
       -Wno-unused-function
       -Wno-unused-result
       -Wno-missing-field-initializers
-      -Wno-write-strings
       -Wno-unknown-pragmas
       -Wno-type-limits
       -Wno-array-bounds
       -Wno-unknown-pragmas
-      -Wno-sign-compare
       -Wno-strict-overflow
       -Wno-strict-aliasing
-      -Wno-error=deprecated-declarations
       # Clang has an unfixed bug leading to spurious missing braces
       # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
       -Wno-missing-braces

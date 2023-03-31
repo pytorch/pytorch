@@ -90,7 +90,7 @@ const std::vector<std::string> functions = {
                 i = 0
             return i
 
-        def AD_var_backward_0(grad, self, correction: int):
+        def AD_var_backward_0(grad, self, correction: number):
             # FIXME: torchscript: div(float, float)
             return  grad * (self - self.mean()) * 2.0 / (self.numel() - correction)
 
@@ -115,7 +115,7 @@ const std::vector<std::string> functions = {
         def AD_var_backward_1(grad,
                               self,
                               dim: List[int],
-                              correction: int,
+                              correction: number,
                               keepdim: bool):
             if self.dim() == 0:
                 return AD_var_backward_0(grad, self, correction)
@@ -129,7 +129,7 @@ const std::vector<std::string> functions = {
         def AD_var_backward_2(grad,
                               self,
                               dim: Optional[List[int]],
-                              correction: Optional[int],
+                              correction: Optional[number],
                               keepdim: bool):
             if correction is None:
                 correction = 1
@@ -163,7 +163,7 @@ const std::vector<std::string> functions = {
         def std_2(self,
                   dim: Optional[List[int]],
                   *,
-                  correction: Optional[int],
+                  correction: Optional[number],
                   keepdim: bool):
             std_out = torch.std(self, dim, correction=correction, keepdim=keepdim)
             def backward(grad_output):
@@ -195,7 +195,7 @@ const std::vector<std::string> functions = {
         def var_2(self,
                   dim: Optional[List[int]],
                   *,
-                  correction: Optional[int],
+                  correction: Optional[number],
                   keepdim: bool):
             def backward(grad_output):
                 grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
@@ -221,32 +221,6 @@ const std::vector<std::string> functions = {
 
             # FIXME: torchscript: torch.zeros(sizes, grad.options())
             return torch.zeros(sizes).to(grad).scatter_(dim, indices, grad)
-
-        def gather(self,
-                    dim: int,
-                    index,
-                    *,
-                    sparse_grad: bool = False):
-            output = torch.gather(self, dim, index, sparse_grad = sparse_grad)
-            def backward(grad_output):
-                if (sparse_grad):
-                    return torch.gather_backward(grad_output, self, dim, index, sparse_grad), None, None, None
-                grad_self = torch.zeros_like(self)
-                grad_self = torch.scatter_add(grad_self, dim, index, grad_output)
-                return grad_self, None, None, None
-            return output, backward
-
-        def index_select(self,
-                         dim: int,
-                         index):
-            output = torch.index_select(self, dim, index)
-            self_size = self.size()
-
-            def backward(grad_output):
-                grad_self = torch.zeros_like(self, memory_format=1).index_add(dim, index, grad_output)
-                return grad_self, None, None
-
-            return output, backward
 
         # def topk(self,
         #          k: int,
@@ -429,7 +403,7 @@ const std::vector<std::string> functions = {
 
         # In matmul backward case of [b, m, n] * [b, n, p] => [m, p],
         # instead of doing [b, m, p] and then reduce to [m, p]
-        # whice potentially uses large intermediate of size b*m*p,
+        # which potentially uses large intermediate of size b*m*p,
         # we do [m, bn] * [bn, p] to avoid having the large
         # intermediate, thus reduces max memory usage.
         def AD_matmul_bw_special_fold(mat1, mat2):

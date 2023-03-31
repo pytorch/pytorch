@@ -10,6 +10,8 @@ from typing import IO, Dict, List, Optional
 
 import pytest
 
+from torch.testing._internal.common_utils import run_tests
+
 try:
     from mypy import api
 except ImportError:
@@ -182,7 +184,7 @@ def _parse_reveals(file: IO[str]) -> List[str]:
     string = file.read().replace("*", "")
 
     # Grab all `# E:`-based comments
-    comments_array = list(map(lambda str: str.partition("  # E: ")[2], string.split("\n")))
+    comments_array = [str.partition("  # E: ")[2] for str in string.split("\n")]
     comments = "/n".join(comments_array)
 
     # Only search for the `{*}` pattern within comments,
@@ -232,5 +234,5 @@ def _test_reveal(path: str, reveal: str, expected_reveal: str, lineno: int) -> N
         raise AssertionError(_REVEAL_MSG.format(lineno, expected_reveal, reveal))
 
 
-if __name__ == '__main__':
-    pytest.main([__file__])
+if __name__ == "__main__":
+    run_tests()
