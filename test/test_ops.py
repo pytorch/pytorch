@@ -148,7 +148,7 @@ class TestCommon(TestCase):
             if isinstance(result, torch.Tensor):
                 self.assertTrue(result.device == cuda_device)
             elif is_iterable_of_tensors(result):
-                self.assertTrue(all(map(lambda t: t.device == cuda_device, result)))
+                self.assertTrue(all((t.device == cuda_device for t in result)))
             else:
                 self.skipTest(
                     "Skipped! Only supports single tensor or iterable of tensor outputs."
@@ -345,13 +345,8 @@ class TestCommon(TestCase):
             if isinstance(sample.input, torch.Tensor) and sample.input.ndim == 0 and skip_zero_dim:
                 continue
 
-            is_lower_than_cuda11_0 = (
-                (torch.version.cuda is not None)
-                and ([int(x) for x in torch.version.cuda.split(".")] < [11, 0]))
-
             if (
                 skip_bfloat
-                and is_lower_than_cuda11_0
                 and (
                     (
                         isinstance(sample.input, torch.Tensor)
@@ -711,7 +706,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple(map(lambda t: t.stride(), out))
+                return tuple((t.stride() for t in out))
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -724,7 +719,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple(map(lambda t: t.data_ptr(), out))
+                return tuple((t.data_ptr() for t in out))
 
             @suppress_warnings
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
@@ -831,7 +826,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple(map(lambda t: t.stride(), out))
+                return tuple((t.stride() for t in out))
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -844,7 +839,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple(map(lambda t: t.data_ptr(), out))
+                return tuple((t.data_ptr() for t in out))
 
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
                 out = _apply_out_transform(transform, expected)
