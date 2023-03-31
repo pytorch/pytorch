@@ -552,9 +552,7 @@ class TritonTemplateCaller(ChoiceCaller):
         return self.bmreq.benchmark(*args, output_tensor=out)
 
     def __str__(self):
-        return (
-            f"TritonTemplateCaller({self.to_callable().__file__}, {self.debug_extra})"
-        )
+        return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
     def call_name(self):
         return f"template_kernels.{self.name}"

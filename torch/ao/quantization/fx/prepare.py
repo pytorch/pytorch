@@ -370,7 +370,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
         # and set output_obs_or_fq_ctr based on qconfig.output_act
         # this also requires we extend the structure of QConfig to support more fine
         # grained configurations
-        target_dtype_info: Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]] = (
+        target_dtype_info: Dict[str, Any] = (
             _get_target_activation_dtype_for_node(
                 node,
                 qconfig,
@@ -387,7 +387,7 @@ def _get_target_activation_dtype_for_node(
     qhandler: Optional[QuantizeHandler],
     named_modules: Dict[str, torch.nn.Module],
     cache_for_no_tensor_check: Dict[Node, bool],
-) -> Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]:
+) -> Dict[str, Any]:
     """
     For each op attribute in the op's input activation, output activation,
     weight, bias - returns the settings of dtype and is_dynamic we expect
@@ -1337,8 +1337,8 @@ def insert_observers_for_model(
                             is_quantized_branch, backend_config)
 
                     is_last_node_of_pattern = node is last_node
-                    input_output_share_observers = node.meta["target_dtype_info"]["input_output_share_observers"]
-                    reuse_input_obs_or_fq = node.meta["target_dtype_info"]["reuse_input_obs_or_fq"]
+                    input_output_share_observers = node.meta["target_dtype_info"].get("input_output_share_observers", False)
+                    reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
 
                     if is_last_node_of_pattern:
                         if _is_custom_module_lstm(node, named_modules, qconfig, qhandler):
