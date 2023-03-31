@@ -2062,7 +2062,7 @@ class CppKernelProxy(CppKernel):
         self.call_ranges = None
         self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
 
-    def data_type_propogation(self, nodes):
+    def data_type_propagation(self, nodes):
 
         def propogate_node(node: torch.fx.Node):
             _node: torch.fx.Node = node
@@ -2110,28 +2110,28 @@ class CppKernelProxy(CppKernel):
             _node.meta[OptimizationContext.key] = opt_ctx
             return True
 
-        def propogation(sub_graph: torch.fx.Graph):
+        def propagation(sub_graph: torch.fx.Graph):
             new_node_propogated = False
             for node in sub_graph.nodes:
                 new_node_propogated = propogate_node(node) or new_node_propogated
 
             return new_node_propogated
 
-        def _data_type_propogation(loop_body: ir.LoopBody):
+        def _data_type_propagation(loop_body: ir.LoopBody):
             sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
             for sub_block in sub_blocks:
                 _sub_graph: torch.fx.Graph = sub_block.graph
                 _sub_graph.print_tabular()
-                changed = propogation(_sub_graph)
+                changed = propagation(_sub_graph)
                 while changed:
-                    changed = propogation(_sub_graph)
+                    changed = propagation(_sub_graph)
 
         for _node in nodes:    
             assert isinstance(_node, SchedulerNode)
             node: SchedulerNode = _node
             if isinstance(node._body, ir.LoopBody):
                 body: ir.LoopBody = node._body
-                _data_type_propogation(body)
+                _data_type_propagation(body)
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
@@ -2277,7 +2277,7 @@ class CppKernelProxy(CppKernel):
                 _legalize_bf16(body)
 
     def codegen_nodes(self, nodes):
-        self.data_type_propogation(nodes)
+        self.data_type_propagation(nodes)
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_bf16(nodes)
 
