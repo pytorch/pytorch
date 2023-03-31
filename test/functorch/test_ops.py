@@ -1072,7 +1072,6 @@ class TestOperators(TestCase):
         xfail('lu'),
         xfail('cumprod'),
         xfail('masked_fill'),
-        xfail('copysign'),
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
@@ -1139,7 +1138,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('view_as_complex'),
-        xfail('copysign'),
         xfail('cummax'),
         xfail('cummin'),
         xfail('fill'),
@@ -2206,6 +2204,22 @@ class TestOperators(TestCase):
                 result = jvpvjpvmap_fn(*new_args)
                 self.assertEqual(result, expected)
 
+    def test_data_write_errors_under_transform(self, device):
+        t = torch.randn(3, 3, device=device)
+
+        def fn(t):
+            t.data = torch.randn(3, 3)
+            return t.sum()
+
+        msg = "mutating directly with `.data` inside functorch transform"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            grad(fn)(t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vjp(fn, t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            jvp(fn, (t,), (torch.randn_like(t),))
 
 
 only_for = ("cpu", "cuda")

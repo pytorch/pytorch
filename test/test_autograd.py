@@ -1463,7 +1463,7 @@ class TestAutograd(TestCase):
             mean.retain_grad()
             # node has two retains_grad hooks
             var.mul_(2)
-            # the retain_grad hook multi-output node refers shoudl now be a nullptr
+            # the retain_grad hook multi-output node refers should now be a nullptr
             (var + mean).sum().backward()
             gvar = var.grad
             gmean = mean.grad
@@ -2398,10 +2398,8 @@ class TestAutograd(TestCase):
             y = torch.randn((3, 3), requires_grad=True)
             MyFunction.apply(x, y).sum().backward()
 
-            has_deprecated = map(lambda warn:
-                                 'deprecated' in str(warn) and
-                                 'saved_variables' in str(warn),
-                                 warns)
+            has_deprecated = ('deprecated' in str(warn) and
+                              'saved_variables' in str(warn) for warn in warns)
             has_deprecated = reduce(lambda x, y: x or y, has_deprecated)
             self.assertTrue(has_deprecated)
 
@@ -5444,7 +5442,7 @@ for shape in [(1,), ()]:
             data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
             data_r.requires_grad = True
-            feat_r = checkpoint(module, data_r)
+            feat_r = checkpoint(module, data_r, use_reentrant=True)
             feat_combined.append(feat_r)
 
         # compute mean as a proxy for some joint reasoning
@@ -5715,10 +5713,10 @@ for shape in [(1,), ()]:
         a = torch.randn(2, 2, requires_grad=True)
 
         with self.assertRaisesRegex(Exception, "Checkpointing is not compatible with .grad()"):
-            b = checkpoint(torch.exp, a).sum()
+            b = checkpoint(torch.exp, a, use_reentrant=True).sum()
             torch.autograd.grad(b, (a,))
 
-        c = checkpoint(torch.exp, a).sum()
+        c = checkpoint(torch.exp, a, use_reentrant=True).sum()
         c.backward()
 
     @parametrize("use_reentrant", [True, False])
@@ -9406,7 +9404,7 @@ class TestAutogradDeviceType(TestCase):
             # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
             # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
             # So the cpu thread will notify the gpu thread with an empty NodeTask.
-            branch2 = checkpoint(fn_on_gpu, inp)
+            branch2 = checkpoint(fn_on_gpu, inp, use_reentrant=True)
             out = branch2 + branch1
             return out
 
