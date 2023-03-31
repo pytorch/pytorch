@@ -105,7 +105,7 @@ class AsyncCollectiveTensor(torch.Tensor):
     Use it inside functional collective pytorch wrappers like the following:
     def functional_collective(self, group, tag):
         tag, rankset, group_size = _expand_group(group, tag)
-        tensor = torch._C._nn.{collective}(self, tag, rankset, group_size)
+        tensor = torch._C._dist.{collective}(self, tag, rankset, group_size)
         res = AsyncCollectiveTensor(tensor)
         _register_wrapper_tensor(res, tensor)
         return res
@@ -226,17 +226,20 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         group_size = len(rankset)
         tag = tag or c10d._get_group_tag(group)
     elif isinstance(group, dt.DeviceMesh):
-        rankset = group.mesh.flatten().tolist()
-        group_size = group.mesh.size(0)
-        rankset = group.mesh.swapdims(-1, 0).reshape(-1, group_size).flatten().tolist()
-        tag = tag or c10d._get_group_tag(group.get_dim_groups()[0])
+        assert group.ndim == 1, "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
+        # TODO: it should run collective in the whole mesh instead of dim 0
+        mesh_pg = group.get_dim_groups()[0]
+        rankset = dist.get_process_group_ranks(mesh_pg)
+        group_size = len(rankset)
+        tag = tag or c10d._get_group_tag(mesh_pg)
     elif isinstance(group, tuple):
         if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
             dmesh = group[0]
             dim = group[1]
-            group_size = dmesh.mesh.size(dim)
-            rankset = dmesh.mesh.swapdims(-1, dim).reshape(-1, group_size).flatten().tolist()
-            tag = tag or c10d._get_group_tag(dmesh.get_dim_groups()[dim])
+            dim_group = dmesh.get_dim_groups()[dim]
+            rankset = dist.get_process_group_ranks(dim_group)
+            group_size = len(rankset)
+            tag = tag or c10d._get_group_tag(dim_group)
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
@@ -251,7 +254,7 @@ def wait_tensor(tensor):
 
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
-    return torch._C._nn.wait_tensor(tensor)  # type: ignore[attr-defined]
+    return torch._C._dist.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
@@ -272,7 +275,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+    tensor = torch._C._dist.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     res = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     return res
@@ -304,7 +307,9 @@ def reduce_scatter_tensor(
     assert (
         self.size(0) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
-    tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, scatter_dim, tag, rankset, group_size)  # type: ignore[attr-defined]
+    tensor = torch._C._dist.reduce_scatter_tensor(  # type: ignore[attr-defined]
+        self, reduceOp, scatter_dim, tag, rankset, group_size
+    )
     res = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     return res

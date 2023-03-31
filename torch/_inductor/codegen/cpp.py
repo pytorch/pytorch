@@ -2242,7 +2242,6 @@ class CppKernelProxy(CppKernel):
                     run(vec_checker)
                 if vec_checker.simd_vec:
                     if len(tiling_indices) == 1:
-                        # TODO(jgong5): support vec on outer loop
                         return [tiling_factor], tiling_indices
                     if len(tiling_indices) == 2 and self.reduction_depth == len(
                         self.itervars
