@@ -1,10 +1,12 @@
 # Owner(s): ["module: inductor"]
+import math
 import sys
 import unittest
 
 import torch
 
 import torch._dynamo
+from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -487,6 +489,108 @@ class CudaReproTests(TestCase):
             torch.cuda.memory._record_memory_history(False)
         snapshot = str(torch.cuda.memory._snapshot())
         self.assertTrue("called_inside_compile" in snapshot)
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_negative_arange_dynamic_shapes(self):
+        # Repro from alibi relative encodings
+        def sign(x):
+            return (x > 0) - (x < 0)
+
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                nheads = 16
+                start = math.log2(0.5)
+                end = math.log2(1 / (2**8))
+
+                self.register_buffer(
+                    "scales",
+                    2
+                    ** torch.arange(
+                        start,
+                        end + 1e-6 * sign(end - start),
+                        (end - start) / (nheads - 1),
+                    ).view(1, nheads, 1, 1),
+                )
+                self.emb = nn.Embedding(1024, 256)
+                self.dec_layer = nn.TransformerDecoderLayer(
+                    256, 16, 512, batch_first=True, norm_first=True
+                )
+                self.head = nn.Linear(256, 1024)
+
+            def forward(self, enc_out: torch.Tensor, dec_in: torch.Tensor):
+                padmask = dec_in == 0
+                dec_mask = padmask.unsqueeze(-1) == padmask.unsqueeze(-2)
+                dec_mask = dec_mask.to(dtype=torch.float32)
+                dec_mask = dec_mask.tril(diagonal=0).cuda()
+
+                q_pos = torch.arange(dec_in.size(1), dtype=torch.long, device="cuda")
+                k_pos = torch.arange(dec_in.size(1), dtype=torch.long, device="cuda")
+                rel_pos = k_pos[None, :] - q_pos[:, None]
+                values = rel_pos.abs().neg().unsqueeze(0).unsqueeze(0)
+                dec_bias = values * self.scales
+                dec_bias.tril_(diagonal=0)
+
+                dec_mask = dec_mask + dec_bias[0]
+                out = self.emb(dec_in)
+                out = self.dec_layer(out, enc_out, tgt_mask=dec_mask)
+                return self.head(out)
+
+        mod = Repro().cuda()
+        opt_mod = torch._dynamo.optimize("inductor", dynamic=True)(mod)
+        mod.eval()
+        opt_mod.eval()
+
+        enc_out = torch.rand(1, 512, 256).cuda()
+        dec_inputs = [
+            torch.randint(0, 512, (1, i + 1), dtype=torch.long).cuda() for i in range(8)
+        ]
+
+        for dec_inp in dec_inputs:
+            assert same_two_models(
+                mod, opt_mod, [enc_out, dec_inp], only_fwd=True
+            ), "Inductor with dynamic shapes failed"
+
+    def test_issue97695_1input(self):
+        def fn(arg3_1, relu, permute_1):
+            addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+            cat_2 = torch.ops.aten.cat.default([addmm_1], 1)
+            return (cat_2,)
+
+        args = [
+            ((96,), (1,), torch.float32, "cuda"),
+            ((10, 256), (256, 1), torch.float32, "cuda"),
+            ((256, 96), (1, 256), torch.float32, "cuda"),
+        ]
+        args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+        correct = fn(*args)
+
+        mod = make_fx(fn, tracing_mode="real")(*args)
+        compiled = compile_fx_inner(mod, args)
+        ref = compiled(list(args))
+        assert same(ref, correct)
+
+        ref = torch.compile(fn, fullgraph=True)(*args)
+        assert same(ref, correct)
+
+    def test_issue97695_2input(self):
+        def fn(arg3_1, arg3_2, relu, permute_1):
+            addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+            addmm_2 = torch.ops.aten.addmm.default(arg3_2, relu, permute_1)
+            cat_2 = torch.ops.aten.cat.default([addmm_1, addmm_2], 1)
+            return (cat_2,)
+
+        args = [
+            ((96,), (1,), torch.float32, "cuda"),
+            ((96,), (1,), torch.float32, "cuda"),
+            ((10, 256), (256, 1), torch.float32, "cuda"),
+            ((256, 96), (1, 256), torch.float32, "cuda"),
+        ]
+        args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+        correct = fn(*args)
+
+        ref = torch.compile(fn, fullgraph=True)(*args)
+        assert same(ref, correct)
 
 
 if __name__ == "__main__":
