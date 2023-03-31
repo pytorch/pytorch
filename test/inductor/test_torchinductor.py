@@ -6347,6 +6347,23 @@ if HAS_CPU and not torch.backends.mps.is_available():
                 FileCheck().check_not("void kernel").run(code)
                 self.assertEqual(f_opt(inps[0]), f(inps[0]))
 
+                class Model(torch.nn.Module):
+                    def __init__(
+                        self,
+                    ):
+                        super().__init__()
+
+                    def forward(self, v1: torch.Tensor):
+                        vx = v1.min(dim=1).values
+                        v2 = torch.randn_like(vx)
+                        return v2
+
+                model = Model()
+                x = torch.rand(10, 3, 0)
+                model_f = torch.compile()(model)
+
+                self.assertEqual(model(x), model_f(x))
+
         def test_redundant_to_node_elimination_bf16(self):
             def fn(x, y):
                 res = x + y
