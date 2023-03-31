@@ -162,12 +162,7 @@ def add(import_name: str):
     assert isinstance(import_name, str)
     try:
         module_spec = importlib.util.find_spec(import_name)
-    except AttributeError as e:
-        # handle fbgemm conflict caused by import torchrec.
-        if "'fbgemm' object has no attribute" in str(e):
-            return
-        raise
-    except ImportError:
+    except Exception:
         return
     if not module_spec:
         return
