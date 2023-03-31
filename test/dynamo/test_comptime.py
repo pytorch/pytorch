@@ -180,10 +180,18 @@ y = TensorVariable()
         f(torch.randn(2))
         self.assertEqual(cnt.frame_count, 1)
         self.assertExpectedInline(
-            FILE.getvalue().rstrip(),
+            re.sub(r"\s+$", "", FILE.getvalue().rstrip(), flags=re.MULTILINE),
             """\
 -
             local 'x' TENSOR_MATCH
+            {
+                'guard_types': None,
+                'code': None,
+                'obj_weakref': None
+                'guarded_class': None
+            }
+-
+            global '' DETERMINISTIC_ALGORITHMS
             {
                 'guard_types': None,
                 'code': None,

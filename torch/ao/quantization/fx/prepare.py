@@ -83,7 +83,6 @@ from ..utils import (
     _parent_name,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
-    activation_is_statically_quantized,
 )
 
 from ..backend_config.utils import (
