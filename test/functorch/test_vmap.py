@@ -3427,7 +3427,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             check_shape_only = op.name in ('empty_like', 'new_empty')
             for sample_input in sample_inputs_itr:
                 args = (sample_input.input,) + sample_input.args
-                if not any(map(lambda arg: isinstance(arg, torch.Tensor), args)):
+                if not any((isinstance(arg, torch.Tensor) for arg in args)):
                     # Atleast one tensor required for vmap.
                     continue
                 kwargs = sample_input.kwargs

@@ -1058,7 +1058,7 @@ class TritonKernel(Kernel):
             line = f"tl.atomic_add({var} + ({index}), {value}, {mask})"
         else:
             raise NotImplementedError(f"store mode={mode}")
-        self.stores.writeline(name, line)
+        self.stores.writeline(DeferredLine(name, line))
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
@@ -1208,23 +1208,27 @@ class TritonKernel(Kernel):
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
+            name_cnt = itertools.count()
+            var_names = []
             for arg_name in call_args:
+                var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.get_buffer(arg_name)
                 if buf:
                     result.writeline(
-                        f"{arg_name} = rand_strided({tuple(buf.get_size())}, {tuple(buf.get_stride())}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({tuple(buf.get_size())}, {tuple(buf.get_stride())}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
                     result.writeline(
-                        f"{arg_name} = rand_strided({tuple(const_tensor.size())}, {tuple(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({tuple(const_tensor.size())}, {tuple(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
                     )
                 else:
                     raise KeyError(
                         f"Don't find the buffer or const tensor for {arg_name}"
                     )
-            result.writeline(f"return {', '.join(call_args)},")
+                var_names.append(var_name)
+            result.writeline(f"return {', '.join(var_names)},")
 
         result.writelines(["\n", "\n", "def call(args):"])
         grid = []
@@ -1248,7 +1252,7 @@ class TritonKernel(Kernel):
                 result.writeline(f"{stream_name} = get_cuda_stream({index})")
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 result.writeline(
-                    f"triton_.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
+                    f"KERNEL_NAME.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
                 )
 
         # benchmark all configs
@@ -1260,7 +1264,7 @@ class TritonKernel(Kernel):
                     f"torch.cuda.set_device({index})"
                 )  # no-op to ensure context
                 result.writeline(
-                    f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
+                    f"return KERNEL_NAME.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
                 )
 
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
