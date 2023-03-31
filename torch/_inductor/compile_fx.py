@@ -332,7 +332,8 @@ def cudagraphify(
     def run(new_inputs):
         nonlocal compiled_fn
         if compiled_fn is None:
-            compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
+            with dynamo_utils.preserve_rng_state():
+                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
 
     return run
@@ -364,7 +365,6 @@ def static_input(x):
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
-@dynamo_utils.preserve_rng_state()
 def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address

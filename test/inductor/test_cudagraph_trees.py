@@ -13,6 +13,7 @@ import torch._dynamo
 import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch._dynamo.testing import same
 
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -552,7 +553,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 def foo(args):
                     x = args[0]
                     args.clear()
-                    return x + 3
+                    return (x + 3,)
 
                 inp = torch.rand([20, 20], device="cuda:1")
 
@@ -566,6 +567,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     is_inference=True,
                 )
                 self.assertEqual(foo_cg(inp_list), foo([inp]))
+                self.assertEqual(foo_cg([inp]), foo([inp]))
+                self.assertEqual(foo_cg([inp]), foo([inp]))
 
                 self.assertTrue(self.get_manager(device_index=0) is None)
                 self.assertFalse(self.get_manager(device_index=1) is None)
