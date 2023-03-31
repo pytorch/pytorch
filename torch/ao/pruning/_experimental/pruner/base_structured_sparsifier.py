@@ -56,6 +56,7 @@ def _get_supported_activation_functions():
         F.prelu,
         F.softsign,
         F.tanhshrink,
+        F.gelu,
     }
     return SUPPORTED_ACTIVATION_FUNCTIONS
 
@@ -82,6 +83,7 @@ def _get_supported_activation_modules():
         nn.PReLU,
         nn.Softsign,
         nn.Tanhshrink,
+        nn.GELU,
     }
     return SUPPORTED_ACTIVATION_MODULES
 

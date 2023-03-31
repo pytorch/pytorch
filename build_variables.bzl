@@ -930,7 +930,6 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
-        "torch/csrc/autograd/generated/python_dist_functions.cpp",
         "torch/csrc/autograd/generated/python_enum_tag.cpp",
         "torch/csrc/autograd/generated/python_return_types.cpp",
         "torch/csrc/autograd/generated/python_sparse_functions.cpp",

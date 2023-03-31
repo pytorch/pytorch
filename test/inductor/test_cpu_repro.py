@@ -25,6 +25,7 @@ from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
+from torch.testing._internal.common_utils import IS_MACOS
 from torch.utils._python_dispatch import TorchDispatchMode
 
 try:
@@ -1178,5 +1179,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU:
+    if HAS_CPU and not IS_MACOS:
         run_tests(needs="filelock")
