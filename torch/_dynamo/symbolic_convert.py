@@ -513,7 +513,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 repl, x, cache, skip_fn=skip
             )
 
-    def update_locals_and_stack_ex(
+    def update_locals_and_stack_tensor(
         self, oldvar: VariableTracker, newvar: VariableTracker
     ):
         def repl(v: VariableTracker):

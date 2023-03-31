@@ -414,7 +414,7 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
-            tx.update_locals_and_stack_ex(self, out)
+            tx.update_locals_and_stack_tensor(self, out)
             return out
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
@@ -454,7 +454,7 @@ class TensorVariable(VariableTracker):
                 **options,
             )
             if name[-1] == "_" and not has_same_metadata(out, self):
-                tx.update_locals_and_stack_ex(self, out)
+                tx.update_locals_and_stack_tensor(self, out)
             return out
 
 

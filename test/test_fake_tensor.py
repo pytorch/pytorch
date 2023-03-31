@@ -501,14 +501,27 @@ class FakeTensorTest(TestCase):
             self.assertRaises(Exception, run_meta)
 
     def test_clone_preserve_strides_storage(self):
-        for requires_grad in [True, False]:
-            with FakeTensorMode():
-                x = torch.rand([4])
-                x.requires_grad = requires_grad
+        with FakeTensorMode():
+            def get_example(t):
+                t.requires_grad = True
+                o = t.sum()
+                o.backward()
+                return t
+
+            inputs = [
+                torch.rand([4]),
+                torch.rand([4], requires_grad=True),
+                torch.empty(2, 2),
+                torch.empty(2, 2, requires_grad=True),
+                torch.rand([1, 2, 3, 4]).to(memory_format=torch.channels_last),
+                # torch.rand(10, requires_grad=True).double(),
+                get_example(torch.rand(10))
+            ]
+            for x in inputs:
                 z = x.clone_preserve_strides_storage()
 
-            self.assertEqual(x.untyped_storage()._cdata, z.untyped_storage()._cdata)
-            assert_metadata_eq(assert_eq, x, z)
+                self.assertEqual(x.untyped_storage()._cdata, z.untyped_storage()._cdata)
+                assert_metadata_eq(assert_eq, x, z)
 
 
 class FakeTensorConstHandling(TestCase):
