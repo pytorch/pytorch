@@ -25,6 +25,7 @@ def module_contains_param(module, parametrization):
         )
     return False
 
+
 def swap_module(mod, mapping):
     r"""Swaps the module if it has a quantized counterpart and it has an
     `observer` attached.
@@ -60,7 +61,10 @@ def swap_module(mod, mapping):
 
     return new_mod
 
-def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = "") -> Optional[str]:
+
+def module_to_fqn(
+    model: nn.Module, module: nn.Module, prefix: str = ""
+) -> Optional[str]:
     """
     Returns the fqn for a module or None if module not a descendent of model.
     """
@@ -115,6 +119,7 @@ class FakeSparsity(nn.Module):
         contents of the mask can change, but the mask reference itself should
         not.
     """
+
     def __init__(self, mask):
         super().__init__()
         self.register_buffer("mask", mask)
