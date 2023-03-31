@@ -59,9 +59,9 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from functorch.compile import config as functorch_config
-from torch._functorch.aot_autograd import aot_module_simplified
 
 from torch._decomp import get_decompositions
+from torch._functorch.aot_autograd import aot_module_simplified
 from torch._inductor import codecache, config, metrics, test_operators
 from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
 from torch._inductor.codegen.triton import texpr
@@ -7153,48 +7153,44 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertTrue(
                 foo(m, inp)[0].is_contiguous(memory_format=torch.channels_last)
             )
-        
+
         # So far these 2 tests just assert that nothing broke
         # But ideally I'd like a a test that checks for whether a string is present in the IR
         # I wonder if there's a better way to do this
         @requires_cuda()
         def test_shape_padding_via_compile(self):
             import torch._inductor.config as inductorconfig
+
             inductorconfig.fx_shape_padding = True
 
-            inp_tensor = torch.randn(3,3)
-            
-            m = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3,3))
-            
+            inp_tensor = torch.randn(3, 3)
+
+            m = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3, 3))
+
             a = m(inp_tensor)
             m = torch.compile(m)
             b = m(inp_tensor)
 
             assert torch.equal(a, b)
-            
-        
+
         @requires_cuda
         def test_shape_padding_pass_standalone(self):
-            def toy_backend(gm, sample_inputs): 
+            def toy_backend(gm, sample_inputs):
                 def my_compiler(gm, sample_inputs):
                     from torch._inductor.padding import pad_mm
+
                     gm2 = pad_mm(gm)
                     return gm2
 
-
                 # Invoke AOTAutograd
-                return aot_module_simplified(
-                    gm,
-                    sample_inputs,
-                    fw_compiler=my_compiler
-                )
-            m = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3,3))
+                return aot_module_simplified(gm, sample_inputs, fw_compiler=my_compiler)
+
+            m = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3, 3))
             torch._dynamo.reset()
             fn = torch.compile(backend=toy_backend)(m)
 
             # triggers compilation of forward graph on the first run
             out = fn(input)
-
 
         # https://github.com/pytorch/torchdynamo/issues/1681#issuecomment-1283433527
         @requires_cuda()

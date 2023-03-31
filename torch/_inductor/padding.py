@@ -1,5 +1,6 @@
 import torch
 
+
 def needs_padding(args):
     for arg in args:
         size = arg.meta["val"].shape
@@ -9,13 +10,13 @@ def needs_padding(args):
                 return True
     return False
 
-  
 
 def larger_closest_multiple(n, k):
     if n % k == 0:
         return n
     else:
         return n + k - (n % k)
+
 
 def get_alignment_size(dtype):
     # try:
@@ -37,41 +38,74 @@ def get_alignment_size(dtype):
     else:
         return 1
 
+
 def pad_and_slice_matrices(new_graph, a, b, pad_amount, batched=False):
     # Pad the first input matrix with zeroes
-    new_a_pad = new_graph.call_function(torch.ops.aten.cat, (a, torch.ops.aten.zeros((a.shape[0], a.shape[1], pad_amount) if batched else (a.shape[0], pad_amount)), 2 if batched else 1))
+    new_a_pad = new_graph.call_function(
+        torch.ops.aten.cat,
+        (
+            a,
+            torch.ops.aten.zeros(
+                (a.shape[0], a.shape[1], pad_amount)
+                if batched
+                else (a.shape[0], pad_amount)
+            ),
+            2 if batched else 1,
+        ),
+    )
 
     # Pad the second input matrix with zeroes
-    new_b_pad = new_graph.call_function(torch.ops.aten.cat, (b, torch.ops.aten.zeros((b.shape[0], pad_amount, b.shape[2]) if batched else (pad_amount, b.shape[1])), 1 if batched else 0))
+    new_b_pad = new_graph.call_function(
+        torch.ops.aten.cat,
+        (
+            b,
+            torch.ops.aten.zeros(
+                (b.shape[0], pad_amount, b.shape[2])
+                if batched
+                else (pad_amount, b.shape[1])
+            ),
+            1 if batched else 0,
+        ),
+    )
 
     # Perform the matrix multiplication with the padded matrices
-    new_mm_pad = new_graph.call_function(torch.ops.aten.bmm if batched else torch.ops.aten.matmul, (new_a_pad, new_b_pad))
+    new_mm_pad = new_graph.call_function(
+        torch.ops.aten.bmm if batched else torch.ops.aten.matmul, (new_a_pad, new_b_pad)
+    )
 
     # Slice the result to get the desired shape and not modify user code semantics
-    new_mm = new_graph.call_function(torch.ops.aten.slice, (new_mm_pad, 2 if batched else 1, 0, a.shape[-1], 1))
+    new_mm = new_graph.call_function(
+        torch.ops.aten.slice, (new_mm_pad, 2 if batched else 1, 0, a.shape[-1], 1)
+    )
 
     return new_mm
 
+
 def pad_mm(fx_g: torch.fx.GraphModule):
-    
     # Leverages a classic interpreter pattern, thanks Horace!
     new_graph = torch.fx.Graph()
     env = {}
     for node in fx_g.graph.nodes:
         if node.target in [torch.ops.aten.addmm.default, torch.ops.aten.bmm]:
-          
-          # Currently this is a heuristic that decides if we should pad
-          # Decided to only pad for medium size matrices and if alignment is off
-          if needs_padding(node.args):
+            # Currently this is a heuristic that decides if we should pad
+            # Decided to only pad for medium size matrices and if alignment is off
+            if needs_padding(node.args):
                 size = int(tuple(env[node.args[0]].meta["tensor_meta"].shape)[0])
-                alignment = get_alignment_size(env[node.args[0]].meta["tensor_meta"].dtype)
+                alignment = get_alignment_size(
+                    env[node.args[0]].meta["tensor_meta"].dtype
+                )
                 pad_amount = larger_closest_multiple(size, alignment) - size
 
-                new_mm = pad_and_slice_matrices(new_graph, env[node.args[0]], env[node.args[1]], pad_amount, batched=node.target == torch.ops.aten.bmm)
+                new_mm = pad_and_slice_matrices(
+                    new_graph,
+                    env[node.args[0]],
+                    env[node.args[1]],
+                    pad_amount,
+                    batched=node.target == torch.ops.aten.bmm,
+                )
 
+            env[node] = new_mm
 
-          env[node] = new_mm
-        
         else:
             new_node = new_graph.node_copy(node, lambda n: env[n])
             env[node] = new_node

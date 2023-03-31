@@ -22,11 +22,11 @@ from torch._subclasses.fake_tensor import FakeTensor
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics, overrides, pattern_matcher
-from .padding import pad_mm 
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
 from .mkldnn import convert_outplace_to_inplace
+from .padding import pad_mm
 from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
@@ -128,7 +128,6 @@ def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
         metrics.num_bytes_accessed += num_bytes
         metrics.nodes_num_elem += nodes_num_elem
     return make_boxed_func(gm.forward)
-
 
 
 @DebugContext.wrap
