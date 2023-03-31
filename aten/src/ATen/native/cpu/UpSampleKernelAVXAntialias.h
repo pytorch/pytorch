@@ -35,8 +35,29 @@ Like PIL, Pillow is licensed under the open source HPND License
 
 namespace {
 
-static __m128i inline mm_cvtepu8_epi32(const uint32_t* C10_RESTRICT ptr) {
-  return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(int32_t*)ptr));
+static inline __m128i mm_cvtsi32_si128(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
+  int32_t v;
+  if (i32_aligned) {
+    v = *(const int32_t*)ptr;
+  } else {
+    std::memcpy(&v, ptr, 4);
+  }
+  return _mm_cvtsi32_si128(v);
+}
+
+static inline __m128i mm_cvtepu8_epi32(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
+  return _mm_cvtepu8_epi32(mm_cvtsi32_si128(ptr, i32_aligned));
+}
+
+static inline void _write_endline_rgb_as_uint32(
+    uint8_t* C10_RESTRICT output,
+    uint32_t data
+) {
+  // data is (R G B X), output is (X1 X2 X3 | R1 B1 G1 R2 ...)
+  // Here we explicitly set X as R1
+  uint8_t* data_ptr = reinterpret_cast<uint8_t*>(&data);
+  data_ptr[3] = output[3];
+  std::memcpy(output, data_ptr, 4);
 }
 
 at::Tensor unpack_rgb(const at::Tensor& packed_tensor) {
@@ -89,40 +110,48 @@ void pack_rgb(
 }
 
 void ImagingResampleHorizontalConvolution8u4x(
-    uint32_t* C10_RESTRICT lineOut0,
-    uint32_t* C10_RESTRICT lineOut1,
-    uint32_t* C10_RESTRICT lineOut2,
-    uint32_t* C10_RESTRICT lineOut3,
+    uint8_t* C10_RESTRICT lineOut0,
+    uint8_t* C10_RESTRICT lineOut1,
+    uint8_t* C10_RESTRICT lineOut2,
+    uint8_t* C10_RESTRICT lineOut3,
     int64_t out_xsize,
-    const uint32_t* C10_RESTRICT lineIn0,
-    const uint32_t* C10_RESTRICT lineIn1,
-    const uint32_t* C10_RESTRICT lineIn2,
-    const uint32_t* C10_RESTRICT lineIn3,
+    const uint8_t* C10_RESTRICT lineIn0,
+    const uint8_t* C10_RESTRICT lineIn1,
+    const uint8_t* C10_RESTRICT lineIn2,
+    const uint8_t* C10_RESTRICT lineIn3,
+    int64_t in_xsize,
     const int64_t* idx_ptr_xmin,
     const int64_t* idx_ptr_size,
     const int16_t* kk,
     int kmax,
-    unsigned int coefs_precision);
+    unsigned int coefs_precision,
+    int64_t num_channels,
+    bool is_last_line);
 
 void ImagingResampleHorizontalConvolution8u(
-    uint32_t* C10_RESTRICT lineOut,
+    uint8_t* C10_RESTRICT lineOut,
     int64_t out_xsize,
-    const uint32_t* C10_RESTRICT lineIn,
+    const uint8_t* C10_RESTRICT lineIn,
+    int64_t in_xsize,
     const int64_t* idx_ptr_xmin,
     const int64_t* idx_ptr_size,
     const int16_t* kk,
     int kmax,
-    unsigned int coefs_precision);
+    unsigned int coefs_precision,
+    int64_t num_channels,
+    bool is_last_line);
 
 void ImagingResampleVerticalConvolution8u(
-    uint32_t* C10_RESTRICT lineOut,
-    const uint32_t* C10_RESTRICT lineIn,
+    uint8_t* C10_RESTRICT lineOut,
+    const uint8_t* C10_RESTRICT lineIn,
     int64_t xsize,
     int64_t ids_min,
     int64_t ids_size,
     const int16_t* k,
-    unsigned int coefs_precision);
+    unsigned int coefs_precision,
+    int64_t num_channels);
 
+template<int num_channels>
 void ImagingResampleHorizontal(
     const at::Tensor & unpacked_output,
     const at::Tensor & unpacked_input,
@@ -154,41 +183,50 @@ void ImagingResampleHorizontal(
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
   auto xin = unpacked_input.size(2);
+  TORCH_INTERNAL_ASSERT(num_channels == unpacked_input.size(0));
 
   const int64_t* idx_ptr_xmin = horiz_indices_weights[0].data_ptr<int64_t>();
   const int64_t* idx_ptr_size = horiz_indices_weights[1].data_ptr<int64_t>();
 
-  uint32_t* unpacked_output_p = (uint32_t*) unpacked_output.data_ptr<uint8_t>();
-  const uint32_t* unpacked_input_p = (uint32_t*) unpacked_input.data_ptr<uint8_t>();
+  uint8_t* unpacked_output_p = unpacked_output.data_ptr<uint8_t>();
+  const uint8_t* unpacked_input_p = unpacked_input.data_ptr<uint8_t>();
 
   int64_t yy = 0;
+  auto xout_stride = xout * num_channels;
+  auto xin_stride = xin * num_channels;
   for (; yy < yout - 3; yy += 4) {
     ImagingResampleHorizontalConvolution8u4x(
-        unpacked_output_p + yy * xout,
-        unpacked_output_p + (yy + 1) * xout,
-        unpacked_output_p + (yy + 2) * xout,
-        unpacked_output_p + (yy + 3) * xout,
+        unpacked_output_p + yy * xout_stride,
+        unpacked_output_p + (yy + 1) * xout_stride,
+        unpacked_output_p + (yy + 2) * xout_stride,
+        unpacked_output_p + (yy + 3) * xout_stride,
         xout,
-        unpacked_input_p + yy * xin,
-        unpacked_input_p + (yy + 1) * xin,
-        unpacked_input_p + (yy + 2) * xin,
-        unpacked_input_p + (yy + 3) * xin,
+        unpacked_input_p + yy * xin_stride,
+        unpacked_input_p + (yy + 1) * xin_stride,
+        unpacked_input_p + (yy + 2) * xin_stride,
+        unpacked_input_p + (yy + 3) * xin_stride,
+        xin,
         idx_ptr_xmin,
         idx_ptr_size,
         kk,
         ksize,
-        horiz_weights_precision);
+        horiz_weights_precision,
+        num_channels,
+        yy + 3 == yout - 1);
   }
   for (; yy < yout; yy++) {
     ImagingResampleHorizontalConvolution8u(
-        unpacked_output_p + yy * xout,
+        unpacked_output_p + yy * xout_stride,
         xout,
-        unpacked_input_p + yy * xin,
+        unpacked_input_p + yy * xin_stride,
+        xin,
         idx_ptr_xmin,
         idx_ptr_size,
         kk,
         ksize,
-        horiz_weights_precision);
+        horiz_weights_precision,
+        num_channels,
+        yy == yout - 1);
   }
 }
 
@@ -220,24 +258,27 @@ void ImagingResampleVertical(
   const int64_t* idx_ptr_xmin = vert_indices_weights[0].data_ptr<int64_t>();
   const int64_t* idx_ptr_size = vert_indices_weights[1].data_ptr<int64_t>();
 
-  uint32_t* unpacked_output_p = (uint32_t*) unpacked_output.data_ptr<uint8_t>();
-  const uint32_t* unpacked_input_p = (uint32_t*) unpacked_input.data_ptr<uint8_t>();
+  uint8_t* unpacked_output_p = unpacked_output.data_ptr<uint8_t>();
+  const uint8_t* unpacked_input_p = unpacked_input.data_ptr<uint8_t>();
 
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
+  const auto num_channels = unpacked_input.size(0);
 
+  auto xout_stride = xout * num_channels;
   for (const auto yy : c10::irange(yout)) {
     const auto* k = &kk[yy * ksize];
     auto ids_min = idx_ptr_xmin[yy];
     auto ids_size = idx_ptr_size[yy];
     ImagingResampleVerticalConvolution8u(
-        unpacked_output_p + yy * xout,
+        unpacked_output_p + yy * xout_stride,
         unpacked_input_p,
         xout,
         ids_min,
         ids_size,
         k,
-        vert_weights_precision);
+        vert_weights_precision,
+        num_channels);
   }
 }
 
@@ -282,13 +323,16 @@ void upsample_avx_bilinear_uint8(
   std::vector<at::Tensor> horiz_indices_weights, vert_indices_weights;
   unsigned int horiz_weights_precision, vert_weights_precision;
 
+  bool needs_unpacking = (num_channels == 3 || num_channels == 4) && input.is_contiguous(at::MemoryFormat::ChannelsLast);
+
   if (need_horizontal) {
     int interp_dim = 3;
+    auto stride = (needs_unpacking) ? num_channels : 4;
     std::tie(horiz_indices_weights, ksize_horiz, horiz_weights_precision) =
         F::compute_indices_int16_weights_aa(
             /*input_size=*/xin,
             /*output_size=*/xout,
-            /*stride=*/1,
+            /*stride=*/stride,
             /*ndims=*/4,
             /*reshape_dim=*/interp_dim,
             /*align_corners=*/align_corners,
@@ -299,11 +343,12 @@ void upsample_avx_bilinear_uint8(
 
   if (need_vertical) {
     int interp_dim = 2;
+    auto stride = (needs_unpacking) ? num_channels * xout : 4 * xout;
     std::tie(vert_indices_weights, ksize_vert, vert_weights_precision) =
         F::compute_indices_int16_weights_aa(
             /*input_size=*/yin,
             /*output_size=*/yout,
-            /*stride=*/xout,
+            /*stride=*/stride,
             /*ndims=*/4,
             /*reshape_dim=*/interp_dim,
             /*align_corners=*/align_corners,
@@ -312,38 +357,42 @@ void upsample_avx_bilinear_uint8(
             /*align_i32=*/true);
   }
 
-  bool needs_unpacking = num_channels == 4 && input.is_contiguous(at::MemoryFormat::ChannelsLast);
-
   at::Tensor buffer_horiz, buffer_vert;
   // Minor optimization: we can avoid allocating an extra buffer if we're performing
   // horizontal-only or vertical-only interpolation, and if the tensor doesn't
   // need unpacking
   if (need_horizontal && !(needs_unpacking && !need_vertical)) {
-    buffer_horiz = at::empty({4, yin, xout}, input.options());
+    auto c = (needs_unpacking) ? num_channels : 4;
+    buffer_horiz = at::empty({c, yin, xout}, input.options());
   }
   if (need_vertical && !needs_unpacking) {
-    buffer_vert = at::empty({4, yout, xout}, input.options());
+    auto c = (needs_unpacking) ? num_channels : 4;
+    buffer_vert = at::empty({c, yout, xout}, input.options());
   }
 
-  // TODO: The unpack / pack operations create a copy of the original input and
-  // output tensor. There should be a way to avoid these copies by instead
-  // modifying the low-level kernels. Or maybe at least avoid copying the entire
-  // tensors and just copy part of them (line by line).
   for (const auto i : c10::irange(batch_size)) {
 
     at::Tensor unpacked_input = (needs_unpacking) ? input[i] : unpack_rgb(input[i]);
     at::Tensor unpacked_output;
 
     if (need_horizontal) {
-
       at::Tensor unpacked_output_temp = (needs_unpacking && !need_vertical) ? output[i] : buffer_horiz;
 
-      ImagingResampleHorizontal(
+      if (needs_unpacking && num_channels == 3) {
+        ImagingResampleHorizontal<3>(
           unpacked_output_temp,
           unpacked_input,
           ksize_horiz,
           horiz_indices_weights,
           horiz_weights_precision);
+      } else {
+        ImagingResampleHorizontal<4>(
+            unpacked_output_temp,
+            unpacked_input,
+            ksize_horiz,
+            horiz_indices_weights,
+            horiz_weights_precision);
+      }
       unpacked_output = unpacked_input = unpacked_output_temp;
     }
     if (need_vertical) {
@@ -354,7 +403,8 @@ void upsample_avx_bilinear_uint8(
           unpacked_input,
           ksize_vert,
           vert_indices_weights,
-          vert_weights_precision);
+          vert_weights_precision
+      );
     }
 
     TORCH_INTERNAL_ASSERT(unpacked_output.defined());
@@ -366,28 +416,33 @@ void upsample_avx_bilinear_uint8(
 }
 
 void ImagingResampleHorizontalConvolution8u4x(
-    uint32_t* C10_RESTRICT lineOut0,
-    uint32_t* C10_RESTRICT lineOut1,
-    uint32_t* C10_RESTRICT lineOut2,
-    uint32_t* C10_RESTRICT lineOut3,
+    uint8_t* C10_RESTRICT lineOut0,
+    uint8_t* C10_RESTRICT lineOut1,
+    uint8_t* C10_RESTRICT lineOut2,
+    uint8_t* C10_RESTRICT lineOut3,
     int64_t out_xsize,
-    const uint32_t* C10_RESTRICT lineIn0,
-    const uint32_t* C10_RESTRICT lineIn1,
-    const uint32_t* C10_RESTRICT lineIn2,
-    const uint32_t* C10_RESTRICT lineIn3,
+    const uint8_t* C10_RESTRICT lineIn0,
+    const uint8_t* C10_RESTRICT lineIn1,
+    const uint8_t* C10_RESTRICT lineIn2,
+    const uint8_t* C10_RESTRICT lineIn3,
+    int64_t in_xsize,
     const int64_t* idx_ptr_xmin,
     const int64_t* idx_ptr_size,
     const int16_t* kk,
     int kmax,
-    unsigned int coefs_precision) {
+    unsigned int coefs_precision,
+    int64_t num_channels,
+    bool is_last_line) {
+
   // Interpolation horizontal pass processing together 4 vertical lines.
-  // - Input data format is RGBA with R,G,B,A being uint8, we can encode 4 values as a single uint32 value.
+  // - Input data format is RGBA or RGB with R,G,B,A being uint8. In case of RGBA
+  //   we can encode 4 values as a single uint32 value.
   // - We split the size of weight vector for a given output index as a sum:
   //   ids_size = num_blocks_4 * 4 + num_blocks_2 * 2 + num_blocks_1.
   // - We load and process 4 weights values in a loop ("block 4") then we process 2 weights values
   // in another loop ("block 2") and finally we process 1 weights value in the final loop ("block 1").
 
-  // Define shuffling masks (low/high) for num_channels 4
+  // Define shuffling masks (low/high) for num_channels 4 and 3
   // Mask low casts lower half of each lane to epi16 and reorder RGBARGBA -> RRGGBBAA:
   //   [r1 g1 b1 a1  r2 g2 b2 a2  ... | R1 G1 B1 A1  R2 G2 B2 A2 ... ] ->
   //   [r1 0 r2 0  g1 0 g2 0  b1 0 b2 0  a1 0 a2 0 | R1 0 R2 0  G1 0 G2 0  B1 0 B2 0  A1 0 A2 0]
@@ -401,9 +456,54 @@ void ImagingResampleHorizontalConvolution8u4x(
   const auto mask_high_c4 = _mm256_set_epi8(
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8,
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8);
+  const auto mask_low_c3 = _mm256_set_epi8(
+      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0,
+      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0);
+  const auto mask_high_c3 = _mm256_set_epi8(
+      -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6,
+      -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6);
 
-  const auto mask_low = mask_low_c4;
-  const auto mask_high = mask_high_c4;
+  const auto mask_low = (num_channels == 3) ? mask_low_c3 : mask_low_c4;
+  const auto mask_high = (num_channels == 3) ? mask_high_c3 : mask_high_c4;
+
+  const auto stride = num_channels * sizeof(uint8_t);
+
+  TORCH_INTERNAL_ASSERT(stride == 3 || stride == 4);
+
+  // out_xsize = output width, out_x = output x index
+  // ids_min is the input offset index corresponding to out_x
+  // ids_size is the interpolation size for out_x
+
+  // Let's precompute ids_size limits for block 4 and block 2.
+  //
+  // In block 4 (4 means we process 4 weight values together), we read input data
+  // with _mm_loadu_si128, i.e. 16 bytes, per one line:
+  // lineIn0 + stride * (i + ids_min) + 16 <= lineIn0 + stride * (ids_size + ids_min)
+  // --> i <= ids_size - 16.0 / stride
+  // Strict boundary:
+  // --> i < ids_size + 1 - int(ceil(16.0 / stride)) = ids_size - b4_delta
+  // Soft boundary for reading inside the buffer except its boundaries:
+  // --> i < ids_size + 1 - int(16.0 / stride) = ids_size - b4_delta_soft
+  // RGBA: b4_delta = b4_delta_soft = 3
+  // RGB : b4_delta = 5
+  // RGB : b4_delta_soft = 4
+  const auto b4_delta = (stride == 4) ? 3 : ((is_last_line) ? 5 : 4);
+
+  // In block 2 (2 means we process 2 weights values together), we read input data
+  // with _mm_loadl_epi64, i.e. 8 bytes, per one line:
+  // lineIn0 + stride * (i + ids_min) + 8 <= lineIn0 + stride * (ids_size + ids_min)
+  // --> i <= ids_size - 8.0 / stride
+  // Strict boundary:
+  // --> i < ids_size + 1 - int(ceil(8.0 / stride)) = ids_size - b2_delta
+  // Soft boundary for reading inside the buffer except its boundaries:
+  // --> i < ids_size + 1 - int(8.0 / stride) = ids_size - b2_delta_soft
+  // RGBA: b2_delta = b2_delta_soft = 1
+  // RGB : b2_delta = 2
+  // RGB : b2_delta_soft = 1
+  const auto b2_delta = (stride == 4) ? 1 : ((is_last_line) ? 2 : 1);
+
+  const auto max_out_x_strided = out_xsize * stride;
+  const auto max_in_x_strided = in_xsize * stride;
 
   const auto zero = _mm256_setzero_si256();
   const auto initial = _mm256_set1_epi32(1 << (coefs_precision - 1));
@@ -423,40 +523,49 @@ void ImagingResampleHorizontalConvolution8u4x(
     const auto * lineIn3_min = lineIn3 + ids_min;
 
     // block 4
-    for (; i < ids_size - 3; i += 4) {
+    for (; i < ids_size - b4_delta; i += 4) {
       // Load 4 values from weight vector
       // mmk0 = [wl_0 wh_0 wl_1 wh_1  wl_0 wh_0 wl_1 wh_1  ...]
       // mmk1 = [wl_2 wh_2 wl_3 wh_3  wl_2 wh_2 wl_3 wh_3  ...]
       const auto mmk0 = _mm256_set1_epi32(*(int32_t*)&k[i]);
       const auto mmk1 = _mm256_set1_epi32(*(int32_t*)&k[i + 2]);
 
-      // Load 8 pixels (4 per line) from input lines 0 and 1:
+      // RGBA: Load 8 pixels (4 per line) from input lines 0 and 1:
       // source = [
       //   r0 g0 b0 a0  r1 g1 b1 a1  r2 g2 b2 a2  r3 g3 b3 a3
       //   R0 G0 B0 A0  R1 G1 B1 A1  R2 G2 B2 A2  R3 G3 B3 A3
       // ]
+      // RGB: Load 10 pixels (5 per line)
+      // source = [
+      //   r0 g0 b0 r1  g1 b1 r2 g2  b2 r3 g3 b3  r4 g4 b4 r5
+      //   R0 G0 B0 R1  G1 B1 R2 G2  B2 R3 G3 B3  R4 G4 B4 R5
+      // ]
       auto source = _mm256_inserti128_si256(_mm256_castsi128_si256(
-          _mm_loadu_si128((__m128i*)&lineIn0_min[i])),
-          _mm_loadu_si128((__m128i*)&lineIn1_min[i]), 1);
+          _mm_loadu_si128((__m128i *) (lineIn0_min + stride * i))),
+          _mm_loadu_si128((__m128i *) (lineIn1_min + stride * i)), 1);
 
       // Apply mask_low:
-      //   [r0 g0 b0 a0  r1 g1 b1 a1  ... | R0 G0 B0 A0  R1 G1 B1 A1 ... ] ->
+      // RGBA:
       //   [r0 0 r1 0  g0 0 g1 0  b0 0 b1 0  a0 0 a1 0 | R0 0 R1 0  G0 0 G1 0  B0 0 B1 0  A0 0 A1 0]
+      // RGB:
+      //   [r0 0 r1 0  g0 0 g1 0  b0 0 b1 0  0 0 0 0 | R0 0 R1 0  G0 0 G1 0  B0 0 B1 0  0 0 0 0]
       auto pix1 = _mm256_shuffle_epi8(source, mask_low);
       // Compute output value as C += w0 * C0 + w1 * C1 for each channel in 32-bit precision
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix1, mmk0));
 
       // Apply mask_high:
-      //   [ ... r2 g2 b2 a2  r3 g3 b3 a3 | ... R2 G2 B2 A2  R3 G3 B3 A3 ] ->
+      // RGBA:
       //   [r2 0 r3 0  g2 0 g3 0  b2 0 b3 0  a2 0 a3 0 | R2 0 R3 0  G2 0 G3 0  B2 0 B3 0  A2 0 A3 0]
+      // RGB:
+      //   [r2 0 r3 0  g2 0 g3 0  b2 0 b3 0  0 0 0 0 | R2 0 R3 0  G2 0 G3 0  B2 0 B3 0  0 0 0 0]
       auto pix2 = _mm256_shuffle_epi8(source, mask_high);
       // Compute output value as C += w2 * C2 + w3 * C3 for each channel in 32-bit precision
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix2, mmk1));
 
       // Same as above to next lines 2 and 3:
       auto source2 = _mm256_inserti128_si256(_mm256_castsi128_si256(
-          _mm_loadu_si128((__m128i*)&lineIn2_min[i])),
-          _mm_loadu_si128((__m128i*)&lineIn3_min[i]), 1);
+          _mm_loadu_si128((__m128i *) (lineIn2_min + stride * i))),
+          _mm_loadu_si128((__m128i *) (lineIn3_min + stride * i)), 1);
       auto pix3 = _mm256_shuffle_epi8(source2, mask_low);
       sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix3, mmk0));
       auto pix4 = _mm256_shuffle_epi8(source2, mask_high);
@@ -464,56 +573,89 @@ void ImagingResampleHorizontalConvolution8u4x(
     }
 
     // block 2
-    for (; i < ids_size - 1; i += 2) {
+    for (; i < ids_size - b2_delta; i += 2) {
       // Load 2 values from weight vector
       // mmk = [wl_0 wh_0 wl_1 wh_1  wl_0 wh_0 wl_1 wh_1  ...]
       const auto mmk = _mm256_set1_epi32(*(int32_t*)&k[i]);
 
       // Load 4 pixels (2 per line) from input lines 0 and 1:
-      // source = [
+      // RGBA: source1 = [
       //   r0 g0 b0 a0  r1 g1 b1 a1  0 0 0 0  0 0 0 0
       //   R0 G0 B0 A0  R1 G1 B1 A1  0 0 0 0  0 0 0 0
       // ]
+      // RGB: source1 = [
+      //   r0 g0 b0 r1  g1 b1 r2  0 0 0 0  0 0 0 0
+      //   R0 G0 B0 R1  G1 B1 R2  0 0 0 0  0 0 0 0
+      // ]
       auto source1 = _mm256_inserti128_si256(_mm256_castsi128_si256(
-          _mm_loadl_epi64((__m128i*)&lineIn0_min[i])),
-          _mm_loadl_epi64((__m128i*)&lineIn1_min[i]), 1);
-
+          _mm_loadl_epi64((__m128i *) (lineIn0_min + stride * i))),
+          _mm_loadl_epi64((__m128i *) (lineIn1_min + stride * i)), 1);
       // Apply mask_low:
-      //   [r0 g0 b0 a0  r1 g1 b1 a1  ... | R0 G0 B0 A0  R1 G1 B1 A1 ... ] ->
+      // RGBA:
       //   [r0 0 r1 0  g0 0 g1 0  b0 0 b1 0  a0 0 a1 0 | R0 0 R1 0  G0 0 G1 0  B0 0 B1 0  A0 0 A1 0]
+      // RGB:
+      //   [r0 0 r1 0  g0 0 g1 0  b0 0 b1 0  0 0 0 0 | R0 0 R1 0  G0 0 G1 0  B0 0 B1 0  0 0 0 0]
       auto pix1 = _mm256_shuffle_epi8(source1, mask_low);
       // Compute output value as C += w0 * C0 + w1 * C1 for each channel in 32-bit precision
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix1, mmk));
 
       // Same as above for lines 2 and 3:
       auto source2 = _mm256_inserti128_si256(_mm256_castsi128_si256(
-          _mm_loadl_epi64((__m128i*)&lineIn2_min[i])),
-          _mm_loadl_epi64((__m128i*)&lineIn3_min[i]), 1);
+          _mm_loadl_epi64((__m128i *) (lineIn2_min + stride * i))),
+          _mm_loadl_epi64((__m128i *) (lineIn3_min + stride * i)), 1);
       auto pix2 = _mm256_shuffle_epi8(source2, mask_low);
       sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix2, mmk));
     }
 
     // block 1
-    for (; i < ids_size; i++) {
+    const auto i32_aligned = num_channels == 4;
+    for (; i < ids_size - 1; i++) {
       // Load 1 value from weight vector
       // mmk = [wl_0 wh_0 0 0  wl_0 wh_0 0 0  ...]
       const auto mmk = _mm256_set1_epi32(k[i]);
 
       // Load 2 pixels (one per line) from input lines 0 and 1:
-      // source = [
-      //   r0 g0 b0 a0  0 0 0 0  0 0 0 0  0 0 0 0
-      //   R0 G0 B0 A0  0 0 0 0  0 0 0 0  0 0 0 0
+      // RGBA: pix1 = [
+      //   r0 0 0 0  g0 0 0 0  b0 0 0 0  a0 0 0 0
+      //   R0 0 0 0  G0 0 0 0  B0 0 0 0  A0 0 0 0
+      // ]
+      // RGB: pix1 = [
+      //   r0 0 0 0  g0 0 0 0  b0 0 0 0  r1 0 0 0
+      //   R0 0 0 0  G0 0 0 0  B0 0 0 0  R1 0 0 0
       // ]
       auto pix1 = _mm256_inserti128_si256(_mm256_castsi128_si256(
-          mm_cvtepu8_epi32(&lineIn0_min[i])),
-          mm_cvtepu8_epi32(&lineIn1_min[i]), 1);
+          mm_cvtepu8_epi32(lineIn0_min + stride * i, i32_aligned)),
+          mm_cvtepu8_epi32(lineIn1_min + stride * i, i32_aligned), 1);
       // Compute output value as C += w0 * C0 for each channel in 32-bit precision
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix1, mmk));
 
       // Same as above for lines 2 and 3
       auto pix2 = _mm256_inserti128_si256(_mm256_castsi128_si256(
-          mm_cvtepu8_epi32(&lineIn2_min[i])),
-          mm_cvtepu8_epi32(&lineIn3_min[i]), 1);
+          mm_cvtepu8_epi32(lineIn2_min + stride * i, i32_aligned)),
+          mm_cvtepu8_epi32(lineIn3_min + stride * i, i32_aligned), 1);
+      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix2, mmk));
+    }
+
+    if (i == ids_size - 1) {
+      // last element
+      auto mmk = _mm256_set1_epi32(k[i]);
+      // For num_channels == 3 (3 bytes = one pixel) we tolerate to read 4 bytes
+      // lines 0, 1 and 2 wont go out of allocated memory bounds
+      auto pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
+          mm_cvtepu8_epi32(lineIn0_min + stride * i, i32_aligned)),
+          mm_cvtepu8_epi32(lineIn1_min + stride * i, i32_aligned), 1);
+      sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk));
+
+      auto p0 = mm_cvtepu8_epi32(lineIn2_min + stride * i, i32_aligned);
+      __m128i p1;
+      if (num_channels == 3 && C10_UNLIKELY(is_last_line && ids_min + stride * i + 4 >= max_in_x_strided)) {
+        uint8_t input[4];
+        std::memcpy(input, lineIn3_min + stride * i, 3);
+        p1 = mm_cvtepu8_epi32(input, true);
+      } else {
+        p1 = mm_cvtepu8_epi32(lineIn3_min + stride * i, i32_aligned);
+      }
+      auto pix2 = _mm256_inserti128_si256(_mm256_castsi128_si256(p0), p1, 1);
       sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix2, mmk));
     }
 
@@ -531,25 +673,70 @@ void ImagingResampleHorizontalConvolution8u4x(
 
     // Write the output into single uint32
     // (a b c d) -> x_uint32
-    lineOut0[out_x] = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss0, 0));
-    lineOut1[out_x] = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss0, 1));
-    lineOut2[out_x] = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss1, 0));
-    lineOut3[out_x] = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss1, 1));
+    auto o0 = _mm_cvtsi128_si32(_mm256_castsi256_si128(sss0));
+    auto o1 = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss0, 1));
+    auto o2 = _mm_cvtsi128_si32(_mm256_castsi256_si128(sss1));
+    auto o3 = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss1, 1));
+
+    const auto out_x_strided = stride * out_x;
+
+    if (num_channels == 3 && C10_UNLIKELY(out_x_strided + 4 >= max_out_x_strided)) {
+      // Memcpy 4-bytes is faster than 3-bytes and this is a boundary case when we want to write
+      // 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
+      // The 4th byte in the register (X) has a garbage value and 4th byte in the output buffer (R1) has a correct
+      // value which was preveiously computed by another line. In other words, it means that we can not overwrite
+      // it by simply writing 4 bytes from the register to the output. We'll do the following:
+      //               v----------|
+      // Output = [... X1 X2 X3 | R1 G1 B1 R2 ...]
+      // First, we write R1 value to the 4th byte of (R G B | X) -> (R G B | R1)
+      // Second, we write 4 bytes from the register to the output: (X1 X2 X3 | R1) -> (R G B | R1)
+      // Output = [... R G B | R1 G1 B1 R2 ...]
+
+      _write_endline_rgb_as_uint32(lineOut0 + out_x_strided, o0);
+      _write_endline_rgb_as_uint32(lineOut1 + out_x_strided, o1);
+      _write_endline_rgb_as_uint32(lineOut2 + out_x_strided, o2);
+
+      if (C10_UNLIKELY(is_last_line)) {
+        // When we handle the last line, we can not access the next 4 bytes
+        // as they are out of memory bounds.
+        std::memcpy(lineOut3 + out_x_strided, (uint8_t *) &o3, num_channels);
+      } else {
+        _write_endline_rgb_as_uint32(lineOut3 + out_x_strided, o3);
+      }
+    } else if (num_channels == 3) {
+      // Memcpy 4-bytes is faster than 3-bytes and here
+      // we simply write 4 bytes (... R G B X 0 0 0 0 0 ...) where X is a garbage value
+      // that we will overwrite on the next iteration: (... R G B R G B X 0 0 ...)
+      std::memcpy(lineOut0 + out_x_strided, (uint8_t *) &o0, 4);
+      std::memcpy(lineOut1 + out_x_strided, (uint8_t *) &o1, 4);
+      std::memcpy(lineOut2 + out_x_strided, (uint8_t *) &o2, 4);
+      std::memcpy(lineOut3 + out_x_strided, (uint8_t *) &o3, 4);
+    } else {
+      // num_channels = 4 -> lineOutX + out_x_strided should be uint32 aligned
+      *(uint32_t *)(lineOut0 + out_x_strided) = o0;
+      *(uint32_t *)(lineOut1 + out_x_strided) = o1;
+      *(uint32_t *)(lineOut2 + out_x_strided) = o2;
+      *(uint32_t *)(lineOut3 + out_x_strided) = o3;
+    }
   }
 }
 
 void ImagingResampleHorizontalConvolution8u(
-    uint32_t* C10_RESTRICT lineOut,
+    uint8_t* C10_RESTRICT lineOut,
     int64_t out_xsize,
-    const uint32_t* C10_RESTRICT lineIn,
+    const uint8_t* C10_RESTRICT lineIn,
+    int64_t in_xsize,
     const int64_t* idx_ptr_xmin,
     const int64_t* idx_ptr_size,
     const int16_t* kk,
     int kmax,
-    unsigned int coefs_precision) {
+    unsigned int coefs_precision,
+    int64_t num_channels,
+    bool is_last_line) {
 
   // Interpolation horizontal pass processing only one vertical line.
-  // - Input data format is RGBA with R,G,B,A being uint8, we can encode 4 values as a single uint32 value.
+  // - Input data format is RGBA or RGB with R,G,B,A being uint8. In case of RGBA
+  //   we can encode 4 values as a single uint32 value.
   // - We split the size of weight vector for a given output index as a sum:
   //   ids_size = num_blocks_8 * 8 + num_blocks_4 * 4 + num_blocks_2 * 2 + num_blocks_1
   // - We load and process 8 weights values in a loop ("block 8") then 4 weights and 2 weights values in
@@ -572,22 +759,81 @@ void ImagingResampleHorizontalConvolution8u(
   const auto mask_high_c4 = _mm256_set_epi8(
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8,
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8);
+  const auto mask_low_c3 = _mm256_set_epi8(
+      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0,
+      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0);
+  const auto mask_high_c3 = _mm256_set_epi8(
+      -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6,
+      -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6);
+  const auto mask_hl_c3 = _mm256_set_epi8(
+      -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6,
+      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0);
   const auto mask_hl_c4 = _mm256_set_epi8(
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8,
       -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0);
+
+  const auto mask_low128_c3 = _mm_set_epi8(
+      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0);
   const auto mask_low128_c4 = _mm_set_epi8(
       -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0);
 
-  const auto mask_low = mask_low_c4;
-  const auto mask_high = mask_high_c4;
-  const auto mask_hl = mask_hl_c4;
-  const auto mask_low128 = mask_low128_c4;
+  const auto mask_low = (num_channels == 3) ? mask_low_c3 : mask_low_c4;
+  const auto mask_high = (num_channels == 3) ? mask_high_c3 : mask_high_c4;
+  const auto mask_hl = (num_channels == 3) ? mask_hl_c3 : mask_hl_c4;
+  const auto mask_low128 = (num_channels == 3) ? mask_low128_c3 : mask_low128_c4;
 
   // out_xsize = output width, out_x = output x index
   // ids_min is the input offset index corresponding to out_x
   // ids_size is the interpolation size for out_x
 
+  const auto stride = num_channels * sizeof(uint8_t);
   const auto zero = _mm_setzero_si128();
+
+  TORCH_INTERNAL_ASSERT(stride == 3 || stride == 4);
+
+  // Let's precompute ids_size limits for block 8, block 4 and block 2
+  //
+  // In block 8 (8 means we process 8 weight values together), we read at
+  // most 32 bytes input data (16 + 16 bytes for RGBA and 12 + 16 bytes for RGB)
+  // lineIn + stride * (i + ids_min) + 32 <= lineIn + stride * (ids_size + ids_min)
+  // --> i <= ids_size - 32.0 / stride
+  // Strict boundary:
+  // --> i < ids_size + 1 - int(ceil(32.0 / stride)) = ids_size - b8_delta
+  // Soft boundary for reading inside the buffer except its boundaries:
+  // --> i < ids_size + 1 - int(32.0 / stride) = ids_size - b8_delta_soft
+  // RGBA: b8_delta = b8_delta_soft = 7
+  // RGB : b8_delta = 10
+  // RGB : b8_delta_soft = 9
+  const auto b8_delta = (stride == 4) ? 7 : ((is_last_line) ? 10 : 9);
+
+  // In block 4 (4 means we process 4 weight values together), we read
+  // 16 bytes of input data.
+  // lineIn + stride * (i + ids_min) + 16 <= lineIn0 + stride * (ids_size + ids_min)
+  // --> i <= ids_size - 16.0 / stride
+  // Strict boundary:
+  // --> i < ids_size + 1 - int(ceil(16.0 / stride)) = ids_size - b4_delta
+  // Soft boundary for reading inside the buffer except its boundaries:
+  // --> i < ids_size + 1 - int(16.0 / stride) = ids_size - b4_delta_soft
+  // RGBA: b4_delta = b4_delta_soft = 3
+  // RGB : b4_delta = 5
+  // RGB : b4_delta_soft = 4
+  const auto b4_delta = (stride == 4) ? 3 : ((is_last_line) ? 5 : 4);
+
+  // In block 2 (2 means we process 2 weight values together), we read
+  // 8 bytes of input data.
+  // lineIn0 + stride * (i + ids_min) + 8 <= lineIn0 + stride * (ids_size + ids_min)
+  // --> i <= ids_size - 8.0 / stride
+  // Strict boundary:
+  // --> i < ids_size + 1 - int(ceil(8.0 / stride)) = ids_size - b2_delta
+  // Soft boundary for reading inside the buffer except its boundaries:
+  // --> i < ids_size + 1 - int(8.0 / stride) = ids_size - b2_delta_soft
+  // RGBA: b2_delta = b2_delta_soft = 1
+  // RGB : b2_delta = 2
+  // RGB : b2_delta_soft = 1
+  const auto b2_delta = (stride == 4) ? 1 : ((is_last_line) ? 2 : 1);
+
+  const auto max_out_x_strided = out_xsize * stride;
+  const auto max_in_x_strided = in_xsize * stride;
 
   for (const auto out_x : c10::irange(out_xsize)) {
     __m128i sss;
@@ -605,7 +851,7 @@ void ImagingResampleHorizontalConvolution8u(
       auto sss256 = _mm256_set1_epi32(1 << (coefs_precision - 2));
 
       // block 8
-      for (; i < ids_size - 7; i += 8) {
+      for (; i < ids_size - b8_delta; i += 8) {
         // Load 8 values from weight vector
         auto tmp = _mm_loadu_si128((__m128i*)&k[i]);
         // ksource = [
@@ -614,16 +860,28 @@ void ImagingResampleHorizontalConvolution8u(
         // ]
         auto ksource = _mm256_insertf128_si256(_mm256_castsi128_si256(tmp), tmp, 1);
 
-        // Load 8 pixels from input:
+        // RGBA: Load 8 pixels from input:
         // source = [
         //    r0 g0 b0 a0  r1 g1 b1 a1  r2 g2 b2 a2  r3 g3 b3 a3
         //    r4 g4 b4 a4  r5 g5 b5 a5  r6 g6 b6 a6  r7 g7 b7 a7
         // ]
-        auto source = _mm256_loadu_si256((__m256i*)&lineIn_min[i]);
+        // RGB: Load 10 pixels from input (however we can process only 8 pixels):
+        // source = [
+        //    r0 g0 b0 r1  g1 b1 r2 g2  b2 r3 g3 b3  r4 g4 b4 r5
+        //    r4 g4 b4 r5  g5 b5 r6 g6  b6 r7 g7 b7  r8 g8 b8 r9
+        // ]
+        auto source = _mm256_inserti128_si256(_mm256_castsi128_si256(
+            _mm_loadu_si128((__m128i *) (lineIn_min + stride * i))),
+            _mm_loadu_si128((__m128i *) (lineIn_min + stride * (i + 4))), 1);
+
         // Extract lower part of each lane, cast to epi16 and reoder RGBARGBA -> RRGGBBAA
-        // pix1 = [
+        // RGBA: pix1 = [
         //   r0 0 r1 0  g0 0 g1 0  b0 0 b1 0  a0 0 a1 0
         //   r4 0 r5 0  g4 0 g5 0  b4 0 b5 0  a4 0 a5 0
+        // ]
+        // RGB: pix1 = [
+        //   r0 0 r1 0  g0 0 g1 0  b0 0 b1 0  0 0 0 0
+        //   r4 0 r5 0  g4 0 g5 0  b4 0 b5 0  0 0 0 0
         // ]
         auto pix1 = _mm256_shuffle_epi8(source, mask_low);
         // mmk1 = [
@@ -646,7 +904,7 @@ void ImagingResampleHorizontalConvolution8u(
       }
 
       // block 4
-      for (; i < ids_size - 3; i += 4) {
+      for (; i < ids_size - b4_delta; i += 4) {
         // Load 4 values from weight vector
         auto tmp = _mm_loadl_epi64((__m128i *) &k[i]);
         // ksource = [
@@ -655,18 +913,26 @@ void ImagingResampleHorizontalConvolution8u(
         // ]
         auto ksource = _mm256_insertf128_si256(_mm256_castsi128_si256(tmp), tmp, 1);
 
-        // Load 4 pixels from input line
-        tmp = _mm_loadu_si128((__m128i*)&lineIn_min[i]);
-        // source = [
+        // Load pixels from input line
+        tmp = _mm_loadu_si128((__m128i *) (lineIn_min + stride * i));
+        // RGBA: source = [
         //   r0 g0 b0 a0  r1 g1 b1 a1  r2 g2 b2 a2  r3 g3 b3 a3
         //   r0 g0 b0 a0  r1 g1 b1 a1  r2 g2 b2 a2  r3 g3 b3 a3
+        // ]
+        // RGB: source = [
+        //   r0 g0 b0 r1  g1 b1 r2 g2  b2 r3 g3 b3  r4 g4 b4 r5
+        //   r0 g0 b0 r1  g1 b1 r2 g2  b2 r3 g3 b3  r4 g4 b4 r5
         // ]
         auto source = _mm256_insertf128_si256(_mm256_castsi128_si256(tmp), tmp, 1);
 
         // Cast source to epi16 and reorder RGBARGBA -> RRGGBBAA
-        // pix = [
+        // RGBA: pix = [
         //   r0 0 r1 0  g0 0 g1 0  b0 0 b1 0  a0 0 a1 0
         //   r2 0 r3 0  g2 0 g3 0  b2 0 b3 0  a2 0 a3 0
+        // ]
+        // RGB: pix = [
+        //   r0 0 r1 0  g0 0 g1 0  b0 0 b1 0  0 0 0 0
+        //   r2 0 r3 0  g2 0 g3 0  b2 0 b3 0  0 0 0 0
         // ]
         auto pix = _mm256_shuffle_epi8(source, mask_hl);
         // mmk = [
@@ -687,15 +953,18 @@ void ImagingResampleHorizontalConvolution8u(
     }
 
     // block 2
-    for (; i < ids_size - 1; i += 2) {
+    for (; i < ids_size - b2_delta; i += 2) {
       // Load 2 values from weight vector
       // mmk = [wl_0 wh_0 wl_1 wh_1  wl_0 wh_0 wl_1 wh_1  ...]
       auto mmk = _mm_set1_epi32(*(int32_t*)&k[i]);
-      // Load 2 pixels from input line
-      // source = [
+      // Load pixels from input line
+      // RGBA: source = [
       //   r0 g0 b0 a0  r1 g1 b1 a1  0 0 0 0  0 0 0 0
       // ]
-      auto source = _mm_loadl_epi64((__m128i*)&lineIn_min[i]);
+      // RGB: source = [
+      //   r0 g0 b0 r1  g1 b1 r2 g2  0 0 0 0  0 0 0 0
+      // ]
+      auto source = _mm_loadl_epi64((__m128i *) (lineIn_min + stride * i));
       // Cast source to epi16 and reorder RGBARGBA -> RRGGBBAA
       auto pix = _mm_shuffle_epi8(source, mask_low128);
       // Compute output value as C += w0 * C0 + w1 * C1 for each channel in 32-bit precision
@@ -703,16 +972,35 @@ void ImagingResampleHorizontalConvolution8u(
     }
 
     // block 1
-    for (; i < ids_size; i++) {
+    const auto i32_aligned = num_channels == 4;
+    for (; i < ids_size - 1; i++) {
       // Load 1 value from weight vector
       // mmk = [wl_0 wh_0 0 0  wl_0 wh_0 0 0  ...]
       auto mmk = _mm_set1_epi32(k[i]);
       // Load one pixel from input line
-      // pix = [
+      // RGBA: pix = [
       //   r0 0 0 0  g0 0 0 0  b0 0 0 0  a0 0 0 0
       // ]
-      auto pix = mm_cvtepu8_epi32(&lineIn_min[i]);
+      // RGB: pix = [
+      //   r0 0 0 0  g0 0 0 0  b0 0 0 0  r1 0 0 0
+      // ]
+      auto pix = mm_cvtepu8_epi32(lineIn_min + stride * i, i32_aligned);
       // Compute output value as C += w0 * C0 for each channel in 32-bit precision
+      sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
+    }
+
+    if (i == ids_size - 1) {
+      // last element
+      auto mmk = _mm_set1_epi32(k[i]);
+      __m128i pix;
+      auto p = lineIn_min + stride * i;
+      if (num_channels == 3 && C10_UNLIKELY(is_last_line && ids_min + stride * i + 4 >= max_in_x_strided)) {
+        uint8_t input[4];
+        std::memcpy(input, p, 3);
+        pix = mm_cvtepu8_epi32(input, true);
+      } else {
+        pix = mm_cvtepu8_epi32(p, i32_aligned);
+      }
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
 
@@ -726,18 +1014,48 @@ void ImagingResampleHorizontalConvolution8u(
     sss = _mm_packus_epi16(sss, zero);
     // Write the output into single uint32
     // (a b c d) -> x_uint32
-    lineOut[out_x] = _mm_cvtsi128_si32(sss);
+    auto o = _mm_cvtsi128_si32(sss);
+    const auto out_x_strided = stride * out_x;
+    if (num_channels == 3 && C10_UNLIKELY(out_x_strided + 4 >= max_out_x_strided)) {
+      if (C10_UNLIKELY(is_last_line)) {
+        // When we handle the last line, we can not access the next 4 bytes
+        // as they are out of memory bounds.
+        std::memcpy(lineOut + out_x_strided, (uint8_t *) &o, 3);
+      } else {
+        // Memcpy 4-bytes is faster than 3-bytes and this is a boundary case when we want to write
+        // 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
+        // The 4th byte in the register (X) has a garbage value and 4th byte in the output buffer (R1) has a correct
+        // value which was preveiously computed by another line. In other words, it means that we can not overwrite
+        // it by simply writing 4 bytes from the register to the output. We'll do the following:
+        //               v----------|
+        // Output = [... X1 X2 X3 | R1 G1 B1 R2 ...]
+        // First, we write R1 value to the 4th byte of (R G B | X) -> (R G B | R1)
+        // Second, we write 4 bytes from the register to the output: (X1 X2 X3 | R1) -> (R G B | R1)
+        // Output = [... R G B | R1 G1 B1 R2 ...]
+        _write_endline_rgb_as_uint32(lineOut + out_x_strided, o);
+      }
+    } else if (num_channels == 3) {
+      // Memcpy 4-bytes is faster than 3-bytes and here
+      // we simply write 4 bytes (... R G B X 0 0 0 0 0 ...) where X is a garbage value
+      // that we will overwrite on the next iteration: (... R G B R G B X 0 0 ...)
+      std::memcpy(lineOut + out_x_strided, (uint8_t *) &o, 4);
+    } else {
+      // num_channels = 4 -> lineOut + out_x_strided should be uint32 aligned
+      *(uint32_t *)(lineOut + out_x_strided) = o;
+    }
   }
 }
 
 void ImagingResampleVerticalConvolution8u(
-    uint32_t* C10_RESTRICT lineOut,
-    const uint32_t* C10_RESTRICT lineIn,
+    uint8_t* C10_RESTRICT lineOut,
+    const uint8_t* C10_RESTRICT lineIn,
     int64_t xsize,
     int64_t ids_min,
     int64_t ids_size,
     const int16_t* k,
-    unsigned int coefs_precision) {
+    unsigned int coefs_precision,
+    int64_t num_channels) {
+
   // Interpolation vertical pass processing one line.
   // - We process x-axis data with blocks of 8, 2 and 1
   // - We split the size of weight vector for a given output index as a sum: K = n * 2 + m.
@@ -745,39 +1063,58 @@ void ImagingResampleVerticalConvolution8u(
   // xsize = output width, also equals to input width
   // ids_size = interpolation size
   // ids_min = input y start index
+  const auto stride = num_channels * sizeof(uint8_t);
+
+  TORCH_INTERNAL_ASSERT(stride == 3 || stride == 4);
+
+  const int64_t data_size = xsize * stride;
+  const int64_t data_stride = stride;
+  constexpr auto vec_size = 256 / 8;
 
   const auto initial = _mm_set1_epi32(1 << (coefs_precision - 1));
   const auto initial_256 = _mm256_set1_epi32(1 << (coefs_precision - 1));
   const auto zero = _mm_setzero_si128();
   const auto zero_256 = _mm256_setzero_si256();
 
-  int64_t xx = 0;
+  int64_t j = 0;
   // block 8
-  for (; xx < xsize - 7; xx += 8) {
+  const auto b8_usable_vec_stride = (vec_size / data_stride) * data_stride;
+  for (; j < data_size - vec_size; j += b8_usable_vec_stride) {
     auto sss0 = initial_256;
     auto sss1 = initial_256;
     auto sss2 = initial_256;
     auto sss3 = initial_256;
     int64_t i = 0;
-    const auto * lineIn_min = lineIn + xx + ids_min;
+    const auto * lineIn_min = lineIn + j + ids_min;
 
     for (; i < ids_size - 1; i += 2) {
       // Load 2 values from weight vector
       auto mmk = _mm256_set1_epi32(*(int32_t*)&k[i]);
 
-      // Load 8 pixels per line
+      // RGBA: Load 8 pixels per line
       // source1 = [
       //    r0 g0 b0 a0  r1 g1 b1 a1  r2 g2 b2 a2  r3 g3 b3 a3
       //    r4 g4 b4 a4  r5 g5 b5 a5  r6 g6 b6 a6  r7 g7 b7 a7
       // ]
-      auto source1 = _mm256_loadu_si256((__m256i*)(lineIn_min + i * xsize));
-      auto source2 = _mm256_loadu_si256((__m256i*)(lineIn_min + (i + 1) * xsize));
+      // RGB: Load 10 pixels per line (however we can process only 8 pixels):
+      // source1 = [
+      //    r0 g0 b0 r1  g1 b1 r2 g2  b2 r3 g3 b3  r4 g4 b4 r5
+      //    r4 g4 b4 r5  g5 b5 r6 g6  b6 r7 g7 b7  r8 g8 b8 r9
+      // ]
+      auto source1 =
+          _mm256_loadu_si256((__m256i*)(lineIn_min + data_size * i));
+      auto source2 =
+          _mm256_loadu_si256((__m256i*)(lineIn_min + data_size * (i + 1)));
 
       // Interleave source1 and source2 from the low half of each 128-bit lane
       // and cast the result to epi16
-      // pix1 = [
+      // RGBA: pix1 = [
       //    r0 0 R0 0  g0 0 G0 0  b0 0 B0 0  a0 0 A0 0
       //    r1 0 R1 0  g1 0 G1 0  b1 0 B1 0  a1 0 A1 0
+      // ]
+      // RGB: pix1 = [
+      //    r0 0 R0 0  g0 0 G0 0  b0 0 B0 0  0 0 0 0
+      //    r1 0 R1 0  g1 0 G1 0  b1 0 B1 0  0 0 0 0
       // ]
       auto source_lo = _mm256_unpacklo_epi8(source1, source2);
       auto pix1 = _mm256_unpacklo_epi8(source_lo, zero_256);
@@ -786,9 +1123,13 @@ void ImagingResampleVerticalConvolution8u(
       //   C += w0 * c1 + w1 * C1 for each channel in 32-bit precision
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix1, mmk));
 
-      // pix2 = [
+      // RGBA: pix2 = [
       //    r2 0 R2 0  g2 0 G2 0  b2 0 B2 0  a2 0 A2 0
       //    r3 0 R3 0  g3 0 G3 0  b3 0 B3 0  a3 0 A3 0
+      // ]
+      // RGB: pix2 = [
+      //    r2 0 R2 0  g2 0 G2 0  b2 0 B2 0  0 0 0 0
+      //    r3 0 R3 0  g3 0 G3 0  b3 0 B3 0  0 0 0 0
       // ]
       auto pix2 = _mm256_unpackhi_epi8(source_lo, zero_256);
       // Compute output value as
@@ -807,7 +1148,7 @@ void ImagingResampleVerticalConvolution8u(
     for (; i < ids_size; i += 1) {
       auto mmk = _mm256_set1_epi32(k[i]);
 
-      auto source1 = _mm256_loadu_si256((__m256i*)(lineIn_min + i * xsize));
+      auto source1 = _mm256_loadu_si256((__m256i*)(lineIn_min + i * data_size));
 
       auto source_lo = _mm256_unpacklo_epi8(source1, zero_256);
       auto pix1 = _mm256_unpacklo_epi8(source_lo, zero_256);
@@ -834,16 +1175,18 @@ void ImagingResampleVerticalConvolution8u(
     // (a a b b c c d d) -> (a b c d)
     sss0 = _mm256_packus_epi16(sss0, sss2);
 
-    // Store 8 pixels to the output
-    _mm256_storeu_si256((__m256i*)&lineOut[xx], sss0);
+    // Stores 32 bytes
+    _mm256_storeu_si256((__m256i*)(lineOut + j), sss0);
   }
 
+  // TODO: Do we also need block 4 ???
   // block 2
-  for (; xx < xsize - 1; xx += 2) {
+  const auto b2_usable_vec_stride = (8 / data_stride) * data_stride;
+  for (; j < data_size - vec_size / 4; j += b2_usable_vec_stride) {
     auto sss0 = initial;
     auto sss1 = initial;
     int64_t i = 0;
-    const auto * lineIn_min = lineIn + xx + ids_min;
+    const auto * lineIn_min = lineIn + j + ids_min;
 
     for (; i < ids_size - 1; i += 2) {
       // Load 2 values from weight vector
@@ -851,22 +1194,30 @@ void ImagingResampleVerticalConvolution8u(
       auto mmk = _mm_set1_epi32(*(int32_t*)&k[i]);
 
       // Load 2 pixels per line
-      // source1 = [
+      // RGBA: source1 = [
       //    r0 g0 b0 a0  r1 g1 b1 a1  0 0 0 0  0 0 0 0
       // ]
-      auto source1 = _mm_loadl_epi64((__m128i*)(lineIn_min + i * xsize));
-      auto source2 = _mm_loadl_epi64((__m128i*)(lineIn_min + (i + 1) * xsize));
-
+      // RGB: source1 = [
+      //    r0 g0 b0 r1  g1 b1 r2 g2  0 0 0 0  0 0 0 0
+      // ]
+      auto source1 = _mm_loadl_epi64((__m128i *) (lineIn_min + i * data_size));
+      auto source2 = _mm_loadl_epi64((__m128i *) (lineIn_min + (i + 1) * data_size));
       // Interleave source1 and source2 and cast the result to epi16
-      // pix = [
+      // RGBA: pix = [
       //    r0 0 R0 0  g0 0 G0 0  b0 0 B0 0  a0 0 A0 0
+      // ]
+      // RGB: pix = [
+      //    r0 0 R0 0  g0 0 G0 0  b0 0 B0 0  0 0 0 0
       // ]
       auto source = _mm_unpacklo_epi8(source1, source2);
       auto pix = _mm_unpacklo_epi8(source, zero);
       // Compute output value as C += w0 * c0 + w1 * C0 for each channel in 32-bit precision
       sss0 = _mm_add_epi32(sss0, _mm_madd_epi16(pix, mmk));
-      // pix = [
+      // RGBA: pix = [
       //    r1 0 R1 0  g1 0 G1 0  b1 0 B1 0  a1 0 A1 0
+      // ]
+      // RGB: pix = [
+      //    r1 0 R1 0  g1 0 G1 0  b1 0 B1 0  0 0 0 0
       // ]
       pix = _mm_unpackhi_epi8(source, zero);
       // Compute output value as C += w0 * c1 + w1 * C1 for each channel in 32-bit precision
@@ -876,7 +1227,7 @@ void ImagingResampleVerticalConvolution8u(
     for (; i < ids_size; i += 1) {
       auto mmk = _mm_set1_epi32(k[i]);
 
-      auto source1 = _mm_loadl_epi64((__m128i*)(lineIn_min + i * xsize));
+      auto source1 = _mm_loadl_epi64((__m128i*) (lineIn_min + i * data_size));
 
       auto source = _mm_unpacklo_epi8(source1, zero);
       auto pix1 = _mm_unpacklo_epi8(source, zero);
@@ -894,14 +1245,16 @@ void ImagingResampleVerticalConvolution8u(
     // (a a b b c c d d) -> (a b c d)
     sss0 = _mm_packus_epi16(sss0, sss0);
     // Store 2 pixels to the output
-    _mm_storel_epi64((__m128i*)&lineOut[xx], sss0);
+    _mm_storel_epi64((__m128i*)(lineOut + j), sss0);
   }
 
   // block 1
-  for (; xx < xsize; xx++) {
+  const auto b1_usable_vec_stride = (4 / data_stride) * data_stride;
+  const auto i32_aligned = num_channels == 4;
+  for (; j < data_size - 4; j += b1_usable_vec_stride) {
     auto sss = initial;
     int64_t i = 0;
-    const auto * lineIn_min = lineIn + xx + ids_min;
+    const auto * lineIn_min = lineIn + j + ids_min;
 
     for (; i < ids_size - 1; i += 2) {
       // Load 2 values from weight vector
@@ -909,25 +1262,80 @@ void ImagingResampleVerticalConvolution8u(
       auto mmk = _mm_set1_epi32(*(int32_t*)&k[i]);
 
       // Load one pixel per line
-      // source1 = [
+      // RGBA: source1 = [
       //    r0 g0 b0 a0  0 0 0 0  0 0 0 0  0 0 0 0
       // ]
-      auto source1 = _mm_cvtsi32_si128(*(int32_t*)(lineIn_min + i * xsize));
-      auto source2 = _mm_cvtsi32_si128(*(int32_t*)(lineIn_min + (i + 1) * xsize));
+      // RGB: source1 = [
+      //    r0 g0 b0 r1  0 0 0 0  0 0 0 0  0 0 0 0
+      // ]
+      auto source1 = mm_cvtsi32_si128(lineIn_min + i * data_size, i32_aligned);
+      auto source2 = mm_cvtsi32_si128(lineIn_min + (i + 1) * data_size, i32_aligned);
 
       // Interleave source1 and source2 and cast the result to epi16
-      // pix = [
+      // RGBA: pix = [
       //    r0 0 R0 0  g0 0 G0 0  b0 0 B0 0  a0 0 A0 0
+      // ]
+      // RGB: pix = [
+      //    r0 0 R0 0  g0 0 G0 0  b0 0 B0 0  0 0 0 0
       // ]
       auto source = _mm_unpacklo_epi8(source1, source2);
       auto pix = _mm_unpacklo_epi8(source, zero);
       // Compute output value as C += w0 * c0 + w1 * C0 for each channel in 32-bit precision
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
+
+    for (; i < ids_size; i++) {
+      auto mmk = _mm_set1_epi32(k[i]);
+      auto pix = mm_cvtepu8_epi32(lineIn_min + i * data_size, i32_aligned);
+      sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
+    }
+    sss = _mm_srai_epi32(sss, coefs_precision);
+    sss = _mm_packs_epi32(sss, zero);
+    sss = _mm_packus_epi16(sss, zero);
+
+    auto o = _mm_cvtsi128_si32(sss);
+
+    // Here we write 4 bytes to the output even if num_channels < 4, e.g o = {r,g,b,X} for num_channels=3
+    // It is OK to write 4th byte (e.g. X) as on the next step we will overwrite it with new data.
+    // We also wont go out of bounds of lineOut memory allocation
+    std::memcpy(lineOut + j, (uint8_t *) &o, 4);
+  }
+
+  for (; j < data_size; j += data_stride) {
+    auto sss = initial;
+    int64_t i = 0;
+    const auto * lineIn_min = lineIn + j + ids_min;
+    // For RGBA we can use (ids_size - 1) as tighter limit but for RGB we can read outside memory boundary
+    // for the last remaining line
+    for (; i < ids_size - 2; i += 2) {
+      // Load two coefficients at once
+      auto mmk = _mm_set1_epi32(*(int32_t*)&k[i]);
+
+      // Load 2 lines
+      auto source1 = mm_cvtsi32_si128(lineIn_min + i * data_size, i32_aligned);
+      auto source2 = mm_cvtsi32_si128(lineIn_min + (i + 1) * data_size, i32_aligned);
+
+      auto source = _mm_unpacklo_epi8(source1, source2);
+      auto pix = _mm_unpacklo_epi8(source, zero);
+      sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
+    }
+
     // Same processing as above but with a single weight value
     for (; i < ids_size; i++) {
       auto mmk = _mm_set1_epi32(k[i]);
-      auto pix = mm_cvtepu8_epi32(lineIn_min + i * xsize);
+
+      const uint8_t * p = lineIn_min + i * data_size;
+      __m128i pix;
+      // There is no much perf gain using more detailed condition like
+      // num_channels == 3 && ids_min + j + data_size * i + 4 >= in_max_size
+      // const int64_t in_max_size = data_size * in_ysize;
+      if (num_channels == 3) {
+        uint8_t input[4];
+        std::memcpy(input, p, 3);
+        pix = mm_cvtepu8_epi32(input, true);
+      } else {
+        pix = mm_cvtepu8_epi32(p, true);
+      }
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
 
@@ -940,7 +1348,12 @@ void ImagingResampleVerticalConvolution8u(
     // (a a b b c c d d) -> (a b c d)
     sss = _mm_packus_epi16(sss, zero);
     // Store one pixel to the output
-    lineOut[xx] = _mm_cvtsi128_si32(sss);
+    auto o = _mm_cvtsi128_si32(sss);
+    if (num_channels == 3 && C10_UNLIKELY(j + 4 >= data_size)) {
+      std::memcpy(lineOut + j, (uint8_t *) &o, 3);
+    } else {
+      std::memcpy(lineOut + j, (uint8_t *) &o, 4);
+    }
   }
 }
 
