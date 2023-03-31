@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     is_slow_gradcheck_env,
     parser as common_parser,
-    retry_shell,
     set_cwd,
     shell,
     TEST_WITH_ROCM,
@@ -42,8 +41,6 @@ try:
         get_reordered_tests,
         get_test_case_configs,
         NUM_PROCS,
-        ShardedTest,
-        THRESHOLD,
     )
 
     HAVE_TEST_SELECTION_TOOLS = True
@@ -52,9 +49,6 @@ except ImportError:
     print(
         "Unable to import test_selections from tools/testing. Running without test selection stats..."
     )
-
-
-RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 
 
 # Note [ROCm parallel CI testing]
@@ -283,13 +277,6 @@ CI_SERIAL_LIST = [
     "_nvfuser/test_torchscript",  # OOM on test_issue_1785
     "test_schema_check",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
     "functorch/test_memory_efficient_fusion",  # Cause CUDA OOM on ROCm
-    "test_utils",  # OOM
-    "test_sort_and_select",  # OOM
-    "test_backward_compatible_arguments",  # OOM
-    "test_module_init",  # OOM
-    "test_autocast",  # OOM
-    "test_native_mha",  # OOM
-    "test_module_hooks",  # OOM
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -304,6 +291,19 @@ CORE_TEST_LIST = [
     "test_torch",
 ]
 
+# A list of distributed tests that run on multiple backends, i.e. gloo, nccl. These backends are spread out
+# among all available shards to speed up the test. The list of backends are copied from the tests themselves
+DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS = {
+    "distributed/test_distributed_spawn": [
+        "gloo",
+        "nccl",
+        "ucc",
+    ],
+    "distributed/algorithms/quantization/test_quantization": [
+        "gloo",
+        "nccl",
+    ],
+}
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -406,19 +406,9 @@ def run_test(
 ) -> int:
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_unittest_args.copy()
-    test_file = test_module
-    if isinstance(test_file, ShardedTest):
-        unittest_args.extend(
-            [
-                f"--shard-id={test_module.shard - 1}",
-                f"--num-shards={test_module.num_shards}",
-            ]
-        )
-        test_file = test_module.name
-
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
-    if test_file in RUN_PARALLEL_BLOCKLIST:
+    if test_module in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [
             arg for arg in unittest_args if not arg.startswith("--run-parallel")
         ]
@@ -432,11 +422,11 @@ def run_test(
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
     if IS_CI:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
-        if RERUN_DISABLED_TESTS:
+        if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
             ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(ci_args)
-    if test_file in PYTEST_SKIP_RETRIES:
+    if test_module in PYTEST_SKIP_RETRIES:
         if not options.pytest:
             raise RuntimeError(
                 "A test running without pytest cannot skip retries using "
@@ -449,35 +439,19 @@ def run_test(
 
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    argv = [test_file + ".py"] + unittest_args
+    argv = [test_module + ".py"] + unittest_args
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
     log_fd, log_path = tempfile.mkstemp(
         dir=REPO_ROOT / "test" / "test-reports",
-        prefix="{}_".format(test_file.replace("\\", "-").replace("/", "-")),
+        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")),
         suffix=".log",
     )
     os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
-    should_file_rerun = (
-        "--subprocess" not in command
-        and not RERUN_DISABLED_TESTS
-        and isinstance(test_module, ShardedTest)
-        and test_module.time is not None
-    )
-    timeout = THRESHOLD * 2 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
     with open(log_path, "w") as f:
-        ret_code = retry_shell(
-            command,
-            test_directory,
-            stdout=f,
-            stderr=f,
-            env=env,
-            timeout=timeout,
-            retries=1 if should_file_rerun else 0,
-        )
-
+        ret_code = shell(command, test_directory, stdout=f, stderr=f, env=env)
     print_log_file(test_module, log_path, failed=(ret_code != 0))
     os.remove(log_path)
     return ret_code
@@ -575,11 +549,32 @@ def test_distributed(test_module, test_directory, options):
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
 
+    if options.shard:
+        which_shard, num_shards = options.shard
+    else:
+        which_shard = num_shards = 1
+    # Round-robin all backends to different shards
+    backend_to_shard = {
+        backend: i % num_shards + 1
+        for i, backend in enumerate(
+            DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS[test_module]
+        )
+    }
+    print_to_stderr(
+        f"Map different backends to different shards for {test_module}: {backend_to_shard}"
+    )
+
     config = DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
         if sys.platform == "win32" and backend != "gloo":
             continue
         if backend == "mpi" and not mpi_available:
+            continue
+        # Default to the first shard if seeing an unrecognized backend
+        if which_shard != backend_to_shard.get(backend, 1):
+            print_to_stderr(
+                f"Shard {which_shard}: {backend} should be run in {backend_to_shard.get(backend, 1)}"
+            )
             continue
         for with_init_file in {True, False}:
             if sys.platform == "win32" and not with_init_file:
@@ -589,8 +584,8 @@ def test_distributed(test_module, test_directory, options):
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
-                    "Running distributed tests for the {} backend {}".format(
-                        backend, with_init
+                    "Running distributed tests for the {} backend {} in shard {} of {}".format(
+                        backend, with_init, which_shard, num_shards
                     )
                 )
             old_environ = dict(os.environ)
@@ -599,7 +594,7 @@ def test_distributed(test_module, test_directory, options):
             os.environ["INIT_METHOD"] = "env://"
             os.environ.update(env_vars)
             if with_init_file:
-                if test_module.name == "test_distributed_spawn":
+                if test_module == "test_distributed_spawn":
                     init_method = f"{FILE_SCHEMA}{tmp_dir}/"
                 else:
                     init_method = f"{FILE_SCHEMA}{tmp_dir}/shared_init_file"
@@ -783,7 +778,6 @@ def run_doctests(test_module, test_directory, options):
 
 def print_log_file(test: str, file_path: str, failed: bool) -> None:
     num_lines = sum(1 for _ in open(file_path, "rb"))
-    test = str(test)
     n = 100
     with open(file_path, "r") as f:
         print_to_stderr("")
@@ -811,7 +805,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
 
 
 def get_pytest_args(options):
-    if RERUN_DISABLED_TESTS:
+    if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", "--flake-runs=50"]
@@ -821,7 +815,7 @@ def get_pytest_args(options):
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
-        rerun_options = ["-x", "--reruns=2", "--sw"]
+        rerun_options = ["-x", "--reruns=2"]
 
     pytest_args = [
         "--use-pytest",
@@ -832,6 +826,55 @@ def get_pytest_args(options):
     ]
     pytest_args.extend(rerun_options)
     return pytest_args
+
+
+def run_test_ops(test_module, test_directory, options):
+    default_unittest_args = get_pytest_args(options)
+
+    return_codes = []
+    os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+    pool = get_context("spawn").Pool(NUM_PROCS)
+    for i in range(NUM_PROCS):
+        extra_unittest_args = default_unittest_args.copy()
+        extra_unittest_args.extend(
+            [
+                f"--shard-id={i}",
+                f"--num-shards={NUM_PROCS}",
+                "-k=not _linalg_cholesky_",
+            ]
+        )
+
+        return_code = pool.apply_async(
+            run_test,
+            args=(test_module, test_directory, copy.deepcopy(options)),
+            kwds={
+                "extra_unittest_args": extra_unittest_args,
+            },
+        )
+        return_codes.append(return_code)
+
+    pool.close()
+    pool.join()
+    del os.environ["NUM_PARALLEL_PROCS"]
+
+    for return_code in return_codes:
+        if return_code.get() != 0:
+            return return_code.get()
+
+    extra_unittest_args = default_unittest_args.copy()
+    extra_unittest_args.extend(
+        [
+            "-k=_linalg_cholesky_",
+        ]
+    )
+
+    return_code = run_test(
+        test_module,
+        test_directory,
+        copy.deepcopy(options),
+        extra_unittest_args=extra_unittest_args,
+    )
+    return return_code
 
 
 CUSTOM_HANDLERS = {
@@ -855,6 +898,15 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
     "doctests": run_doctests,
+    "inductor/test_torchinductor_opinfo": run_test_ops,
+    "test_ops": run_test_ops,
+    "test_ops_gradients": run_test_ops,
+    "test_ops_fwd_gradients": run_test_ops,
+    "test_ops_jit": run_test_ops,
+    "functorch/test_ops": run_test_ops,
+    # not a test_ops file, but takes 2 hrs on some architectures and
+    # run_test_ops is good at parallelizing things
+    "test_decomp": run_test_ops,
 }
 
 
@@ -1127,7 +1179,13 @@ def get_selected_tests(options):
 
     if options.distributed_tests:
         selected_tests = list(
-            filter(lambda test_name: test_name in DISTRIBUTED_TESTS, selected_tests)
+            filter(
+                lambda test_name: (
+                    test_name in DISTRIBUTED_TESTS
+                    and test_name not in DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS
+                ),
+                selected_tests,
+            )
         )
 
     # Filter to only run core tests when --core option is specified
@@ -1188,6 +1246,46 @@ def get_selected_tests(options):
     elif TEST_WITH_ROCM:
         selected_tests = exclude_tests(ROCM_BLOCKLIST, selected_tests, "on ROCm")
 
+    # sharding
+    if options.shard:
+        assert len(options.shard) == 2, "Unexpected shard format"
+        assert min(options.shard) > 0, "Shards must be positive numbers"
+        which_shard, num_shards = options.shard
+        assert (
+            which_shard <= num_shards
+        ), "Selected shard must be less than or equal to total number of shards"
+        assert num_shards <= len(
+            selected_tests
+        ), f"Number of shards must be less than {len(selected_tests)}"
+
+        if num_shards == 1:
+            return selected_tests
+
+        # Download previous test times to make sharding decisions
+        path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                test_file_times = cast(Dict[str, Any], json.load(f))
+        else:
+            test_file_times = {}
+        test_config = os.environ.get("TEST_CONFIG")
+        if test_config not in test_file_times:
+            print(
+                "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
+            )
+            selected_tests = selected_tests[which_shard - 1 :: num_shards]
+        else:
+            print("Found test time stats from artifacts")
+            test_file_times_config = test_file_times[test_config]
+            shards = calculate_shards(
+                num_shards,
+                selected_tests,
+                test_file_times_config,
+                must_serial=must_serial,
+            )
+            _, tests_from_shard = shards[which_shard - 1]
+            selected_tests = tests_from_shard
+
     # skip all distributed tests if distributed package is not available.
     if not dist.is_available():
         selected_tests = exclude_tests(
@@ -1213,61 +1311,30 @@ def get_selected_tests(options):
             exact_match=True,
         )
 
-    selected_tests = [parse_test_module(x) for x in selected_tests]
-
-    # sharding
-    which_shard, num_shards = 1, 1
-    if options.shard:
-        assert len(options.shard) == 2, "Unexpected shard format"
-        assert min(options.shard) > 0, "Shards must be positive numbers"
-        which_shard, num_shards = options.shard
-        assert (
-            which_shard <= num_shards
-        ), "Selected shard must be less than or equal to total number of shards"
-        assert num_shards <= len(
-            selected_tests
-        ), f"Number of shards must be less than {len(selected_tests)}"
-
-    # Download previous test times to make sharding decisions
-    path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            test_file_times = cast(Dict[str, Any], json.load(f))
-    else:
-        test_file_times = {}
-    test_config = os.environ.get("TEST_CONFIG")
-    if test_config not in test_file_times:
-        print(
-            "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
-        )
-    else:
-        print("Found test time stats from artifacts")
-
-    # Do sharding
-    test_file_times_config = test_file_times.get(test_config, {})
-    shards = calculate_shards(
-        num_shards, selected_tests, test_file_times_config, must_serial=must_serial
-    )
-    _, tests_from_shard = shards[which_shard - 1]
-    selected_tests = tests_from_shard
+    if options.distributed_tests:
+        # Run distributed tests with multiple backends across all shards, one per backend
+        selected_tests.extend(DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS.keys())
+        selected_tests.reverse()
 
     return selected_tests
 
 
-def run_test_module(test: ShardedTest, test_directory: str, options) -> Optional[str]:
+def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
     maybe_set_hip_visible_devies()
 
+    test_module = parse_test_module(test)
+
     # Printing the date here can help diagnose which tests are slow
-    print_to_stderr("Running {} ... [{}]".format(str(test), datetime.now()))
-    handler = CUSTOM_HANDLERS.get(test.name, run_test)
-    return_code = handler(test, test_directory, options)
+    print_to_stderr("Running {} ... [{}]".format(test, datetime.now()))
+    handler = CUSTOM_HANDLERS.get(test_module, run_test)
+    return_code = handler(test_module, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
-    ), f"While running {str(test)} got non integer return code {return_code}"
+    ), f"While running {test} got non integer return code {return_code}"
     if return_code == 0:
         return None
 
-    message = f"{str(test)} failed!"
+    message = f"{test} failed!"
     if return_code < 0:
         # subprocess.Popen returns the child process' exit signal as
         # return code -N, where N is the signal number.
@@ -1283,9 +1350,7 @@ def main():
     selected_tests = get_selected_tests(options)
 
     if options.verbose:
-        print_to_stderr(
-            "Selected tests:\n {}".format("\n ".join(str(x) for x in selected_tests))
-        )
+        print_to_stderr("Selected tests:\n {}".format("\n ".join(selected_tests)))
 
     if options.dry_run:
         return
@@ -1307,18 +1372,18 @@ def main():
 
     # parallel = in parallel with other files
     # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
-    selected_tests_parallel = [x for x in selected_tests if not must_serial(x.name)]
+    selected_tests_parallel = [x for x in selected_tests if not must_serial(x)]
     selected_tests_serial = [
         x for x in selected_tests if x not in selected_tests_parallel
     ]
     print_to_stderr(
         "parallel (file granularity) tests:\n {}".format(
-            "\n ".join(str(x) for x in selected_tests_parallel)
+            "\n ".join(selected_tests_parallel)
         )
     )
     print_to_stderr(
         "serial (file granularity) tests:\n {}".format(
-            "\n ".join(str(x) for x in selected_tests_serial)
+            "\n ".join(selected_tests_serial)
         )
     )
 
@@ -1338,7 +1403,7 @@ def main():
         return False
 
     try:
-        os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+        os.environ["PARALLEL_TESTING"] = "1"
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
@@ -1350,7 +1415,7 @@ def main():
             )
         pool.close()
         pool.join()
-        del os.environ["NUM_PARALLEL_PROCS"]
+        del os.environ["PARALLEL_TESTING"]
 
         if not options.continue_through_error and len(failure_messages) != 0:
             raise RuntimeError(
