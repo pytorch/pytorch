@@ -466,6 +466,8 @@ class LazyModule(LazyModuleMixin, MaterializedModule):
         self.param = UninitializedParameter()
 
     def initialize_parameters(self, x):
+        # force graph break to ensure this was not inlined
+        torch._dynamo.graph_break()
         self.param.materialize(x.shape)
 
 
