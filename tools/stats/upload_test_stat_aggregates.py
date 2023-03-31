@@ -1,9 +1,10 @@
 import argparse
 import datetime
+import json
 import os
 from typing import Any
 
-import rockset
+import rockset  # type: ignore[import]
 
 from tools.stats.upload_stats_lib import upload_to_s3
 
@@ -28,7 +29,9 @@ def get_test_stat_aggregates(date: datetime.date) -> Any:
         version="865e3748f31e9b59",
         parameters=query_parameters,
     )
-    return api_response["results"]
+    return json.loads(
+        json.dumps(api_response["results"], indent=4, sort_keys=True, default=str)
+    )
 
 
 if __name__ == "__main__":
@@ -46,8 +49,9 @@ if __name__ == "__main__":
     if args.date < datetime.datetime.now().date() - datetime.timedelta(days=30):
         raise ValueError("date must be in the last 30 days")
     data = get_test_stat_aggregates(date=args.date)
+    # print(data)
     upload_to_s3(
-        bucket_name="torchci-testing-aggregate-data",
+        bucket_name="torchci-aggregated-stats",
         key=f"test_data_aggregates/{str(args.date)}",
         docs=data,
     )

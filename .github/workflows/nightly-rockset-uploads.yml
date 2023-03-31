@@ -1,4 +1,4 @@
-name: Nightly Upload to rockset
+name: Nightly Upload t orockset
 
 on:
   schedule:
