@@ -6344,7 +6344,6 @@ if HAS_CPU and not torch.backends.mps.is_available():
                 x = torch.rand(10, 3, 0)
                 model_f = torch.compile()(model)
 
-
                 self.assertEqual(model(x), model_f(x))
 
         def test_redundant_to_node_elimination_bf16(self):
