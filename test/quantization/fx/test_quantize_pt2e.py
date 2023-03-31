@@ -84,14 +84,14 @@ class TestQuantizePT2E(QuantizationTestCase):
             # first conv is quantized, second conv is not quantized
             node_occurrence = {
                 # two for input of the first conv, one for output for the first conv
-                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 3,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 3,
             }
             node_list = [
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
                 ns.call_function(torch.ops.aten.convolution.default),
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
                 ns.call_function(torch.ops.aten.convolution.default),
             ]
             self.checkGraphModuleNodes(
@@ -133,14 +133,14 @@ class TestQuantizePT2E(QuantizationTestCase):
             # conv is quantized, linear is not quantized
             node_occurrence = {
                 # two for input and weight of the conv, one for output for the conv
-                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 3,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 3,
             }
             node_list = [
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
                 ns.call_function(torch.ops.aten.convolution.default),
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
                 ns.call_function(torch.ops.aten.addmm.default),
             ]
             self.checkGraphModuleNodes(
@@ -181,14 +181,14 @@ class TestQuantizePT2E(QuantizationTestCase):
             m(*example_inputs)
             node_occurrence = {
                 # two for input and weight of the conv, one for output for the conv
-                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 3,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 3,
             }
             node_list = [
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
                 ns.call_function(torch.ops.aten.convolution.default),
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
             ]
             self.checkGraphModuleNodes(
                 m,
@@ -198,8 +198,8 @@ class TestQuantizePT2E(QuantizationTestCase):
             m = make_fx(m, decomposition_table=quant_decomp)(*copy.deepcopy(example_inputs))
             node_occurrence = {
                 # check both q/dq are decomposed
-                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 0,
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 0,
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 0,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 0,
             }
             node_list = [
                 # ops in quantize
@@ -249,12 +249,18 @@ class TestQuantizePT2E(QuantizationTestCase):
             backend_config = get_qnnpack_pt2e_backend_config()
             qconfig = get_default_qconfig("qnnpack")
             qconfig_mapping = QConfigMapping().set_global(qconfig)
-            before_fusion_result = m(*example_inputs)
 
             m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
             m(*example_inputs)
             m = convert_pt2e(m)
 
+            # this does not work if we use torch.ops.quantized_decomposed.quantize_per_tensor op,
+            # I think it is something related to
+            # FakeTensorMode not being able to work with overloaded ops properly
+            # e.g. op torch.ops.quantized_decomposed.quantize_per_tensor is an overloaded
+            # op that accepts both float scale and Tensor scale, the scale argument in the
+            # graph is a Tensor, but the op we are using is torch.ops.quantized_decomposed.quantize_per_tensor
+            # and it is being traced as torch.ops.quantized_decomopsed.quantize_per_tensor.tensor
             with FakeTensorMode(allow_non_fake_inputs=True) as mode:
                 fake_x = mode.from_tensor(torch.rand((1, 3, 224, 224)).to(memory_format=torch.channels_last))
                 out = m(fake_x)
@@ -368,27 +374,27 @@ class TestQuantizePT2EX86Inductor(QuantizationTestCase):
                     # Fake quant should only be inserted at start and end
                     node_occurrence = {
                         # one for input and weight of the conv, one for output for the conv
-                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 2,
                         ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
                         ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
-                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 2,
                     }
                     if use_relu:
                         node_list = [
-                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
-                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
                             ns.call_function(torch.ops.aten.convolution.default),
                             ns.call_function(torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default),
-                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
-                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
                         ]
                     else:
                         node_list = [
-                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
-                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
                             ns.call_function(torch.ops.aten.convolution.default),
-                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
-                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
                         ]
                     self.checkGraphModuleNodes(convert_module,
                                                expected_node_occurrence=node_occurrence,
