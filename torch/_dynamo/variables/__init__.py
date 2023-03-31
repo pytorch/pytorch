@@ -5,6 +5,7 @@ from .ctx_manager import (
     ContextWrappingVariable,
     CUDAStreamContextVariable,
     CUDAStreamVariable,
+    DeterministicAlgorithmsVariable,
     GradModeVariable,
     WithExitFunctionVariable,
 )
@@ -27,7 +28,6 @@ from .misc import (
     AutogradFunctionVariable,
     BlackHoleVariable,
     ClosureVariable,
-    DeterministicAlgorithmsVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
