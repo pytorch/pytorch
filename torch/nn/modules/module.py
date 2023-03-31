@@ -1581,14 +1581,11 @@ class Module:
     __call__ : Callable[..., Any] = _call_impl
 
     def __getstate__(self):
-        state = super().__getstate__()
+        state = self.__dict__.copy()
         state.pop("_compiled_call_impl", None)
         return state
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
-        if "_compiled_call_impl" in self.__dict__:
-            del self.__dict__["_compiled_call_impl"]
 
         # Support loading old checkpoints that don't have the following attrs:
         if '_forward_pre_hooks' not in self.__dict__:
