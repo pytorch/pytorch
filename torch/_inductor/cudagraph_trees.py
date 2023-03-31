@@ -718,7 +718,7 @@ class CUDAGraphNode:
 
         # NB: some static inputs are saved tensors from the forward that die in the backward.
         # Their locations are static but lifetimes are not. We only include the persistent static
-        # data ptrs below because the non persistent data ptrs may be outputs of this record and 
+        # data ptrs below because the non persistent data ptrs may be outputs of this record and
         # fresh allocations.
         static_input_persistent_storage_ptrs: Set[int] = {
             inputs[i].untyped_storage().data_ptr()
@@ -801,7 +801,9 @@ class CUDAGraphNode:
 
     def _add_replayed_outputs(self, outputs):
         self.outputs_weakrefs.clear()
-        for out, is_alias in zip(outputs, self.output_is_alias_of_persistent_static_inputs):
+        for out, is_alias in zip(
+            outputs, self.output_is_alias_of_persistent_static_inputs
+        ):
             self.outputs_weakrefs.append(map_to_ref(out) if not is_alias else None)
 
     @property
