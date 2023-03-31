@@ -1498,7 +1498,7 @@ class DistributedDataParallel(Module, Joinable):
 
         # TODO: DDPSink is currently enabled for unused parameter detection and
         # static graph training for first iteration.
-        if (self.find_unused_parameters and not self.static_graph) or (
+        if self.find_unused_parameters or (
             self.static_graph and self.num_iterations == 1
         ):
             state_dict = {

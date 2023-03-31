@@ -8471,13 +8471,14 @@ class DistributedTest:
                 group_gloo,
             )
 
-        def _test_output_unused_in_loss(self, module_cls, gradient_as_bucket_view):
+        def _test_output_unused_in_loss(self, module_cls, static_graph):
             model = module_cls()
             local_net = copy.deepcopy(model)
             net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(model).cuda(self.rank),
                 device_ids=[self.rank],
                 find_unused_parameters=True,
+                static_graph=static_graph,
             )
 
             # Tests that certain parameters not getting gradient since the
@@ -8574,8 +8575,8 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         def test_output_unused_in_loss_tuple_module(self):
             module_cls = UnusedParamTwoLinLayerNet
-            for grad_as_bucket_view in [True, False]:
-                self._test_output_unused_in_loss(module_cls, grad_as_bucket_view)
+            for static_graph in [True, False]:
+                self._test_output_unused_in_loss(module_cls, static_graph)
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -8584,8 +8585,8 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         def test_output_unused_in_loss_dict_module(self):
             module_cls = DictOutputModule
-            for grad_as_bucket_view in [True, False]:
-                self._test_output_unused_in_loss(module_cls, grad_as_bucket_view)
+            for static_graph in [True, False]:
+                self._test_output_unused_in_loss(module_cls, static_graph)
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
