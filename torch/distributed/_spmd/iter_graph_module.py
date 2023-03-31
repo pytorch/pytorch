@@ -10,6 +10,11 @@ from torch.fx.graph import PythonCode
 from torch.fx.node import Argument
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.distributed._spmd.graph_utils import (
+    clone_subgraph,
+    get_output,
+    is_leaf_subgraph,
+)
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -104,78 +109,16 @@ class IterGraph(fx.Graph):
     def inserting_before(self, node):
         return self._insert_context("inserting_before", node)
 
-    @staticmethod
-    def _find_output(graph: fx.Graph) -> fx.Node:
-        output: Optional[fx.Node] = None
-        for output in reversed(graph.nodes):
-            assert output is not None
-            if output.target == "output":
-                break
-        assert output is not None
-        return output
-
-    @staticmethod
-    def _is_connect_to_output(subgraph: List[fx.Node], output: fx.Node) -> bool:
-        """
-        This function ensure the nodes in subgraph satisfy one of the following:
-        1. The user of the node is in ``subgraph``.
-        2. The user of the node is output.
-        3. There are no users -- the node is a side-effect node.
-        """
-        all_nodes: Set[fx.Node] = set(subgraph)
-        for node in subgraph:
-            for user in node.users:
-                if not isinstance(user, fx.Node):
-                    continue
-                if user not in all_nodes and user != output:
-                    return False
-        return True
-
-    @staticmethod
-    def _clone_subgraph(
-        subgraph: List[fx.Node], graph: fx.Graph, target: fx.Node
-    ) -> List[fx.Node]:
-        all_nodes = set(subgraph)
-        mapping: Dict[fx.Node, fx.Node] = dict()
-        cloned_subgraph = []
-        with graph.inserting_before(target):
-            for node in subgraph:
-                cloned_node = graph.call_function(
-                    node.target, node.args, node.kwargs, node.type
-                )
-                # TODO: there are many flatten/unflatten in IterGraph that
-                # can be simplified with tree_map. Will simplify this in
-                # a follow-up PR.
-                original_input, _ = tree_flatten((node.args, node.kwargs))
-                cloned_input, spec = tree_flatten(
-                    (cloned_node.args, cloned_node.kwargs)
-                )
-                mapped_cloned_input = []
-                for original_input_node, cloned_input_node in zip(
-                    original_input, cloned_input
-                ):
-                    if original_input_node in all_nodes:
-                        assert original_input_node in mapping
-                        mapped_cloned_input.append(mapping[original_input_node])
-                    else:
-                        mapped_cloned_input.append(cloned_input_node)
-                cloned_node.args, cloned_node.kwargs = tree_unflatten(
-                    mapped_cloned_input, spec
-                )
-                mapping[node] = cloned_node
-                cloned_subgraph.append(cloned_node)
-        return cloned_subgraph
-
     def _forward_subgraph_inputs(
         self, subgraph: List[fx.Node], graph: fx.Graph, erase_node: bool
     ) -> int:
         """
-        This function make the inputs of a subgraph become the extra output
+        This function turns the inputs of a subgraph into the extra output
         of the entire graph. If ``erase_node`` is True, the subgraph will be
         erased from the graph -- essentially forward the inputs of the subgraph
         to the output of the graph.
         """
-        output = self._find_output(graph)
+        output = get_output(graph)
         inputs = []
         all_nodes: Set[fx.Node] = set(subgraph)
 
@@ -188,7 +131,29 @@ class IterGraph(fx.Graph):
                     continue
                 inputs.append(_input)
 
-        new_output = output.args + tuple(inputs)
+        # Add all the extra output nodes into a list and append the list to
+        # the original output.args[0].
+        if self.num_extra_output:
+            # If the extra-output list already exist, just use it.
+            output.args[0][-1].extend(inputs)
+            new_output = output.args[0]
+        else:
+            # When adding the extra-output list, out_spec of _PyTreeCodeGen
+            # must be updated accordingly.
+            if hasattr(graph._codegen, "pytree_info"):
+                new_output = list(output.args[0])
+                new_output.append(inputs)
+                original_tree_out = tree_unflatten(
+                    output.args[0], graph._codegen.pytree_info.out_spec
+                )
+                # Use None as a placeholder. If we use the extra-output list
+                # the list will be flatten as well and put into out_spec.
+                _, out_spec = tree_flatten((original_tree_out, None))
+                graph._codegen.pytree_info = graph._codegen.pytree_info._replace(
+                    out_spec=out_spec
+                )
+            else:
+                new_output = (output.args[0], inputs)
         if erase_node:
             # We have to remove the node in the reversed order to ensure the
             # node has zero users.
@@ -216,48 +181,66 @@ class IterGraph(fx.Graph):
                 erased.add(node)
         self._fx_graph_call(graph, "erase_node", output)
         self._fx_graph_call(graph, "output", new_output)
-        logger.info(f"Extended outputs from the subgraph inputs: {inputs}")
+
+        logger.info("Extended outputs from the subgraph inputs: %s", str(inputs))
         return len(inputs)
 
     def _forward_inputs_to_subgraph(
         self, subgraph: List[fx.Node], graph: fx.Graph, extra_input: int
     ) -> None:
-        last_placeholder = None
-        for node in graph.nodes:
-            if str(node.op) != "placeholder":
-                break
-            last_placeholder = node
-        assert last_placeholder is not None
-        with self._fx_graph_call(graph, "inserting_after", last_placeholder):
-            new_input_nodes = reversed(
-                [
-                    self._fx_graph_call(
-                        graph,
-                        "placeholder",
-                        f"cross_iter_input_{self._cross_iter_block_count}_{i}",
-                    )
-                    for i in reversed(range(extra_input))
-                ]
+        """
+        This function creates extra input nodes and forward the input nodes to
+        the ``subgraph``. The external input nodes of ``subgraph`` (nodes that
+        are not in ``subgraph``) will replaced by the newly created input nodes.
+        """
+        placeholders = [node for node in graph.nodes if str(node.op) == "placeholder"]
+        assert placeholders, "No placeholders are found"
+        # Append the extra input nodes to the current input nodes.
+        with self._fx_graph_call(graph, "inserting_after", placeholders[-1]):
+            new_input_nodes = list(
+                reversed(
+                    [
+                        self._fx_graph_call(
+                            graph,
+                            "placeholder",
+                            f"cross_iter_input_{self._cross_iter_block_count}_{i}",
+                        )
+                        for i in reversed(range(extra_input))
+                    ]
+                )
             )
 
+        # Update the inputs of subgraph to use the newly created input nodes.
         all_nodes = set(subgraph)
-        try:
-            for node in subgraph:
-                node_inputs, spec = tree_flatten((node.args, node.kwargs))
-                new_node_inputs = []
-                for input_node in node_inputs:
-                    if input_node in all_nodes or not isinstance(input_node, fx.Node):
-                        new_node_inputs.append(input_node)
-                    else:
-                        new_node_inputs.append(next(new_input_nodes))
-                node.args, node.kwargs = tree_unflatten(new_node_inputs, spec)
-        except StopIteration:
-            raise RuntimeError("There are no enough input nodes")
-        try:
-            unused_node = next(new_input_nodes)
-            raise RuntimeError(f"There are unused nodes {unused_node}")
-        except StopIteration:
-            pass
+        new_input_index = 0
+        for node in subgraph:
+            node_inputs, spec = tree_flatten((node.args, node.kwargs))
+            new_node_inputs = []
+            for input_node in node_inputs:
+                if input_node in all_nodes or not isinstance(input_node, fx.Node):
+                    new_node_inputs.append(input_node)
+                else:
+                    new_node_inputs.append(new_input_nodes[new_input_index])
+                    new_input_index += 1
+            node.args, node.kwargs = tree_unflatten(new_node_inputs, spec)
+        assert new_input_index == len(
+            new_input_nodes
+        ), f"More inputs than needed {len(new_input_nodes)} > {new_input_index}"
+
+        # Update the in_spec of _PyTreeCodeGen
+        if hasattr(graph._codegen, "pytree_info"):
+            original_tree_in = tree_unflatten(
+                placeholders, graph._codegen.pytree_info.in_spec
+            )
+            _, in_spec = tree_flatten(tuple(list(original_tree_in) + new_input_nodes))
+            graph._codegen.pytree_info = graph._codegen.pytree_info._replace(
+                in_spec=in_spec
+            )
+            for new_input in new_input_nodes:
+                graph._codegen.pytree_info.orig_args.append(new_input.name)
+            graph._codegen.pytree_info = graph._codegen.pytree_info._replace(
+                in_spec=in_spec
+            )
 
     def move_to_next_iter_before(
         self, subgraph: List[fx.Node], target_node: fx.Node
@@ -279,7 +262,7 @@ class IterGraph(fx.Graph):
                 "IterGraph."
             )
 
-        if not self._is_connect_to_output(subgraph, self._find_output(self)):
+        if not is_leaf_subgraph(self, subgraph):
             raise ValueError(
                 "The target nodes for ``move_to_next_iter_before`` must "
                 "satisfy one of the following conditions: 1) the user of the "
@@ -316,9 +299,9 @@ class IterGraph(fx.Graph):
             mapped_node = self._lookup_node(node, self.cleanup_graph)
             assert mapped_node is not None
             cleanup_subgraph.append(mapped_node)
-        cloned_subgraph = self._clone_subgraph(
-            subgraph=cleanup_subgraph,
-            graph=self.cleanup_graph,
+        cloned_subgraph = clone_subgraph(
+            self.cleanup_graph,
+            cleanup_subgraph,
             target=target_cleanup_node,
         )
         self._forward_inputs_to_subgraph(
@@ -658,27 +641,16 @@ class IterGraphModule(nn.Module):
 
     def _run(self, gm: fx.GraphModule, *args, **kwargs) -> Any:
         if cast(IterGraph, self.main_gm.graph).num_extra_output > 0:
-            # TODO: a general way to support different types of input and output.
-            assert not kwargs, "Has not supported kwargs now."
             new_args = args + (self._previous_output)
             output = gm(*new_args, **kwargs)
             if self._iter < self._max_iters:
-                assert isinstance(
-                    output, tuple
-                ), f"Only support tuple output now. {type(output)}"
-                num_actual_output = (
-                    len(output) - cast(IterGraph, self.main_gm.graph).num_extra_output
-                )
-                assert num_actual_output > 0
-                self._previous_output = output[num_actual_output:]
-                output = output[:num_actual_output]
-                if len(output) == 1:
-                    output = output[0]
+                assert len(output) == 2
+                self._previous_output = tuple(output[-1])
+                output = output[0]
         else:
             # No cross-iteration optimization is done. Simply call the
             # GraphModule.
             output = gm(*args, **kwargs)
-        logger.debug(f"The output information: size={len(output)}, type={type(output)}")
         return output
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
