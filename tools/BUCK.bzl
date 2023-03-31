@@ -135,7 +135,6 @@ def define_tools_targets(
             "autograd/templates/python_return_types.cpp",
             "autograd/templates/python_sparse_functions.cpp",
             "autograd/templates/python_special_functions.cpp",
-            "autograd/templates/python_dist_functions.cpp",
             "autograd/templates/python_torch_functions.cpp",
             "autograd/templates/python_variable_methods.cpp",
             "autograd/templates/variable_factories.h",
