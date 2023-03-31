@@ -32,7 +32,7 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
-  TensorMaker& storage_offset(optional<int64_t> value) noexcept {
+  TensorMaker& storage_offset(c10::optional<int64_t> value) noexcept {
     storage_offset_ = value;
 
     return *this;
@@ -51,7 +51,7 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
-  TensorMaker& target_device(optional<Device> value) noexcept {
+  TensorMaker& target_device(c10::optional<Device> value) noexcept {
     device_ = value;
 
     return *this;
@@ -80,10 +80,10 @@ class TORCH_API TensorMaker {
   void* data_;
   IntArrayRef sizes_;
   OptionalIntArrayRef strides_{};
-  optional<int64_t> storage_offset_{};
+  c10::optional<int64_t> storage_offset_{};
   std::function<void(void*)> deleter_{};
   std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
-  optional<Device> device_{};
+  c10::optional<Device> device_{};
   TensorOptions opts_{};
 };
 
@@ -127,10 +127,12 @@ inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
     const std::function<void(void*)>& deleter,
-    const TensorOptions& options = {}) {
+    const TensorOptions& options = {},
+    const c10::optional<Device> target_device = c10::nullopt) {
   return for_blob(data, sizes)
       .deleter(deleter)
       .options(options)
+      .target_device(target_device)
       .make_tensor();
 }
 

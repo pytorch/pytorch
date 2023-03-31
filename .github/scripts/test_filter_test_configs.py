@@ -2,10 +2,9 @@
 
 import json
 import os
-from typing import Any, Dict
+from typing import Any
 from unittest import main, mock, TestCase
 
-import requests
 import yaml
 from filter_test_configs import (
     filter,
@@ -16,7 +15,6 @@ from filter_test_configs import (
     SUPPORTED_PERIODICAL_MODES,
     VALID_TEST_CONFIG_LABELS,
 )
-from requests.models import Response
 
 
 MOCKED_DISABLED_JOBS = {
@@ -85,19 +83,7 @@ MOCKED_DISABLED_JOBS = {
         "build (dynamo)",
     ],
 }
-
-
-def mocked_gh_get_labels_failed(url: str, headers: Dict[str, str]) -> Response:
-    mocked_response = Response()
-    mocked_response.status_code = requests.codes.bad_request
-    return mocked_response
-
-
-def mocked_gh_get_labels(url: str, headers: Dict[str, str]) -> Response:
-    mocked_response = Response()
-    mocked_response.status_code = requests.codes.ok
-    mocked_response._content = b'[{"name": "foo"}, {"name": "bar"}, {}, {"name": ""}]'
-    return mocked_response
+MOCKED_LABELS = [{"name": "foo"}, {"name": "bar"}, {}, {"name": ""}]
 
 
 class TestConfigFilter(TestCase):
@@ -106,15 +92,15 @@ class TestConfigFilter(TestCase):
         if os.getenv("GITHUB_OUTPUT"):
             del os.environ["GITHUB_OUTPUT"]
 
-    @mock.patch("filter_test_configs.requests.get", side_effect=mocked_gh_get_labels)
-    def test_get_labels(self, mocked_gh: Any) -> None:
+    @mock.patch("filter_test_configs.download_json")
+    def test_get_labels(self, mock_download_json: Any) -> None:
+        mock_download_json.return_value = MOCKED_LABELS
         labels = get_labels(pr_number=12345)
         self.assertSetEqual({"foo", "bar"}, labels)
 
-    @mock.patch(
-        "filter_test_configs.requests.get", side_effect=mocked_gh_get_labels_failed
-    )
-    def test_get_labels_failed(self, mocked_gh: Any) -> None:
+    @mock.patch("filter_test_configs.download_json")
+    def test_get_labels_failed(self, mock_download_json: Any) -> None:
+        mock_download_json.return_value = {}
         labels = get_labels(pr_number=54321)
         self.assertFalse(labels)
 
