@@ -160,7 +160,7 @@ def compile_fx_inner(
     )
     V.debug.fx_graph(gm, example_inputs)
 
-    if config.shape_padding == True:
+    if config.fx_shape_padding == True:
         gm = pad_mm(gm)
 
     if cudagraphs is None:

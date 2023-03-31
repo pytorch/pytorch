@@ -3,9 +3,9 @@ import torch
 def needs_padding(args):
   
   for arg in args:
-    size = arg.meta["tensor_meta"].shape
+    size = arg.meta['val'].shape
     for i in size:
-      if i // get_alignment_size(i) or i < 512:
+      if i % get_alignment_size(i) or i < 512:
         return False
     return True
   
@@ -34,7 +34,7 @@ def get_alignment_size(dtype):
     elif dtype == torch.float64:
         return 2
     else:
-        return 0
+        return 1
 
 def pad_mm(fx_g: torch.fx.GraphModule):
     
