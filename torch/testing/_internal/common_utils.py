@@ -1099,14 +1099,59 @@ torch_to_numpy_dtype_dict.update({
     torch.complex32: np.complex64
 })
 
-def skipIfRocm(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
+def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
+    def decorator(fn):
+        if not isinstance(fn, type):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if TEST_WITH_ROCM:
+                    if TEST_WITH_TORCHINDUCTOR:
+                        raise unittest.SkipTest(f"skipRocmIfTorchInductor: {msg}")
+                else:
+                    fn(*args, **kwargs)
+            return wrapper
+
+        assert(isinstance(fn, type))
         if TEST_WITH_ROCM:
-            raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
+            if TEST_WITH_TORCHINDUCTOR:
+                fn.__unittest_skip__ = True
+                fn.__unittest_skip_why__ = msg
+        
+        return fn
+
+    return decorator
+
+def skipRocmIfTorchDynamo(msg="test doesn't currently work with dynamo on the ROCm stack"):
+    def decorator(fn):
+        if not isinstance(fn, type):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if TEST_WITH_ROCM:
+                    if TEST_WITH_TORCHDYNAMO:
+                        raise unittest.SkipTest(f"skipRocmIfTorchDynamo: {msg}")
+                else:
+                    fn(*args, **kwargs)
+            return wrapper
+        
+        assert(isinstance(fn, type))
+        if TEST_WITH_ROCM:
+            if TEST_WITH_TORCHDYNAMO:
+                fn.__unittest_skip__ = True
+                fn.__unittest_skip_why__ = msg
+        
+        return fn
+
+    return decorator
+
+def skipIfRocm(msg="test doesn't currently work on the ROCm stack"):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if TEST_WITH_ROCM:
+                raise unittest.SkipTest(f"skipIfRocm: {msg}")
+            return fn(self, *args, **kwargs)
+        return wrap_fn
+    return dec_fn
 
 def skipIfMps(fn):
     @wraps(fn)
