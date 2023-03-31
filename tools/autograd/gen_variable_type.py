@@ -1066,20 +1066,17 @@ def emit_body(
             f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
         )
 
-    if requires_derivative and len(fw_derivatives) > 0:
-        # note(crcrpar): In-place foreach functions do not support forward AD
-        # but their `info` is the same as their reference native function
-        # thus it's (for now) necessary to skip this check.
-        if (not is_inplace_foreach) and sum(
-            len(derivative.var_names) for derivative in fw_derivatives
-        ) != len(differentiable_outputs):
-            raise RuntimeError(
-                "Expected the number of forward derivatives implemented to match the "
-                "number of differentiable outputs. NB: This only applies when at least "
-                "one forward derivative is implemented. Not implementing any forward "
-                "derivatives is also okay, and we would require inputs to the op to "
-                "not have associated tangents in that case."
-            )
+    # note(crcrpar): In-place foreach functions do not support forward AD
+    if requires_derivative and len(fw_derivatives) > 0 and not is_inplace_foreach:
+        assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(
+            differentiable_outputs
+        ), (
+            "Expected the number of forward derivatives implemented to match the "
+            "number of differentiable outputs. NB: This only applies when at least "
+            "one forward derivative is implemented. Not implementing any forward "
+            "derivatives is also okay, and we would require inputs to the op to "
+            "not have associated tangents in that case."
+        )
 
     try_jit_decomposition = (
         requires_derivative
