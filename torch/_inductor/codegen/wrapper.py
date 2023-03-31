@@ -302,6 +302,18 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
+    def generate_fusion_ops_code(
+        self,
+        name,
+        kernel,
+        cpp_kernel,
+        codegen_args,
+        cpp_op_schema,
+        cpp_kernel_key,
+        cpp_kernel_overload_name="",
+    ):
+        self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
+
     @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
@@ -662,6 +674,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.ending = ";"
         self.comment = "//"
         self.namespace = "at::"
+        self.extern_call_ops = set()
 
     def seed(self):
         """
@@ -867,6 +880,33 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"{self.codegen_shape_tuple(shape)}, "
             f"{self.codegen_shape_tuple(stride)}, "
             f"{DTYPE_TO_ATEN[dtype]}){self.ending}"
+        )
+
+    def generate_fusion_ops_code(
+        self,
+        name,
+        kernel,
+        cpp_kernel,
+        codegen_args,
+        cpp_op_schema,
+        cpp_kernel_key,
+        cpp_kernel_overload_name="",
+    ):
+        if cpp_kernel_key not in self.extern_call_ops:
+            self.writeline(
+                f"""
+    static auto op_{cpp_kernel_key} =
+    c10::Dispatcher::singleton()
+        .findSchemaOrThrow(
+            \"{cpp_kernel}\",
+            \"{cpp_kernel_overload_name}\")
+        .typed<{cpp_op_schema}>();
+            """
+            )
+            self.extern_call_ops.add(cpp_kernel_key)
+
+        self.writeline(
+            f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
 
 
