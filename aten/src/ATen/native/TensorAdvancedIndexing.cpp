@@ -1518,6 +1518,106 @@ static void scatter_reduce_exclude_self_helper(
   });
 }
 
+void _scatter_via_index_put(
+  const Tensor& self,
+  int64_t dim,
+  const Tensor& index,
+  const Tensor& src,
+  const Tensor& mut_out) {
+  if (self.dim() == 1) {
+    // TODO: Pretty sure these checks can be removed, since they're done in
+    // `scatter_meta_impl`, which I think is always called before this
+    TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "
+      "but their dims are ", index.dim(), " and ", src.dim(), ", respectively");
+    TORCH_CHECK(index.numel() == src.numel(), "index and src should have same number of elements for 1D tensors, "
+      "but got ", index.numel(), " versus ", src.numel());
+    TORCH_CHECK(dim == 0, "dim should be zero for 1D self tensor, but got ", dim);
+    torch::List<c10::optional<Tensor>> indices;
+    indices.reserve(1);
+    indices.push_back(index);
+    mut_out.index_put_(indices, src, true);
+  } else {
+    Tensor mut_out_contig = mut_out.contiguous();
+
+    auto index_coords_sizes = index.sizes().vec();
+    index_coords_sizes.push_back(self.dim());
+    auto index_coords = at::empty(
+      index_coords_sizes,
+      at::TensorOptions().dtype(at::ScalarType::Long).device(self.device()));
+
+    for (int64_t dim_other = 0; dim_other < self.dim(); dim_other++) {
+      if (dim_other == dim) {
+        continue;
+      }
+      auto dim_coord_vals = at::arange(
+        index.size(dim_other),
+        at::TensorOptions().device(self.device()));
+
+      for (int64_t dim_unsqueeze = 0; dim_unsqueeze < self.dim() - 1; dim_unsqueeze++) {
+        dim_coord_vals = dim_coord_vals.unsqueeze((dim_unsqueeze >= dim_other) ? -1 : 0);
+      }
+
+      auto view_sizes = index.sizes().vec();
+      view_sizes.push_back(1);
+      auto view_strides = index_coords.strides().vec();
+      view_strides[self.dim()] = self.dim();
+
+      at::as_strided(
+        index_coords,
+        view_sizes,
+        view_strides,
+        dim_other
+      ).copy_(dim_coord_vals.unsqueeze(-1));
+    }
+
+    auto view_sizes = index.sizes().vec();
+    view_sizes.push_back(1);
+    auto view_strides = index_coords.strides().vec();
+    view_strides[self.dim()] = self.dim();
+
+    at::as_strided(
+      index_coords,
+      view_sizes,
+      view_strides,
+      dim
+    ).copy_(index.unsqueeze(-1));
+
+    Tensor index_coords_flat = index_coords.flatten(0, -2);
+
+    // Copy mut_out_contig's strides into a tensor
+    // TODO: Is there a utility function that already does this?
+    IntArrayRef mut_out_contig_strides = mut_out_contig.strides();
+    Tensor coord_strides = at::empty(
+      {mut_out_contig.dim()},
+      TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
+    std::memcpy(
+      coord_strides.data_ptr(),
+      mut_out_contig_strides.data(),
+      coord_strides.nbytes());
+    coord_strides = coord_strides.to(mut_out_contig.device());
+
+    // `index_flat` contains the 1-D indices corresponding with the
+    // flattened `mut_out`
+    Tensor index_flat = (index_coords_flat * coord_strides).sum({-1});
+    Tensor mut_out_flat = mut_out_contig.flatten();
+    Tensor src_flat = at::as_strided(
+      src,
+      index.sizes(),
+      src.strides()
+    ).flatten();
+
+    torch::List<c10::optional<Tensor>> indices;
+    indices.reserve(1);
+    indices.push_back(index_flat);
+
+    mut_out_flat.index_put_(indices, src_flat, true);
+
+    if (!mut_out.is_contiguous()) {
+      mut_out.copy_(mut_out_flat.reshape(mut_out.sizes()));
+    }
+  }
+}
+
 template <bool use_new_options = false, typename T, typename ReduceStub, typename FillStub>
 void scatter_impl(
     const Tensor& self,
@@ -1617,98 +1717,7 @@ TORCH_IMPL_FUNC(scatter_add)
   // See Note [Enabling Deterministic Operations]
   // Avoid gpuAtomicAdd for CUDA if deterministic mode is turned on
   if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA) {
-    if (self.dim() == 1) {
-      // TODO: Pretty sure these checks can be removed, since they're done in
-      // `scatter_meta_impl`, which I think is always called before this
-      TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "
-        "but their dims are ", index.dim(), " and ", src.dim(), ", respectively");
-      TORCH_CHECK(index.numel() == src.numel(), "index and src should have same number of elements for 1D tensors, "
-        "but got ", index.numel(), " versus ", src.numel());
-      TORCH_CHECK(dim == 0, "dim should be zero for 1D self tensor, but got ", dim);
-      torch::List<c10::optional<Tensor>> indices;
-      indices.reserve(1);
-      indices.push_back(index);
-      mut_out.index_put_(indices, src, true);
-    } else {
-      Tensor mut_out_contig = mut_out.contiguous();
-
-      auto index_coords_sizes = index.sizes().vec();
-      index_coords_sizes.push_back(self.dim());
-      auto index_coords = at::empty(
-        index_coords_sizes,
-        at::TensorOptions().dtype(at::ScalarType::Long).device(self.device()));
-
-      for (int64_t dim_other = 0; dim_other < self.dim(); dim_other++) {
-        if (dim_other == dim) {
-          continue;
-        }
-        auto dim_coord_vals = at::arange(
-          index.size(dim_other),
-          at::TensorOptions().device(self.device()));
-
-        for (int64_t dim_unsqueeze = 0; dim_unsqueeze < self.dim() - 1; dim_unsqueeze++) {
-          dim_coord_vals = dim_coord_vals.unsqueeze((dim_unsqueeze >= dim_other) ? -1 : 0);
-        }
-
-        auto view_sizes = index.sizes().vec();
-        view_sizes.push_back(1);
-        auto view_strides = index_coords.strides().vec();
-        view_strides[self.dim()] = self.dim();
-
-        at::as_strided(
-          index_coords,
-          view_sizes,
-          view_strides,
-          dim_other
-        ).copy_(dim_coord_vals.unsqueeze(-1));
-      }
-
-      auto view_sizes = index.sizes().vec();
-      view_sizes.push_back(1);
-      auto view_strides = index_coords.strides().vec();
-      view_strides[self.dim()] = self.dim();
-
-      at::as_strided(
-        index_coords,
-        view_sizes,
-        view_strides,
-        dim
-      ).copy_(index.unsqueeze(-1));
-
-      Tensor index_coords_flat = index_coords.flatten(0, -2);
-
-      // Copy mut_out_contig's strides into a tensor
-      // TODO: Is there a utility function that already does this?
-      IntArrayRef mut_out_contig_strides = mut_out_contig.strides();
-      Tensor coord_strides = at::empty(
-        {mut_out_contig.dim()},
-        TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
-      std::memcpy(
-        coord_strides.data_ptr(),
-        mut_out_contig_strides.data(),
-        coord_strides.nbytes());
-      coord_strides = coord_strides.to(mut_out_contig.device());
-
-      // `index_flat` contains the 1-D indices corresponding with the
-      // flattened `mut_out`
-      Tensor index_flat = (index_coords_flat * coord_strides).sum({-1});
-      Tensor mut_out_flat = mut_out_contig.flatten();
-      Tensor src_flat = at::as_strided(
-        src,
-        index.sizes(),
-        src.strides()
-      ).flatten();
-
-      torch::List<c10::optional<Tensor>> indices;
-      indices.reserve(1);
-      indices.push_back(index_flat);
-
-      mut_out_flat.index_put_(indices, src_flat, true);
-
-      if (!mut_out.is_contiguous()) {
-        mut_out.copy_(mut_out_flat.reshape(mut_out.sizes()));
-      }
-    }
+    _scatter_via_index_put(self, dim, index, src, mut_out);
   } else {
     if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
       scatter_add_expanded_index_stub(self.device().type(), mut_out, index, src);
