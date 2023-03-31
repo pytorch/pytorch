@@ -429,7 +429,7 @@ def load_cached_autotuning(
     matching_configs = [
         cfg
         for cfg in configs
-        if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
+        if all(val == best_config.get(key) for key, val in cfg.kwargs.items()) and cfg.num_warps == best_config.get("num_warps") and cfg.num_stages == best_config.get("num_stages")
     ]
     if len(matching_configs) != 1:
         return None
