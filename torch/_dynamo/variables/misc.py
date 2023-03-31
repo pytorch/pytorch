@@ -200,9 +200,7 @@ class ContextWrappingVariable(VariableTracker):
         assert len(args) == 1
         if isinstance(args[0], NestedUserFunctionVariable):
             args[0] = UserFunctionVariable(args[0].get_function())
-        assert isinstance(args[0], UserMethodVariable) or isinstance(
-            args[0], UserFunctionVariable
-        )
+        assert isinstance(args[0], (UserMethodVariable, UserFunctionVariable))
 
         if isinstance(args[0], UserMethodVariable):
             return WrappedUserMethodVariable(args[0], self)
