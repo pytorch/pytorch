@@ -3824,6 +3824,8 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
+register_pointwise(aten._foreach_add.List)
+
 
 def register_inplace(aten_op, outplace_op):
     @register_lowering(aten_op, type_promotion_kind=None)
