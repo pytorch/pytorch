@@ -226,7 +226,7 @@ jobs:
 
       - name: Print remaining test logs
         shell: bash
-        if: always()
+        if: always() && steps.test.conclusion
         run: |
           cat test/**/*.log || true
 
@@ -292,6 +292,7 @@ jobs:
           RUNNER_WORKSPACE: ${{ runner.workspace }}
         run: |
           set +e
+          set -x
 
           nvidia-smi
           NVIDIA_SMI_STATUS=$?
@@ -301,27 +302,3 @@ jobs:
             echo "NVIDIA driver installation has failed, shutting down the runner..."
             .github/scripts/stop_runner_service.sh
           fi
-
-      - name: Check other unrecoverable error (Run this last)
-        if: failure() && contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
-        shell: bash
-        env:
-          RUNNER_WORKSPACE: ${{ runner.workspace }}
-        run: |
-          set +e
-
-          UNRECOVERABLE_ERRORS=(
-            "docker: Error response from daemon"
-          )
-
-          for ERROR in "${UNRECOVERABLE_ERRORS[@]}"
-          do
-            grep -Rli "${ERROR}" "${RUNNER_WORKSPACE}/../../_diag/pages"
-            RC=$?
-
-            # If GPU crashes, stop the runner to prevent it from receiving new jobs
-            if [[ "${RC}" == "0" ]]; then
-              echo "The runner has encoutered an unrecoverable error (${ERROR}), shutting it down..."
-              .github/scripts/stop_runner_service.sh
-            fi
-          done
