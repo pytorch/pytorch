@@ -120,7 +120,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return resizable_;
   };
 
-  at::DataPtr& data_ptr() {
+  at::DataPtr& mutable_data_ptr() {
     return data_ptr_;
   };
 
@@ -139,12 +139,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_ = std::move(data_ptr);
   }
 
-  // TODO: Return const ptr eventually if possible
-  void* data() {
+  const void* data() const {
     return data_ptr_.get();
   }
 
-  void* data() const {
+  void* mutable_data() {
     return data_ptr_.get();
   }
 
