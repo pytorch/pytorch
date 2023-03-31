@@ -490,7 +490,7 @@ class GraphLowering(torch.fx.Interpreter):
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
-                if dense and len(strides):
+                if dense:
                     result = ir.ExternKernel.require_stride_order(
                         result, ir.get_stride_order(strides)
                     )

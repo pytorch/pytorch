@@ -3082,6 +3082,15 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_fill3(self):
+        def fn(x):
+            return aten.fill_.Scalar(x, 8)
+
+        self.common(
+            fn,
+            (torch.randint(0, 999, size=[], dtype=torch.int64),),
+        )
+
     def test_pow1(self):
         def fn(x):
             return [aten.pow(x, e) for e in range(-8, 9)]
