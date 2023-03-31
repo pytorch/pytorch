@@ -173,7 +173,7 @@ NestedTensorImpl::NestedTensorImpl(
       nested_sizes_(std::move(nested_sizes)),
       nested_strides_(std::move(nested_strides)),
       storage_offsets_(std::move(storage_offsets)),
-      opt_sizes_(construct_opt_sizes(nested_sizes_)) {
+      opt_sizes_(c10::nullopt) {
   C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
@@ -230,10 +230,22 @@ NestedTensorImpl::NestedTensorImpl(
       nested_sizes_(std::move(nested_sizes)),
       nested_strides_(std::move(nested_strides)),
       storage_offsets_(std::move(storage_offsets)),
-      opt_sizes_(construct_opt_sizes(nested_sizes_)) {
+      opt_sizes_(c10::nullopt) {
   validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
   refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
+}
+
+c10::optional<int64_t> NestedTensorImpl::opt_size(int64_t d) const {
+  if (C10_UNLIKELY(!opt_sizes_.has_value())) {
+    // Cache the metadata to avoid recomputing it each time.
+    opt_sizes_ = c10::make_optional(construct_opt_sizes(nested_sizes_));
+  }
+  d = at::maybe_wrap_dim(d, dim(), false);
+  if ((*opt_sizes_)[d] == -1) {
+    return c10::nullopt;
+  }
+  return (*opt_sizes_)[d];
 }
 
 void NestedTensorImpl::refresh_dim() {

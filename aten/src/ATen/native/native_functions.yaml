@@ -1161,6 +1161,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: logical_not
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_logical_not
   tags: [core, pointwise]
 
 - func: logical_not_(Tensor(a!) self) -> Tensor(a!)
@@ -1168,6 +1169,7 @@
   variants: method
   dispatch:
     CompositeExplicitAutograd: logical_not_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_logical_not_
   tags: pointwise
 
 - func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -7434,6 +7436,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: masked_fill
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_masked_fill
   tags: pointwise
 
 - func: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
@@ -14715,29 +14718,25 @@
 
 # Collectives
 - func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor
-  # This should be changed to distributed but it requires changes all over the place to work
-  python_module: nn
+  python_module: dist
   dispatch:
     CompositeExplicitAutograd: all_reduce
   variants: function
 
 - func: all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor
-  # This should be changed to distributed but it requires changes all over the place to work
-  python_module: nn
+  python_module: dist
   dispatch:
     CompositeExplicitAutograd: all_gather_into_tensor
   variants: function
 
 - func: reduce_scatter_tensor(Tensor input, str reduceOp, int scatter_dim, str tag, int[] ranks, int group_size) -> Tensor
-  # This should be changed to distributed but it requires changes all over the place to work
-  python_module: nn
+  python_module: dist
   dispatch:
     CompositeExplicitAutograd: reduce_scatter_tensor
   variants: function
 
 - func: wait_tensor(Tensor self) -> Tensor
-  # This should be changed to distributed but it requires changes all over the place to work
-  python_module: nn
+  python_module: dist
   dispatch:
     CompositeExplicitAutograd: wait_tensor
 

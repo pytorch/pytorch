@@ -1304,7 +1304,9 @@ TORCH_IMPL_FUNC(mean_out)
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
   // in lieu of the sum + divide implementation below.
-  if (self.device().is_cpu()) {
+  // Note: there has an accuracy loss for half and bfloat16 which has one more type
+  // cast compared with mean_stub path.
+  if (self.device().is_cpu() && dtype != kHalf && dtype != kBFloat16) {
     int64_t dim_prod = 1;
     if (!opt_dim.has_value() || opt_dim.value().empty() || self.ndimension() == 0) {
       dim_prod = self.numel();
