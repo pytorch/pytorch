@@ -255,6 +255,8 @@ class MetaConverter:
                     ), "Dynamic shapes must be enabled for nested tensors"
                     is_leaf = safe_is_leaf(t)
 
+                    from torch._dynamo.source import AttrSource
+
                     sizes = t._nested_tensor_size()
                     sizes = self.meta_tensor(
                         sizes,
