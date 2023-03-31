@@ -464,7 +464,7 @@ def run_test(
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
     )
-    timeout = THRESHOLD * 2 if should_file_rerun else None
+    timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
     with open(log_path, "w") as f:
         ret_code = retry_shell(
