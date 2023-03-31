@@ -188,7 +188,6 @@ def compile_fx_inner(
             num_static_inputs=num_fixed,
             graph_id=graph_id,
             aot_mode=aot_mode,
-            cpp_wrapper=config.cpp_wrapper,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)

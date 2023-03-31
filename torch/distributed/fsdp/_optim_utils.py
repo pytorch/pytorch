@@ -34,12 +34,7 @@ from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
 from torch.distributed.fsdp._runtime_utils import _clear_grads_if_needed, _lazy_init
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
-from torch.distributed.fsdp.flat_param import (
-    _FLAT_PARAM_PADDING,
-    _FlatParameterPadding,
-    FlatParameter,
-    FlatParamHandle,
-)
+from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
 
 
 @dataclass
@@ -274,24 +269,11 @@ def _unflatten_communicated_optim_state(
                 flat_param_views[state_name] = views
             else:
                 views = flat_param_views[state_name]
-            optim_state: Union[
-                torch.Tensor, ShardedTensor, _FlatParameterPadding
-            ] = next(views)
-            # Skip any alignment padding -- `views` should never be exhausted
-            # before the outer for loop completes
-            try:
-                while optim_state is _FLAT_PARAM_PADDING:
-                    optim_state = next(views)
-            except StopIteration as e:
-                print(
-                    f"Rank {dist.get_rank()} exhausted views early while "
-                    "unflattening optimizer state. Please report a bug."
-                )
-                raise e
+            optim_state: Union[torch.Tensor, ShardedTensor] = next(views)
             if shard_state:
                 assert fsdp_state.process_group is not None
                 optim_state = _ext_chunk_tensor(
-                    cast(Union[torch.Tensor, ShardedTensor], optim_state),
+                    optim_state,
                     fsdp_state.rank,
                     fsdp_state.world_size,
                     torch.cuda.device_count(),
@@ -1561,12 +1543,9 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         handle = handles[0]
         flat_param = handle.flat_param
         fsdp_param_info = FSDPParamInfo(fsdp_state, handle, {})
-        # NOTE: `idx` indexes into the data structures *with padding elements*
-        # to preserve correctness since `_shard_orig_params_state()` relies on
-        # the indexing
-        for idx, local_fqn in enumerate(flat_param._wp_fqns):
-            if local_fqn is _FLAT_PARAM_PADDING:
-                continue
+        # NOTE: `idx` indexes into the data structures *without* padding
+        # elements
+        for idx, local_fqn in enumerate(flat_param._fqns):
             fqn = clean_tensor_name(prefix + local_fqn)
             if fqn in fqn_to_param_info:
                 assert fqn_to_param_info[fqn].handle.flat_param is flat_param, fqn
@@ -1730,8 +1709,8 @@ def _gather_orig_param_state(
         if not torch.is_tensor(value) or value.dim() == 0:
             continue
 
-        value = value[: flat_param._wp_numels[param_idx]].reshape(
-            flat_param._wp_shapes[param_idx]
+        value = value[: flat_param._numels[param_idx]].reshape(
+            flat_param._shapes[param_idx]
         )
         if shard_state:
             assert fsdp_state.process_group is not None
@@ -1761,17 +1740,16 @@ def _shard_orig_param_state(
     fsdp_state = fsdp_param_info.state
     flat_param = fsdp_param_info.handle.flat_param
     param_idx = fsdp_param_info.param_indices[fqn]
-
+    shard_param_info = flat_param._shard_param_infos[param_idx]  # type: ignore[attr-defined]
     optim_state = _gather_state_dict(optim_state, fsdp_state.process_group)
-    start, end = flat_param._shard_param_indices  # type: ignore[attr-defined]
-    if not (start <= param_idx <= end and flat_param._shard_param_offsets):  # type: ignore[attr-defined]
+    if not shard_param_info.in_shard:
         return {}
-    param_start, param_end = flat_param._shard_param_offsets[param_idx - start]  # type: ignore[attr-defined]
-
     # Flatten and shard the state.
     new_optim_state: Dict[str, Any] = {}
+    intra_param_start_idx = shard_param_info.intra_param_start_idx
+    intra_param_end_idx = shard_param_info.intra_param_end_idx
     for state_name, value in optim_state.items():
         if torch.is_tensor(value) and value.dim() > 0:
-            value = value.flatten()[param_start : param_end + 1]
+            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]
         new_optim_state[state_name] = value
     return new_optim_state

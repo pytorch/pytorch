@@ -379,12 +379,7 @@ def break_graph_if_unsupported(*, push):
                 kw_names = self.kw_names.value if self.kw_names is not None else ()
                 if len(kw_names) > 0:
                     self.output.add_output_instructions(
-                        [
-                            create_instruction(
-                                "KW_NAMES",
-                                PyCodegen.get_const_index(self.code_options, kw_names),
-                            ),
-                        ]
+                        [create_instruction("KW_NAMES", argval=kw_names)]
                     )
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
@@ -1769,10 +1764,13 @@ class InstructionTranslator(InstructionTranslatorBase):
         compiler_fn,
         one_graph,
         export,
+        export_constraints,
         mutated_closure_cell_contents: Set[str],
     ):
         super().__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn, self, export),
+            output=OutputGraph(
+                f_globals, code_options, compiler_fn, self, export, export_constraints
+            ),
             instructions=instructions,
             f_locals=f_locals,
             f_globals=f_globals,
@@ -1882,14 +1880,22 @@ class InstructionTranslator(InstructionTranslatorBase):
         # Python does not allow null to be an arg to a function, so
         # we remove nulls from the stack and restore them in the
         # prologue of the resume function
+
+        # sorted list of indices of nulls on the stack
         null_idxes: List[int] = []
         if sys.version_info >= (3, 11):
+            # find indices of NullVariables
+            for i, var in enumerate(self.stack):
+                if isinstance(var, NullVariable):
+                    null_idxes.append(i)
+            # generate bytecode to pop the nulls
+            null_cnt = 0
             for i, var in enumerate(reversed(self.stack)):
                 if isinstance(var, NullVariable):
-                    for j in range(2, i + 2 - len(null_idxes)):
+                    for j in range(2, i + 2 - null_cnt):
                         cg.append_output(create_instruction("SWAP", j))
-                    null_idxes.append(i + 1)
                     cg.extend_output(cg.pop_null())
+                    null_cnt += 1
 
         # we popped all nulls from the stack at runtime,
         # so we should not count NullVariables

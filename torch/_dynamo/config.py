@@ -68,6 +68,13 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # see [Note - on the state of mark_dynamic]
 assume_static_by_default = False
 
+# Typically, if you mark_dynamic a dimension, we will error if the dimension
+# actually ended up getting specialized.  This knob changes the behavior so
+# that we don't error at all.  This is helpful for our CI where I'm using a
+# heuristic to mark batch dimensions as dynamic and the heuristic may get it
+# wrong.
+allow_ignore_mark_dynamic = False
+
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 
@@ -190,6 +197,11 @@ optimize_ddp = True
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 
+# Make dynamo skip guarding on hooks on nn modules
+# Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
+# dynamo will not notice and will execute whichever version you first compiled.
+skip_nnmodule_hook_guards = False
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -205,6 +217,10 @@ error_on_nested_fx_trace = True
 
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
+
+# If true, error if we try to compile a function that has
+# been seen before.
+error_on_recompile = False
 
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
