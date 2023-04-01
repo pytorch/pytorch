@@ -557,18 +557,15 @@ class TraceTrainStepTest(DTensorTestBase):
         # module parameters.
         torch.manual_seed(1)
         # FIXME(@mrshenli): gradients for bias is missing
-        mod = nn.Linear(10, 10, bias=False).cuda(rank)
-        # FIXME(@mrshenli): we have to enable foreach to get better perf
-        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=False)
+        mod = nn.Linear(10, 10, bias=True).cuda(rank)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
         inp = torch.randn(2, 10).cuda(rank)
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
-        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.01, foreach=False)
+        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.01, foreach=True)
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
 
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_adam(self):
+    def _test_adam(self, *, foreach: bool, fused: bool):
         @compile()
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
@@ -580,15 +577,30 @@ class TraceTrainStepTest(DTensorTestBase):
         torch.manual_seed(0)
         # FIXME(@mrshenli): gradients for bias is missing
         mod = nn.Linear(10, 10, bias=False).cuda(rank)
-        # FIXME(@mrshenli): we have to enable foreach to get better perf
         opt = torch.optim.Adam(
-            mod.parameters(), lr=0.01, foreach=False, capturable=True
+            mod.parameters(),
+            lr=0.01,
+            foreach=foreach,
+            fused=fused,
+            capturable=True,
         )
         inp = torch.randn(2, 10).cuda(rank)
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
-        ddp_opt = torch.optim.Adam(ddp_mod.parameters(), lr=0.01, foreach=False)
+        ddp_opt = torch.optim.Adam(
+            ddp_mod.parameters(), lr=0.01, foreach=foreach, fused=fused
+        )
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_adam_foreach(self):
+        self._test_adam(foreach=True, fused=False)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_adam_fused(self):
+        self._test_adam(foreach=False, fused=True)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -678,7 +690,9 @@ class TraceTrainStepTest(DTensorTestBase):
         self.assertEqual(graph_optimization.call_count, 1)
         gm = train_step.__dict__[COMPILED_OBJECT_KEY].gm
         train_step(mod, opt, inp)
-        self.assertEqual(id(gm), id(train_step.__dict__[COMPILED_OBJECT_KEY].gm))
+        self.assertEqual(
+            id(gm), id(train_step.__dict__[COMPILED_OBJECT_KEY].gm)
+        )
         self.assertEqual(graph_optimization.call_count, 1)
 
 

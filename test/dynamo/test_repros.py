@@ -499,9 +499,9 @@ class PartialMaml(torch.nn.Module):
         logits = net(x_spt)
         loss = F.cross_entropy(logits, y_spt)
         grad = torch.autograd.grad(loss, net.parameters())
-        fast_weights = list(
-            map(lambda p: p[1] - self.update_lr * p[0], zip(grad, net.parameters()))
-        )
+        fast_weights = [
+            p[1] - self.update_lr * p[0] for p in zip(grad, net.parameters())
+        ]
 
         # this is the loss and accuracy before first update
         with torch.no_grad():
@@ -2161,7 +2161,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_output_aliases_intermediate(self):
         def f(x):
             intermediate = x.mul(2)
-            return intermediate.view(-1)
+            return intermediate.view(-1), intermediate
 
         opt_f = torch._dynamo.optimize("aot_eager")(f)
 
@@ -2169,10 +2169,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(4, requires_grad=b)
             out = f(x)
             out_test = opt_f(x)
-            self.assertEqual(out, out_test)
-            self.assertEqual(out.requires_grad, out_test.requires_grad)
-            self.assertEqual(out._is_view(), out_test._is_view())
-            self.assertEqual(out._base.requires_grad, out_test._base.requires_grad)
+            self.assertEqual(out[0], out_test[0])
+            self.assertEqual(out[1], out_test[1])
+            self.assertEqual(out[0].requires_grad, out_test[0].requires_grad)
+            self.assertEqual(out[1].requires_grad, out_test[1].requires_grad)
+            # test that the aliasing relationship of outputs is preserved
+            out[0].mul_(2)
+            out_test[0].mul_(2)
+            self.assertEqual(out[0], out_test[0])
+            self.assertEqual(out[1], out_test[1])
 
     def test_while_loop_graph_break(self):
         # Repro of tacotron2 cache_size_recompilation
@@ -2319,7 +2324,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertNoUnraisable(f)
 
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
             b = x.sin()
@@ -2340,7 +2344,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
 
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
             b = x.sin()
@@ -2353,7 +2356,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "input sum needs to be 3"):
             opt_fn(*args)
 
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
             b = x.sin()
@@ -2367,7 +2369,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
 
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
             b = x.sin()
@@ -2386,7 +2387,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             1,
         )
 
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_noop(self):
         def f(x):
             b = x.sin()
@@ -2424,16 +2424,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(x1, y), opt_f(x1, y)))
         self.assertTrue(same(f(x2, y), opt_f(x2, y)))
         self.assertEqual(cnt.frame_count, 2)
-
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", False)
-    def test_not_rewrite_assert(self):
-        def f(x):
-            b = x.sin()
-            assert x[0] == 3
-            return x.cos() + b
-
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
-            torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
@@ -2620,6 +2610,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
+
+    def test_iadd_graph_break(self):
+        def fn(x):
+            a = ()
+            x = torch.sin(x)
+            a += (x,)
+            return a
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
 
 
 if __name__ == "__main__":

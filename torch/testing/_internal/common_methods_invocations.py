@@ -4509,7 +4509,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
         args = []
 
         # dim. We handle the scalar case
-        dim = 1 if t.ndim == 2 else 0
+        dim = -1 if t.ndim == 2 else 0
         args.append(dim)
 
         idx = make_idx(t.shape[dim] if t.ndim != 0 else 1)
@@ -6827,7 +6827,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
 
         if mask_t.sum() == 0:
             def random_index(shape):
-                return tuple(map(lambda max_idx: random.randrange(0, max_idx), shape))
+                return tuple((random.randrange(0, max_idx) for max_idx in shape))
 
             mask_t[random_index(mask_t.shape)] = True
             return mask_t
@@ -12767,6 +12767,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
+           supports_gradgrad=True,
            sample_inputs_func=sample_inputs_linear,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
