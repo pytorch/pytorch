@@ -10,7 +10,7 @@ import torch._C
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
-from ..source import AttrSource
+from ..source import AttrSource, ODictGetItemSource
 from ..utils import check_constant_args, identity, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
@@ -62,6 +62,22 @@ class SuperVariable(VariableTracker):
         source = None if self.source is None else AttrSource(self.source, name)
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
+        elif inner_fn is torch.nn.Module.__init__:
+            objvar = self.objvar
+            from ..side_effects import AttributeMutationNew
+
+            if (
+                isinstance(objvar, variables.UserDefinedObjectVariable)
+                and isinstance(objvar.mutable_local, AttributeMutationNew)
+                and not (args or kwargs)
+            ):
+                tx.output.guards.update(options.get("guards", set()))
+                tx.output.side_effects.store_attr(
+                    objvar, "__call_nn_module_init", variables.ConstantVariable(True)
+                )
+                return variables.ConstantVariable(None)
+            else:
+                unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
                 inner_fn, source=source, **options
@@ -70,6 +86,20 @@ class SuperVariable(VariableTracker):
             return variables.UserMethodVariable(
                 inner_fn.__func__, self.objvar, source=source, **options
             ).call_function(tx, args, kwargs)
+        elif (
+            inner_fn is collections.OrderedDict.__getitem__
+            and isinstance(self.objvar, variables.UserDefinedObjectVariable)
+            and self.objvar.source
+            and len(args) == 1
+            and len(kwargs) == 0
+            and args[0].is_python_constant()
+        ):
+            from .builder import VariableBuilder
+
+            key = args[0].as_python_constant()
+            return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
+                collections.OrderedDict.__getitem__(self.objvar.value, key)
+            )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
