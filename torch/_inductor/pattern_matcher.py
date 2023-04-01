@@ -645,7 +645,6 @@ def inference_graph(fn, args):
 
 
 @torch.enable_grad()
-@torch._functorch.config.patch(use_intermediate_base=False)
 def training_graph(fn, args):
     """Build a normalized training graph, for use with fx_to_pattern"""
     gm = None
