@@ -263,6 +263,18 @@ Tensor& add_out_sparse_csr_cuda(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
+    TORCH_CHECK(
+      self.is_cuda(),
+      "add: expected 'self' to be CUDA tensor, but got tensor on device: ",
+      self.device());
+    TORCH_CHECK(
+      other.is_cuda(),
+      "add: expected 'other' to be CUDA tensor, but got tensor on device: ",
+      other.device());
+    TORCH_CHECK(
+      out.is_cuda(),
+      "add: expected 'out' to be CUDA tensor, but got tensor on device: ",
+      out.device());
 
     if (only_sparse_compressed_add_trivial_cases(self, other, alpha, out)) {
       return out;
