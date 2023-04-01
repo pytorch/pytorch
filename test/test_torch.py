@@ -3654,7 +3654,7 @@ else:
 
     # FIXME: find a test suite for the masked scatter operator
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_masked_scatter(self, device, dtype):
         dt = dtype
         with warnings.catch_warnings(record=True) as w:
@@ -3668,11 +3668,6 @@ else:
                 src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
                 src_ones = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt, device=device)
                 mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=maskType, device=device)
-
-                if dt == torch.bool:
-                    # torch.bool is a special case and is being tested
-                    # in a separate test
-                    return
 
                 dest.masked_scatter_(mask, src)
                 j = 0
@@ -6495,30 +6490,30 @@ class TestTorch(TestCase):
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
         self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
-        shorts = torch.ShortStorage.from_buffer(a, 'big' if sys.byteorder == 'little' else 'little')
+        shorts = torch.ShortStorage.from_buffer(a, 'big')
         self.assertEqual(shorts.size(), 2)
         self.assertEqual(shorts.tolist(), [258, 772])
-        ints = torch.IntStorage.from_buffer(a, 'little' if sys.byteorder == 'little' else 'big')
+        ints = torch.IntStorage.from_buffer(a, 'little')
         self.assertEqual(ints.size(), 1)
         self.assertEqual(ints[0], 67305985)
         f = bytearray([0x40, 0x10, 0x00, 0x00])
-        floats = torch.FloatStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
+        floats = torch.FloatStorage.from_buffer(f, 'big')
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
         f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
-        bools = torch.BoolStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
         self.assertEqual(bools.size(), 8)
         self.assertEqual(bools.tolist(), [False, True, True, True, True, True, True, True])
         self.assertEqual(bools.type(), 'torch.BoolStorage')
         self.assertTrue(isinstance(bools, torch.BoolStorage))
 
         f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
-        bools = torch.BoolStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
         self.assertEqual(bools.size(), 19)
 
         f = bytearray(b'\0x4A')
-        bools = torch.BoolStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
         self.assertEqual(bools.size(), 4)
         self.assertEqual(bools.tolist(), [False, True, True, True])
         bytes = torch.ByteStorage.from_buffer(a)
@@ -6845,7 +6840,7 @@ class TestTorch(TestCase):
                 '^TypedStorage is deprecated',
                 str(warning)))
             # Check the line of code from the warning's stack
-            with open(w[0].filename) as f:
+            with open(w[0].filename, encoding="utf-8") as f:
                 code_line = f.readlines()[w[0].lineno - 1]
             self.assertTrue(re.search(re.escape('torch.FloatStorage()'), code_line))
 

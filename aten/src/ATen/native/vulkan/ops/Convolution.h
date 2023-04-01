@@ -2,6 +2,7 @@
 
 #ifdef USE_VULKAN_API
 
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/VulkanPackedContext.h>
 
@@ -163,6 +164,11 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
     const int64_t groups,
     const c10::optional<Scalar>& output_min = c10::nullopt,
     const c10::optional<Scalar>& output_max = c10::nullopt);
+
+c10::intrusive_ptr<Conv2dPackedContext> convert_qconv2d_context(
+    const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_params,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max);
 
 Tensor run_qconv2d_context(
     const Tensor& input_arg,

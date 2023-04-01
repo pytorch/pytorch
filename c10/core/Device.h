@@ -17,7 +17,7 @@ namespace c10 {
 /// DeviceIndex directly.
 using DeviceIndex = int8_t;
 
-/// Represents a a compute device on which a tensor is located. A device is
+/// Represents a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
 /// (e.g. CPU or CUDA GPU), and a device index or ordinal, which identifies the
 /// specific compute device when there is more than one of a certain type. The
