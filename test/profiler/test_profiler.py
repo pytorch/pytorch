@@ -154,6 +154,8 @@ def add_one(in_: torch.Tensor):
 sample_arg = torch.zeros(10, device="cuda").requires_grad_(True)
 add_one_graphed = torch.cuda.graphs.make_graphed_callables(add_one, sample_args=(sample_arg,))
 
+assert torch._C._profiler._is_kineto_profiler_registered()
+
 zeros = torch.zeros(10, device="cuda")
 out = add_one_graphed(zeros)
 assert out[0] == 1
