@@ -165,12 +165,6 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
 
 
 @functools.lru_cache()
-def is_invariant_under(var: sympy.Symbol, index: sympy.Expr):
-    expanded_index = sympy.expand(index)
-    return not expanded_index.has(var)
-
-
-@functools.lru_cache()
 def cpp_prefix():
     path = Path(__file__).parent / "cpp_prefix.h"
     with path.open() as f:
@@ -917,12 +911,11 @@ class CppKernel(Kernel):
         self.num_threads = num_threads  # num_threads the kernel specialized for
 
     def scale_index_with_offset(
-        self, index: sympy.Expr, scale, itervar_idx=-1, offset=0
+        self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
     ):
-        expanded_index = sympy.expand(index)
         var = self.itervars[itervar_idx]
         replacement = {var: var * scale + offset}
-        new_index = sympy_subs(expanded_index, replacement)
+        new_index = sympy_subs(index, replacement)
         return new_index
 
     def load(self, name: str, index: sympy.Expr):
@@ -1148,21 +1141,15 @@ class CppVecKernel(CppKernel):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
-
-        expanded_index = sympy.expand(index)
-        new_index = self.scale_index_with_offset(
-            index, self.tiling_factor, itervar_idx=self.tiling_idx
-        )
-
         dtype = V.graph.get_dtype(name)
-        is_broadcast = expanded_index == new_index
-        is_mask = dtype in [torch.bool, torch.uint8]
         tiling_var = self.itervars[self.tiling_idx]
+        is_broadcast = not index.has(tiling_var)
+        is_mask = dtype in [torch.bool, torch.uint8]
         non_contiguous = not is_broadcast and stride_at(tiling_var, index) != 1
         var_expr = (
             f"{var}[{cexpr_index(index)}]"
             if is_broadcast
-            else f"{var} + {cexpr_index(new_index)}"
+            else f"{var} + {cexpr_index(index)}"
         )
         loadbuf = "tmpbuf" if non_contiguous else var_expr
         if is_broadcast:
@@ -1187,7 +1174,7 @@ class CppVecKernel(CppKernel):
             tmpbufdeclare = f"__at_align__ {tmpbuftype} tmpbuf[{tmpbufsize}];"
             inner = sympy.symbols(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
-                index, self.tiling_factor, itervar_idx=self.tiling_idx, offset=inner
+                index, itervar_idx=self.tiling_idx, offset=inner
             )
             tmpbufdefine = (
                 f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
@@ -1202,20 +1189,16 @@ class CppVecKernel(CppKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
+        assert mode is None
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
         index = self.rename_indexing(index)
-        assert mode is None
-
-        expanded_index = sympy.expand(index)
-        new_index = self.scale_index_with_offset(
-            index, self.tiling_factor, itervar_idx=self.tiling_idx
-        )
-        assert new_index != expanded_index
-        var_expr = f"{var} + {cexpr_index(new_index)}"
-        dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
-        if stride_at(tiling_var, index) != 1:
+        assert index.has(tiling_var)
+        non_contiguous = stride_at(tiling_var, index) != 1
+        var_expr = f"{var} + {cexpr_index(index)}"
+        dtype = V.graph.get_dtype(name)
+        if non_contiguous:
             var_expr = "tmpbuf"
         if V.graph.get_dtype(name) in [torch.bfloat16]:
             if opt_ctx.is_store_fp32_as_bf16:
@@ -1225,10 +1208,10 @@ class CppVecKernel(CppKernel):
                 line = f"{value}.store({var_expr}, {self.tiling_factor});"
         else:
             line = f"{value}.store({var_expr});"
-        if stride_at(tiling_var, index) != 1:
+        if non_contiguous:
             inner = sympy.symbols(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
-                index, self.tiling_factor, itervar_idx=self.tiling_idx, offset=inner
+                index, itervar_idx=self.tiling_idx, offset=inner
             )
             tmp_bufsize = (
                 f"{self.tiling_factor}*sizeof(float)/sizeof({DTYPE_TO_CPP[dtype]})"
@@ -1310,12 +1293,9 @@ class CppVecKernel(CppKernel):
                 )
             else:
                 # Vertical reduction
-                new_index = self.scale_index_with_offset(
-                    index, self.tiling_factor, itervar_idx=self.tiling_idx
-                )
                 self.reduction_suffix.writeline(
                     DeferredLine(
-                        name, f"{tmpvar_vec}.store({var} + {cexpr_index(new_index)});"
+                        name, f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
                     )
                 )
 
@@ -1361,22 +1341,15 @@ class CppTile2DKernel(CppVecKernel):
         return sympy.symbols(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
-        return stride_at(
-            self.itervars[self.outer_idx], index
-        ) == 1 and not is_invariant_under(self.itervars[self.tiling_idx], index)
+        return stride_at(self.itervars[self.outer_idx], index) == 1 and index.has(
+            self.itervars[self.tiling_idx]
+        )
 
     def gen_transposed_tile_load_store(self, name, var, index, is_store):
         # transposed tile load/store outside the kernel inner loop
         dtype = V.graph.get_dtype(name)
         factor = self.tiling_factor
-        new_index = self.scale_index_with_offset(
-            index, factor, itervar_idx=self.tiling_idx
-        )
-        new_index = self.scale_index_with_offset(
-            new_index, factor, itervar_idx=self.outer_idx
-        )
-
-        src = f"{var} + {cexpr_index(new_index)}"
+        src = f"{var} + {cexpr_index(index)}"
         dst = "__place_holder__"
         ld_src = f"{cexpr_index(stride_at(self.itervars[self.tiling_idx], index))}"
         ld_dst = f"{factor}"
@@ -1412,10 +1385,9 @@ class CppTile2DKernel(CppVecKernel):
         index = self.rename_indexing(index)
 
         inner = self.inner_itervar()
-        expanded_index = sympy.expand(index)
-        if self.need_vec_transpose(expanded_index):
+        if self.need_vec_transpose(index):
             tile_var = self.gen_transposed_tile_load_store(
-                name, var, expanded_index, is_store=False
+                name, var, index, is_store=False
             )
             # vector load inside the kernel inner loop
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
@@ -1430,8 +1402,7 @@ class CppTile2DKernel(CppVecKernel):
             return self.cse.generate(self.loads, line)
         else:
             new_index = self.scale_index_with_offset(
-                expanded_index,
-                self.tiling_factor,
+                index,
                 itervar_idx=self.outer_idx,
                 offset=inner,
             )
@@ -1445,10 +1416,9 @@ class CppTile2DKernel(CppVecKernel):
         inner = self.inner_itervar()
         index = self.rename_indexing(index)
         assert mode is None
-        expanded_index = sympy.expand(index)
-        if self.need_vec_transpose(expanded_index):
+        if self.need_vec_transpose(index):
             tile_var = self.gen_transposed_tile_load_store(
-                name, var, expanded_index, is_store=True
+                name, var, index, is_store=True
             )
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
@@ -1463,8 +1433,7 @@ class CppTile2DKernel(CppVecKernel):
             self.stores.writeline(DeferredLine(name, line))
         else:
             new_index = self.scale_index_with_offset(
-                expanded_index,
-                self.tiling_factor,
+                index,
                 itervar_idx=self.outer_idx,
                 offset=inner,
             )
@@ -1846,7 +1815,7 @@ class CppVecKernelChecker(CppVecKernel):
                         self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
 
                     tiling_var = self.itervars[self.tiling_idx]
-                    tiling_var_irrelevant = is_invariant_under(tiling_var, expr)
+                    tiling_var_irrelevant = not expr.has(tiling_var)
                     if not tiling_var_irrelevant:
                         self.disable_vec(
                             f"index_expr (tiling var relevant): {expr}, dtype {dtype}"
@@ -2453,8 +2422,9 @@ class LoopLevel:
         def do_split_with_tiling():
             sympy_factor = sympy.Integer(factor)
 
-            main_loop_range = ir.FloorDiv(self.size, sympy_factor)
-            main_loop = LoopLevel(self.var, main_loop_range)
+            offset = ir.FloorDiv(self.size, sympy_factor) * sympy_factor
+            main_loop = LoopLevel(self.var, offset)
+            main_loop.steps = sympy_factor
             main_loop.parallel = self.parallel
             main_loop.collapsed = False
             main_loop.reduction_var_map = self.reduction_var_map
@@ -2463,7 +2433,6 @@ class LoopLevel:
                 for loop in main_loop.inner:
                     loop.parent = main_loop
 
-            offset = main_loop_range * sympy_factor
             tail_loop = LoopLevel(self.var, self.size)
             tail_loop.offset = offset
             tail_loop.parallel = self.parallel
