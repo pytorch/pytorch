@@ -149,21 +149,20 @@ def _prop__foreach_pow_scalar_and_tensor(op_schema: OpSchema):
 
 @register_prop_rule([aten._fused_adam.default])  # pyre-ignore
 def _prop__fused_adam(op_schema: OpSchema):
-    NT = 5  # number of tensors for gradients and states
+    NT = 5
+    tesnor_list_args: Tuple[List[DTensorSpec]] = op_schema.args_schema[:NT]  # type: ignore[assignment]
 
-    assert all(
-        [isinstance(schema, list) for schema in op_schema.args_schema[:NT]]
-    )
+    assert all([isinstance(schema, list) for schema in tesnor_list_args])
     assert all(
         [
             isinstance(s, DTensorSpec)
-            for schema in op_schema.args_schema[:NT]
+            for schema in tesnor_list_args
             for s in schema
         ]
     )
 
-    tensor_schemas: Tuple[List[DTensorSpec]] = [
-        schema for schema in op_schema.args_schema[:NT] if len(schema)
+    tensor_schemas: Tuple[List[DTensorSpec]] = [  # type: ignore[assignment]
+        schema for schema in tesnor_list_args if len(schema)
     ]
 
     assert all([len(s) == len(tensor_schemas[0]) for s in tensor_schemas]), (
@@ -172,9 +171,8 @@ def _prop__fused_adam(op_schema: OpSchema):
     )
 
     if any([any([t != ts[0] for t in ts]) for ts in zip(*tensor_schemas)]):
-        new_schemas = tuple(
-            op_schema.args_schema[0] if len(s) else s
-            for s in op_schema.args_schema[:NT]
+        new_schemas: Tuple[List[DTensorSpec]] = tuple(  # type: ignore[assignment]
+            op_schema.args_schema[0] if len(s) else s for s in tesnor_list_args
         )
         return OutputSharding(
             output_spec=None,
@@ -189,7 +187,7 @@ def _prop__fused_adam(op_schema: OpSchema):
             ],
         )
     else:
-        return OutputSharding(output_spec=(op_schema.args_schema[0],) * NT)
+        return OutputSharding(output_spec=(op_schema.args_schema[0],) * NT)  # type: ignore[arg-type]
 
 
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
