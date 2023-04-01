@@ -2644,12 +2644,17 @@ def create_aot_dispatcher_function(
                     if shape_env is not None:
                         from torch._dynamo.source import ConstantSource
                         if isinstance(x, int):
-                            return shape_env.create_symintnode(shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")), hint=x)
+                            return shape_env.create_symintnode(
+                                shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
+                                hint=x
+                            )
                     if not isinstance(x, torch.Tensor):
                         return x
                     if isinstance(x, FakeTensor):
                         assert x.fake_mode is fake_mode
                         return x
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
                     if (
                         idx < aot_config.num_params_buffers
                         and config.static_weight_shapes
@@ -2745,9 +2750,6 @@ def aot_function(
     function can be used to perform optimizations such as recomputation. One can
     set `decompositions` dictionary to decompose the operators into a sequence
     of core or simpler operators supported by the backend compilers.
-
-    :func:`aot_function` uses a compilation cache, based on input tensor
-    properties, to detect when there is a need of recompilation.
 
     .. warning::
         This API is experimental and likely to change.

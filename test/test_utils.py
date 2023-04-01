@@ -145,7 +145,7 @@ class TestCheckpoint(TestCase):
         # checkpointed
         chunks = 2
         modules = list(model.children())
-        out = checkpoint_sequential(modules, chunks, input_var)
+        out = checkpoint_sequential(modules, chunks, input_var, use_reentrant=True)
         with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
@@ -256,7 +256,7 @@ class TestCheckpoint(TestCase):
             state = torch.get_rng_state()
 
             out = phase1(inp)
-            out = checkpoint(run_fn, out)
+            out = checkpoint(run_fn, out, use_reentrant=True)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
@@ -284,7 +284,7 @@ class TestCheckpoint(TestCase):
             state = torch.cuda.get_rng_state()
 
             out = phase1(inp)
-            out = checkpoint(run_fn, out)
+            out = checkpoint(run_fn, out, use_reentrant=True)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
@@ -320,7 +320,7 @@ class TestCheckpoint(TestCase):
             return tensor1 + tensor2
 
         input_var = torch.randn(1, 100, requires_grad=True)
-        out = checkpoint(run_fn, input_var, None)
+        out = checkpoint(run_fn, input_var, None, use_reentrant=True)
         out.sum().backward()
 
     def test_checkpoint_non_tensor_inputs_outputs(self):
@@ -335,7 +335,7 @@ class TestCheckpoint(TestCase):
         t2 = torch.rand(10, requires_grad=True)
         t3 = torch.rand(10)
         scale = random.randint(0, 10)
-        res = checkpoint(foo, t1, t2, scale, t3)
+        res = checkpoint(foo, t1, t2, scale, t3, use_reentrant=True)
         self.assertEqual(scale, res[0])
         self.assertEqual((t1 + t2 * t3) * scale, res[1])
         self.assertEqual(None, res[2])
@@ -373,7 +373,7 @@ class TestCheckpoint(TestCase):
         t2 = random.random()
         t3 = random.random()
         scale = random.randint(0, 10)
-        res = checkpoint(foo, t1, t2, scale, t3)
+        res = checkpoint(foo, t1, t2, scale, t3, use_reentrant=True)
         self.assertEqual(scale, res[0])
         self.assertEqual((t1 + t2 * t3) * scale, res[1])
         self.assertEqual(None, res[2])
@@ -388,7 +388,7 @@ class TestCheckpoint(TestCase):
             return tensor1, tensor2
         input_var = torch.randn(1, 4, requires_grad=True)
         input_var2 = torch.randn(1, 4, requires_grad=False)
-        out = checkpoint(run_fn, input_var, input_var2)
+        out = checkpoint(run_fn, input_var, input_var2, use_reentrant=True)
         out[0].sum().backward()
 
         def run_fn2(tensor1, tensor2):
@@ -399,7 +399,7 @@ class TestCheckpoint(TestCase):
             RuntimeError,
             r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
         ):
-            out = checkpoint(run_fn2, input_var, input_var2)
+            out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")

@@ -13,7 +13,9 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
+from torch._export import dynamic_dim
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal import common_utils
 
 
@@ -2040,12 +2042,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         torch._dynamo.export(my_dyn_fn, y)
-        torch._dynamo.mark_dynamic(y, 0)
 
-        with self.assertRaises(
-            torch._dynamo.exc.InternalTorchDynamoError,
-        ):
-            torch._dynamo.export(my_dyn_fn, y)
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
     @config.patch(dynamic_shapes=True)
     def test_export_raise_guard_partial_constraint(self):
@@ -2057,12 +2056,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         torch._dynamo.export(my_dyn_fn, y)
-        torch._dynamo.mark_dynamic(y, 0)
 
-        with self.assertRaises(
-            torch._dynamo.exc.InternalTorchDynamoError,
-        ):
-            torch._dynamo.export(my_dyn_fn, y)
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
     @config.patch(dynamic_shapes=True)
     def test_export_no_raise_on_relationship(self):
@@ -2075,16 +2071,14 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return a.cos()
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
-        torch._dynamo.mark_dynamic(y, 0)
+        constraints = [dynamic_dim(y, 0)]
         if config.assume_static_by_default:
             # The assume_static flag causes this to raise, as
             # we are now esentially comparing with a constant
-            with self.assertRaises(
-                torch._dynamo.exc.InternalTorchDynamoError,
-            ):
-                torch._dynamo.export(my_dyn_fn, y, y, y)
+            with self.assertRaises(ConstraintViolationError):
+                torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
         else:
-            torch._dynamo.export(my_dyn_fn, y, y, y)
+            torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
     def test_export_no_raise(self):
@@ -2096,8 +2090,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return a * b * c
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
-        torch._dynamo.mark_dynamic(y, 0)
-        torch._dynamo.export(my_dyn_fn, y, y, y)
+        torch._dynamo.export(my_dyn_fn, y, y, y, constraints=[dynamic_dim(y, 0)])
 
     @config.patch(dynamic_shapes=True)
     def test_export_multi_dynamic_dim_safe_relationship(self):
@@ -2111,15 +2104,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return a * c, b
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
-        torch._dynamo.mark_dynamic(y, 0)
-        torch._dynamo.mark_dynamic(x, 0)
-        torch._dynamo.mark_dynamic(z, 0)
-        torch._dynamo.export(my_dyn_fn, x, y, z)
+        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
+        torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
-    # This should not fail, but it does, because
-    # symbolic_shapes simplification _maybe_evaluate_static removes this guard
-    # see https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit#
-    @unittest.expectedFailure
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
@@ -2130,11 +2117,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return a * a
 
         torch._dynamo.export(my_dyn_fn, x)
-        torch._dynamo.mark_dynamic(x, 0)
-        with self.assertRaises(
-            torch._dynamo.exc.InternalTorchDynamoError,
-        ):
-            torch._dynamo.export(my_dyn_fn, x)
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, x, constraints=[dynamic_dim(x, 0)])
 
     @config.patch(dynamic_shapes=True)
     def test_export_multi_dynamic_dim_constraint(self):
@@ -2148,18 +2132,14 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return a * c, b
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
-        torch._dynamo.mark_dynamic(x, 0)
-        torch._dynamo.mark_dynamic(x, 1)
-        torch._dynamo.mark_dynamic(x, 2)
+        constraints = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(x, 2)]
         if config.assume_static_by_default:
             # The assume_static flag causes this to raise, as
             # we are now esentially comparing with a constant
-            with self.assertRaises(
-                torch._dynamo.exc.InternalTorchDynamoError,
-            ):
-                torch._dynamo.export(my_dyn_fn, x, y, z)
+            with self.assertRaises(ConstraintViolationError):
+                torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
         else:
-            torch._dynamo.export(my_dyn_fn, x, y, z)
+            torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
     def test_list_contains(self):
@@ -2274,6 +2254,32 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         ref = mod(input_tensor, input_tensor2)
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_mark_dynamic_conflict_dynamic_dim(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(x):
+            if x.shape[0] > 3:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.mark_dynamic(y, 0)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Constraints violated",
+        ):
+            torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_dynamic_dim_cleanup(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(x):
+            return x.cos()
+
+        constraints = [dynamic_dim(y, 0)]
+        torch._dynamo.export(my_dyn_fn, y, constraints=constraints)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

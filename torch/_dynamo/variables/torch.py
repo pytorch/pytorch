@@ -16,7 +16,7 @@ from torch._guards import GuardsCheckpointState
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
-from ..source import GetItemSource, NNModuleSource
+from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -384,6 +384,9 @@ class TorchVariable(VariableTracker):
                     *proxy_args_kwargs(args, kwargs),
                 ),
                 example_value=self.value(),
+                source=GeneratorStateSource(
+                    self.value.__self__.device.type, self.value.__self__.initial_seed()
+                ),
                 **options,
             )
         if (

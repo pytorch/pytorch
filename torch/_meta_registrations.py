@@ -1189,6 +1189,29 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
+@register_meta([aten._int_mm])
+@out_wrapper()
+def meta__int_mm(a, b):
+    check(a.dim() == 2, lambda: "a must be a 2D tensor")
+    check(b.dim() == 2, lambda: "b must be a 2D tensor")
+    check(
+        a.dtype is torch.int8,
+        lambda: f"expected self to be int8, got {a.dtype}",
+    )
+    check(
+        b.dtype is torch.int8,
+        lambda: f"expected mat2 to be int8, got {b.dtype}",
+    )
+    check(
+        a.size(1) == b.size(0),
+        lambda: (
+            f"Incompatible matrix sizes for _int_mm ({a.size(0)}x{a.size(1)} "
+            f"and {b.size(0)}x{b.size(1)})"
+        ),
+    )
+    return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
+
+
 @register_meta(aten._cdist_forward.default)
 def meta_cdist_forward(x1, x2, p, compute_mode):
     check(

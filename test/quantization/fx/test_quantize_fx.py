@@ -1236,6 +1236,150 @@ class TestQuantizeFx(QuantizationTestCase):
 
             checkSerDeser(qr, is_dynamic)
 
+    def _get_conv_transpose_test_cases(self, is_reference):
+        """ Returns a list of test cases, with format:
+        is_dynamic, ModuleClass, module_constructor_inputs,
+        inputs, quantized_node, weight_prepack_op
+        """
+        class ConvTranspose1d(torch.nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.deconv = torch.nn.ConvTranspose1d(*args)
+
+            def forward(self, x):
+                return self.deconv(x)
+
+        conv_transpose1d_input = torch.rand(1, 3, 224)
+        conv_transpose1d_module_args = (3, 3, 3)
+
+        class ConvTranspose2d(torch.nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.deconv = torch.nn.ConvTranspose2d(*args)
+
+            def forward(self, x):
+                return self.deconv(x)
+
+        conv_transpose2d_input = torch.rand(1, 3, 224, 224)
+        conv_transpose2d_module_args = (3, 3, 3)
+
+        class ConvTranspose3d(torch.nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.deconv = torch.nn.ConvTranspose3d(*args)
+
+            def forward(self, x):
+                return self.deconv(x)
+
+        conv_transpose3d_input = torch.rand(1, 3, 32, 224, 224)
+        conv_transpose3d_module_args = (3, 3, 3)
+
+        # is_dynamic, ModuleClass, module_constructor_inputs,
+        # inputs, quantized_node, weight_prepack_node
+        tests = [
+            (
+                False,
+                ConvTranspose1d,
+                conv_transpose1d_module_args,
+                (conv_transpose1d_input,),
+                ns.call_module(nnqr.ConvTranspose1d if is_reference else nnq.ConvTranspose1d),
+                None
+            ),
+            (
+                False,
+                ConvTranspose2d,
+                conv_transpose2d_module_args,
+                (conv_transpose2d_input,),
+                ns.call_module(nnqr.ConvTranspose2d if is_reference else nnq.ConvTranspose2d),
+                None
+            ),
+            (
+                False,
+                ConvTranspose3d,
+                conv_transpose3d_module_args,
+                (conv_transpose3d_input,),
+                ns.call_module(nnqr.ConvTranspose3d if is_reference else nnq.ConvTranspose3d),
+                None
+            ),
+        ]
+        return tests
+
+    @skipIfNoFBGEMM
+    def test_conv_transpose_not_reference(self):
+        """ Test quantizing transposed conv
+        """
+        tests = self._get_conv_transpose_test_cases(is_reference=False)
+        for (is_dynamic, ModuleClass, module_constructor_inputs,
+             inputs, quantized_node, weight_prepack_node) in tests:
+            quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
+            node_occurrence = {}
+            if weight_prepack_node:
+                node_occurrence[weight_prepack_node] = 0
+            self.checkGraphModeFxOp(
+                ModuleClass(*module_constructor_inputs),
+                inputs, quant_type,
+                expected_node=quantized_node,
+                expected_node_occurrence=node_occurrence,
+                is_reference=False)
+
+    @skipIfNoFBGEMM
+    def test_conv_transpose_reference(self):
+        """ Test quantizing transposed conv with reference option
+        """
+        tests = self._get_conv_transpose_test_cases(is_reference=True)
+
+        def _get_keys(prefix, is_dynamic):
+            all_keys = [prefix + "." + k for k in ["weight_qscheme", "weight_dtype"]]
+            if not is_dynamic:
+                all_keys.extend([prefix + "." + k for k in ["weight_scale", "weight_zero_point"]])
+            return all_keys
+
+        for (is_dynamic, ModuleClass, module_constructor_inputs,
+             inputs, quantized_node, weight_prepack_node) in tests:
+            quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
+            node_occurrence = {}
+            if weight_prepack_node:
+                node_occurrence[weight_prepack_node] = 0
+            result_dict = self.checkGraphModeFxOp(
+                ModuleClass(*module_constructor_inputs),
+                inputs, quant_type,
+                expected_node=quantized_node,
+                expected_node_occurrence=node_occurrence,
+                is_reference=True)
+            qr = result_dict["quantized_reference"]
+
+            def checkWeightQParams(model):
+                module_name = "deconv"
+                if hasattr(model, module_name):
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_qscheme"))
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_scale"))
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_zero_point"))
+                    self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
+
+            def checkSerDeser(model, is_dynamic):
+                module_name = "deconv"
+                if hasattr(model, module_name):
+                    # make sure seralization works
+                    state_dict = copy.deepcopy(model.state_dict())
+                    all_keys = _get_keys(module_name, is_dynamic)
+                    for key in all_keys:
+                        self.assertTrue(key in state_dict)
+                    # check load_state_dict restores states
+                    module = getattr(model, module_name)
+                    prev_scale = module.weight_scale
+                    module.weight_scale = None
+                    model.load_state_dict(state_dict)
+                    module = getattr(model, module_name)
+                    self.assertTrue(torch.equal(prev_scale, module.weight_scale))
+
+
+            checkWeightQParams(qr)
+            qr = copy.deepcopy(qr)
+            # make sure the qparams are preserved after copy
+            checkWeightQParams(qr)
+
+            checkSerDeser(qr, is_dynamic)
+
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):
         ''' Test that weight observer is run in convert step
