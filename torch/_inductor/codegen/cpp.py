@@ -232,8 +232,6 @@ def cexpr_index(index):
 class OptimizationContext:
     key: ClassVar[str] = "opt_ctx"
 
-    # Masked load
-    is_masked_load: bool = False
     # Load value as mask
     is_load_as_mask: bool = False
     # Load bfloat16 value as float32
@@ -589,10 +587,6 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx
-        assert opt_ctx.is_masked_load
-
         code = BracesBuffer()
         var = V.kernel.cse.newvar()
         code.writeline(f"auto {var} = [&]")
@@ -1694,69 +1688,6 @@ class CppVecKernelChecker(CppVecKernel):
         else:
             return left_dtype == right_dtype
 
-    def is_load_only_block(self, sub_graph: torch.fx.Graph):
-        # The sub graph only contains "placeholder", "output", "get_index", "load", "to_dtype"
-        is_load_only = False
-        load_dtype = None
-        skip_io_nodes = ["placeholder", "output"]
-        for _node in sub_graph.nodes:
-            if _node.op in skip_io_nodes:
-                continue
-
-            if _node.target not in ["load", "get_index", "constant", "to_dtype"]:
-                # The body contains non load node
-                is_load_only = False
-                break
-
-            if _node.target in ["load", "constant"]:
-                load_dtype = (
-                    V.graph.get_dtype(_node.args[1])
-                    if _node.target == "load"
-                    else _node.args[-1]
-                )
-                is_bf16_as_fp32 = load_dtype in [
-                    torch.bfloat16
-                ] and self.can_load_bf16_as_fp32(_node)
-                is_fp32 = load_dtype in [torch.float]
-                is_load_only = is_bf16_as_fp32 or is_fp32
-                load_dtype = torch.float if is_load_only else load_dtype
-                if not is_load_only:
-                    break
-
-                # Create and record the context
-                if OptimizationContext.key in _node.meta:
-                    opt_ctx = _node.meta[OptimizationContext.key]
-                else:
-                    opt_ctx = OptimizationContext()
-                opt_ctx.dtype = load_dtype
-                opt_ctx.ops_name = _node.target
-                opt_ctx.is_load_bf16_as_fp32 = True if is_bf16_as_fp32 else False
-                _node.meta[OptimizationContext.key] = opt_ctx
-
-            if _node.target == "to_dtype":
-                dtype = _node.args[-1]
-                if dtype == torch.float:
-                    # load -> to_dtype
-                    is_load_only = all(
-                        usr.target in ["ops", "load", "constant"]
-                        for usr in _node.all_input_nodes
-                    )
-                elif dtype == torch.bfloat16:
-                    # to_dtype -> store
-                    is_load_only = all(usr.target in ["store"] for usr in _node.users)
-                else:
-                    is_load_only = False
-
-                if not is_load_only:
-                    break
-
-            if _node.target == "get_index":
-                is_load_only = all(usr.target in ["load"] for usr in _node.users)
-                if not is_load_only:
-                    break
-
-        return is_load_only, load_dtype
-
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
@@ -1931,24 +1862,8 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def masked(mask, body, other):
-                with RecordOptimizationContext(__name__) as node_ctx:
-                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
-                    assert opt_ctx
-                    is_masked_load, load_dtype = self.is_load_only_block(body.graph)
-                    opt_ctx.dtype = load_dtype
-                    opt_ctx.is_masked_load = is_masked_load
-
-                    _simd_vec = is_masked_load and load_dtype in [
-                        torch.float32,
-                        torch.float,
-                    ]
-                    if not _simd_vec:
-                        self.disable_vec(
-                            f"masked: is_masked_load {is_masked_load}, load_dtype {load_dtype}"
-                        )
-
-                    tmp_var = self.cse.newvar()
-                    return tmp_var
+                body()
+                return self.cse.newvar()
 
             @staticmethod
             def to_dtype(x, dtype):
