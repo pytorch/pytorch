@@ -1,6 +1,7 @@
 import collections
 import functools
 import inspect
+import itertools
 import sys
 import types
 from typing import Dict, List
@@ -62,6 +63,22 @@ class SuperVariable(VariableTracker):
         source = None if self.source is None else AttrSource(self.source, name)
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
+        elif inner_fn is torch.nn.Module.__init__:
+            objvar = self.objvar
+            from ..side_effects import AttributeMutationNew
+
+            if (
+                isinstance(objvar, variables.UserDefinedObjectVariable)
+                and isinstance(objvar.mutable_local, AttributeMutationNew)
+                and not (args or kwargs)
+            ):
+                tx.output.guards.update(options.get("guards", set()))
+                tx.output.side_effects.store_attr(
+                    objvar, "__call_nn_module_init", variables.ConstantVariable(True)
+                )
+                return variables.ConstantVariable(None)
+            else:
+                unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
                 inner_fn, source=source, **options
@@ -436,6 +453,18 @@ class SkipFilesVariable(VariableTracker):
             )
             return self.fold_through_function_to_wrapper().get(self.value)(
                 value, mutable_local=MutableLocal(), **options
+            )
+        elif (
+            self.value is itertools.product
+            and not kwargs
+            and all(arg.has_unpack_var_sequence(tx) for arg in args)
+        ):
+            seqs = [arg.unpack_var_sequence(tx) for arg in args]
+            items = []
+            for item in itertools.product(*seqs):
+                items.append(variables.TupleVariable(list(item), **options))
+            return variables.ListIteratorVariable(
+                items, mutable_local=MutableLocal(), **options
             )
         else:
             try:
