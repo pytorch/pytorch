@@ -47,9 +47,7 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyLong_FromVoidPtr(THPStorage_Unpack(self)
-                                .unsafeGetStorageImpl()
-                                ->mutable_unsafe_data<uint8_t>());
+  return PyLong_FromVoidPtr(THPStorage_Unpack(self).data<uint8_t>());
   END_HANDLE_TH_ERRORS
 }
 
@@ -84,9 +82,7 @@ static PyObject* THPStorage_isPinned(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 #if defined(USE_CUDA)
   return PyBool_FromLong(
-      at::globalContext().isPinnedPtr(THPStorage_Unpack(self)
-                                          .unsafeGetStorageImpl()
-                                          ->mutable_unsafe_data<uint8_t>()));
+      at::globalContext().isPinnedPtr(THPStorage_Unpack(self).data<uint8_t>()));
 #else
   Py_RETURN_FALSE;
 #endif
