@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 import torch
 
@@ -150,18 +150,30 @@ def _prop__foreach_pow_scalar_and_tensor(op_schema: OpSchema):
 @register_prop_rule([aten._fused_adam.default])  # pyre-ignore
 def _prop__fused_adam(op_schema: OpSchema):
     NT = 5  # number of tensors for gradients and states
-    tensor_schemas = [
-        schema for schema in op_schema.args_schema[:NT] if len(schema)  # type: ignore[arg-type]
+
+    assert all(
+        [isinstance(schema, list) for schema in op_schema.args_schema[:NT]]
+    )
+    assert all(
+        [
+            isinstance(s, DTensorSpec)
+            for schema in op_schema.args_schema[:NT]
+            for s in schema
+        ]
+    )
+
+    tensor_schemas: Tuple[List[DTensorSpec]] = [
+        schema for schema in op_schema.args_schema[:NT] if len(schema)
     ]
 
-    assert all([len(s) == len(tensor_schemas[0]) for s in tensor_schemas]), (  # type: ignore[arg-type]
+    assert all([len(s) == len(tensor_schemas[0]) for s in tensor_schemas]), (
         "expect the same number of gradients and states, but got "
         f"{[len(s) for s in tensor_schemas]}."
     )
 
-    if any([any([t != ts[0] for t in ts]) for ts in zip(*tensor_schemas)]):  # type: [call-overload]
+    if any([any([t != ts[0] for t in ts]) for ts in zip(*tensor_schemas)]):
         new_schemas = tuple(
-            op_schema.args_schema[0] if len(s) else s  # type: ignore[arg-type]
+            op_schema.args_schema[0] if len(s) else s
             for s in op_schema.args_schema[:NT]
         )
         return OutputSharding(
