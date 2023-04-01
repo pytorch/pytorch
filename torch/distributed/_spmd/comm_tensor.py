@@ -65,7 +65,7 @@ class CommTensor(torch.Tensor):
 
     In eager mode, it will record whether the inplace collective communication
     has been launched using this Tensor and remember the corresponding work
-    handle. If yes, it will expliclty call wait() in the ``__torch_dispatch__``
+    handle. If yes, it will explicitly call wait() in the ``__torch_dispatch__``
     function before subsequent operations consuming the value of the Tensor.
 
     In tracing mode, ``CommTensor`` inserts two node into the graph using the
