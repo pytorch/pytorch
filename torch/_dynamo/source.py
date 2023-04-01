@@ -7,7 +7,7 @@ from torch._guards import GuardSource, Source
 
 from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
-from .utils import enum_repr, rename_implicit
+from .utils import enum_repr
 
 _GUARD_SOURCE_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
@@ -56,7 +56,7 @@ class LocalSource(Source):
         return GuardSource.LOCAL
 
     def name(self):
-        return rename_implicit(self.local_name)
+        return f"L[{repr(self.local_name)}]"
 
 
 @dataclasses.dataclass
@@ -79,7 +79,7 @@ class RandomValueSource(Source):
         ]
 
     def name(self):
-        return rename_implicit(f"random_value_{self.random_call_index}")
+        return f"random_value_{self.random_call_index}"
 
 
 @dataclasses.dataclass
@@ -93,7 +93,7 @@ class GlobalSource(Source):
         return GuardSource.GLOBAL
 
     def name(self):
-        return self.global_name
+        return f"G[{repr(self.global_name)}]"
 
 
 @dataclasses.dataclass
@@ -109,7 +109,7 @@ class GlobalWeakRefSource(Source):
         return GuardSource.GLOBAL
 
     def name(self):
-        return f"{self.global_name}()"
+        return f"G[{repr(self.global_name)}]()"
 
 
 @dataclasses.dataclass
@@ -271,7 +271,7 @@ class GetItemSource(Source):
             return f"{self.base.name()}[{self.index.name()}]"
         else:
             if isinstance(self.index, enum.Enum):
-                return f"{self.base.name()}[{enum_repr(self.index)}]"
+                return f"{self.base.name()}[{enum_repr(self.index, self.base.guard_source())}]"
             else:
                 return f"{self.base.name()}[{self.index!r}]"
 

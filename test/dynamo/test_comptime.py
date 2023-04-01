@@ -40,8 +40,9 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-def forward(self, x : torch.Tensor):
-    mul = x * 2;  x = None""",
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    mul = l_x_ * 2;  l_x_ = None""",
         )
 
     def test_print_disas(self):
@@ -183,7 +184,7 @@ y = TensorVariable()
             FILE.getvalue().rstrip(),
             """\
 -
-            local 'x' TENSOR_MATCH
+            local "L['x']" TENSOR_MATCH
             {
                 'guard_types': None,
                 'code': None,
@@ -259,8 +260,9 @@ y = TensorVariable()
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-def forward(self, x : torch.Tensor):
-    mul = x * 2;  x = None
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    mul = l_x_ * 2;  l_x_ = None
     add = mul + 4;  mul = None""",
         )
 

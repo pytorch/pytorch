@@ -1305,7 +1305,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertTrue("check_obj_id(m._forward_hooks" in failure_reason)
+        self.assertTrue("___check_obj_id(L['m']._forward_hooks" in failure_reason)
 
 
 if __name__ == "__main__":
