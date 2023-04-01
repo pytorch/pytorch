@@ -830,7 +830,7 @@ class VariableBuilder:
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
                 if self.tx.export and not isinstance(
-                    self.get_source(), LocalInputSource
+                    self.get_source(), LocalSource
                 ):
                     raise AssertionError(
                         "Dynamo attempts to add additional input during export: value={}, source={}".format(
