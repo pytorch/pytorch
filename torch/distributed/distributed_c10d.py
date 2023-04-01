@@ -2025,7 +2025,7 @@ def _check_for_nccl_backend(group):
 
 
 @exception_handler
-def all_gather_object(object_list, obj, group=None):
+def all_gather_object(object_list, obj, group=None, device=None):
     """
     Gathers picklable objects from the whole group into a list. Similar to
     :func:`all_gather`, but Python objects can be passed in. Note that the object
@@ -2037,6 +2037,9 @@ def all_gather_object(object_list, obj, group=None):
         obj (Any): Pickable Python object to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
+        device (``torch.device``, optional): If not None, the objects are
+            serialized and converted to tensors which are moved to the
+            ``device`` before all_gather. Default is ``None``.
 
     Returns:
         None. If the calling rank is part of this group, the output of the
@@ -2068,7 +2071,9 @@ def all_gather_object(object_list, obj, group=None):
         >>> # Assumes world_size of 3.
         >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
         >>> output = [None for _ in gather_objects]
-        >>> dist.all_gather_object(output, gather_objects[dist.get_rank()])
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> dist.all_gather_object(output, gather_objects[dist.get_rank()], device=device)
         >>> output
         ['foo', 12, {1: 2}]
     """
@@ -2076,7 +2081,7 @@ def all_gather_object(object_list, obj, group=None):
         _warn_not_in_group("all_gather_object")
         return
 
-    current_device = _get_pg_device(group)
+    current_device = device or _get_pg_device(group)
     input_tensor, local_size = _object_to_tensor(obj, current_device)
 
     # Gather all local sizes. This is so that we can find the max size, and index
@@ -2112,7 +2117,7 @@ def all_gather_object(object_list, obj, group=None):
 
 
 @exception_handler
-def gather_object(obj, object_gather_list=None, dst=0, group=None):
+def gather_object(obj, object_gather_list=None, dst=0, group=None, device=None):
     """
     Gathers picklable objects from the whole group in a single process.
     Similar to :func:`gather`, but Python objects can be passed in. Note that the
@@ -2127,7 +2132,9 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         dst (int, optional): Destination rank. (default is 0)
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
-
+        device (``torch.device``, optional): If not None, the objects are
+            serialized and converted to tensors which are moved to the
+            ``device`` before gathering. Default is ``None``.
     Returns:
         None. On the ``dst`` rank, ``object_gather_list`` will contain the
         output of the collective.
@@ -2156,10 +2163,14 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         >>> # Assumes world_size of 3.
         >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
         >>> output = [None for _ in gather_objects]
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> dist.all_gather_object(output, gather_objects[dist.get_rank()], device=device)
         >>> dist.gather_object(
         ...     gather_objects[dist.get_rank()],
         ...     output if dist.get_rank() == 0 else None,
-        ...     dst=0
+        ...     dst=0,
+        ...     device=device
         ... )
         >>> # On rank 0
         >>> output
@@ -2172,7 +2183,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # Ensure object_gather_list is specified appropriately.
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
-    current_device = _get_pg_device(group)
+    current_device = device or _get_pg_device(group)
     input_tensor, local_size = _object_to_tensor(obj, current_device)
 
     # Gather all local sizes. This is so that we can find the max size, and index
@@ -2318,7 +2329,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
 
 @exception_handler
 def scatter_object_list(
-    scatter_object_output_list, scatter_object_input_list, src=0, group=None
+    scatter_object_output_list, scatter_object_input_list, src=0, group=None, device=None
 ):
     """
     Scatters picklable objects in ``scatter_object_input_list`` to the whole
@@ -2337,6 +2348,9 @@ def scatter_object_list(
             ``scatter_object_input_list``.
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
+        device (``torch.device``, optional): If not None, the objects are
+            serialized and converted to tensors which are moved to the
+            ``device`` before scatter. Default is ``None``.
 
     Returns:
         ``None``. If rank is part of the group, ``scatter_object_output_list``
@@ -2363,7 +2377,9 @@ def scatter_object_list(
         >>>     # Can be any list on non-src ranks, elements are not used.
         >>>     objects = [None, None, None]
         >>> output_list = [None]
-        >>> dist.scatter_object_list(output_list, objects, src=0)
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> dist.scatter_object_list(output_list, objects, src=0, device=device)
         >>> # Rank i gets objects[i]. For example, on rank 2:
         >>> output_list
         [{1: 2}]
@@ -2381,10 +2397,10 @@ def scatter_object_list(
         )
 
     my_rank = get_rank(group)
-    pg_device = _get_pg_device(group)
+    current_device = device or _get_pg_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
-            *[_object_to_tensor(obj, pg_device) for obj in scatter_object_input_list]
+            *[_object_to_tensor(obj, current_device) for obj in scatter_object_input_list]
         )
         tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
 
@@ -2395,11 +2411,11 @@ def scatter_object_list(
         for tensor in tensor_list:
             tensor.resize_(max_tensor_size)
     else:
-        max_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
+        max_tensor_size = torch.tensor([0], dtype=torch.long, device=current_device)
     broadcast(max_tensor_size, src=src, group=group)
 
     # Scatter actual serialized objects
-    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8, device=pg_device)
+    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8, device=current_device)
     scatter(
         output_tensor,
         scatter_list=None if my_rank != src else tensor_list,
@@ -2408,7 +2424,7 @@ def scatter_object_list(
     )
 
     # Scatter per-object sizes to trim tensors when deserializing back to object
-    obj_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
+    obj_tensor_size = torch.tensor([0], dtype=torch.long, device=current_device)
     scatter(
         obj_tensor_size,
         scatter_list=None if my_rank != src else tensor_sizes,
