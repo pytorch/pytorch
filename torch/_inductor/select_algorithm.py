@@ -807,12 +807,14 @@ class AlgorithmSelectorCache(PersistentCache):
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
+            sys.stderr.write(
+                f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
+            )
 
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse} seconds\n")
+        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse:.4f} seconds\n")
 
     @staticmethod
     def benchmark_example_value(node):

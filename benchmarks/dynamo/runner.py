@@ -316,6 +316,17 @@ def parse_args():
         help="Provide the args of torch.backends.xeon.run_cpu. "
         "To look up what optional arguments this launcher offers: python -m torch.backends.xeon.run_cpu --help",
     )
+    parser.add_argument(
+        "--no-cold-start-latency",
+        action="store_true",
+        default=False,
+        help="Do not include --cold-start-latency on inductor benchmarks",
+    )
+    parser.add_argument(
+        "--inductor-compile-mode",
+        default=None,
+        help="torch.compile mode argument for inductor runs.",
+    )
     args = parser.parse_args()
     return args
 
@@ -396,9 +407,13 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
 
-                    if compiler in (
-                        "inductor",
-                        "inductor_no_cudagraphs",
+                    if (
+                        compiler
+                        in (
+                            "inductor",
+                            "inductor_no_cudagraphs",
+                        )
+                        and not args.no_cold_start_latency
                     ):
                         cmd = f"{cmd} --cold-start-latency"
 
@@ -413,6 +428,9 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
 
                     if args.partition_id is not None:
                         cmd = f"{cmd} --partition-id {args.partition_id}"
+
+                    if args.inductor_compile_mode is not None:
+                        cmd = f"{cmd} --inductor-compile-mode {args.inductor_compile_mode}"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])

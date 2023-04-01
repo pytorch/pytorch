@@ -62,7 +62,7 @@ struct C10_API Storage {
 
   template <typename T>
   T* data() const {
-    return storage_impl_->mutable_unsafe_data<T>();
+    return storage_impl_->unsafe_data<T>();
   }
 
   template <typename T>
@@ -93,11 +93,11 @@ struct C10_API Storage {
   // get() use here is to get const-correctness
 
   void* data() const {
-    return storage_impl_->mutable_data();
+    return storage_impl_.get()->data();
   }
 
   at::DataPtr& data_ptr() {
-    return storage_impl_->mutable_data_ptr();
+    return storage_impl_->data_ptr();
   }
 
   const at::DataPtr& data_ptr() const {

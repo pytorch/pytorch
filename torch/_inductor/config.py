@@ -157,6 +157,8 @@ _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
+disable_cpp_codegen = is_fbcode()
+
 
 # config specific to codegen/cpp.pp
 class cpp:

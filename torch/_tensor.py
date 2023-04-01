@@ -100,7 +100,7 @@ class Tensor(torch._C._TensorBase):
                 or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
-                    and self.device.type == "privateuseone"
+                    and self.device.type == torch._C._get_privateuse1_backend_name()
                 )
                 or (type(self) is not Tensor and self.data_ptr() == 0)
             ):
@@ -256,7 +256,8 @@ class Tensor(torch._C._TensorBase):
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
         if self.device.type in ["xla", "ort"] or (
-            not torch._C._has_storage(self) and self.device.type == "privateuseone"
+            not torch._C._has_storage(self)
+            and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,

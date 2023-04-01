@@ -422,9 +422,11 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
+        constraint_inputs = [a.constraint_dims for a in fs]
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
+            constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
         )
         for shape_guard in guards:
@@ -639,7 +641,7 @@ class CheckFunctionManager:
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
-                and "hooks" not in guard.name
+                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
             ):
                 continue
             guard.create(local_builder, global_builder)
