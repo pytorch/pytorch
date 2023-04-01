@@ -559,6 +559,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     graph: Graph,
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config: PrepareCustomConfig,
+    backend_config: Optional[BackendConfig] = None
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -573,7 +574,8 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 node, inner_arg, qconfig, model, named_modules,
                 graph,
                 qhandler,
-                prepare_custom_config)
+                prepare_custom_config,
+                backend_config)
             new_arg_to_return.append(new_inner_arg)
         return type(arg)(new_arg_to_return)
 
@@ -584,6 +586,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     new_arg = arg
 
     is_standalone_module = qhandler is not None and qhandler.is_standalone_module()
+    # TODO: move this to a separate function
     if not is_standalone_module:
         # Note: qconfig can be None in this branch this we are getting act/fq from
         # node.meta now
@@ -695,6 +698,7 @@ def _maybe_insert_input_observers_for_node(
     graph: Graph,
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config: PrepareCustomConfig,
+    backend_config: Optional[BackendConfig] = None
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -707,6 +711,8 @@ def _maybe_insert_input_observers_for_node(
     To
 
       prev_node -> obs -> cur_node
+
+    Note: backend_config only needed for standalone_module node
     """
     if qconfig is None:
         # if quantization is turned off for this node, we do not need
@@ -721,7 +727,8 @@ def _maybe_insert_input_observers_for_node(
         new_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
             node, arg, qconfig, model, named_modules, graph,
             qhandler,
-            prepare_custom_config)
+            prepare_custom_config,
+            backend_config)
         new_args.append(new_arg)
 
     new_kwargs = {}
@@ -729,7 +736,8 @@ def _maybe_insert_input_observers_for_node(
         new_kwarg = _maybe_insert_input_observer_for_arg_or_kwarg(
             node, kwarg, qconfig, model, named_modules, graph,
             qhandler,
-            prepare_custom_config)
+            prepare_custom_config,
+            backend_config)
         new_kwargs[k] = new_kwarg
 
     # assign the new args and kwargs to the node, inplace
@@ -864,8 +872,8 @@ def _maybe_insert_observers_before_graph_output(
                 arg_as_input_target_dtype != torch.float
             )
             if need_obs:
+                assert observer_mod is not None
                 # insert observer
-                observer_mod = qconfig.activation()
                 observer_node = _insert_observer(
                     maybe_node, observer_mod, model, named_modules, graph)
                 return observer_node
@@ -1343,7 +1351,8 @@ def insert_observers_for_model(
                         _maybe_insert_input_observers_for_node(
                             node, qconfig, model, named_modules, model.graph,
                             qhandler,
-                            prepare_custom_config)
+                            prepare_custom_config,
+                            backend_config)
 
                         # insert equalization input observers if needed
                         _maybe_insert_input_equalization_observers_for_node(
