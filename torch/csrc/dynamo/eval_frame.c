@@ -602,6 +602,8 @@ inline static PyObject* eval_custom_code(
   PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
   #if IS_PYTHON_3_11_PLUS
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
+  Py_XINCREF(frame->f_func->func_closure);
+  shadow->f_func->func_closure = frame->f_func->func_closure;
   #else
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
   #endif
