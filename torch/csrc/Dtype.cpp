@@ -58,7 +58,7 @@ PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
   return THPUtils_packString(self->name);
 }
 
-PyObject* THPDtype_to_float(PyObject* self, PyObject* noargs) {
+PyObject* THPDtype_to_real(PyObject* self, PyObject* noargs) {
   if (at::isFloatingType(self->scalar_type)) {
     auto scalar_type = self->scalar_type;
   }
@@ -98,7 +98,7 @@ static struct PyGetSetDef THPDtype_properties[] = {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDtype_methods[] = {
     {"__reduce__", THPDtype_reduce, METH_NOARGS, nullptr},
-    {"to_float", THPDtype_to_float, METH_NOARGS, nullptr},
+    {"to_real", THPDtype_to_real, METH_NOARGS, nullptr},
     {"to_complex", THPDtype_to_complex, METH_NOARGS, nullptr},
     {nullptr} /* Sentinel */
 };
