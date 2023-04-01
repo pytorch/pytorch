@@ -4,6 +4,7 @@ import functools
 import itertools
 import logging
 import math
+import re
 import sys
 from copy import copy, deepcopy
 from pathlib import Path
@@ -2229,10 +2230,12 @@ class CppKernelProxy(CppKernel):
                 for var in index.free_symbols:
                     if "tmp" in var.name:
                         return []
+                    if not re.search(r"^d\d+$", var.name):
+                        continue
                     stride = self.stride_at(var, index)
                     if stride == 1:
                         contig_vars.add(int(var.name[1:]))
-                    elif stride.is_number:
+                    elif all(s.name.startswith("s") for s in stride.free_symbols):
                         non_contig_stride_const.add(int(var.name[1:]))
                     else:
                         non_contig_stride_other.add(int(var.name[1:]))
