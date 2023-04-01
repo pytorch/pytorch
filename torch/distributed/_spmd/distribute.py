@@ -385,6 +385,31 @@ def _rebuild_graph(
                     value_remap[dtn] = gm.graph.node_copy(
                         dtn, lambda n: value_remap[n]
                     )
+                    if all(
+                        [
+                            isinstance(n.target, torch._ops.OpOverload)
+                            and (
+                                n.target._schema.name.startswith(
+                                    "aten::_foreach"
+                                )
+                                or n.target._schema.name.startswith(
+                                    "aten::_fused_adam"
+                                )
+                            )
+                            for n in [dtn, node]
+                        ]
+                    ):
+                        # FIXME(@mrshenli): This is a temporary solution enable
+                        # foreach ops. The problem is that foreach ops returns
+                        # List[Tensor], but make_fx will flatten that before
+                        # passing those tensors to output node, which will
+                        # introduce additional getitem nodes. These redundant
+                        # getitem nodes breaks graph correctness as we cannot do
+                        # getitem(getitem(foreach_out, 0), 0). This temporary
+                        # solution skips getitem nodes in DTensor expanded
+                        # subgraphs.
+                        node.replace_all_uses_with(value_remap[dtn])
+                        break
             # explicitly erase node instead of relying on DCE, as DCE does not
             # remove inplace copy_ correctly.
             gm.graph.erase_node(node)
