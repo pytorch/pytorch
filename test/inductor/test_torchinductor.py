@@ -6949,8 +6949,8 @@ if HAS_CPU and not torch.backends.mps.is_available():
             metrics.reset()
             x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
-            same(fn(x), opt_fn(x))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            self.assertTrue(same(fn(x), opt_fn(x)))
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
         def test_invalid_index_of_empty_tensor(self):
             def fn(a):

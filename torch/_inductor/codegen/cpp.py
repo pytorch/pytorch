@@ -1158,7 +1158,11 @@ class CppVecKernel(CppKernel):
         is_broadcast = expanded_index == new_index
         is_mask = dtype in [torch.bool, torch.uint8]
         tiling_var = self.itervars[self.tiling_idx]
-        non_contiguous = not is_broadcast and stride_at(tiling_var, index) != 1
+        non_contiguous = (
+            not is_broadcast
+            and stride_at(tiling_var, index) != 1
+            or "tmp" in f"{index}"
+        )
         var_expr = (
             f"{var}[{cexpr_index(index)}]"
             if is_broadcast
@@ -1215,7 +1219,8 @@ class CppVecKernel(CppKernel):
         var_expr = f"{var} + {cexpr_index(new_index)}"
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
-        if stride_at(tiling_var, index) != 1:
+        non_contiguous = stride_at(tiling_var, index) != 1 or "tmp" in f"{index}"
+        if non_contiguous:
             var_expr = "tmpbuf"
         if V.graph.get_dtype(name) in [torch.bfloat16]:
             if opt_ctx.is_store_fp32_as_bf16:
@@ -1225,7 +1230,7 @@ class CppVecKernel(CppKernel):
                 line = f"{value}.store({var_expr}, {self.tiling_factor});"
         else:
             line = f"{value}.store({var_expr});"
-        if stride_at(tiling_var, index) != 1:
+        if non_contiguous:
             inner = sympy.symbols(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
                 index, self.tiling_factor, itervar_idx=self.tiling_idx, offset=inner
@@ -1857,7 +1862,6 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def indirect_indexing(index_var):
-                self.disable_vec(f"indirect_indexing: {index_var}")
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
@@ -2122,17 +2126,17 @@ class CppKernelProxy(CppKernel):
                 rw = dependencies.extract_read_writes(node._body, *node._sizes)
                 all_index += [dep.index for dep in itertools.chain(rw.reads, rw.writes)]
             contig_vars = set()
+            contig_vars_list = []
             non_contig_stride_const = set()
             non_contig_stride_other = set()
             for index in all_index:
                 for var in index.free_symbols:
-                    if "tmp" in var.name:
-                        return []
                     if not re.search(r"^d\d+$", var.name):
                         continue
                     stride = stride_at(var, index)
                     if stride == 1:
                         contig_vars.add(int(var.name[1:]))
+                        contig_vars_list.append(int(var.name[1:]))
                     elif all(s.name.startswith("s") for s in stride.free_symbols):
                         non_contig_stride_const.add(int(var.name[1:]))
                     else:
@@ -2151,7 +2155,9 @@ class CppKernelProxy(CppKernel):
                 and contig_vars_sorted[-1] in contig_and_const_stride
             ):
                 return contig_vars_sorted
-            return []
+            return sorted(contig_vars_sorted, key=lambda i: contig_vars_list.count(i))[
+                -1:
+            ]
 
         def select_tiling():
             # TODO(jgong5): support alternative tiling factors and data types
