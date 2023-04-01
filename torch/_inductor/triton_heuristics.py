@@ -189,6 +189,11 @@ class CachingAutotuner(KernelInterface):
                 print(f"{k.config}: {v}")
         return timings
 
+    def is_persistent_reduction(self):
+        fn_name = self.fn.__name__
+        assert any([fn_name.startswith(prefix) for prefix in ["triton_poi_", "triton_red_", "triton_per_"]]), f"name {fn_name}"
+        return fn_name.startswith("triton_per_")
+
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
         Tune one config parameter at a time.
@@ -212,11 +217,12 @@ class CachingAutotuner(KernelInterface):
                 cloned_args.append(arg)
 
         baseline_timing = best_timing = self.bench(launcher, *cloned_args, **kwargs)[0]
-        # TODO should tune YZBLOCK as well.
-        tuning_coordinates = ["XBLOCK", "RBLOCK", "num_warps"]
+        tuning_coordinates = ["XBLOCK", "YBLOCK", "ZBLOCK", "num_warps"]
+        if not self.is_persistent_reduction():
+            tuning_coordinates.append("RBLOCK") 
 
         def get_coord(config, name):
-            if name in ["XBLOCK", "RBLOCK"]:
+            if name in ["XBLOCK", "YBLOCK", "ZBLOCK", "RBLOCK"]:
                 return config.kwargs.get(name, None)
             elif name == "num_warps":
                 return config.num_warps
@@ -224,7 +230,7 @@ class CachingAutotuner(KernelInterface):
                 raise KeyError(f"Unrecognized name {name}")
 
         def set_coord(config, name, value):
-            if name in ["XBLOCK", "RBLOCK"]:
+            if name in ["XBLOCK", "YBLOCK", "ZBLOCK", "RBLOCK"]:
                 config.kwargs[name] = value
             elif name == "num_warps":
                 config.num_warps = value
