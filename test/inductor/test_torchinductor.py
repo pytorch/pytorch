@@ -260,8 +260,11 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
     from torch._inductor.graph import output_code_log
 
     output_code_log.addHandler(ch)
+    prev_level = output_code_log.level
+    output_code_log.setLevel(logging.DEBUG)
     fn(*args, **kwargs)
     s = log_capture_string.getvalue()
+    output_code_log.setLevel(prev_level)
     output_code_log.removeHandler(ch)
     return s
 
@@ -6346,6 +6349,23 @@ if HAS_CPU and not torch.backends.mps.is_available():
                 FileCheck().check_not("void kernel").run(code)
                 self.assertEqual(f_opt(inps[0]), f(inps[0]))
 
+                class Model(torch.nn.Module):
+                    def __init__(
+                        self,
+                    ):
+                        super().__init__()
+
+                    def forward(self, v1: torch.Tensor):
+                        vx = v1.min(dim=1).values
+                        v2 = torch.randn_like(vx)
+                        return v2
+
+                model = Model()
+                x = torch.rand(10, 3, 0)
+                model_f = torch.compile()(model)
+
+                self.assertEqual(model(x), model_f(x))
+
         def test_redundant_to_node_elimination_bf16(self):
             def fn(x, y):
                 res = x + y
@@ -7155,20 +7175,20 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return mod(x)
 
             func_and_kernel_aten = [
-                (fn1, "triton_fused_cos_sin", (torch.randn(8, device="cuda"),)),
-                (fn2, "triton_fused__softmax", (torch.randn(4, 4, device="cuda"),)),
+                (fn1, "triton_poi_fused_cos_sin", (torch.randn(8, device="cuda"),)),
+                (fn2, "triton_poi_fused__softmax", (torch.randn(4, 4, device="cuda"),)),
                 (
                     fn3,
-                    "triton_fused_native_layer_norm_relu",
+                    "triton_poi_fused_native_layer_norm_relu",
                     (torch.randn(4, 4, device="cuda"),),
                 ),
             ]
             func_and_kernel_torch = [
-                (fn1, "triton_fused_cos_sin", (torch.randn(8, device="cuda"),)),
-                (fn2, "triton_fused_softmax", (torch.randn(4, 4, device="cuda"),)),
+                (fn1, "triton_poi_fused_cos_sin", (torch.randn(8, device="cuda"),)),
+                (fn2, "triton_poi_fused_softmax", (torch.randn(4, 4, device="cuda"),)),
                 (
                     fn3,
-                    "triton_fused_LayerNorm_ReLU",
+                    "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device="cuda"),),
                 ),
             ]
