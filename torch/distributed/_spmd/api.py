@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
 from copy import copy
+from dataclasses import dataclass
 from functools import wraps, partial
 from typing import (
     Any,
@@ -153,7 +154,7 @@ def _dtensor_expand(
         if isinstance(a, torch.Tensor):
             inps.append(a)
             schemas.append(shard_schema)
-        elif isinstance(a, nn.Module) or isinstance(a, torch.optim.Optimizer):
+        elif isinstance(a, (nn.Module, torch.optim.Optimizer)):
             # nn.Module or optimizer placeholder is captured by make_fx but
             # never used in the graph
             inps.append(torch.empty(0))
@@ -204,6 +205,9 @@ def _rematerialize_optimizer(
         opt.state.update(orig_states)
 
 
+aten = torch.ops.aten  # pyre-ignore
+
+
 @contextmanager
 def _enable_compile():
     # The return value of torch._utils.is_compiling changes optimizer behavior.
@@ -220,7 +224,179 @@ def _enable_compile():
         torch._utils.is_compiling.__code__ = orig_is_compiling_code
 
 
-def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
+def _foreach_add_decomp(self, other, alpha=1):
+    self_updated = aten._foreach_add.List(self, other, alpha=alpha)
+    for s, s_u in zip(self, self_updated):
+        s.copy_(s_u)
+
+
+def _foreach_unaop_decomp(op, self):
+    self_updated = op(self)
+    for s, s_u in zip(self, self_updated):
+        s.copy_(s_u)
+
+
+def _foreach_binop_list_decomp(op, self, other):
+    self_updated = op(self, other)
+    for s, s_u in zip(self, self_updated):
+        s.copy_(s_u)
+
+
+def _foreach_binop_scalar_decomp(op, self, scalar=1):
+    self_updated = op(self, scalar)
+    for s, s_u in zip(self, self_updated):
+        s.copy_(s_u)
+
+
+def _foreach_addcop_scalar_decomp(op, self, tensor1, tensor2, scalar=1):
+    self_updated = op(self, tensor1, tensor2, scalar)
+    for s, s_u in zip(self, self_updated):
+        s.copy_(s_u)
+
+
+FOREACH_DECOMP_TABLE = {
+    aten._foreach_add_.List: _foreach_add_decomp,
+    aten._foreach_add_.Scalar: partial(
+        _foreach_binop_scalar_decomp, aten._foreach_add.Scalar
+    ),
+    aten._foreach_addcdiv_.Scalar: partial(
+        _foreach_addcop_scalar_decomp, aten._foreach_addcdiv.Scalar
+    ),
+    aten._foreach_addcmul_.Scalar: partial(
+        _foreach_addcop_scalar_decomp, aten._foreach_addcmul.Scalar
+    ),
+    aten._foreach_div_.List: partial(
+        _foreach_binop_list_decomp, aten._foreach_div.List
+    ),
+    aten._foreach_mul_.Scalar: partial(
+        _foreach_binop_scalar_decomp, aten._foreach_mul.Scalar
+    ),
+    aten._foreach_neg_.default: partial(
+        _foreach_unaop_decomp, aten._foreach_neg.default
+    ),
+    aten._foreach_reciprocal_.default: partial(
+        _foreach_unaop_decomp, aten._foreach_reciprocal.default
+    ),
+    aten._foreach_sub_.Scalar: partial(
+        _foreach_binop_scalar_decomp, aten._foreach_sub.Scalar
+    ),
+}
+
+
+@dataclass
+class _CompiledResult:
+    gm: fx.GraphModule
+    mod: nn.Module
+    opt: Optional[torch.optim.Optimizer]
+    named_states: Dict[str, torch.Tensor]
+    params_and_buffers: Dict[str, torch.Tensor]
+
+
+def _compile(
+    func: Callable,
+    module_override: Optional[Dict[Type[Any], Override]],
+    *args: Any,
+    **kwargs: Any,
+) -> _CompiledResult:
+    # 1. Extract nn.Module and Optimizer from args and kwargs
+    # FIXME(@mrshenli): support multiple nn.Module instances
+    # FIXME(@mrshenli): support multiple Optiimzer instances
+    # FIXME(@mrshenli): need to broadcast model to sync parameters
+    mod, opt = None, None
+    for arg in pytree.tree_flatten(list(args) + list(kwargs.values()))[0]:
+        if isinstance(arg, nn.Module):
+            assert mod is None, "Only support single nn.Module for now"
+            mod = arg
+        if isinstance(arg, torch.optim.Optimizer):
+            assert opt is None, "Only support single Optimizer for now"
+            opt = arg
+
+    assert (
+        mod is not None
+    ), "Couldn't find nn.Module instances from the arguments."
+
+    # 2. Override target submodules (e.g., MoE) with dummy replacements
+    if module_override:
+        accessor = NamedMemberAccessor(mod)
+
+        for typ, override in module_override.items():
+            for name, submodule in mod.named_modules():
+                if isinstance(submodule, typ):
+                    accessor.swap_submodule(
+                        name, override.replacement(submodule)
+                    )
+
+    # 3. Trace statelss version of the train_step
+    params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
+    }
+
+    named_states = {}
+    if opt is not None:
+        opt_states, spec = pytree.tree_flatten(dict(opt.state))
+
+        # Pass named_states instead of opt.state to stateless_func, because
+        # the later uses nn.Parameter as key. During tracing, we need to
+        # make sure optimizers can find the states using proxy tensors.
+        for n, p in params_and_buffers.items():
+            if p in opt.state:
+                # opt.state's key type is string, but optimizer uses
+                # Parameter as keys
+                named_states[n] = opt.state[p]  # type: ignore[index]
+
+    # Lift states and parameters as function arguments so that make_fx
+    # can trace operations applied to them.
+    def stateless_func(func, args, kwargs, named_states, params_and_buffers):
+        with stateless._reparametrize_module(
+            cast(nn.Module, mod), params_and_buffers
+        ), _rematerialize_optimizer(
+            opt, named_states, params_and_buffers
+        ) if opt else nullcontext():
+            ret = func(*args, **kwargs)
+            # make sure updated parameters are returned
+            return ret, list(mod.parameters())  # type: ignore[union-attr]
+
+    # FIXME: Using symbolic tracing to work around. Otherwise it hits
+    # shape mismatch error, as we use local inputs to trace local graph
+    # and use DTensor to expand operators, where DTensor's shape is the
+    # global shape.
+    with _enable_compile():
+        # FIXME(@mrshenli): functionalization does not work for our use
+        # case yet. Use explicit decompositions for foreach ops.
+        # Remove this when the following issue is addressed.
+        # Issue: https://github.com/pytorch/pytorch/issues/97852
+        gm = make_fx(
+            partial(stateless_func, func),
+            tracing_mode="symbolic",
+            decomposition_table=FOREACH_DECOMP_TABLE,
+            _allow_non_fake_inputs=False,
+        )(args, kwargs, named_states, params_and_buffers)
+
+    # 4. Use DTensor to insert collectives
+    gm, name_to_spec = _dtensor_expand(
+        gm, args, kwargs, named_states, params_and_buffers
+    )
+
+    # 5. Replace previously inserted dummy ones with real graphs.
+    if module_override:
+        for _, override in module_override.items():
+            gm = override.transform(gm, name_to_spec)
+
+    return _CompiledResult(gm, mod, opt, named_states, params_and_buffers)
+
+
+# Note that the Python convention of __dict__ requires the key to be str.
+# TODO: ensure the key is unique.
+COMPILED_OBJECT_KEY = "_compiled_obj"
+
+
+def compile(
+    module_override: Optional[Dict[Type[Any], Override]] = None,
+    gm_transformation: Optional[
+        Callable[[fx.GraphModule], fx.GraphModule]
+    ] = None,
+):
     r"""
     Compile and optimize a callable, which can be a train step within a training
     loop. This method will extract :class:`nn.Module` and :class:`torch.optim.Optimizer`
@@ -233,101 +409,38 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
             The :class:`Override` objects provide :class:`nn.Module` replacements
             during tracing and a graph transformation function after tracing.
             (Default: ``None``)
+        gm_transformation (Optional[Callable[fx.GraphModule, fx.GraphModule]]):
+            a callback that will be called after the original callable is
+            compiled and distributed (usually after the first iteration) to
+            transform the compiled GraphModule into a new optimized one.
     """
 
     def inner(func: Callable):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # 1. Extract nn.Module and Optimizer from args and kwargs
-            # FIXME(@mrshenli): support multiple nn.Module instances
-            # FIXME(@mrshenli): support multiple Optiimzer instances
-            # FIXME(@mrshenli): need to broadcast model to sync parameters
-            mod, opt = None, None
-            for arg in pytree.tree_flatten(list(args) + list(kwargs.values()))[
-                0
-            ]:
-                if isinstance(arg, nn.Module):
-                    assert mod is None, "Only support single nn.Module for now"
-                    mod = arg
-                if isinstance(arg, torch.optim.Optimizer):
-                    assert opt is None, "Only support single Optimizer for now"
-                    opt = arg
-
-            assert (
-                mod is not None
-            ), "Couldn't find nn.Module instances from the arguments."
-
-            # 2. Override target submodules (e.g., MoE) with dummy replacements
-            if module_override:
-                accessor = NamedMemberAccessor(mod)
-
-                for typ, override in module_override.items():
-                    for name, submodule in mod.named_modules():
-                        if isinstance(submodule, typ):
-                            accessor.swap_submodule(
-                                name, override.replacement(submodule)
-                            )
-
-            # 3. Trace statelss version of the train_step
-            params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
-                **dict(mod.named_parameters(remove_duplicate=False)),
-                **dict(mod.named_buffers(remove_duplicate=False)),
-            }
-
-            named_states = {}
-            if opt is not None:
-                opt_states, spec = pytree.tree_flatten(dict(opt.state))
-
-                # Pass named_states instead of opt.state to stateless_func, because
-                # the later uses nn.Parameter as key. During tracing, we need to
-                # make sure optimizers can find the states using proxy tensors.
-                for n, p in params_and_buffers.items():
-                    if p in opt.state:
-                        # opt.state's key type is string, but optimizer uses
-                        # Parameter as keys
-                        named_states[n] = opt.state[p]  # type: ignore[index]
-
-            # Lift states and parameters as function arguments so that make_fx
-            # can trace operations applied to them.
-            def stateless_func(
-                func, args, kwargs, named_states, params_and_buffers
-            ):
-                with stateless._reparametrize_module(
-                    cast(nn.Module, mod), params_and_buffers
-                ), _rematerialize_optimizer(
-                    opt, named_states, params_and_buffers
-                ) if opt else nullcontext():
-                    ret = func(*args, **kwargs)
-                    # make sure updated parameters are returned
-                    return ret, list(mod.parameters())  # type: ignore[union-attr]
-
-            # FIXME: Using symbolic tracing to work around. Otherwise it hits
-            # shape mismatch error, as we use local inputs to trace local graph
-            # and use DTensor to expand operators, where DTensor's shape is the
-            # global shape.
-            with _enable_compile():
-                # FIXME: functionalize crashes with
-                # "UnsupportedFakeTensorException: meta converter nyi"
-                gm = make_fx(
-                    partial(stateless_func, func),
-                    tracing_mode="symbolic",
-                    _allow_non_fake_inputs=True,
-                )(args, kwargs, named_states, params_and_buffers)
-
-            # 4. Use DTensor to insert collectives
-            gm, name_to_spec = _dtensor_expand(
-                gm, args, kwargs, named_states, params_and_buffers
-            )
-
-            # 5. Replace previously inserted dummy ones with real graphs.
-            if module_override:
-                for _, override in module_override.items():
-                    gm = override.transform(gm, name_to_spec)
+            first_iter = False
+            # Put the COMPILED_OBJECT_KEY in ``wrapper`` instead of ``func`` as
+            # ``wrapper`` is the one that users will get.
+            compiled_obj = wrapper.__dict__.get(COMPILED_OBJECT_KEY, None)
+            if compiled_obj is None:
+                first_iter = True
+                compiled_obj = _compile(func, module_override, *args, **kwargs)
+                wrapper.__dict__[COMPILED_OBJECT_KEY] = compiled_obj
 
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been
                 # captured in the graph.
-                return gm(args, kwargs, named_states, params_and_buffers)[0]
+                output = compiled_obj.gm(
+                    args,
+                    kwargs,
+                    compiled_obj.named_states,
+                    compiled_obj.params_and_buffers,
+                )[0]
+                if first_iter and gm_transformation:
+                    # TODO: SPMD should provid a default and configurable
+                    # transformation.
+                    compiled_obj.gm = gm_transformation(compiled_obj.gm)
+                return output
 
         return wrapper
 
