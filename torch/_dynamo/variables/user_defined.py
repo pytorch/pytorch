@@ -3,7 +3,6 @@ import contextlib
 import functools
 import importlib
 import inspect
-import itertools
 import random
 import types
 from typing import Dict, List
@@ -264,24 +263,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tx.random_calls.append((self.value, args, kwargs))
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
-            )
-        elif (
-            istype(self.value, functools.partial)
-            and is_allowed(self.value.func)
-            and all(
-                variables.ConstantVariable.is_literal(v)
-                for v in itertools.chain(self.value.args, self.value.keywords.values())
-            )
-        ):
-            options = VariableTracker.propagate(self, args, kwargs.values())
-            partial_args = [variables.ConstantVariable(v) for v in self.value.args]
-            partial_args.extend(args)
-            partial_kwargs = {
-                k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
-            }
-            partial_kwargs.update(kwargs)
-            return variables.TorchVariable(self.value.func, **options).call_function(
-                tx, partial_args, partial_kwargs
             )
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
