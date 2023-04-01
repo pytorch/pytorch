@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, 
 from unittest.mock import patch
 
 import torch
+import torch._logging
 from torch._guards import Checkpointable, TracingContext
 
 from . import (
@@ -59,6 +60,7 @@ from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable, EnumVariable
+from .variables.ctx_manager import ContextWrappingVariable, WithExitFunctionVariable
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
@@ -75,12 +77,10 @@ from .variables.lists import (
 )
 from .variables.misc import (
     ClosureVariable,
-    ContextWrappingVariable,
     GetAttrVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
-    WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
@@ -329,7 +329,12 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         else:
-            unimplemented(f"generic_jump {typestr(value)}")
+            # TODO link the torch.cond doc later
+            raise exc.UserError(
+                exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
+                "Dynamic control flow is not supported at the moment. Please use "
+                "functorch.experimental.control_flow.cond to explicitly capture the control flow",
+            )
 
     return inner
 
@@ -676,7 +681,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(ClosureVariable(name=inst.argval))
 
     def LOAD_CONST(self, inst):
-        if inst.argval == ():
+        # For empty tuples, create empty TupleVariable
+        if isinstance(inst.argval, tuple) and not inst.argval:
             self.push(TupleVariable([]))
         else:
             self.push(ConstantVariable(value=inst.argval))
@@ -2032,7 +2038,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented(f"inline {code.co_name}")
 
         suffix = ""
-        if config.output_code:
+        # TODO: mlazos, add support for enabling multiple artifact logs
+        # with a single alias
+        if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
         log.debug(f"INLINING {code}{suffix}")
 
