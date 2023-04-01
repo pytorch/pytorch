@@ -1075,6 +1075,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertTrue(same(opt_fn(mod, x), fn(mod, x)))
 
+    def test_constant_getattr(self):
+        # https://github.com/pytorch/pytorch/issues/97480
+        def fn():
+            return getattr(None, 'arg', 3)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        optimized_fn = torch._dynamo.optimize(cnt)(fn)
+        res = optimized_fn()
+        self.assertTrue(same(res, 3))
+
     def test_user_property(self):
         class MyConfig:
             @property
