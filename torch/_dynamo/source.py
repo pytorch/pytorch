@@ -271,7 +271,7 @@ class GetItemSource(Source):
             return f"{self.base.name()}[{self.index.name()}]"
         else:
             if isinstance(self.index, enum.Enum):
-                return f"{self.base.name()}[{enum_repr(self.index)}]"
+                return f"{self.base.name()}[{enum_repr(self.index, self.base.guard_source())}]"
             else:
                 return f"{self.base.name()}[{self.index!r}]"
 

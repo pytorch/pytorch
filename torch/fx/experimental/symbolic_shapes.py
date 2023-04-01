@@ -1621,12 +1621,12 @@ class ShapeEnv:
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
-        from torch._dynamo.source import GlobalSource
+        from torch._dynamo.source import LocalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
+        guards = self.produce_guards(placeholders, [LocalSource(a) for a in arg_names])
         if guards:
             code = " and ".join(guards)
-            return eval(code, SYMPY_INTERP, {"G": dict(zip(arg_names, args))})
+            return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
         return True
 
     def bind_symbols(self, placeholders, args):

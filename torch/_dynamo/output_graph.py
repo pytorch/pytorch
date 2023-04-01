@@ -535,6 +535,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if stack_values:
             val_to_names[stack_values[-1]] = list()
         for k, v in tx.symbolic_locals.items():
+            # Note! this explicitly uses .local_name for matching
+            # Failure to do so will cause spurious registrations in val_to_names.
+            # This will in turn result in spurious variables showing up in the graph.
+            # This was very tricky to debug. For an example, dump the graph at call_user_compiler
+            # while running test_subgraphs.py
             if isinstance(v.source, LocalSource) and v.source.local_name == k:
                 continue  # no need to restore initial state
             if v not in val_to_names:

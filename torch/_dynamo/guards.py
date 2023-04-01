@@ -363,7 +363,7 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         param_key_ids = set(dict_param_key_ids(value))
         const_keys = set(dict_const_keys(value))
-        const_keys_repr = dict_const_keys_repr(const_keys)
+        const_keys_repr = dict_const_keys_repr(const_keys, guard.source)
         if param_key_ids:
             code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
             code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
@@ -655,6 +655,7 @@ class CheckFunctionManager:
     def compile_check_fn(
         self, local_builder, global_builder, guards_out, guard_fail_fn
     ):
+        assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
         largs += [a for a in local_builder.argnames if a != "___implicit0"]
@@ -725,7 +726,7 @@ class CheckFunctionManager:
         )
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
-def ___make_guard_fn(G, {','.join(closure_vars.keys())}):
+def ___make_guard_fn({','.join(closure_vars.keys())}):
     return lambda L: {code}
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
@@ -733,9 +734,7 @@ def ___make_guard_fn(G, {','.join(closure_vars.keys())}):
         set_guard_fail_hook(guard_fail_hook)
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
-        guard_fn = out["___make_guard_fn"](
-            global_builder.scope["G"], *closure_vars.values()
-        )
+        guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
