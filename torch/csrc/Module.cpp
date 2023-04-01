@@ -188,7 +188,7 @@ static PyObject* THPModule_crashIfCsrcUBSAN(PyObject* module, PyObject* arg) {
 }
 
 static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
-  // This code shoud work perfectly fine, as vtables are idential for Foo and
+  // This code should work perfectly fine, as vtables are identical for Foo and
   // Baz unless rtti and ubsan are enabled
   struct Foo {
     virtual int bar() = 0;
