@@ -25,7 +25,7 @@ _ENABLE_FALLBACK = False
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
-    if isinstance(res, torch.Tensor):
+    def to_dt(res, spec):
         assert spec is not None and isinstance(
             spec, DTensorSpec
         ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
@@ -39,6 +39,9 @@ def wrap(res: object, spec: OutputSpecType) -> object:
             requires_grad=res.requires_grad,
             stride=spec.tensor_meta.stride,
         )
+
+    if isinstance(res, torch.Tensor):
+        return to_dt(res, spec)
     elif isinstance(res, (list, tuple)):
         assert spec is not None and isinstance(
             spec, (list, tuple)
@@ -48,21 +51,15 @@ def wrap(res: object, spec: OutputSpecType) -> object:
             # NOTE: local results might return Optional Tensor from ATen op, so we need
             # to handle that case and make sure we don't wrap None with DTensor.
             # (i.e. native_layer_norm.backward)
-            if e is not None and s is not None:
-                assert s.tensor_meta is not None
-                res_dt = dtensor.DTensor(
-                    e,
-                    s.mesh,
-                    s.placements,
-                    shape=s.tensor_meta.shape,
-                    dtype=s.tensor_meta.dtype,
-                    requires_grad=s.tensor_meta.requires_grad,
-                    stride=s.tensor_meta.stride,
+            if isinstance(e, (list, tuple)) and isinstance(s, (list, tuple)):
+                res_list.append(
+                    type(e)([to_dt(ee, ss) for ee, ss in zip(e, s)])
                 )
+            elif e is not None and s is not None:
+                res_list.append(to_dt(e, s))
             else:
-                res_dt = None
+                res_list.append(None)  # type: ignore[arg-type]
 
-            res_list.append(res_dt)
         return tuple(res_list) if isinstance(res, tuple) else res_list
     else:
         # if the res contains only non tensor values, we simply return it without rewrapping
