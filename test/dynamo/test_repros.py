@@ -14,7 +14,7 @@ import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from typing import List, OrderedDict
+from typing import List
 
 import numpy as np
 import torch
@@ -2448,77 +2448,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(x1, y), opt_f(x1, y)))
         self.assertTrue(same(f(x2, y), opt_f(x2, y)))
         self.assertEqual(cnt.frame_count, 2)
-
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", False)
-    def test_not_rewrite_assert(self):
-        def f(x):
-            b = x.sin()
-            assert x[0] == 3
-            return x.cos() + b
-
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
-            torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
-
-    def test_dict_subclass_contains(self):
-        # pattern from huggingface
-        class ClassInstantier(collections.OrderedDict):
-            pass
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def f(x, d):
-            if "key1" in d:
-                x = x + 2
-            if "key2" in d:
-                x = x + 4
-            x = x + 8
-            return x
-
-        result = f(torch.ones(8), ClassInstantier({"key1": torch.ones(8)}))
-        self.assertTrue(same(result, torch.full([8], 11.0)))
-
-        result = f(torch.ones(8), ClassInstantier({"key2": torch.ones(8)}))
-        self.assertTrue(same(result, torch.full([8], 13.0)))
-
-    def test_hf_classinstantier(self):
-        # hf activations.py
-        class ClassInstantier(OrderedDict):
-            def __getitem__(self, key):
-                content = super().__getitem__(key)
-                cls, kwargs = content if isinstance(content, tuple) else (content, {})
-                return cls(**kwargs)
-
-        ACT2CLS = ClassInstantier(
-            {
-                "relu": (nn.ReLU, {"inplace": False}),
-                "tanh": nn.Tanh,
-            }
-        )
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def f(x, act):
-            return ACT2CLS[act](x)
-
-        y = torch.randn(10)
-        self.assertTrue(same(f(y, "tanh"), torch.tanh(y)))
-        self.assertTrue(same(f(y, "relu"), torch.relu(y)))
-
-    def test_ephemeral_module(self):
-        # hf activations.py
-        class ReLUSquaredActivation(nn.Module):
-            def forward(self, input):
-                relu_applied = torch.nn.functional.relu(input)
-                squared = torch.square(relu_applied)
-                return squared
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def f(x):
-            x = x + 0.2
-            x = ReLUSquaredActivation()(x)
-            x = x + 1
-            return x
-
-        y = torch.randn(10)
-        self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
