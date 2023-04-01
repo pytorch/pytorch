@@ -480,4 +480,4 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen(self.code)
         if sys.version_info < (3, 11):
             codegen(self.fn_name)
-        return [create_instruction("MAKE_FUNCTION", flags)]
+        return [create_instruction("MAKE_FUNCTION", arg=flags)]
