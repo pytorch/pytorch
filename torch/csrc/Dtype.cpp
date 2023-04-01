@@ -1,7 +1,7 @@
 #include <torch/csrc/Dtype.h>
 
-#include <structmember.h>
 #include <c10/core/ScalarType.h>
+#include <structmember.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -58,27 +58,25 @@ PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
   return THPUtils_packString(self->name);
 }
 
-PyObject* THPDtype_to_real(PyObject* self, PyObject* noargs) {
+PyObject* THPDtype_to_real(THPDtype* self, PyObject* noargs) {
   if (at::isFloatingType(self->scalar_type)) {
     auto scalar_type = self->scalar_type;
-  }
-  else {
-    auto scalar_type = toRealValueType(self->scalar_type);
+  } else {
+    auto scalar_type = (at::toRealValueType(self->scalar_type));
   }
   std::string primary_name, legacy_name;
-  std::tie(primary_name, legacy_name) = getDtypeNames(scalar_type);
+  std::tie(primary_name, legacy_name) = (at::getDtypeNames(scalar_type));
   return THPDtype_New(scalar_type, primary_name);
 }
 
-PyObject* THPDtype_to_complex(PyObject* self, PyObject* noargs) {
+PyObject* THPDtype_to_complex(THPDtype* self, PyObject* noargs) {
   if (at::isComplexType(self->scalar_type)) {
     auto scalar_type = self->scalar_type;
-  }
-  else {
-    auto scalar_type = toComplexType(self->scalar_type);
+  } else {
+    auto scalar_type = (at::toComplexType(self->scalar_type));
   }
   std::string primary_name, legacy_name;
-  std::tie(primary_name, legacy_name) = getDtypeNames(scalar_type);
+  std::tie(primary_name, legacy_name) = (at::getDtypeNames(scalar_type));
   return THPDtype_New(scalar_type, primary_name);
 }
 
