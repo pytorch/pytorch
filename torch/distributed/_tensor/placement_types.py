@@ -47,7 +47,7 @@ class Shard(Placement):
         # it might be slow compared to even size collective, we need to pad tensor
         # before really calling the collective, and unpad/narrow it afterwards
         # TODO: consider if we should remove this logic once ProcessGroupGloo
-        # support uneven list, and collective perfomance on par
+        # support uneven list, and collective performance on par
         assert (
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
@@ -63,7 +63,7 @@ class Shard(Placement):
             for i, shard in enumerate(tensor_list):
                 if with_padding and idx_start_to_pad != 0 and i >= idx_start_to_pad:
                     shard = self._pad_tensor(shard)
-                # input tensors are expected to be congtiguous by the collective backend
+                # input tensors are expected to be contiguous by the collective backend
                 shard = shard.contiguous() if contiguous else shard
                 shard_list.append(shard)
             return shard_list, idx_start_to_pad
