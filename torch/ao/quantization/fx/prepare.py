@@ -860,8 +860,8 @@ def _maybe_insert_observers_before_graph_output(
                 arg_as_input_target_dtype != torch.float
             )
             if need_obs:
+                assert observer_mod is not None
                 # insert observer
-                observer_mod = qconfig.activation()
                 observer_node = _insert_observer(
                     maybe_node, observer_mod, model, named_modules, graph)
                 return observer_node
