@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa
 import collections
+import contextlib
 import functools
 import inspect
 import itertools
@@ -484,6 +485,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + 10
         if a.dtype == torch.float32:
             return a - b * 32
+
+    @make_test
+    def test_tuple_iadd(x):
+        my_tuple = () if isinstance(x, torch.Tensor) else None
+        x = x + 1
+        my_tuple += (x, torch.sin(x))
+        return my_tuple[-1]
 
     @make_test
     def test_build_list_unpack(a, b):
