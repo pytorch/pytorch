@@ -1,7 +1,6 @@
 import collections
 import functools
 import inspect
-import itertools
 import sys
 import types
 from typing import Dict, List
@@ -437,18 +436,6 @@ class SkipFilesVariable(VariableTracker):
             )
             return self.fold_through_function_to_wrapper().get(self.value)(
                 value, mutable_local=MutableLocal(), **options
-            )
-        elif (
-            self.value is itertools.product
-            and not kwargs
-            and all(arg.has_unpack_var_sequence(tx) for arg in args)
-        ):
-            seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = []
-            for item in itertools.product(*seqs):
-                items.append(variables.TupleVariable(list(item), **options))
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
             )
         else:
             try:
