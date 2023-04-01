@@ -2078,6 +2078,8 @@ class CppKernelProxy(CppKernel):
             nodes, key=lambda x: int(x.is_reduction())
         ).group
 
+        self.set_ranges(group, reduction_group)
+
         def codegen_kernel(cls, *args):
             with kernel_group.new_kernel(cls, *args) as kernel:
                 run(kernel)
@@ -2109,8 +2111,6 @@ class CppKernelProxy(CppKernel):
                         node.run(vars, ())
 
         scalar_kernel = codegen_kernel(CppKernel)
-        inner_most_idx = len(scalar_kernel.itervars) - 1
-        self.set_ranges(group, reduction_group)
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
         if not self.picked_vec_isa:
@@ -2197,7 +2197,7 @@ class CppKernelProxy(CppKernel):
                 tail_loop.simd_nelements = tiling_factors[0] // 2
             elif len(tiling_indices) == 2:
                 assert (
-                    tiling_indices[1] == inner_most_idx
+                    tiling_indices[1] == len(self.itervars) - 1
                     and tiling_factors[0] == tiling_factors[1]
                 )
                 outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
