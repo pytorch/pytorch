@@ -254,10 +254,43 @@ def _foreach_addcop_scalar_decomp(op, self, tensor1, tensor2, scalar=1):
         s.copy_(s_u)
 
 
-def _fused_adam_decomp(self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, *, lr=1, beta1=1, beta2=1, weight_decay=1, eps=1, amsgrad=True, maximize=True, grad_scale=None, found_inf=None):
-    #self_updated, grads_updated, exp_avgs_updated, exp_avg_sqs_updated, max_exp_avg_sqs_out = aten._fused_adam.default(self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf)
+def _fused_adam_decomp(
+    self,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    max_exp_avg_sqs,
+    state_steps,
+    *,
+    lr=1,
+    beta1=1,
+    beta2=1,
+    weight_decay=1,
+    eps=1,
+    amsgrad=True,
+    maximize=True,
+    grad_scale=None,
+    found_inf=None,
+):
+    # self_updated, grads_updated, exp_avgs_updated, exp_avg_sqs_updated, max_exp_avg_sqs_out = aten._fused_adam.default(self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf)
     orig_tuple = (self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs)
-    updated_tuple = aten._fused_adam.default(self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr=lr, beta1=beta1, beta2=beta2, weight_decay=weight_decay, eps=eps, amsgrad=amsgrad, maximize=maximize, grad_scale=grad_scale, found_inf=found_inf)
+    updated_tuple = aten._fused_adam.default(
+        self,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        state_steps,
+        lr=lr,
+        beta1=beta1,
+        beta2=beta2,
+        weight_decay=weight_decay,
+        eps=eps,
+        amsgrad=amsgrad,
+        maximize=maximize,
+        grad_scale=grad_scale,
+        found_inf=found_inf,
+    )
 
     for orig, updated in zip(orig_tuple, updated_tuple):
         for o, u in zip(orig, updated):
