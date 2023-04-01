@@ -4,11 +4,7 @@ from typing import List, Optional, Sequence, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
-from torch._decomp import (
-    _add_op_to_registry,
-    global_decomposition_table,
-    meta_table,
-)
+from torch._decomp import _add_op_to_registry, global_decomposition_table, meta_table
 from torch._ops import OpOverload
 from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
@@ -22,11 +18,7 @@ from torch._prims_common import (
     TensorLike,
 )
 
-from torch._prims_common.wrappers import (
-    _maybe_resize_out,
-    _safe_copy_out,
-    out_wrapper,
-)
+from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch._refs import _broadcast_shapes
 
 from torch.utils._pytree import tree_map
@@ -216,7 +208,9 @@ def meta_angle_out(self, out):
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def squareCheckInputs(self: Tensor, f_name: str):
-    assert self.dim() >= 2, f"{f_name}: The input tensor must have at least 2 dimensions."
+    assert (
+        self.dim() >= 2
+    ), f"{f_name}: The input tensor must have at least 2 dimensions."
     assert self.size(-1) == self.size(
         -2
     ), f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
@@ -2068,7 +2062,9 @@ def zeros_like(
         )
 
         if self.is_sparse:
-            res.sparse_resize_and_clear_(self.size(), self.sparse_dim(), self.dense_dim())
+            res.sparse_resize_and_clear_(
+                self.size(), self.sparse_dim(), self.dense_dim()
+            )
         else:
             res.sparse_resize_and_clear_(self.size(), self.dim(), 0)
 
@@ -2623,7 +2619,9 @@ def upsample_nearest2d_backward(
     scales_h: float = None,
     scales_w: float = None,
 ):
-    full_output_size = upsample_common_check(input_size, output_size, num_spatial_dims=2)
+    full_output_size = upsample_common_check(
+        input_size, output_size, num_spatial_dims=2
+    )
     check(
         grad_output.ndim == 4,
         lambda: f"Expected grad_output to be a tensor of dimension 4 but got: dimension {grad_output.ndim}",

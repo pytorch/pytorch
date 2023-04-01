@@ -272,7 +272,6 @@ def _fused_adam_decomp(
     grad_scale=None,
     found_inf=None,
 ):
-    # self_updated, grads_updated, exp_avgs_updated, exp_avg_sqs_updated, max_exp_avg_sqs_out = aten._fused_adam.default(self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf)
     orig_tuple = (self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs)
     updated_tuple = aten._fused_adam.default(
         self,

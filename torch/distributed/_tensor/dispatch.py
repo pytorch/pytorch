@@ -58,7 +58,7 @@ def wrap(res: object, spec: OutputSpecType) -> object:
             elif e is not None and s is not None:
                 res_list.append(to_dt(e, s))
             else:
-                res_list.append(None)
+                res_list.append(None)  # type: ignore[arg-type]
 
         return tuple(res_list) if isinstance(res, tuple) else res_list
     else:
