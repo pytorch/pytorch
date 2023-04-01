@@ -29,8 +29,8 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import VariableTracker
+from .ctx_manager import AutocastModeVariable, NullContextVariable
 from .lists import ListVariable, TupleVariable
-from .misc import AutocastModeVariable, NullContextVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)

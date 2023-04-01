@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 import torch
 
@@ -145,6 +145,49 @@ def _prop__foreach_pow_scalar_and_tensor(op_schema: OpSchema):
         [isinstance(s, DTensorSpec) for s in exponent]
     )
     return OutputSharding(output_spec=exponent)
+
+
+@register_prop_rule([aten._fused_adam.default])  # pyre-ignore
+def _prop__fused_adam(op_schema: OpSchema):
+    NT = 5
+    tesnor_list_args: Tuple[List[DTensorSpec]] = op_schema.args_schema[:NT]  # type: ignore[assignment]
+
+    assert all([isinstance(schema, list) for schema in tesnor_list_args])
+    assert all(
+        [
+            isinstance(s, DTensorSpec)
+            for schema in tesnor_list_args
+            for s in schema
+        ]
+    )
+
+    tensor_schemas: Tuple[List[DTensorSpec]] = [  # type: ignore[assignment]
+        schema for schema in tesnor_list_args if len(schema)
+    ]
+
+    assert all([len(s) == len(tensor_schemas[0]) for s in tensor_schemas]), (
+        "expect the same number of gradients and states, but got "
+        f"{[len(s) for s in tensor_schemas]}."
+    )
+
+    if any([any([t != ts[0] for t in ts]) for ts in zip(*tensor_schemas)]):
+        new_schemas: Tuple[List[DTensorSpec]] = tuple(  # type: ignore[assignment]
+            op_schema.args_schema[0] if len(s) else s for s in tesnor_list_args
+        )
+        return OutputSharding(
+            output_spec=None,
+            schema_suggestions=[
+                OpSchema(
+                    func_schema=op_schema.func_schema,
+                    args_schema=new_schemas + op_schema.args_schema[NT:],
+                    kwargs_schema=op_schema.kwargs_schema,
+                    is_inplace=op_schema.is_inplace,
+                    is_out_variant=op_schema.is_out_variant,
+                )
+            ],
+        )
+    else:
+        return OutputSharding(output_spec=(op_schema.args_schema[0],) * NT)  # type: ignore[arg-type]
 
 
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
