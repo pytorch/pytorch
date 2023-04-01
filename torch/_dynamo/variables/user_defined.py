@@ -3,7 +3,6 @@ import contextlib
 import functools
 import importlib
 import inspect
-import itertools
 import random
 import types
 from typing import Dict, List
@@ -216,6 +215,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (
+                method is collections.OrderedDict.__contains__
+                and len(args) == 1
+                and isinstance(args[0], ConstantVariable)
+                and inspect.getattr_static(type(self.value), "keys")
+                is collections.OrderedDict.keys
+            ):
+                assert not kwargs
+                return ConstantVariable(
+                    args[0].as_python_constant() in self.value, **options
+                ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+
+            if (
                 method is collections.OrderedDict.items
                 and isinstance(self.value, collections.OrderedDict)
                 and self.source
@@ -278,24 +289,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tx.random_calls.append((self.value, args, kwargs))
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
-            )
-        elif (
-            istype(self.value, functools.partial)
-            and is_allowed(self.value.func)
-            and all(
-                variables.ConstantVariable.is_literal(v)
-                for v in itertools.chain(self.value.args, self.value.keywords.values())
-            )
-        ):
-            options = VariableTracker.propagate(self, args, kwargs.values())
-            partial_args = [variables.ConstantVariable(v) for v in self.value.args]
-            partial_args.extend(args)
-            partial_kwargs = {
-                k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
-            }
-            partial_kwargs.update(kwargs)
-            return variables.TorchVariable(self.value.func, **options).call_function(
-                tx, partial_args, partial_kwargs
             )
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
