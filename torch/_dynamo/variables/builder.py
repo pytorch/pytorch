@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -84,6 +85,7 @@ from .misc import (
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
+    NullContextVariable,
     NumpyVariable,
     PythonModuleVariable,
     SkipFilesVariable,
@@ -521,6 +523,14 @@ class VariableBuilder:
             return UserMethodVariable(
                 value.__func__,
                 self_obj,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif (
+            istype(value, contextlib.nullcontext)
+            and inspect.getattr_static(value, "enter_result", None) is None
+        ):
+            return NullContextVariable(
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
