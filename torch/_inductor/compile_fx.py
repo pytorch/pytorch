@@ -49,6 +49,15 @@ class BoxedBool:
         return False
 
 
+@dataclasses.dataclass
+class BoxedDeviceIndex:
+    value: Optional[int]
+
+    def set(self, device_idx):
+        assert device_idx is None or isinstance(device_idx, int)
+        self.value = device_idx
+
+
 # copy_ fails when trying to write to tensors with memory overlap,
 # for expanded dimensions (a dimension which used to have size 1 -> ?)
 # we can select one element from that dimension and write to it
@@ -141,6 +150,7 @@ def compile_fx_inner(
     graph_id=None,
     aot_mode=False,
     is_inference=False,
+    boxed_forward_device_index=None,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -204,8 +214,8 @@ def compile_fx_inner(
             for arg in output.args[0]
         ]
 
-        complex_memory_overlap_inputs = any(
-            complex_memory_overlap(t) for t in example_inputs
+        complex_memory_overlap_inputs = (
+            any(complex_memory_overlap(t) for t in example_inputs)
         )
 
         if (
@@ -215,6 +225,13 @@ def compile_fx_inner(
             and not complex_memory_overlap_inputs
             and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
+            if (
+                boxed_forward_device_index is not None
+                and not is_inference
+                and not is_backward
+            ):
+                boxed_forward_device_index.set(next(iter(graph.device_idxs)))
+
             compiled_fn = cudagraphify(
                 compiled_fn,
                 example_inputs,
@@ -225,8 +242,23 @@ def compile_fx_inner(
                 is_inference=is_inference,
             )
         else:
-
             BoxedBool.disable(cudagraphs)
+
+            # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+            # know we are we running the backward even if we will not run it in cudagraphs
+            if is_backward:
+                assert boxed_forward_device_index.value is not None
+                compiled_fn_inner = compiled_fn
+
+                manager = torch._inductor.cudagraph_trees.get_manager(
+                    boxed_forward_device_index.value, create_if_none_exists=False
+                )
+                # should already exist from forward
+                assert manager is not None
+
+                def compiled_fn(new_inputs):
+                    manager.set_to_running_backward()
+                    return compiled_fn_inner(new_inputs)
 
             if len(set(graph.device_types)) > 1:
                 developer_warning("skipping cudagraphs due to multiple devices")
@@ -531,6 +563,8 @@ def compile_fx(
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes
     )
+    forward_device = BoxedDeviceIndex(None)
+
     graph_id = next(_graph_counter)
 
     @dynamo_utils.dynamo_timed
@@ -547,6 +581,7 @@ def compile_fx(
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             is_inference=is_inference,
+            boxed_forward_device_index=forward_device,
         )
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
@@ -568,6 +603,7 @@ def compile_fx(
                 cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=graph_id,
+                boxed_forward_device_index=forward_device,
             )
 
     with overrides.patch_functions():
