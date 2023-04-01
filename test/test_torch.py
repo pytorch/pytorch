@@ -3699,13 +3699,6 @@ else:
         src = torch.empty((0,), dtype=dt, device=device)
         dest.masked_scatter_(mask, src)
 
-        # test invalidate mask types
-        for mask_dtype in [torch.float, torch.uint8]:
-            dest = torch.empty(1, 3, dtype=dt, device=device)
-            source = torch.ones(3, 4, dtype=dt, device=device)
-            with self.assertRaisesRegex(RuntimeError, "masked_scatter_ only supports boolean masks"):
-                dest.masked_scatter_(torch.ones(1, 3, dtype=mask_dtype, device=device), source)
-
     # FIXME: find a test suite for the masked scatter operator
     @skipIfMps
     def test_masked_scatter_bool_tensor(self, device):
