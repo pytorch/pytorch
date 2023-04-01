@@ -923,6 +923,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         tos = self.pop()
         assert tos is None
 
+    def POP_FINALLY(self, inst):
+        preserve_tos = inst.argval
+        if preserve_tos:
+            tos = self.pop()
+        assert self.pop() is None
+        if preserve_tos:
+            self.push(tos)
+
     def FOR_ITER(self, inst):
         it = self.pop()
         if isinstance(it, ListIteratorVariable):

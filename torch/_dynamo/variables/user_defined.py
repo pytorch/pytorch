@@ -302,6 +302,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
+        elif istype(self.value, types.MethodType):
+            func = self.value.__func__
+            obj = self.value.__self__
+            if (
+                func is torch.utils._contextlib._DecoratorContextManager.clone
+                and is_allowed(obj.__class__)
+                and not (args or kwargs)
+            ):
+                return variables.TorchVariable(obj.__class__).call_function(
+                    tx, args, kwargs
+                )
 
         return super().call_function(tx, args, kwargs)
 
