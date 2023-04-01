@@ -3090,11 +3090,11 @@ void quantized_groupnorm_nhwc_kernel(
       // To avoid thread conflict, we use a temp buffer of {T, Bs, 2*C}
       int num_threads = at::get_num_threads();
       Tensor buffer = at::empty({num_threads, Bs, 2 * C}, X.options().dtype(at::kFloat)).zero_();
-      float* buffer_data = buffer.data_ptr<float>();
+      float* buffer_data = buffer.mutable_data_ptr<float>();
       Tensor mean = at::empty(M, X.options().dtype(at::kFloat));
-      float* mean_data = mean.data_ptr<float>();
+      float* mean_data = mean.mutable_data_ptr<float>();
       Tensor rstd = at::empty(M, X.options().dtype(at::kFloat));
-      float* rstd_data = rstd.data_ptr<float>();
+      float* rstd_data = rstd.mutable_data_ptr<float>();
 
       // Step 1: Accumulate on C dimension
       at::parallel_for(0, Bs * HxW, 1, [&](int64_t begin, int64_t end) {
