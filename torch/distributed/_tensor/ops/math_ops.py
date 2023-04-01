@@ -92,10 +92,11 @@ def mean_rule(op_schema: OpSchema) -> OutputSharding:
         op_schema, dims=dims, keep_dim=keep_dim, reduction_linear=True
     )
     if output_sharding.output_spec is not None:
+        assert isinstance(output_sharding.output_spec, DTensorSpec)
         for placement in output_sharding.output_spec.placements:
             if placement.is_partial():
                 partial_placement = cast(_Partial, placement)
-                partial_placement.reduce_op = c10d.ReduceOp.AVG
+                partial_placement.reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
 
     return output_sharding
 
