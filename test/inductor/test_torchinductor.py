@@ -7175,20 +7175,20 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return mod(x)
 
             func_and_kernel_aten = [
-                (fn1, "triton_fused_cos_sin", (torch.randn(8, device="cuda"),)),
-                (fn2, "triton_fused__softmax", (torch.randn(4, 4, device="cuda"),)),
+                (fn1, "triton_poi_fused_cos_sin", (torch.randn(8, device="cuda"),)),
+                (fn2, "triton_poi_fused__softmax", (torch.randn(4, 4, device="cuda"),)),
                 (
                     fn3,
-                    "triton_fused_native_layer_norm_relu",
+                    "triton_poi_fused_native_layer_norm_relu",
                     (torch.randn(4, 4, device="cuda"),),
                 ),
             ]
             func_and_kernel_torch = [
-                (fn1, "triton_fused_cos_sin", (torch.randn(8, device="cuda"),)),
-                (fn2, "triton_fused_softmax", (torch.randn(4, 4, device="cuda"),)),
+                (fn1, "triton_poi_fused_cos_sin", (torch.randn(8, device="cuda"),)),
+                (fn2, "triton_poi_fused_softmax", (torch.randn(4, 4, device="cuda"),)),
                 (
                     fn3,
-                    "triton_fused_LayerNorm_ReLU",
+                    "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device="cuda"),),
                 ),
             ]
