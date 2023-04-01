@@ -60,11 +60,6 @@ class LocalSource(Source):
 
 
 @dataclasses.dataclass
-class LocalInputSource(LocalSource):
-    pos: int
-
-
-@dataclasses.dataclass
 class RandomValueSource(Source):
     random_call_index: int
 
@@ -271,7 +266,7 @@ class GetItemSource(Source):
             return f"{self.base.name()}[{self.index.name()}]"
         else:
             if isinstance(self.index, enum.Enum):
-                return f"{self.base.name()}[{enum_repr(self.index, self.base.guard_source())}]"
+                return f"{self.base.name()}[{enum_repr(self.index)}]"
             else:
                 return f"{self.base.name()}[{self.index!r}]"
 

@@ -363,7 +363,7 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         param_key_ids = set(dict_param_key_ids(value))
         const_keys = set(dict_const_keys(value))
-        const_keys_repr = dict_const_keys_repr(const_keys, guard.source)
+        const_keys_repr = dict_const_keys_repr(const_keys)
         if param_key_ids:
             code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
             code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
@@ -657,8 +657,7 @@ class CheckFunctionManager:
     ):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
-        largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
-        largs += [a for a in local_builder.argnames if a != "___implicit0"]
+        largs = local_builder.argnames
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
 
@@ -740,7 +739,8 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
-        guard_fn.global_scope = global_builder.scope
+        # Grab only G, but preserve "G" because guards access it as "G"
+        guard_fn.global_scope = {"G": global_builder.scope["G"]}
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 

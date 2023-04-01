@@ -769,7 +769,7 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
-def enum_repr(value, guard_source):
+def enum_repr(value):
     # Workaround repr(Enum) returning invalid global reference before python 3.11
     # https://peps.python.org/pep-0663/
     if sys.version_info < (3, 11):
@@ -778,8 +778,7 @@ def enum_repr(value, guard_source):
         enum_name = repr(value)
 
     name, val = enum_name.split(".")
-    prefix = "L" if guard_source.is_local() else "G"
-    local_name = f'{prefix}["{name}"].{val}'
+    local_name = f'L["{name}"].{val}'
     return local_name
 
 
@@ -791,11 +790,11 @@ def dict_const_keys(value):
     return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
-def dict_const_keys_repr(const_keys, guard_source):
+def dict_const_keys_repr(const_keys):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{ {enum_repr(k, guard_source) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
+        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:

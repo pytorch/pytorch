@@ -51,7 +51,6 @@ from .source import (
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
-    LocalInputSource,
     LocalSource,
 )
 from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
@@ -1800,7 +1799,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 k,
                 VariableBuilder(
                     self,
-                    LocalInputSource(k, code_options["co_varnames"].index(k))
+                    LocalSource(k)
                     if k in code_options["co_varnames"]
                     else LocalSource((k)),
                 )(f_locals[k]),
