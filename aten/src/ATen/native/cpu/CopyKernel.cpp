@@ -13,6 +13,61 @@ inline namespace CPU_CAPABILITY {
 void neg_kernel(TensorIteratorBase &iter);
 void conj_kernel(TensorIteratorBase &iter);
 
+namespace {
+
+using constable_loop2d_t = c10::function_ref<
+  void(const char* in, char* out, const int64_t* strides, int64_t size0, int64_t size1)>;
+
+void constable_get_data_ptrs(
+    // char** ptrs,
+    const char*& in,
+    char*& out,
+    IntArrayRef strides,
+    IntArrayRef counter) {
+  const int64_t ndim = counter.size();
+  for (const auto dim : c10::irange(ndim)) {
+    int64_t value = counter[dim];
+    out += value * strides[dim * 2 + 0];
+    in += value * strides[dim * 2 + 1];
+  }
+}
+
+void constable_serial_for_each(
+    IntArrayRef shape,
+    IntArrayRef strides,
+    const char* in,
+    char* out,
+    constable_loop2d_t loop,
+    Range range) {
+  const auto ndim = shape.size();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      strides.size() == 2 * std::max(size_t{2}, ndim));
+
+  if (ndim <= 1) {
+    if (range.begin == 0) {
+      loop(in, out, strides.data(), range.size(), 1);
+    } else {
+      constable_get_data_ptrs(in, out, strides, {range.begin});
+      loop(in, out, strides.data(), range.size(), 1);
+    }
+  } else {
+    const char* original_in = in;
+    char* original_out = out;
+
+    auto counter = DimCounter(shape, range);
+    while (!counter.is_done()) {
+      in = original_in;
+      out = original_out;
+      constable_get_data_ptrs(in, out, strides, counter.values);
+      auto step = counter.max_2d_step();
+      loop(in, out, strides.data(), step[0], step[1]);
+      counter.increment(step);
+    }
+  }
+}
+
+} // namespace
+
 void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
   auto strides_out = iter.strides(0);
   auto strides_in = iter.strides(1);
@@ -35,23 +90,18 @@ void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
     using scalar_t = BFloat16;
     using Vecd = Vectorized<dest_t>;
     using Vecs = Vectorized<scalar_t>;
-    c10::SmallBuffer<char*, 2> ptrs(2);
-    dest_t* output_data = iter.tensor_base(0).data_ptr<dest_t>();
-    scalar_t* input_data = iter.tensor_base(1).data_ptr<scalar_t>();
-    ptrs[0] = reinterpret_cast<char*>(output_data);
-    ptrs[1] = reinterpret_cast<char*>(input_data);
+    dest_t* output_data = iter.tensor_base(0).mutable_data_ptr<dest_t>();
+    const scalar_t* input_data = iter.tensor_base(1).data_ptr<scalar_t>();
 
     int64_t grain_size = at::internal::GRAIN_SIZE;
 
-    auto loop = [strides_in, requires_neg](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
-      std::array<char*, 2> data;
-      std::copy_n(base, 2, data.data());
+    auto loop = [strides_in, requires_neg](const char* in, char* out, const int64_t* strides, int64_t size0, int64_t size1) {
       const int64_t *outer_strides = &strides[2];
 
       for (const auto it C10_UNUSED : c10::irange(size1)) {
         Vecd dst_s;
         if (strides_in[0] == 0) {
-          dst_s = Vecd(dest_t(*((scalar_t*)data[1])));
+          dst_s = Vecd(dest_t(*((scalar_t*)in)));
           if (requires_neg) {
             dst_s = dst_s.neg();
           }
@@ -59,68 +109,63 @@ void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
         int64_t i = 0;
         for (; i <= size0 - Vecs::size(); i += Vecs::size()) {
           if (strides_in[0] != 0) {
-            Vecs data_vec = Vecs::loadu(data[1] + i * sizeof(scalar_t));
+            Vecs data_vec = Vecs::loadu(in + i * sizeof(scalar_t));
             Vecd data_vec0, data_vec1;
             std::tie(data_vec0, data_vec1) = convert_bfloat16_float(data_vec);
             if (requires_neg) {
               data_vec0 = data_vec0.neg();
               data_vec1 = data_vec1.neg();
             }
-            data_vec0.store(data[0] + i * sizeof(dest_t));
-            data_vec1.store(data[0] + (i + Vecd::size()) * sizeof(dest_t));
+            data_vec0.store(out + i * sizeof(dest_t));
+            data_vec1.store(out + (i + Vecd::size()) * sizeof(dest_t));
           } else {
-            dst_s.store(data[0] + i * sizeof(dest_t));
-            dst_s.store(data[0] + (i + Vecd::size()) * sizeof(dest_t));
+            dst_s.store(out + i * sizeof(dest_t));
+            dst_s.store(out + (i + Vecd::size()) * sizeof(dest_t));
           }
         }
         if (i < size0) {
           if (strides_in[0] != 0) {
-            Vecs data_vec = Vecs::loadu(data[1] + i * sizeof(scalar_t), size0 - i);
+            Vecs data_vec = Vecs::loadu(in + i * sizeof(scalar_t), size0 - i);
             Vecd data_vec0, data_vec1;
             std::tie(data_vec0, data_vec1) = convert_bfloat16_float(data_vec);
             if (requires_neg) {
               data_vec0 = data_vec0.neg();
               data_vec1 = data_vec1.neg();
             }
-            data_vec0.store(data[0] + i * sizeof(dest_t), ((size0 - i) > Vecd::size())?  Vecd::size() : (size0 - i));
-            data_vec1.store(data[0] + (i + Vecd::size()) * sizeof(dest_t), ((size0 - i) > Vecd::size())? (size0 - i - Vecd::size()) : 0);
+            data_vec0.store(out + i * sizeof(dest_t), ((size0 - i) > Vecd::size())?  Vecd::size() : (size0 - i));
+            data_vec1.store(out + (i + Vecd::size()) * sizeof(dest_t), ((size0 - i) > Vecd::size())? (size0 - i - Vecd::size()) : 0);
           } else {
-            dst_s.store(data[0] + i * sizeof(dest_t), ((size0 - i) > Vecd::size())?  Vecd::size() : (size0 - i));
-            dst_s.store(data[0] + (i + Vecd::size()) * sizeof(dest_t), ((size0 - i) > Vecd::size())? (size0 - i - Vecd::size()) : 0);
+            dst_s.store(out + i * sizeof(dest_t), ((size0 - i) > Vecd::size())?  Vecd::size() : (size0 - i));
+            dst_s.store(out + (i + Vecd::size()) * sizeof(dest_t), ((size0 - i) > Vecd::size())? (size0 - i - Vecd::size()) : 0);
           }
         }
-        data[0] += outer_strides[0];
-        data[1] += outer_strides[1];
+        out += outer_strides[0];
+        in += outer_strides[1];
       }
 
     };
 
     parallel_for(0, iter.numel(), grain_size, [&] (int64_t begin, int64_t end) {
-      at::internal::serial_for_each(shape, strides, ptrs.data(), 2, loop, {begin, end});
+      constable_serial_for_each(shape, strides, reinterpret_cast<const char*>(input_data),
+                                reinterpret_cast<char*>(output_data), loop, {begin, end});
     });
   } else if ((iter.dtype(0) == kBFloat16) && (iter.dtype(1) == kFloat)) {
     using dest_t = BFloat16;
     using scalar_t = float;
     using Vecd = Vectorized<dest_t>;
     using Vecs = Vectorized<scalar_t>;
-    c10::SmallBuffer<char*, 2> ptrs(2);
-    dest_t* output_data = iter.tensor_base(0).data_ptr<dest_t>();
-    scalar_t* input_data = iter.tensor_base(1).data_ptr<scalar_t>();
-
-    ptrs[0] = reinterpret_cast<char*>(output_data);
-    ptrs[1] = reinterpret_cast<char*>(input_data);
+    dest_t* output_data = iter.tensor_base(0).mutable_data_ptr<dest_t>();
+    const scalar_t* input_data = iter.tensor_base(1).data_ptr<scalar_t>();
 
     int64_t grain_size = at::internal::GRAIN_SIZE;
 
-    auto loop = [strides_in, requires_neg](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
-      std::array<char*, 2> data;
-      std::copy_n(base, 2, data.data());
+    auto loop = [strides_in, requires_neg](const char* in, char* out, const int64_t* strides, int64_t size0, int64_t size1) {
       const int64_t *outer_strides = &strides[2];
 
       for (const auto it C10_UNUSED : c10::irange(size1)) {
         Vecd dst_s;
         if (strides_in[0] == 0) {
-          dst_s = Vecd(dest_t(*((scalar_t*)data[1])));
+          dst_s = Vecd(dest_t(*((scalar_t*)in)));
           if (requires_neg) {
             dst_s = dst_s.neg();
           }
@@ -128,38 +173,38 @@ void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
         int64_t i = 0;
         for (; i <= size0 - 2 * Vecs::size(); i += 2 * Vecs::size()) {
           if (strides_in[0] != 0) {
-            Vecs data_vec0 = Vecs::loadu(data[1] + i * sizeof(scalar_t));
-            Vecs data_vec1 = Vecs::loadu(data[1] + (i + Vecs::size()) * sizeof(scalar_t));
+            Vecs data_vec0 = Vecs::loadu(in + i * sizeof(scalar_t));
+            Vecs data_vec1 = Vecs::loadu(in + (i + Vecs::size()) * sizeof(scalar_t));
             auto data_vec = convert_float_bfloat16(data_vec0, data_vec1);
             if (requires_neg) {
               data_vec = data_vec.neg();
             }
-            data_vec.store(data[0] + i * sizeof(dest_t));
+            data_vec.store(out + i * sizeof(dest_t));
           } else {
-            dst_s.store(data[0] + i * sizeof(dest_t));
+            dst_s.store(out + i * sizeof(dest_t));
           }
 
         }
         if (i < size0) {
           if (strides_in[0] != 0) {
-            Vecs data_vec0 = Vecs::loadu(data[1] + i * sizeof(scalar_t), ((size0 - i) > Vecs::size())?  Vecs::size() : (size0 - i));
-            Vecs data_vec1 = Vecs::loadu(data[1] + (i + Vecs::size()) * sizeof(scalar_t), ((size0 - i) > Vecs::size())?  (size0 - i - Vecs::size()) : 0);
+            Vecs data_vec0 = Vecs::loadu(in + i * sizeof(scalar_t), ((size0 - i) > Vecs::size())?  Vecs::size() : (size0 - i));
+            Vecs data_vec1 = Vecs::loadu(in + (i + Vecs::size()) * sizeof(scalar_t), ((size0 - i) > Vecs::size())?  (size0 - i - Vecs::size()) : 0);
             auto data_vec = convert_float_bfloat16(data_vec0, data_vec1);
             if (requires_neg) {
               data_vec = data_vec.neg();
             }
-            data_vec.store(data[0] + i * sizeof(dest_t), size0 - i);
+            data_vec.store(out + i * sizeof(dest_t), size0 - i);
           } else {
-            dst_s.store(data[0] + i * sizeof(dest_t), size0 - i);
+            dst_s.store(out + i * sizeof(dest_t), size0 - i);
           }
         }
-        data[0] += outer_strides[0];
-        data[1] += outer_strides[1];
+        out += outer_strides[0];
+        in += outer_strides[1];
       }
 
     };
     parallel_for(0, iter.numel(), grain_size, [&] (int64_t begin, int64_t end) {
-      at::internal::serial_for_each(shape, strides, ptrs.data(), 2, loop, {begin, end});
+      constable_serial_for_each(shape, strides, reinterpret_cast<const char*>(input_data), reinterpret_cast<char*>(output_data), loop, {begin, end});
     });
   }
 }
