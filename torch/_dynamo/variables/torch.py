@@ -220,15 +220,10 @@ class TorchVariable(VariableTracker):
         elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
             if self.value is torch.nn.CrossEntropyLoss:
                 return self._call_cross_entropy_loss(tx, args, kwargs, options)
-            elif variables.EphemeralNNModule.can_use(self.value, args, kwargs):
-                return variables.EphemeralNNModule(
-                    self.value,
-                    [v.as_python_constant() for v in args],
-                    {k: v.as_python_constant() for k, v in kwargs.items()},
-                    **options,
-                )
             else:
-                unimplemented(f"construct nn.Module: {self.value.__name__}")
+                return variables.UserDefinedClassVariable(
+                    self.value, source=self.source, **options
+                ).call_function(tx, args, kwargs)
         elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
             assert len(args) == 1
             if isinstance(args[0], TensorVariable) or (

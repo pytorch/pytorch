@@ -6,7 +6,6 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
-import functools
 import inspect
 import itertools
 import random
@@ -2486,16 +2485,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(x1, y), opt_f(x1, y)))
         self.assertTrue(same(f(x2, y), opt_f(x2, y)))
         self.assertEqual(cnt.frame_count, 2)
-
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", False)
-    def test_not_rewrite_assert(self):
-        def f(x):
-            b = x.sin()
-            assert x[0] == 3
-            return x.cos() + b
-
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
-            torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
     def test_dict_subclass_contains(self):
         # pattern from huggingface
