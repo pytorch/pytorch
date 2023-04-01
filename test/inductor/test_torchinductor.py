@@ -260,8 +260,11 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
     from torch._inductor.graph import output_code_log
 
     output_code_log.addHandler(ch)
+    prev_level = output_code_log.level
+    output_code_log.setLevel(logging.DEBUG)
     fn(*args, **kwargs)
     s = log_capture_string.getvalue()
+    output_code_log.setLevel(prev_level)
     output_code_log.removeHandler(ch)
     return s
 
