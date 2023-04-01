@@ -115,13 +115,15 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
         enabled (bool): if ``False``, the RNG is not forked.  This is a convenience
             argument for easily disabling the context manager without having
             to delete it and unindent your Python code under it.
-        deivce(str): device type str, default is `cuda`.
+        deivce(str): device type str, default is `cuda`. As for custom device,
+            see details in [Note: support the custom device with privateuse1]
     """
 
     device_type = torch.device(device_type).type
     device_mod = getattr(torch, device_type, None)
     if device_mod is None:
-        raise RuntimeError("`torch` has no module of `device`, please define torch.{device_type} module")
+        raise RuntimeError(f"torch has no module of `{device_type}`, you should register " +
+                           "a module by `torch._register_device_module`.")
     global _fork_rng_warned_already
 
     # Internal arguments:
