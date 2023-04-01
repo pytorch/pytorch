@@ -116,13 +116,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.NamedTupleVariable(
                 items, self.value, **VariableTracker.propagate(self, items)
             )
-        elif variables.EphemeralNNModule.can_use(self.value, args, kwargs):
-            return variables.EphemeralNNModule(
-                self.value,
-                [v.as_python_constant() for v in args],
-                {k: v.as_python_constant() for k, v in kwargs.items()},
-                **options,
-            )
         elif (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
             and SideEffects.cls_supports_mutation_side_effects(self.value)
@@ -136,7 +129,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 else UserDefinedObjectVariable,
                 options,
             )
-            return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+            if (
+                inspect.getattr_static(self.value, "__init__", None)
+                is torch.nn.Module.__init__
+            ):
+                tx.output.side_effects.store_attr(
+                    var, "__call_nn_module_init", variables.ConstantVariable(True)
+                )
+                return var
+            else:
+                return var.add_options(var.call_method(tx, "__init__", args, kwargs))
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
@@ -211,18 +213,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert all(map(ConstantVariable.is_literal, keys))
                 return TupleVariable(
                     [ConstantVariable(k, **options) for k in keys], **options
-                ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
-
-            if (
-                method is collections.OrderedDict.__contains__
-                and len(args) == 1
-                and isinstance(args[0], ConstantVariable)
-                and inspect.getattr_static(type(self.value), "keys")
-                is collections.OrderedDict.keys
-            ):
-                assert not kwargs
-                return ConstantVariable(
-                    args[0].as_python_constant() in self.value, **options
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (

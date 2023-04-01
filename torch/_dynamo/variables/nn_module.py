@@ -616,15 +616,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         # TODO mlazos: only support __call__ for lazy modules
         # until we can support a larger swath of python
-        if is_lazy_module(self.value) and self.source:
+        if is_lazy_module(self.value):
             fn = self.value_type.__call__
             source = AttrSource(AttrSource(self.source, "__class__"), "__call__")
         else:
             fn = self.value_type.forward
-            if self.source:
-                source = AttrSource(AttrSource(self.source, "__class__"), "forward")
-            else:
-                source = None
+            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
 
         return variables.UserFunctionVariable(
             fn, source=source, **options
@@ -704,74 +701,3 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         else:
             # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
             self.source = NotNNModuleSource(source)
-
-
-class EphemeralNNModule(VariableTracker):
-    """
-    This handles patterns like:
-
-        nn.Softmax(dim=-1)(x)
-        nn.ReLU()(x)
-        nn.Sigmoid()(x)
-
-    Which involve constructing temporary nn.Modules containing no state
-    then immediately discarding them.
-    """
-
-    allowlist = {
-        # everything in this list must be stateless
-        torch.nn.GELU,
-        torch.nn.ReLU,
-        torch.nn.ReLU6,
-        torch.nn.Sigmoid,
-        torch.nn.Softmax,
-        torch.nn.Tanh,
-    }
-
-    @classmethod
-    def can_use(
-        cls,
-        module_cls,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ):
-        if module_cls not in cls.allowlist:
-            if (
-                not issubclass(module_cls, torch.nn.Module)
-                or inspect.getattr_static(module_cls, "__init__", None)
-                is not torch.nn.Module.__init__
-                or inspect.getattr_static(module_cls, "__call__", None)
-                is not torch.nn.Module.__call__
-            ):
-                return False
-        for v in itertools.chain(args, kwargs.values()):
-            if not v.is_python_constant():
-                return False
-        return True
-
-    def __init__(self, module_cls, constant_args, constant_kwargs, **kwargs):
-        super().__init__(**kwargs)
-        self.module_cls = module_cls
-        self.constant_args = constant_args
-        self.constant_kwargs = constant_kwargs
-
-    def python_type(self):
-        return self.module_cls
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        class EphemeralInstance(UnspecializedNNModuleVariable):
-            def var_getattr(self, tx, name):
-                value = inspect.getattr_static(exemplar, name)
-                assert variables.ConstantVariable.is_literal(value), value
-                return variables.ConstantVariable(value, **options)
-
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        exemplar = self.module_cls(*self.constant_args, **self.constant_kwargs)
-        mod_var = EphemeralInstance(exemplar, **options)
-        return mod_var.call_function(tx, args, kwargs).add_options(options)
-
-    def reconstruct(self, codegen):
-        # this would be easy to implement, but doesn't seem to be needed yet
-        unimplemented("reconstruct EphemeralNNModule")
