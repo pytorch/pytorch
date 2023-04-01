@@ -2626,6 +2626,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
 
+    def test_iadd_graph_break(self):
+        def fn(x):
+            a = ()
+            x = torch.sin(x)
+            a += (x,)
+            return a
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
