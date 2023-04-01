@@ -34,17 +34,17 @@ def define_targets(rules):
         ],
         copts = ["-fexceptions"],
         tags = [
+            "-fbcode",
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",
-            "-fbcode",
             "xplat",
         ],
         visibility = ["//visibility:public"],
         deps = [
             ":caffe2_headers",
-            "@com_github_glog//:glog",
             "//c10",
             "//third_party/miniz-2.1.0:miniz",
+            "@com_github_glog//:glog",
         ],
     )
 
@@ -87,19 +87,19 @@ def define_targets(rules):
     rules.genrule(
         name = "gen_aten",
         srcs = gen_aten_srcs,
-        tools = ["//torchgen:gen"],
         outs = gen_aten_outs,
         cmd = gen_aten_cmd,
+        tools = ["//torchgen:gen"],
     )
 
     rules.genrule(
         name = "gen_aten_hip",
         srcs = gen_aten_srcs,
-        tools = ["//torchgen:gen"],
         outs = gen_aten_outs_cuda,
         cmd = gen_aten_cmd + " --rocm",
         features = ["-create_bazel_outputs"],
         tags = ["-bazel"],
+        tools = ["//torchgen:gen"],
     )
 
     rules.genrule(
@@ -109,21 +109,21 @@ def define_targets(rules):
             ":DispatchKeyNativeFunctions.h",
             ":LazyIr.h",
             ":LazyNonNativeIr.h",
-            ":RegisterDispatchKey.cpp",
             ":RegisterDispatchDefinitions.ini",
+            ":RegisterDispatchKey.cpp",
             ":native_functions.yaml",
             ":shape_inference.h",
             ":tags.yaml",
             ":ts_native_functions.cpp",
             ":ts_native_functions.yaml",
         ],
-        tools = ["//tools/setup_helpers:generate_code"],
         outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
         cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
               "--gen_lazy_ts_backend",
+        tools = ["//tools/setup_helpers:generate_code"],
     )
 
     rules.cc_library(
