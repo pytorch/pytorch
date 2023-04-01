@@ -3,6 +3,7 @@ from typing import cast, Optional, Sequence
 
 import torch
 
+import torch.distributed.distributed_c10d as c10d
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import pointwise_rule, reduction_rule
 from torch.distributed._tensor.ops.utils import (
@@ -10,7 +11,7 @@ from torch.distributed._tensor.ops.utils import (
     normalize_dims,
     register_prop_rule,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.placement_types import DTensorSpec, _Partial
 
 
 aten = torch.ops.aten
@@ -36,9 +37,6 @@ def default_reduction_rule(op_schema: OpSchema) -> OutputSharding:
     [
         aten.sum.default,
         aten.sum.dim_IntList,
-        aten.mean.default,
-        aten.mean.dim,
-        aten.mean.out
     ]
 )
 def sum_rule(op_schema: OpSchema) -> OutputSharding:
@@ -78,6 +76,28 @@ def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
     ):
         raise RuntimeError("Cannot run _softmax_backward_data on sharding dimension!")
     return pointwise_rule(op_schema)
+
+
+@register_prop_rule([aten.mean.default, aten.mean.dim, aten.mean.out])
+def mean_rule(op_schema: OpSchema) -> OutputSharding:
+    args_schema = op_schema.args_schema
+    input_spec = cast(DTensorSpec, args_schema[0])
+    dims = None
+    # if length of args > 1, we check args to find dims
+    if len(args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], input_spec.ndim)
+
+    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+    output_sharding = reduction_rule(
+        op_schema, dims=dims, keep_dim=keep_dim, reduction_linear=True
+    )
+    if output_sharding.output_spec is not None:
+        for placement in output_sharding.output_spec.placements:
+            if placement.is_partial():
+                partial_placement = cast(_Partial, placement)
+                partial_placement.reduce_op = c10d.ReduceOp.AVG
+
+    return output_sharding
 
 
 @register_prop_rule(
