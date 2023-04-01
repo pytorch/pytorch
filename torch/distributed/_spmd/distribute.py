@@ -388,13 +388,8 @@ def _rebuild_graph(
                     if all(
                         [
                             isinstance(n.target, torch._ops.OpOverload)
-                            and (
-                                n.target._schema.name.startswith(
-                                    "aten::_foreach"
-                                )
-                                or n.target._schema.name.startswith(
-                                    "aten::_fused_adam"
-                                )
+                            and n.target._schema.name.startswith(
+                                ("aten::_foreach", "aten::_fused_adam")
                             )
                             for n in [dtn, node]
                         ]
