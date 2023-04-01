@@ -38,11 +38,7 @@ from .misc import (
     SuperVariable,
     UnknownVariable,
 )
-from .nn_module import (
-    EphemeralNNModule,
-    NNModuleVariable,
-    UnspecializedNNModuleVariable,
-)
+from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
     FakeItemVariable,
     SymNodeVariable,
@@ -64,7 +60,6 @@ __all__ = [
     "DataClassVariable",
     "DefaultDictVariable",
     "EnumVariable",
-    "EphemeralNNModule",
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",
