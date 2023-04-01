@@ -260,7 +260,6 @@ graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 def setup_compile_debug():
     compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
-    exitstack = contextlib.ExitStack()
 
     if compile_debug:
         torch._logging.set_logs(
@@ -270,10 +269,9 @@ def setup_compile_debug():
             output_code=True,  # this is off by default
         )
 
-        debug_file_handler = add_file_handler()
-        exitstack.callback(lambda: log.removeHandler(debug_file_handler))
+        return add_file_handler()
 
-    return exitstack
+    return contextlib.ExitStack()
 
 
 def reset_graph_break_dup_checker():
@@ -285,11 +283,25 @@ def add_file_handler():
     if not os.path.exists(log_path):
         os.makedirs(log_path)
 
-    log_file = logging.FileHandler(os.path.join(log_path, "debug.log"))
-    log_file.setLevel(logging.DEBUG)
+    log_file_handler = logging.FileHandler(os.path.join(log_path, "debug.log"))
     logger = logging.getLogger("torch._dynamo")
-    logger.addHandler(log_file)
-    return log_file
+    logger.addHandler(log_file_handler)
+
+    exitstack = contextlib.ExitStack()
+    exitstack.callback(lambda: logger.removeHandler(log_file_handler))
+    return exitstack
+
+
+def setup_log_file():
+    exitstack = contextlib.ExitStack()
+    if config.log_file_name is not None:
+        log_file_handler = logging.FileHandler(config.log_file_name)
+        for logger in logging.get_loggers():
+            logger.addHandler(log_file_handler)
+            exitstack.callback(lambda: logger.removeHandler(log_file_handler))
+        return exitstack
+
+    return exitstack
 
 
 def gen_record_file_name(exc, code):
@@ -1034,6 +1046,10 @@ orig_code_map = ExactWeakKeyDictionary()
 
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures = collections.defaultdict(list)
+
+# keep record of compiled code, if we are in "error if recompile"
+# to track code that dynamo has compiled previously
+seen_code_map = ExactWeakKeyDictionary()
 
 
 class CompileProfiler:
