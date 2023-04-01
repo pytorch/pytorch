@@ -61,21 +61,15 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from functorch.compile import config as functorch_config
-from torch._decomp import get_decompositions
 from torch._inductor import codecache, config, metrics, test_operators
-from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
-from torch._inductor.codegen.triton import texpr
-from torch._inductor.codegen.wrapper import pexpr
+from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
 
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
     complex_memory_overlap,
 )
-from torch._inductor.ir import ModularIndexing
-from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import has_torchvision_roi_align, timed
-from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
@@ -148,21 +142,6 @@ binary_list = [
     lambda x, y: x.sub(y),  # call_method
     lambda x, y: x.sub_(y),  # call_method
 ]
-
-
-def requires_decomp(fn):
-    """Decorator to disable test if a decomp is missing"""
-
-    def wrap_test(test):
-        @functools.wraps(test)
-        def maybe_test(*args, **kwargs):
-            if len(get_decompositions([fn])) == 0:
-                raise unittest.SkipTest(f"requires decomp for {fn.__name__}")
-            return test(*args, **kwargs)
-
-        return maybe_test
-
-    return wrap_test
 
 
 class TestCase(TorchTestCase):
@@ -546,152 +525,6 @@ class SweepInputs2:
         for name1 in cls.input_gen_types1:
             for name2 in cls.input_gen_types2:
                 cls.gen_template(name1, name2)
-
-
-class TestIndexingSimplification(TorchTestCase):
-    def test_indexing_simplification(self):
-        sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
-        i2 = sympy.Symbol("i2", integer=True)
-        r3 = sympy.Symbol("r3", integer=True)
-
-        var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
-        expr = (
-            128 * i2
-            + ModularIndexing(i1, 1, 64)
-            + 64 * ModularIndexing(i1 + 64 * r3, 64, 2)
-        )
-        # check that `i1//64` is removed when i1 is always less than 64,
-        # and the next simplificaton doesn't happen
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr, var_ranges),
-            i1 + 128 * i2 + 64 * ModularIndexing(r3, 1, 2),
-        )
-        # all the modular indexing should be removed when the body cant be larger than the modulus
-        var_ranges[r3] = 2
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
-        )
-        # if there are negative terms in ModularIndexing base, we cannot replace it with FloorDiv
-        expr = ModularIndexing(i1 - 15, 1, 64)
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr, var_ranges),
-            ModularIndexing(i1 - 15, 1, 64),
-        )
-        # small terms should be kept if the rest is not guaranteed to be divisible
-        self.assertEqual(
-            sizevars.simplify_with_ranges(FloorDiv(r3 + i2 + i1, 32), var_ranges),
-            FloorDiv(r3 + i2 + i1, 32),
-        )
-
-        expr = ModularIndexing(2 * i2 + r3, 1, 64)
-        # modular indexing is removed if base is smaller than modulo
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), 2 * i2 + r3)
-
-        # check the same thing but with symbolic divisor
-        self.assertEqual(FloorDiv(r3 * i0, r3), i0)
-        self.assertEqual(ModularIndexing(r3 * i0, r3, 10), ModularIndexing(i0, 1, 10))
-
-        # (10*i) % 10 is always zero and should get optimized away
-        self.assertEqual(
-            ModularIndexing(i0 + i1 * 10, 1, 10), ModularIndexing(i0, 1, 10)
-        )
-
-        # ((20*i)//2) % 10 is always zero and should get optimized away
-        self.assertEqual(
-            ModularIndexing(i0 + i1 * 20, 2, 10), ModularIndexing(i0, 2, 10)
-        )
-
-        # the same things happens with symbolic divisor
-        self.assertEqual(
-            ModularIndexing(i0 + i1 * i2 * r3, i2, r3), ModularIndexing(i0, i2, r3)
-        )
-
-        # if there are negative terms, we cannot optimize away zero terms due to https://github.com/openai/triton/issues/619
-        self.assertEqual(
-            ModularIndexing(-i0 + i1 * 20, 2, 10), ModularIndexing(-i0 + i1 * 20, 2, 10)
-        )
-        self.assertEqual(
-            ModularIndexing(-15 + i1 * 20, 2, 10), ModularIndexing(-15 + i1 * 20, 2, 10)
-        )
-
-        # Constant fold from divisor into base
-        self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
-        self.assertEqual(FloorDiv(i0 * 4, 2), i0 * 2)
-
-        # Nested modular indexing is correctly simplified
-        var_ranges = {"i1": 13, "i2": 121}
-        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
-        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
-        var_ranges = {"i2": 784}
-        expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
-        expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
-        expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
-
-    def test_indexing_join(self):
-        sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
-        i2 = sympy.Symbol("i2", integer=True)
-
-        # join two ModularIndexing calls into one larger one when possible
-        expr1 = ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr1, {}), ModularIndexing(i0, 1, 128)
-        )
-
-        # it should also work with a scale
-        self.assertEqual(
-            sizevars.simplify_with_ranges(2 * expr1, {}),
-            2 * ModularIndexing(i0, 1, 128),
-        )
-
-        # it should work when divisor is not 1
-        expr2 = ModularIndexing(i0, 3, 32) + 32 * ModularIndexing(i0, 32 * 3, 4)
-        simplified = sizevars.simplify_with_ranges(expr2, {})
-        self.assertEqual(simplified, ModularIndexing(i0, 3, 128))
-        self.assertEqual(expr2.subs({i0: 39485}), simplified.subs({i0: 39485}))
-
-        # it should not happen in this case as the modulus is wrong
-        expr3 = ModularIndexing(i0, 1, 30) + 32 * ModularIndexing(i0, 32, 4)
-        self.assertEqual(sizevars.simplify_with_ranges(expr3, {}), expr3)
-
-        # check that it also works with a modulus>1
-        expr4 = ModularIndexing(i0, 10, i1) + i1 * ModularIndexing(i0, i1 * 10, i2)
-        res0 = expr4.subs({i0: 24056, i1: 13, i2: 19})
-        simplified = sizevars.simplify_with_ranges(expr4, {})
-        res1 = simplified.subs({i0: 24056, i1: 13, i2: 19})
-        self.assertEqual(res0, res1)
-        self.assertEqual(simplified, ModularIndexing(i0, 10, i1 * i2))
-
-        # and also works with an offset
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr4 + 10, {}),
-            ModularIndexing(i0, 10, i1 * i2) + 10,
-        )
-
-        # works for ModularIndexing + FloorDiv
-        expr5 = 197 * FloorDiv(i0, 197) + ModularIndexing(i0, 1, 197)
-        simplified = sizevars.simplify_with_ranges(expr5, {})
-        self.assertEqual(simplified, i0)
-        self.assertEqual(expr5.subs({i0: 39485}), simplified.subs({i0: 39485}))
-
-        # works with a scale
-        self.assertEqual(
-            sizevars.simplify_with_ranges(2 * expr5, {}),
-            2 * i0,
-        )
-
-        # divisor != 1
-        expr6 = 197 * FloorDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
-        simplified = sizevars.simplify_with_ranges(expr6, {})
-        self.assertEqual(simplified, FloorDiv(i0, 3))
-        self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
 
 class CommonTemplate:
@@ -2680,6 +2513,24 @@ class CommonTemplate:
             check_lowp=False,
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    def test_adaptive_avg_pool2d_low_prec(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+            def forward(self, x):
+                x = self.avgpool(x)
+                return x
+
+        mod = Model()
+        for dtype in [torch.half, torch.bfloat16]:
+            x = torch.randn(4, 3, 7, 7).to(dtype=dtype)
+            opt_mod = torch.compile(mod)
+            res = opt_mod(x)
+            expected = mod(x)
+            self.assertTrue(torch.allclose(res, expected))
 
     def test_max_pool2d1(self):
         def fn(x):
@@ -7384,6 +7235,72 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(real_out, compiled_out)
             torch._dynamo.reset()
 
+        @torch._dynamo.config.patch(dynamic_shapes=True)
+        def test_negative_arange_dynamic_shapes(self):
+            # Repro from alibi relative encodings
+            def sign(x):
+                return (x > 0) - (x < 0)
+
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    nheads = 16
+                    start = math.log2(0.5)
+                    end = math.log2(1 / (2**8))
+
+                    self.register_buffer(
+                        "scales",
+                        2
+                        ** torch.arange(
+                            start,
+                            end + 1e-6 * sign(end - start),
+                            (end - start) / (nheads - 1),
+                        ).view(1, nheads, 1, 1),
+                    )
+                    self.emb = nn.Embedding(1024, 256)
+                    self.dec_layer = nn.TransformerDecoderLayer(
+                        256, 16, 512, batch_first=True, norm_first=True
+                    )
+                    self.head = nn.Linear(256, 1024)
+
+                def forward(self, enc_out: torch.Tensor, dec_in: torch.Tensor):
+                    padmask = dec_in == 0
+                    dec_mask = padmask.unsqueeze(-1) == padmask.unsqueeze(-2)
+                    dec_mask = dec_mask.to(dtype=torch.float32)
+                    dec_mask = dec_mask.tril(diagonal=0).cuda()
+
+                    q_pos = torch.arange(
+                        dec_in.size(1), dtype=torch.long, device="cuda"
+                    )
+                    k_pos = torch.arange(
+                        dec_in.size(1), dtype=torch.long, device="cuda"
+                    )
+                    rel_pos = k_pos[None, :] - q_pos[:, None]
+                    values = rel_pos.abs().neg().unsqueeze(0).unsqueeze(0)
+                    dec_bias = values * self.scales
+                    dec_bias.tril_(diagonal=0)
+
+                    dec_mask = dec_mask + dec_bias[0]
+                    out = self.emb(dec_in)
+                    out = self.dec_layer(out, enc_out, tgt_mask=dec_mask)
+                    return self.head(out)
+
+            mod = Repro().cuda()
+            opt_mod = torch._dynamo.optimize("inductor", dynamic=True)(mod)
+            mod.eval()
+            opt_mod.eval()
+
+            enc_out = torch.rand(1, 512, 256).cuda()
+            dec_inputs = [
+                torch.randint(0, 512, (1, i + 1), dtype=torch.long).cuda()
+                for i in range(8)
+            ]
+
+            for dec_inp in dec_inputs:
+                assert same_two_models(
+                    mod, opt_mod, [enc_out, dec_inp], only_fwd=True
+                ), "Inductor with dynamic shapes failed"
+
         @config.patch({"triton.cudagraphs": True, "size_asserts": False})
         def test_expanded_inputs_cudagraphs_no_size_asserts(self):
             @torch._dynamo.optimize("inductor")
@@ -7593,6 +7510,69 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             fn_optimized = torch._dynamo.optimize("inductor")(fn)
             assert same(fn(a, b), fn_optimized(a, b))
+
+        @requires_cuda()
+        def test_issue97695_1input(self):
+            def fn(arg3_1, relu, permute_1):
+                addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+                cat_2 = torch.ops.aten.cat.default([addmm_1], 1)
+                return (cat_2,)
+
+            args = [
+                ((96,), (1,), torch.float32, "cuda"),
+                ((10, 256), (256, 1), torch.float32, "cuda"),
+                ((256, 96), (1, 256), torch.float32, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            correct = fn(*args)
+
+            mod = make_fx(fn, tracing_mode="real")(*args)
+            compiled = compile_fx_inner(mod, args)
+            ref = compiled(list(args))
+            assert same(ref, correct)
+
+            ref = torch.compile(fn, fullgraph=True)(*args)
+            assert same(ref, correct)
+
+        @requires_cuda()
+        def test_issue97695_2input(self):
+            def fn(arg3_1, arg3_2, relu, permute_1):
+                addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
+                addmm_2 = torch.ops.aten.addmm.default(arg3_2, relu, permute_1)
+                cat_2 = torch.ops.aten.cat.default([addmm_1, addmm_2], 1)
+                return (cat_2,)
+
+            args = [
+                ((96,), (1,), torch.float32, "cuda"),
+                ((96,), (1,), torch.float32, "cuda"),
+                ((10, 256), (256, 1), torch.float32, "cuda"),
+                ((256, 96), (1, 256), torch.float32, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            correct = fn(*args)
+
+            ref = torch.compile(fn, fullgraph=True)(*args)
+            assert same(ref, correct)
+
+        @requires_cuda()
+        def test_deterministic_algorithms(self):
+            N = 10000
+
+            @torch.compile
+            def fn(idx, values):
+                x = torch.zeros(1, device="cuda")
+                x[idx] += values
+                return x
+
+            idx = torch.zeros(N, dtype=torch.int64, device="cuda")
+            values = torch.randn(N, device="cuda")
+
+            r0 = fn(idx, values)
+            with DeterministicGuard(True):
+                r1 = fn(idx, values)
+                for _ in range(10):
+                    rn = fn(idx, values)
+                    self.assertEqual(r1, rn, atol=0, rtol=0)
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_heuristics import CachingAutotuner
@@ -7840,49 +7820,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     )
                     inps = torch.randn([5, 5])
                     fn_opt(inps)
-
-
-class ExprPrinterTests(TestCase):
-    def test_print_pow(self):
-        s1 = sympy.Symbol("foo", integer=True)
-        s2 = sympy.Symbol("bar", integer=True)
-        s3 = sympy.Symbol("baz", integer=True)
-
-        cases = (
-            # expr, result
-            # Test exprs.
-            (
-                s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                lambda c: f"((-1)*({c}/((-1) + (2*foo)))) + (foo*({c}/((-1) + (2*foo))))",
-            ),
-            (s1 / (s2 - s3), lambda c: f"foo*({c}/(bar + ((-1)*baz)))"),
-            # Test Pow directly.
-            (
-                sympy.Pow(s1 + s2, 0),
-                lambda _: "1",
-            ),  # note: simplified before _print_Pow
-            (
-                sympy.Pow(s1 + s2, -3),
-                lambda c: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
-            ),
-            (sympy.Pow(s1 + s2, 2), lambda _: "(bar + foo)*(bar + foo)"),
-        )
-
-        for expr, result in cases:
-            self.assertEqual(cexpr(expr), result(1.0))  # 1.0 for FP div
-            self.assertEqual(texpr(expr), result(1))
-            self.assertEqual(pexpr(expr), result(1))
-
-    def test_print_floor(self):
-        s1 = sympy.Symbol("s1", integer=False)
-        expr = sympy.floor(s1)
-        self.assertEqual(texpr(expr), "tl.math.floor(s1)")
-        self.assertEqual(pexpr(expr), "math.floor(s1)")
-
-    def test_print_ceil(self):
-        s1 = sympy.Symbol("s1", integer=False)
-        expr = sympy.ceiling(s1)
-        self.assertEqual(pexpr(expr), "math.ceil(s1)")
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
