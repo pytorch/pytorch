@@ -299,7 +299,7 @@ void initPythonBindings(PyObject* module) {
       &torch::profiler::impl::disableExecutionGraphObserver);
   m.def("_is_kineto_profiler_registered", []() {
 #ifdef USE_KINETO
-      return libkineto::api().isProfilerRegistered();
+    return libkineto::api().isProfilerRegistered();
 #else
       return false;
 #endif
