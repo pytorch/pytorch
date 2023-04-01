@@ -736,14 +736,7 @@ class EphemeralNNModule(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ):
         if module_cls not in cls.allowlist:
-            if (
-                not issubclass(module_cls, torch.nn.Module)
-                or inspect.getattr_static(module_cls, "__init__", None)
-                is not torch.nn.Module.__init__
-                or inspect.getattr_static(module_cls, "__call__", None)
-                is not torch.nn.Module.__call__
-            ):
-                return False
+            return False
         for v in itertools.chain(args, kwargs.values()):
             if not v.is_python_constant():
                 return False

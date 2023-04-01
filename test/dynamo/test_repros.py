@@ -6,6 +6,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
+import functools
 import inspect
 import itertools
 import random
@@ -1434,6 +1435,42 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    def test_nullcontext1(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x, ctx):
+            x = x.sin()
+            with ctx:
+                x = x.cos()
+            x = x.sin()
+            return x
+
+        y = torch.randn(10)
+        self.assertTrue(same(fn(y, contextlib.nullcontext()), y.sin().cos().sin()))
+
+    def test_nullcontext2(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x, ctx):
+            x = x.sin()
+            with ctx():
+                x = x.cos()
+            x = x.sin()
+            return x
+
+        y = torch.randn(10)
+        self.assertTrue(same(fn(y, contextlib.nullcontext), y.sin().cos().sin()))
+
+    def test_no_grad_inline(self):
+        @torch.no_grad()
+        def a(x):
+            return x.sin()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def b(x):
+            return a(x).cos()
+
+        y = torch.randn(10)
+        self.assertTrue(same(b(y), y.sin().cos()))
+
     # AssertionError: ABCMeta
     @unittest.expectedFailure
     def test_numpy_list(self):
@@ -1494,6 +1531,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.ops.aten.absolute(x)
 
         fn(torch.randn(3))
+
+    def test_hf_gelu_inline(self):
+        class GELUActivation(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.act = nn.functional.gelu
+
+            def forward(self, input):
+                return self.act(input)
+
+        @torch._dynamo.optimize("eager", nopython=True)
+        def fn(x):
+            return GELUActivation()(x)
+
+        y = torch.randn(10)
+        self.assertTrue(same(fn(y), nn.functional.gelu(y)))
+
+        @torch._dynamo.optimize("eager", nopython=True)
+        def fn_returns(x):
+            return GELUActivation(), x + 1
+
+        act, _ = fn_returns(y)
+        self.assertIsInstance(act, GELUActivation)
+        self.assertIs(act.act, nn.functional.gelu)
+        self.assertTrue(hasattr(act, "_buffers"))  # check that __init__ got called
 
     def test_torch_tensor_ops(self):
         def fn(x):

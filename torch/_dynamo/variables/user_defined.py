@@ -3,6 +3,7 @@ import contextlib
 import functools
 import importlib
 import inspect
+import itertools
 import random
 import types
 from typing import Dict, List
@@ -10,12 +11,14 @@ from typing import Dict, List
 import torch.nn
 
 from .. import variables
+from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     get_custom_getattr,
     is_namedtuple_cls,
+    istype,
     namedtuple_fields,
     object_has_getattribute,
 )
@@ -126,9 +129,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
         ):
             var = tx.output.side_effects.track_object_new(
-                self.source, self.value, UserDefinedObjectVariable, options
+                self.source,
+                self.value,
+                variables.UnspecializedNNModuleVariable
+                if issubclass(self.value, torch.nn.Module)
+                else UserDefinedObjectVariable,
+                options,
             )
-            return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+            if (
+                inspect.getattr_static(self.value, "__init__", None)
+                is torch.nn.Module.__init__
+            ):
+                tx.output.side_effects.store_attr(
+                    var, "__call_nn_module_init", variables.ConstantVariable(True)
+                )
+                return var
+            else:
+                return var.add_options(var.call_method(tx, "__init__", args, kwargs))
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
@@ -281,6 +298,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
+        elif (
+            istype(self.value, functools.partial)
+            and is_allowed(self.value.func)
+            and all(
+                variables.ConstantVariable.is_literal(v)
+                for v in itertools.chain(self.value.args, self.value.keywords.values())
+            )
+        ):
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            partial_args = [variables.ConstantVariable(v) for v in self.value.args]
+            partial_args.extend(args)
+            partial_kwargs = {
+                k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
+            }
+            partial_kwargs.update(kwargs)
+            return variables.TorchVariable(self.value.func, **options).call_function(
+                tx, partial_args, partial_kwargs
+            )
+        elif istype(self.value, types.MethodType):
+            func = self.value.__func__
+            obj = self.value.__self__
+            if (
+                func is torch.utils._contextlib._DecoratorContextManager.clone
+                and is_allowed(obj.__class__)
+                and not (args or kwargs)
+            ):
+                return variables.TorchVariable(obj.__class__).call_function(
+                    tx, args, kwargs
+                )
 
         return super().call_function(tx, args, kwargs)
 
