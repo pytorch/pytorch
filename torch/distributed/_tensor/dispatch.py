@@ -57,7 +57,7 @@ def wrap(res: object, spec: OutputSpecType) -> object:
                     shape=s.tensor_meta.shape,
                     dtype=s.tensor_meta.dtype,
                     requires_grad=s.tensor_meta.requires_grad,
-                    stride=s.tensor_meta.stride
+                    stride=s.tensor_meta.stride,
                 )
             else:
                 res_dt = None
@@ -97,7 +97,9 @@ def _reshape_alias(
     return torch.ops.aten.view(x, shape)
 
 
-_CURRENT_DECOMPOSITION_TABLE: Dict[Callable[..., object], Callable[..., object]] = {
+_CURRENT_DECOMPOSITION_TABLE: Dict[
+    Callable[..., object], Callable[..., object]
+] = {
     torch.ops.aten._reshape_alias.default: _reshape_alias,
 }
 
@@ -112,7 +114,9 @@ def operator_dispatch(
     arg_list, _ = tree_flatten(args)
     mesh = None
     for arg in arg_list:
-        if isinstance(arg, torch.Tensor) and not isinstance(arg, dtensor.DTensor):
+        if isinstance(arg, torch.Tensor) and not isinstance(
+            arg, dtensor.DTensor
+        ):
             raise RuntimeError(
                 f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
                 " torch.Tensor to DTensor before calling distributed operators!"
@@ -134,7 +138,9 @@ def operator_dispatch(
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
 
-    output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
+    output_sharding = sharding_propagator.propagate_op_sharding(
+        op_call, op_schema
+    )
 
     # if the schema suggestion from sharding prop is not the same instance as the
     # input op_schema, it indicates a reshard, we need to redistribute the input
@@ -171,12 +177,16 @@ def operator_dispatch(
             ret_type = str(ret_list[0].type)
             if ret_type == "bool":
                 import operator
-                local_results: object = functools.reduce(operator.and_, obj_list, True)
+
+                local_results: object = functools.reduce(
+                    operator.and_, obj_list, True
+                )
             else:
                 raise NotImplementedError(
                     f"return type {ret_type} in DTensor op is not supported"
                 )
         else:
+
             def default_tensor(spec: DTensorSpec) -> torch.Tensor:
                 if spec.tensor_meta is not None:
                     shape = spec.tensor_meta.shape
@@ -188,16 +198,16 @@ def operator_dispatch(
                         # non-scalar tensor
                         return torch.tensor([], dtype=dtype)
                 else:
-                    raise RuntimeError(
-                        f"{spec} has no tensor metadata."
-                    )
+                    raise RuntimeError(f"{spec} has no tensor metadata.")
 
-            if (isinstance(spec, DTensorSpec)):
+            if isinstance(spec, DTensorSpec):
                 # return a Tensor value
                 local_results = default_tensor(spec)
-            elif (isinstance(spec, Sequence)):
+            elif isinstance(spec, Sequence):
                 # return a List[Tensor] value
-                local_results = [default_tensor(s) if s is not None else None for s in spec]
+                local_results = [
+                    default_tensor(s) if s is not None else None for s in spec
+                ]
                 assert isinstance(local_results, List)
                 if None in local_results:
                     ret_type = str(ret_list[0].type)
