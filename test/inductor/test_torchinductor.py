@@ -71,8 +71,8 @@ from torch._inductor.compile_fx import (
 )
 from torch._inductor.utils import has_torchvision_roi_align, timed
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
