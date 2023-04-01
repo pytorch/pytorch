@@ -147,6 +147,39 @@ def _prop__foreach_pow_scalar_and_tensor(op_schema: OpSchema):
     return OutputSharding(output_spec=exponent)
 
 
+@register_prop_rule([aten._fused_adam.default])  # pyre-ignore
+def _prop__fused_adam(op_schema: OpSchema):
+    NT = 5  # number of tensors for gradients and states
+    tensor_schemas = [
+        schema for schema in op_schema.args_schema[:NT] if len(schema)
+    ]
+
+    assert all([len(s) == len(tensor_schemas[0]) for s in tensor_schemas]), (
+        "expect the same number of gradients and states, but got "
+        f"{[len(s) for s in tensor_schemas]}."
+    )
+
+    if any([any([t != ts[0] for t in ts]) for ts in zip(*tensor_schemas)]):
+        new_schemas = tuple(
+            op_schema.args_schema[0] if len(s) else s
+            for s in op_schema.args_schema[:NT]
+        )
+        return OutputSharding(
+            output_spec=None,
+            schema_suggestions=[
+                OpSchema(
+                    func_schema=op_schema.func_schema,
+                    args_schema=new_schemas + op_schema.args_schema[NT:],
+                    kwargs_schema=op_schema.kwargs_schema,
+                    is_inplace=op_schema.is_inplace,
+                    is_out_variant=op_schema.is_out_variant,
+                )
+            ],
+        )
+    else:
+        return OutputSharding(output_spec=(op_schema.args_schema[0],) * NT)
+
+
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
 def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:
     input, normalized_shape, weight, bias, eps = op_schema.args_schema

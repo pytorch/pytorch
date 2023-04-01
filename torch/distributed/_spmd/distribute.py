@@ -391,6 +391,9 @@ def _rebuild_graph(
                             and n.target._schema.name.startswith(
                                 "aten::_foreach"
                             )
+                            or n.target._schema.name.startswith(
+                                "aten::_fused_adam"
+                            )
                             for n in [dtn, node]
                         ]
                     ):
