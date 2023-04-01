@@ -573,7 +573,7 @@ class VariableBuilder:
         return SymNodeVariable.create(
             tx=self.tx,
             proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.get_source().local_name), type(value)
             ),
             sym_num=value
             # shape Guards live their own rich life via shape_env
@@ -745,7 +745,7 @@ class VariableBuilder:
             ignore_subclass = False
 
         tensor_proxy = self.tx.output.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.get_source().local_name), type(value)
         )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
@@ -817,7 +817,7 @@ class VariableBuilder:
                 options.update({"raw_value": value})
 
             proxy = self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.get_source().local_name), type(wrapped_value)
             )
 
             unspec_var = wrap_fx_proxy_cls(
@@ -830,7 +830,7 @@ class VariableBuilder:
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
                 if self.tx.export and not isinstance(
-                    self.get_source(), LocalInputSource
+                    self.get_source(), LocalSource
                 ):
                     raise AssertionError(
                         "Dynamo attempts to add additional input during export: value={}, source={}".format(
