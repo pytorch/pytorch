@@ -379,6 +379,68 @@ def make_pointwise(
     return inner
 
 
+def make_foreach_pointwise(
+    fn,
+    override_return_dtype=None,
+    override_device=None,
+    override_fn_when_input_bool=None,
+    override_fn_when_cuda_float64=None,
+    allow_alpha=False,
+):
+    def inner(*inputs: List[List[TensorBox]], alpha=None):
+        inputs = [promote_constants(input, override_return_dtype) for input in inputs]
+        if allow_alpha:
+            if alpha is not None and alpha != 1:
+                inputs = list(inputs)
+                inputs[-1] = mul(inputs[-1], alpha)
+        else:
+            assert alpha is None
+        loaders = [[x.make_loader() for x in input] for input in inputs]
+        ranges = [input.get_size() for input in inputs[0]]
+        dtype = override_return_dtype or inputs[0][0].get_dtype()
+        is_cuda = decode_device(inputs[0][0].get_device()).type == "cuda"
+
+        for ind, other, dims in zip(itertools.count(), inputs[1], ranges, strict=False):
+            assert len(dims) == len(
+                other.get_size()
+            ), f"ndim mismatch {fn} {dims} {other.get_size()} at arg list ind {ind}"
+
+        def inner_fn(indices):
+            assert len(indices) == len(ranges), f"mismatched lengths {indices} {ranges}"
+            for ind, index, range in zip(itertools.count(), indices, ranges):
+                assert len(index) == len(
+                    range
+                ), f"wrong ndim {index} {ranges} at ind {ind}"
+
+            # TODO mlazos: handle these
+            if dtype == torch.bool and override_fn_when_input_bool is not None:
+                return override_fn_when_input_bool(*[load(index) for load in loaders])
+            elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
+                return override_fn_when_cuda_float64(*[load(index) for load in loaders])
+            else:
+                return fn(*[load(index) for load in loaders])
+
+        if not override_device:
+            device = None
+            for i in inputs:
+                if i.get_device().type == "cuda":
+                    device = i.get_device()
+                    break
+            if not device:
+                device = inputs[0].get_device()
+
+        device = override_device or device
+
+        return Pointwise.create(
+            device=device,
+            dtype=dtype,
+            inner_fn=inner_fn,
+            ranges=ranges,
+        )
+
+    return inner
+
+
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def to_dtype(x: TensorBox, dtype: torch.dtype):
     if x.get_dtype() == dtype:
@@ -427,6 +489,48 @@ def register_pointwise(
         override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
 
     fn = make_pointwise(
+        fn,
+        override_return_dtype=override_return_dtype,
+        override_fn_when_input_bool=override_fn_when_input_bool,
+        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,
+        allow_alpha=allow_alpha,
+    )
+    fn = register_lowering(
+        aten_fn,
+        broadcast=broadcast,
+        type_promotion_kind=type_promotion_kind,
+        convert_input_to_bool=convert_input_to_bool,
+    )(fn)
+
+    if hasattr(prims, name):
+        register_lowering(
+            getattr(prims, name),
+            type_promotion_kind=None,
+            convert_input_to_bool=convert_input_to_bool,
+        )(fn)
+    return fn
+
+
+def register_foreach_pointwise(
+    aten_fn,
+    name=None,
+    broadcast=True,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    convert_input_to_bool=False,
+    override_return_dtype=None,
+    override_fn_when_input_bool=None,
+    allow_alpha=False,
+    use_libdevice_for_f64=False,
+):
+    """A pointwise function that maps ops.{name} to inputs"""
+    name = name or aten_fn.__name__
+    fn = ops_wrapper(name)
+    if use_libdevice_for_f64:
+        fn_libdevice = ops_wrapper("libdevice_" + name)
+    if override_fn_when_input_bool is not None:
+        override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
+
+    fn = make_foreach_pointwise(
         fn,
         override_return_dtype=override_return_dtype,
         override_fn_when_input_bool=override_fn_when_input_bool,
@@ -3824,7 +3928,7 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-register_pointwise(aten._foreach_add.List)
+register_foreach_pointwise(aten._foreach_add.List)
 
 
 def register_inplace(aten_op, outplace_op):
