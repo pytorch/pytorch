@@ -14718,25 +14718,29 @@
 
 # Collectives
 - func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor
-  python_module: dist
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
   dispatch:
     CompositeExplicitAutograd: all_reduce
   variants: function
 
 - func: all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor
-  python_module: dist
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
   dispatch:
     CompositeExplicitAutograd: all_gather_into_tensor
   variants: function
 
 - func: reduce_scatter_tensor(Tensor input, str reduceOp, int scatter_dim, str tag, int[] ranks, int group_size) -> Tensor
-  python_module: dist
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
   dispatch:
     CompositeExplicitAutograd: reduce_scatter_tensor
   variants: function
 
 - func: wait_tensor(Tensor self) -> Tensor
-  python_module: dist
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
   dispatch:
     CompositeExplicitAutograd: wait_tensor
 
