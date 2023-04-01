@@ -805,8 +805,10 @@ class BuiltinVariable(VariableTracker):
         else:
             raise AssertionError("call_dict_helper with illegal arg")
 
-    def call_dict(self, tx, obj=None):
+    def call_dict(self, tx, obj=None, **kwargs):
         if self.is_supported_call_dict_arg(tx, obj):
+            if kwargs:
+                return self.call_dict_helper(tx, dict, variables.ConstDictVariable(kwargs, dict))
             return self.call_dict_helper(tx, dict, obj)
 
     def call_zip(self, tx, *args):
