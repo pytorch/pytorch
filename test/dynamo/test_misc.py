@@ -1983,8 +1983,77 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
-    @unittest.skipIf(sys.version_info < (3, 10), "use linetable when python >= 3.10")
-    def test_linetable_writer(self):
+    @unittest.skipIf(sys.version_info < (3, 11), "linetable test for Python 3.11")
+    def test_linetable_311_writer1(self):
+        def fn():
+            a = 10
+            b = 20
+            c = a + b
+            f = "linetable_writer"
+            return f"Test if {f} generates correct co_linetable: {c}"
+
+        # Dynamo doesn't deal with column locations or end line numbers,
+        # so we only check that start line numbers in the linetables match.
+        keys = bytecode_transformation.get_code_keys()
+        code_options = {k: getattr(fn.__code__, k) for k in keys}
+        result = bytecode_transformation.clean_and_assemble_instructions(
+            bytecode_transformation.cleaned_instructions(fn.__code__),
+            keys,
+            code_options,
+        )
+        l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
+        self.assertEqual(len(l1), len(l2))
+        for p1, p2 in zip(l1, l2):
+            # check that start line numbers match
+            self.assertEqual(p1[0], p2[0])
+        self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "linetable test for Python 3.11")
+    def test_linetable_311_writer2(self):
+        """
+        test large ops (LOAD_METHOD) and EXTENDED_ARGS
+        fn_str is in the form:
+        def fn():
+            ...
+            x0 = 1
+            x1 = 1
+            ...
+            l = [x0, x1, ...]
+        """
+        fn_str = f"""\
+def fn():
+    foo.bar(1, 2, 3)
+{str(chr(10)).join(' ' * 4 + 'x' + str(i) + ' = 1' for i in range(1 << 9))}
+    l = [{str(' ').join('x' + str(i) + ',' for i in range(1 << 9))}]
+        """
+        locals = {}
+        exec(fn_str, {}, locals)
+        fn = locals["fn"]
+        orig_inst_str = "\n".join(list(map(str, dis.get_instructions(fn))))
+        self.assertIn("EXTENDED_ARG", orig_inst_str)
+        self.assertIn("LOAD_METHOD", orig_inst_str)
+        keys = bytecode_transformation.get_code_keys()
+        code_options = {k: getattr(fn.__code__, k) for k in keys}
+        result = bytecode_transformation.clean_and_assemble_instructions(
+            bytecode_transformation.cleaned_instructions(fn.__code__),
+            keys,
+            code_options,
+        )
+        new_inst_str = "\n".join(list(map(str, result[0])))
+        self.assertIn("EXTENDED_ARG", new_inst_str)
+        self.assertIn("LOAD_METHOD", new_inst_str)
+        l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
+        self.assertEqual(len(l1), len(l2))
+        for p1, p2 in zip(l1, l2):
+            # check that start line numbers match
+            self.assertEqual(p1[0], p2[0])
+        self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 10) or sys.version_info >= (3, 11),
+        "linetable test for Python 3.10",
+    )
+    def test_linetable_310_writer(self):
         def fn():
             a = 10
             b = 20
@@ -4406,9 +4475,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, y)
 
         if torch._dynamo.config.dynamic_shapes:
-            self.assertEqual(len(all_guards), 13)
+            self.assertEqual(len(all_guards), 17)
         else:
-            self.assertEqual(len(all_guards), 9)
+            self.assertEqual(len(all_guards), 13)
         for guard in all_guards:
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
@@ -4723,15 +4792,40 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_if_tensor_is_none(self):
+        """
+        Python 3.11 adds new jump instructions that check if
+        TOS is None. We do not support these instructions.
+        """
+
+        def f(x, y):
+            z = 1
+            if x is None:
+                z *= 2
+            if y is not None:
+                z *= 3
+            return z
+
+        # TODO remove condition once 3.11 is fully supported
+        if sys.version_info < (3, 11):
+            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            self.assertEqual(opt_f(None, torch.ones(2)), 6)
+
+        if sys.version_info >= (3, 11):
+            insts = bytecode_transformation.cleaned_instructions(f.__code__)
+            for inst in insts:
+                self.assertNotIn("_NONE", inst.opname)
+
     @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
     def test_py311_jump_offset(self):
         new_inst = bytecode_transformation.create_instruction
+        load_global = bytecode_transformation.create_load_global
         consts = (None, 1, 2, 3, 4)
 
         def create_test_code(jump_opname, target_idx):
             targets = [
-                new_inst("LOAD_CONST", 1),
-                new_inst("LOAD_CONST", 3),
+                new_inst("LOAD_CONST", argval=1),
+                new_inst("LOAD_CONST", argval=3),
             ]
             jump_to_target_inst = new_inst(jump_opname, target=targets[target_idx])
             """
@@ -4749,20 +4843,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             """
             # test with LOAD_GLOBAL since it has a different instruction size
             insts = [
-                new_inst("RESUME", 0),
+                new_inst("RESUME", arg=0),
                 new_inst("JUMP_FORWARD", target=jump_to_target_inst),
                 targets[0],
-                new_inst("LOAD_GLOBAL", argval="print"),
+                load_global("print", False),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 jump_to_target_inst,
-                new_inst("LOAD_CONST", 2),
-                new_inst("LOAD_GLOBAL", argval="print"),
+                new_inst("LOAD_CONST", argval=2),
+                load_global("print", False),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 targets[1],
                 new_inst("RETURN_VALUE"),
-                new_inst("LOAD_CONST", 4),
+                new_inst("LOAD_CONST", argval=4),
                 new_inst("RETURN_VALUE"),
             ]
             code_options = collections.OrderedDict(
@@ -4819,8 +4913,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             dummy_fn.__code__ = code
             self.assertEqual(dummy_fn(), test[3])
 
-            # TODO should also pass the code object back into dynamo again, but
-            # dynamo is not enabled for Python 3.11 yet.
+            dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
+            self.assertEqual(dummy_opt(), test[3])
 
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
@@ -5229,6 +5323,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ).run(
                 prof.report()
             )
+
+    def test_guards_strip_function_call(self):
+        from torch._dynamo.guards import strip_function_call
+
+        test_case = [
+            ("___odict_getitem(a, 1)", "a"),
+            ("a.layers[slice(2)][0]._xyz", "a"),
+            ("getattr(a.layers[slice(2)][0]._abc, '0')", "a"),
+            ("getattr(getattr(a.x[3], '0'), '3')", "a"),
+            ("a.layers[slice(None, -1, None)][0]._xyz", "a"),
+            ("a.layers[func('offset', -1, None)][0]._xyz", "a"),
+        ]
+        # strip_function_call should extract the object from the string.
+        for name, expect_obj in test_case:
+            self.assertEqual(strip_function_call(name), expect_obj)
 
 
 class CustomFunc1(torch.autograd.Function):
