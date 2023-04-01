@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
      TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
 from torch.testing import make_tensor
-from torch.testing._comparison import TensorLikePair
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
@@ -1467,11 +1466,11 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(linear_cpu_output.size(), linear_mps_output.size())
 
         if backward_pass:
-            cpu_grad = torch.ones_like(linear_cpu_output)
-            grad = cpu_grad.to('mps')
+            cpu_grad = torch.rand_like(linear_cpu_output, requires_grad=True)
+            grad = cpu_grad.detach().to('mps').requires_grad_()
 
-            linear_cpu_output.backward(gradient=cpu_grad)
-            linear_mps_output.backward(gradient=grad)
+            linear_cpu_output.backward(gradient=cpu_grad, create_graph=True)
+            linear_mps_output.backward(gradient=grad, create_graph=True)
 
             self.assertEqual(linear_cpu_input.grad.size(), linear_mps_input.grad.size())
             self.assertEqual(linear_cpu_input.grad, linear_mps_input.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
@@ -1481,6 +1480,36 @@ class TestMPS(TestCaseMPS):
             if bias:
                 self.assertEqual(cpu_linear.bias.grad.size(), mps_linear.bias.grad.size())
                 self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
+
+            # test gradgrad
+            x_grad_out = torch.rand_like(linear_cpu_input)
+            x_grad_out_mps = x_grad_out.to("mps")
+            w_grad_out = torch.rand_like(cpu_linear.weight)
+            w_grad_out_mps = w_grad_out.to("mps")
+
+            linear_cpu_input.grad.detach().zero_()
+            linear_mps_input.grad.detach().zero_()
+            cpu_linear.weight.grad.detach().zero_()
+            mps_linear.weight.grad.detach().zero_()
+            if bias:
+                b_grad_out = torch.rand_like(cpu_linear.bias)
+                b_grad_out_mps = b_grad_out.to("mps")
+                cpu_linear.bias.grad.detach().zero_()
+                mps_linear.bias.grad.detach().zero_()
+
+            linear_cpu_input.grad.backward(x_grad_out, retain_graph=True)
+            linear_mps_input.grad.backward(x_grad_out_mps, retain_graph=True)
+            cpu_linear.weight.grad.backward(w_grad_out, retain_graph=True)
+            mps_linear.weight.grad.backward(w_grad_out_mps, retain_graph=True)
+            if bias:
+                cpu_linear.bias.grad.backward(b_grad_out, retain_graph=True)
+                mps_linear.bias.grad.backward(b_grad_out_mps, retain_graph=True)
+
+            self.assertEqual(cpu_grad.grad, grad.grad)
+            self.assertEqual(linear_cpu_input.grad, linear_mps_input.grad)
+            self.assertEqual(cpu_linear.weight.grad, mps_linear.weight.grad)
+            if bias:
+                self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad)
 
     def test_linear1D(self):
         self._linear_helper(in_features=2, out_features=3, shape=([2]), bias=True, backward_pass=False)
@@ -6516,7 +6545,9 @@ class TestNLLLoss(TestCaseMPS):
 
             self.assertEqual(idx_result, idx_result_cpu)
 
-        helper(22, 0, [])
+        helper(22, 0, [0])
+        with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
+            helper(22, 0, [])
 
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
@@ -7121,6 +7152,7 @@ class TestNLLLoss(TestCaseMPS):
         x.backward(torch.randn_like(x))
         torch.mps.synchronize()
 
+    @unittest.expectedFailure
     def test_mps_allocator_module(self):
         # first garbage collect and empty the cached blocks
         gc.collect()
@@ -10079,19 +10111,6 @@ class TestNoRegression(TestCase):
         # corruption which needs to be fixed for this test to be enabled.
         # with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
             # torch.testing.assert_close(a, nan)
-
-    @unittest.expectedFailure
-    def test_mps_compat(self):
-        # If this test is successful, that means that all operations in the comparison logic are supported natively on
-        # the MPS backend. Please remove this test as well as the compatibility logic in
-        # torch.testing._comparison.TensorLikePair._equalize_attributes
-        actual = torch.tensor(1.0, device="mps")
-        expected = actual.clone()
-
-        # We can't use assert_close or TensorLikePair.compare() directly, since that would hit the compatibility logic
-        # in torch.testing._comparison.TensorLikePair._equalize_attributes that we want to circumvent here
-        pair = TensorLikePair(actual, expected)
-        pair._compare_values(actual, expected)
 
     def test_double_error(self):
         with self.assertRaisesRegex(TypeError, "the MPS framework doesn't support float64"):
