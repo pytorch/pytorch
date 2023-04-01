@@ -2175,7 +2175,10 @@
   output_differentiability: [True, False]
 
 - name: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
-  input, weight, bias: linear_backward(input, grad, weight, grad_input_mask)
+  input, weight, bias: "grad.defined() ? linear_backward(input, grad, weight, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+
+- name: linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  self, grad_output, weight: linear_double_backward(grads, self, grad_output, weight)
 
 #mps
 - name: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor

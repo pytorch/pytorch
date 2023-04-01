@@ -260,7 +260,7 @@ class TestFSDPCheckpoint(FSDPTest):
                             else contextlib.suppress()
                         )
                         with offload_ctx:
-                            out = checkpoint(m, inp)
+                            out = checkpoint(m, inp, use_reentrant=True)
                     else:
                         # _save_on_cpu should not be called yet
                         self.assertFalse(_save_on_cpu_called)
