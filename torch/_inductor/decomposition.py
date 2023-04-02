@@ -435,6 +435,8 @@ def view_copy_dtype(self, dtype):
 def native_dropout(input: Tensor, p: float, train: bool):
     if not train or p == 0:
         return (input, torch.ones_like(input, dtype=torch.bool))
+    if p == 1:
+        return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
     # intentionally don't decompose to improve pattern matching
     return NotImplemented
 
