@@ -45,6 +45,7 @@ import torch.utils._pytree as pytree
 from itertools import product
 
 test_consistency_op_db = copy.deepcopy(op_db)
+test_error_inputs_op_db = copy.deepcopy(op_db)
 
 # Copied from `test_ops.py` for the purposes of duplicating `test_numpy_ref`
 _ref_test_ops = tuple(
@@ -10424,7 +10425,7 @@ class TestConsistency(TestCaseMPS):
 
 
 class TestErrorInputs(TestCaseMPS):
-    @ops(mps_ops_error_inputs_modifier(op_db), dtypes=OpDTypes.none)
+    @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps")
 
