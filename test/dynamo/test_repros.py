@@ -1531,6 +1531,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
+    def test_hf_gelu_inline(self):
+        class GELUActivation(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.act = nn.functional.gelu
+
+            def forward(self, input):
+                return self.act(input)
+
+        @torch._dynamo.optimize("eager", nopython=True)
+        def fn(x):
+            return GELUActivation()(x)
+
+        y = torch.randn(10)
+        self.assertTrue(same(fn(y), nn.functional.gelu(y)))
+
+        @torch._dynamo.optimize("eager", nopython=True)
+        def fn_returns(x):
+            return GELUActivation(), x + 1
+
+        act, _ = fn_returns(y)
+        self.assertIsInstance(act, GELUActivation)
+        self.assertIs(act.act, nn.functional.gelu)
+        self.assertTrue(hasattr(act, "_buffers"))  # check that __init__ got called
+
     def test_torch_tensor_ops(self):
         def fn(x):
             return torch.Tensor.abs_(x)
