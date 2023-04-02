@@ -117,3 +117,6 @@ torch/profiler/ @robieta
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
+
+# Dataloader
+torch/utils/data/ @NivekT @ejguan
