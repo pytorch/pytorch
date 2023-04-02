@@ -380,6 +380,60 @@ Tensor _nested_from_padded_backward(
   return grad.to_padded_tensor(0, input.sizes());
 }
 
+std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
+    const variable_list& grads,
+    const Tensor& self,
+    const Tensor& grad_output,
+    const Tensor& weight) {
+  if (!grad_output.defined()) {
+    return std::make_tuple(Tensor(), Tensor(), Tensor());
+  }
+
+  Tensor grad_self, grad_grad_output, grad_weight;
+
+  if (grads[1].defined()) {
+    grad_self =
+        (grad_output.dim() == 1 ? grad_output.unsqueeze(0) : grad_output)
+            .matmul(grads[1]);
+    if (grad_output.dim() == 1) {
+      grad_self = grad_self.squeeze(0);
+    }
+  }
+  if (grads[0].defined()) {
+    grad_weight =
+        (grad_output.dim() == 1 ? grad_output.unsqueeze(1) : grad_output.mT())
+            .matmul(grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0]);
+  }
+
+  if (grads[0].defined() || grads[1].defined() || grads[2].defined()) {
+    grad_grad_output = at::zeros_like(grad_output);
+    if (grad_output.dim() == 1) {
+      grad_grad_output = grad_grad_output.unsqueeze(0);
+    }
+  }
+
+  if (grads[0].defined()) {
+    grad_grad_output = grad_grad_output +
+        (grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0])
+            .matmul(weight.mT());
+  }
+  if (grads[1].defined()) {
+    grad_grad_output = grad_grad_output +
+        (self.dim() == 1 ? self.unsqueeze(0) : self).matmul(grads[1].mT());
+  }
+  if (grads[2].defined()) {
+    grad_grad_output = grad_grad_output + grads[2];
+  }
+  if (grad_grad_output.defined() && grad_output.dim() == 1) {
+    grad_grad_output = grad_grad_output.squeeze(0);
+  }
+
+  return std::make_tuple(
+      std::move(grad_self),
+      std::move(grad_grad_output),
+      std::move(grad_weight));
+}
+
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -6648,9 +6702,9 @@ Tensor take_backward(
     const Tensor& indices) {
   Tensor grad_self = at::zeros_like(self);
   // For Composite Compliance,
-  // if `grad` and `indices` are CCT but `self` is not
+  // if `grad` and `indices` are CCT but `grad_self` is not
   // then we use the out-of-place variant of `put`.
-  if (!isTensorSubclassLike(self) &&
+  if (!isTensorSubclassLike(grad_self) &&
       areAnyTensorSubclassLike({grad, indices})) {
     return grad_self.put(indices, grad, true);
   }

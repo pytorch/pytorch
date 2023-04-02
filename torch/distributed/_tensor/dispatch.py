@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
-from typing import Callable, cast, Dict, Tuple, Union, Optional, Sequence, List
+from typing import Callable, cast, Dict, Tuple, Union, Sequence, List
 
 import torch
 
@@ -25,7 +25,7 @@ _ENABLE_FALLBACK = False
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
-    if isinstance(res, torch.Tensor):
+    def to_dt(res, spec):
         assert spec is not None and isinstance(
             spec, DTensorSpec
         ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
@@ -39,6 +39,9 @@ def wrap(res: object, spec: OutputSpecType) -> object:
             requires_grad=res.requires_grad,
             stride=spec.tensor_meta.stride,
         )
+
+    if isinstance(res, torch.Tensor):
+        return to_dt(res, spec)
     elif isinstance(res, (list, tuple)):
         assert spec is not None and isinstance(
             spec, (list, tuple)
@@ -48,21 +51,15 @@ def wrap(res: object, spec: OutputSpecType) -> object:
             # NOTE: local results might return Optional Tensor from ATen op, so we need
             # to handle that case and make sure we don't wrap None with DTensor.
             # (i.e. native_layer_norm.backward)
-            if e is not None and s is not None:
-                assert s.tensor_meta is not None
-                res_dt = dtensor.DTensor(
-                    e,
-                    s.mesh,
-                    s.placements,
-                    shape=s.tensor_meta.shape,
-                    dtype=s.tensor_meta.dtype,
-                    requires_grad=s.tensor_meta.requires_grad,
-                    stride=s.tensor_meta.stride
+            if isinstance(e, (list, tuple)) and isinstance(s, (list, tuple)):
+                res_list.append(
+                    type(e)([to_dt(ee, ss) for ee, ss in zip(e, s)])
                 )
+            elif e is not None and s is not None:
+                res_list.append(to_dt(e, s))
             else:
-                res_dt = None
+                res_list.append(None)  # type: ignore[arg-type]
 
-            res_list.append(res_dt)
         return tuple(res_list) if isinstance(res, tuple) else res_list
     else:
         # if the res contains only non tensor values, we simply return it without rewrapping
@@ -97,7 +94,9 @@ def _reshape_alias(
     return torch.ops.aten.view(x, shape)
 
 
-_CURRENT_DECOMPOSITION_TABLE: Dict[Callable[..., object], Callable[..., object]] = {
+_CURRENT_DECOMPOSITION_TABLE: Dict[
+    Callable[..., object], Callable[..., object]
+] = {
     torch.ops.aten._reshape_alias.default: _reshape_alias,
 }
 
@@ -107,13 +106,14 @@ def operator_dispatch(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
     sharding_propagator: ShardingPropagator,
-    custom_dispatch_ops: Optional[Dict[str, Callable[..., object]]] = None,
 ) -> object:
     # check that we are not getting mixed vanilla and Distributed tensors
     arg_list, _ = tree_flatten(args)
     mesh = None
     for arg in arg_list:
-        if isinstance(arg, torch.Tensor) and not isinstance(arg, dtensor.DTensor):
+        if isinstance(arg, torch.Tensor) and not isinstance(
+            arg, dtensor.DTensor
+        ):
             raise RuntimeError(
                 f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
                 " torch.Tensor to DTensor before calling distributed operators!"
@@ -132,16 +132,12 @@ def operator_dispatch(
     if op_call in _CURRENT_DECOMPOSITION_TABLE:
         return _CURRENT_DECOMPOSITION_TABLE[op_call](*args, **kwargs)
 
-    # STEP 0. See if there's a user defined custom aten operator
-    # implementations. Custom operators take the highest priority
-    if custom_dispatch_ops is not None and str(op_call) in custom_dispatch_ops:
-        # dispatch to user defined custom distributed tensor ops
-        return custom_dispatch_ops[str(op_call)](*args, **kwargs)
-
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
 
-    output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
+    output_sharding = sharding_propagator.propagate_op_sharding(
+        op_call, op_schema
+    )
 
     # if the schema suggestion from sharding prop is not the same instance as the
     # input op_schema, it indicates a reshard, we need to redistribute the input
@@ -178,12 +174,16 @@ def operator_dispatch(
             ret_type = str(ret_list[0].type)
             if ret_type == "bool":
                 import operator
-                local_results: object = functools.reduce(operator.and_, obj_list, True)
+
+                local_results: object = functools.reduce(
+                    operator.and_, obj_list, True
+                )
             else:
                 raise NotImplementedError(
                     f"return type {ret_type} in DTensor op is not supported"
                 )
         else:
+
             def default_tensor(spec: DTensorSpec) -> torch.Tensor:
                 if spec.tensor_meta is not None:
                     shape = spec.tensor_meta.shape
@@ -195,16 +195,16 @@ def operator_dispatch(
                         # non-scalar tensor
                         return torch.tensor([], dtype=dtype)
                 else:
-                    raise RuntimeError(
-                        f"{spec} has no tensor metadata."
-                    )
+                    raise RuntimeError(f"{spec} has no tensor metadata.")
 
-            if (isinstance(spec, DTensorSpec)):
+            if isinstance(spec, DTensorSpec):
                 # return a Tensor value
                 local_results = default_tensor(spec)
-            elif (isinstance(spec, Sequence)):
+            elif isinstance(spec, Sequence):
                 # return a List[Tensor] value
-                local_results = [default_tensor(s) if s is not None else None for s in spec]
+                local_results = [
+                    default_tensor(s) if s is not None else None for s in spec
+                ]
                 assert isinstance(local_results, List)
                 if None in local_results:
                     ret_type = str(ret_list[0].type)
