@@ -1,11 +1,13 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import functools
+from io import StringIO
 import random
 import unittest
 from unittest.mock import patch
 import numpy as np
 import torch
+from torch._C import FileCheck
 import torch._dynamo
 from torch._dynamo.backends.distributed import DDPOptimizer
 import torch._dynamo.test_case
@@ -27,7 +29,7 @@ from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
 )
 import torch._dynamo.logging
-
+from torch._dynamo.comptime import comptime
 
 def reset_rng_state():
     torch.manual_seed(1337)
@@ -532,6 +534,68 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         fsdp_m = FSDP(m, use_orig_params=False)
         fsdp_m = torch._dynamo.optimize()(fsdp_m)
         self.assertRaisesRegex(AssertionError, "Dynamo only supports FSDP with use_orig_params=True", fsdp_m, inputs)
+
+    def test_fsdp_skip_guards(self):
+        """
+        It's currently difficult to test dynamo guards.  Most guards tests are indirect- modify something and
+        observe that the guard in question failed. In this case, since the FSDP guards were already deemed
+        useless and skipping them is expected to have no practical effect, it's pretty contrived to even try to
+        make those guards fail.  Instead, we observe the 'guard source' printed by dynamo's comptime print_guards
+        function.
+
+        Note: comptime prints the guards before the time they get installed or not installed, so in both cases
+        (skip or no skip) the same guards get printed.  The difference is that in the skip case, they show up
+        with a special 'guard source' which will cuase them to not be installed.  So all we check for is the expected
+        guard source 'local_fsdp_module'.
+        """
+        global GUARDS_FILE
+        GUARDS_FILE = StringIO()
+
+        for skip_guards, expected_guard_source in (
+            (True, "local_fsdp_module"),
+            (False, "local")
+        ):
+            torch._dynamo.reset()
+            torch._dynamo.config.skip_fsdp_guards = skip_guards
+
+            class ToyModel(nn.Module):
+                def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
+                    super().__init__()
+                    self.net = nn.Sequential(
+                        *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
+                        + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+                        + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+                        + [nn.Linear(hidden_feat, out_feat), nn.ReLU()]
+                    )
+
+                def forward(self, inputs):
+                    out = self.net(inputs)
+
+                    @comptime
+                    def _(ctx):
+                        ctx.print_guards(file=GUARDS_FILE)
+
+                    return out
+            device = f"cuda:{self.rank}"
+            m = ToyModel(in_feat=10, hidden_feat=5000, out_feat=5,).to(device)
+            inputs = torch.rand(20, 10).to(device)
+            m.apply(init_weights)
+            correct_outputs = m(inputs)
+            fsdp_m = FSDP(m, use_orig_params=True)
+            opt_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+            outputs = opt_m(inputs)
+
+            # far from an exhaustive check of all the expected guards, just check a couple of them.
+            FileCheck() \
+                .check("local 'self' TYPE_MATCH") \
+                .check("local 'self' ID_MATCH") \
+                .check(f"{expected_guard_source} 'self.net' TYPE_MATCH") \
+                .check(f"{expected_guard_source} 'self.net' ID_MATCH") \
+                .check(f"{expected_guard_source} 'self.net[0]' TYPE_MATCH") \
+                .check(f"{expected_guard_source} 'self.net[0]' ID_MATCH") \
+                .run(GUARDS_FILE.getvalue())
+            self.assertTrue(same(correct_outputs, outputs))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
