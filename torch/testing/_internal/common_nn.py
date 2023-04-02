@@ -118,21 +118,6 @@ module_tests = [
         tf32_precision=0.005,
     ),
     dict(
-        module_name='Threshold',
-        constructor_args=(2., 1.),
-        cpp_constructor_args='torch::nn::ThresholdOptions(2., 1.)',
-        input_size=(2, 3, 4, 5),
-        check_inplace=True,
-        desc='threshold_value'
-    ),
-    dict(
-        module_name='Threshold',
-        constructor_args=(2., 10.),
-        cpp_constructor_args='torch::nn::ThresholdOptions(2., 10.)',
-        input_size=(2, 3, 4, 5),
-        desc='large_value'
-    ),
-    dict(
         module_name='RReLU',
         input_size=(1, 2, 2),
         test_cuda=False,
@@ -146,97 +131,11 @@ module_tests = [
         test_cuda=False,
     ),
     dict(
-        module_name='Hardtanh',
-        input_size=(3, 2, 5),
-        reference_fn=lambda i, *_: i.clamp(-1, 1),
-    ),
-    dict(
-        module_name='Sigmoid',
-        input_size=(2, 3, 4, 5),
-    ),
-    dict(
-        module_name='Tanh',
-        input_size=(2, 3, 4, 5),
-    ),
-    dict(
         module_name='Flatten',
         input_size=(2, 3, 4, 5),
         reference_fn=lambda i, *_: torch.flatten(i, 1)
     ),
-    dict(
-        module_name='Softmax',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::SoftmaxOptions(1)',
-        input_size=(10, 20),
-        reference_fn=lambda i, *_: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20)),
-    ),
-    dict(
-        module_name='Softmax2d',
-        input_size=(1, 3, 10, 20),
-        reference_fn=lambda i, *_: torch.exp(i).div(torch.exp(i).sum(1, False)),
-    ),
-    dict(
-        module_name='LogSoftmax',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::LogSoftmaxOptions(1)',
-        input_size=(10, 20),
-        reference_fn=lambda i, *_: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_(),
-    ),
-    dict(
-        module_name='LogSoftmax',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::LogSoftmaxOptions(1)',
-        input_size=(1, 3, 10, 20),
-        reference_fn=lambda i, *_: torch.exp(i).div_(torch.exp(i).sum(1, False)).log_(),
-        desc='multiparam',
-    ),
     # TODO: reference function
-    dict(
-        module_name='Hardshrink',
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::HardshrinkOptions(2.)',
-        input_size=(4, 3, 2, 4),
-    ),
-    dict(
-        module_name='LogSigmoid',
-        input_size=(2, 3, 4),
-        reference_fn=lambda i, *_: i.sigmoid().log(),
-    ),
-    dict(
-        module_name='Softplus',
-        input_size=(10, 20),
-        reference_fn=lambda i, *_: torch.log(1 + torch.exp(i)),
-    ),
-    dict(
-        module_name='Softplus',
-        constructor_args=(2,),
-        cpp_constructor_args='torch::nn::SoftplusOptions().beta(2)',
-        input_size=(10, 20),
-        reference_fn=lambda i, *_: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
-        desc='beta',
-    ),
-    dict(
-        module_name='Softplus',
-        constructor_args=(2, -100),
-        cpp_constructor_args='torch::nn::SoftplusOptions().beta(2).threshold(-100)',
-        input_size=(10, 20),
-        reference_fn=(
-            lambda i, *_: ((i * 2) > -100).type_as(i) * i
-            + ((i * 2) <= -100).type_as(i) * 1. / 2. * torch.log(1 + torch.exp(2 * i))
-        ),
-        desc='beta_threshold',
-    ),
-    dict(
-        module_name='Softshrink',
-        input_size=(3, 2, 5),
-    ),
-    dict(
-        module_name='Softshrink',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::SoftshrinkOptions(1)',
-        input_size=(3, 2, 5),
-        desc='lambda',
-    ),
     dict(
         module_name='CrossMapLRN2d',
         constructor_args=(5, 5e-3, 1e-3, 2),
@@ -245,28 +144,6 @@ module_tests = [
         check_gradgrad=False,
         # TODO(#50743): Figure out the error. "RuntimeError: Unrecognized tensor type ID: Batched"
         check_batched_grad=False,
-    ),
-    dict(
-        module_name='Softsign',
-        input_size=(3, 2, 5),
-        reference_fn=lambda i, *_: i.div(1 + torch.abs(i)),
-    ),
-    dict(
-        module_name='Softmin',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::SoftminOptions(1)',
-        input_size=(10, 20),
-    ),
-    dict(
-        module_name='Softmin',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::SoftminOptions(1)',
-        input_size=(2, 3, 5, 10),
-        desc='multidim',
-    ),
-    dict(
-        module_name='Tanhshrink',
-        input_size=(2, 3, 4, 5),
     ),
 ]
 
@@ -3210,17 +3087,6 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
-        module_name='Mish',
-        input_size=(),
-        desc='scalar',
-        reference_fn=lambda x, *_: x * torch.tanh(F.softplus(x)),
-    ),
-    dict(
-        module_name='Mish',
-        input_size=(5, 6, 7),
-        reference_fn=lambda x, *_: x * torch.tanh(F.softplus(x)),
-    ),
-    dict(
         constructor=wrap_functional(F.softmax, dim=-1),
         cpp_options_args='F::SoftmaxFuncOptions(-1)',
         input_size=(2, 128),  # trigger the last-dim algo in CUDA
@@ -3324,30 +3190,6 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
-        module_name='Softmax2d',
-        input_size=(3, 4, 5),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='Softmax',
-        constructor_args=(-1,),
-        cpp_constructor_args='torch::nn::SoftmaxOptions(-1)',
-        input_size=(4, 5),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='LogSoftmax',
-        constructor_args=(-1,),
-        cpp_constructor_args='torch::nn::LogSoftmaxOptions(1)',
-        input_size=(4, 5),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-
-
-    dict(
         fullname='Unfold',
         constructor=lambda: nn.Unfold((2, 2), (1, 1), (0, 0), (1, 1)),
         cpp_constructor_args='torch::nn::UnfoldOptions({2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
@@ -3398,109 +3240,12 @@ new_module_tests = [
         test_cuda=True,
     ),
     dict(
-        module_name='Threshold',
-        constructor_args=(2., 1.),
-        cpp_constructor_args='torch::nn::ThresholdOptions(2., 1.)',
-        input_size=(),
-        check_inplace=True,
-        desc='threshold_value_scalar'
-    ),
-    dict(
         module_name='RReLU',
         constructor_args=(0.1, 0.9),
         cpp_constructor_args='torch::nn::RReLUOptions().lower(0.1).upper(0.9)',
         input_size=(),
         desc='with_up_down_scalar',
         test_cuda=False,
-    ),
-    dict(
-        module_name='Hardtanh',
-        input_size=(),
-        reference_fn=lambda i, *_: i.clamp(-1, 1),
-        desc='scalar'
-    ),
-    dict(
-        module_name='Sigmoid',
-        input_size=(),
-        desc='scalar',
-    ),
-    dict(
-        module_name='Tanh',
-        input_size=(),
-        desc='scalar',
-    ),
-    dict(
-        module_name='Softmax',
-        constructor_args=(0,),
-        cpp_constructor_args='torch::nn::SoftmaxOptions(0)',
-        input_size=(),
-        reference_fn=lambda i, *_: torch.exp(i).div(torch.exp(i).sum(0, True)),
-        desc='scalar',
-    ),
-    dict(
-        module_name='LogSoftmax',
-        constructor_args=(0,),
-        cpp_constructor_args='torch::nn::LogSoftmaxOptions(0)',
-        input_size=(),
-        reference_fn=lambda i, *_: torch.exp(i).div_(torch.exp(i).sum(0, False)).log_(),
-        desc='multiparam_scalar',
-    ),
-    dict(
-        module_name='Hardshrink',
-        constructor_args=(2.,),
-        cpp_constructor_args='torch::nn::HardshrinkOptions(2.)',
-        input_size=(),
-        desc='scalar',
-    ),
-    dict(
-        module_name='LogSigmoid',
-        input_size=(),
-        reference_fn=lambda i, *_: i.sigmoid().log(),
-        desc='scalar'
-    ),
-    dict(
-        module_name='Softplus',
-        constructor_args=(2, -100),
-        cpp_constructor_args='torch::nn::SoftplusOptions().beta(2).threshold(-100)',
-        input_size=(),
-        reference_fn=(
-            lambda i, *_: ((i * 2) > -100).type_as(i) * i
-            + ((i * 2) <= -100).type_as(i) * 1.0 / 2.0 * torch.log(1 + torch.exp(2 * i))
-        ),
-        desc='beta_threshold_scalar',
-    ),
-    dict(
-        module_name='Softshrink',
-        constructor_args=(1,),
-        cpp_constructor_args='torch::nn::SoftshrinkOptions(1)',
-        input_size=(),
-        desc='lambda_scalar',
-    ),
-    dict(
-        module_name='Softsign',
-        input_size=(),
-        reference_fn=lambda i, *_: i.div(1 + torch.abs(i)),
-        desc='scalar',
-    ),
-    dict(
-        module_name='Softmin',
-        constructor_args=(0,),
-        cpp_constructor_args='torch::nn::SoftminOptions(0)',
-        input_size=(),
-        desc='scalar',
-    ),
-    dict(
-        module_name='Softmin',
-        constructor_args=(-1,),
-        cpp_constructor_args='torch::nn::SoftminOptions(-1)',
-        input_size=(3, 4, 10),
-        reference_fn=single_batch_reference_fn,
-        desc='no_batch_dim',
-    ),
-    dict(
-        module_name='Tanhshrink',
-        input_size=(),
-        desc='scalar',
     ),
     dict(
         fullname='Padding12_1dcircular',
@@ -5469,7 +5214,7 @@ class ModuleTest(TestBase):
         type_map = {torch.double: torch.float}
         cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
 
-        is_any_input_complex = any(map(lambda t: isinstance(t, torch.Tensor) and t.dtype.is_complex, cpu_input_tuple))
+        is_any_input_complex = any((isinstance(t, torch.Tensor) and t.dtype.is_complex for t in cpu_input_tuple))
 
         gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
