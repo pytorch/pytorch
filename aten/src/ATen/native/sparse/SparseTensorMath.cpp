@@ -1853,8 +1853,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
         .build();
       const auto device_type = kCPU;
 
-      const auto gIv_data = reinterpret_cast<char*>(grad_input_values.mutable_data_ptr());
-      const auto gOv_data = reinterpret_cast<char*>(grad_values_expand.mutable_data_ptr());
+      const auto gIv_data = reinterpret_cast<char*>(grad_input_values.data_ptr());
+      const auto gOv_data = reinterpret_cast<char*>(grad_values_expand.data_ptr());
       const auto gIv_stride = (grad_input_values.strides()[0] *
                                grad_input_values.element_size());
       const auto gOv_stride = (grad_values_expand.strides()[0] *

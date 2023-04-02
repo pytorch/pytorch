@@ -840,11 +840,11 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
     values.scalar_type(), "bmm_sparse_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
-      uint32_t* row_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim1.mutable_data_ptr());
-      uint32_t* col_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim2.mutable_data_ptr());
-      scalar_t* values_start_ptr = reinterpret_cast<scalar_t*>(values.mutable_data_ptr());
-      scalar_t* mat2_start_ptr = reinterpret_cast<scalar_t*>(mat2_contig.mutable_data_ptr());
-      scalar_t* result_start_ptr = reinterpret_cast<scalar_t*>(tmp_result.mutable_data_ptr());
+      uint32_t* row_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim1.data_ptr());
+      uint32_t* col_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim2.data_ptr());
+      scalar_t* values_start_ptr = reinterpret_cast<scalar_t*>(values.data_ptr());
+      scalar_t* mat2_start_ptr = reinterpret_cast<scalar_t*>(mat2_contig.data_ptr());
+      scalar_t* result_start_ptr = reinterpret_cast<scalar_t*>(tmp_result.data_ptr());
       for (
         int64_t cur_mat_num = 0;
         (cur_mat_num < num_matrices);

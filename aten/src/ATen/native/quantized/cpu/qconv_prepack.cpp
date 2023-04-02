@@ -439,7 +439,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
                                    : w_desc.get_dims();
   ideep::tensor wgt = ideep::tensor(
       ideep::tensor::desc({w_dims, dnnl::memory::data_type::s8, w_tag}, groups),
-      weight_copy.mutable_data_ptr());
+      weight_copy.data_ptr());
   wgt.set_scale(wgt_scales); // Scales are needed for feed_from().
   ideep::tensor exp_wgt;
   exp_wgt.init(w_desc);
@@ -459,7 +459,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         "bias should have K elements: " + std::to_string(output_channels));
     auto bias_desc = ideep::tensor::desc(bias.value().sizes().vec(), dnnl::memory::data_type::f32);
     ideep::tensor packed_bias;
-    packed_bias.init(bias_desc, bias.value().mutable_data_ptr());
+    packed_bias.init(bias_desc, bias.value().data_ptr());
     onednn_bias = c10::optional<ideep::tensor>(packed_bias);
   }
   auto ret_ptr = c10::make_intrusive<PackedConvWeightsOnednn<kSpatialDim>>(

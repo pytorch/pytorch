@@ -8,7 +8,7 @@ namespace {
 template <typename scalar_t>
 inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
   auto value = value_scalar.to<scalar_t>();
-  scalar_t* dptr = static_cast<scalar_t*>(self.mutable_data_ptr());
+  scalar_t* dptr = static_cast<scalar_t*>(self.data_ptr());
   *dptr = value;
 }
 }

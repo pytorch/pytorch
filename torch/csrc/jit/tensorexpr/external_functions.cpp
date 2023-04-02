@@ -479,7 +479,7 @@ void nnc_aten_quantized_conv1d_out(
   auto qx = tensors[1].unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
   r = r.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -541,7 +541,7 @@ void nnc_aten_quantized_conv2d_out(
   const int64_t out_qzero = extra_args[4];
   // NOLINTNEXTLINE
   auto r = convPackedParams->apply(tensors[1], out_qscale, out_qzero);
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -603,7 +603,7 @@ void nnc_aten_quantized_conv2d_relu_out(
   const int64_t out_qzero = extra_args[4];
   // NOLINTNEXTLINE
   auto r = convPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -665,7 +665,7 @@ void nnc_aten_quantized_linear_out(
   const int64_t out_qzero = extra_args[4];
   // NOLINTNEXTLINE
   auto r = linearPackedParams->apply(tensors[1], out_qscale, out_qzero);
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -795,7 +795,7 @@ void nnc_aten_quantized_mul_out(
   const int64_t out_qzero = extra_args[7];
   // NOLINTNEXTLINE
   auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -851,7 +851,7 @@ void nnc_aten_quantized_mul_scalar_out(
   const double scalar = ((double*)extra_args)[3];
   // NOLINTNEXTLINE
   auto r = quantized_mul_scalar(tensors[1], scalar);
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -932,7 +932,7 @@ void nnc_aten_quantized_sigmoid_out(
 
   // NOLINTNEXTLINE
   auto r = at::sigmoid(tensors[1]);
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -1060,7 +1060,7 @@ void nnc_aten_upsample_nearest2d_out(
       (scale_factor_h != -1.f) ? c10::optional<at::ArrayRef<double>>(
                                      {scale_factor_h, scale_factor_w})
                                : c10::nullopt);
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -1110,7 +1110,7 @@ void nnc_aten_quantize_per_tensor_out(
   const int64_t qzero = extra_args[1];
   const c10::ScalarType qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto r = at::quantize_per_tensor(x, qscale, qzero, qdtype);
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -1165,7 +1165,7 @@ void nnc_aten_dequantize_out(
       bufs_out_num);
   // NOLINTNEXTLINE
   auto r = at::dequantize(tensors[1]);
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -1255,7 +1255,7 @@ void nnc_aten_conv1d_out(
     }
   }
 
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
@@ -1356,7 +1356,7 @@ void nnc_aten_max_red_out(
     r = std::get<0>(at::max(x, max_dim, keep_dim));
   } catch (...) {
   }
-  buf_data[0] = r.mutable_data_ptr();
+  buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }

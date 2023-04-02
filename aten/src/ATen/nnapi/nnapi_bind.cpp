@@ -143,7 +143,7 @@ void NnapiCompilation::run(
         execution,
         i,
         nullptr,
-        t.mutable_data_ptr(),
+        t.data_ptr(),
         t.nbytes());
   }
 

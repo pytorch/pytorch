@@ -74,16 +74,16 @@ void set_params_fprop(FMHA_fprop_params &params,
     params.is_bf16 = q.dtype() == at::kBFloat16;
 
     // Set the pointers and strides.
-    params.q_ptr = q.mutable_data_ptr();
-    params.k_ptr = k.mutable_data_ptr();
-    params.v_ptr = v.mutable_data_ptr();
+    params.q_ptr = q.data_ptr();
+    params.k_ptr = k.data_ptr();
+    params.v_ptr = v.data_ptr();
     params.q_row_stride_in_elts = q.stride(0);
     params.k_row_stride_in_elts = k.stride(0);
     params.v_row_stride_in_elts = v.stride(0);
     params.q_head_stride_in_elts = q.stride(1);
     params.k_head_stride_in_elts = k.stride(1);
     params.v_head_stride_in_elts = v.stride(1);
-    params.o_ptr = out.mutable_data_ptr();
+    params.o_ptr = out.data_ptr();
     params.o_row_stride_in_elts = out.stride(0);
     params.o_head_stride_in_elts = out.stride(1);
     params.o_tmp_ptr = o_tmp_d;
@@ -169,9 +169,9 @@ void set_params_dgrad(FMHA_dgrad_params &params,
                      num_splits);
 
     // Set the pointers and strides.
-    params.dq_ptr = dq.mutable_data_ptr();
-    params.dk_ptr = dk.mutable_data_ptr();
-    params.dv_ptr = dv.mutable_data_ptr();
+    params.dq_ptr = dq.data_ptr();
+    params.dk_ptr = dk.data_ptr();
+    params.dv_ptr = dv.data_ptr();
     params.dq_row_stride_in_elts = dq.stride(0);
     params.dk_row_stride_in_elts = dk.stride(0);
     params.dv_row_stride_in_elts = dv.stride(0);
@@ -298,11 +298,11 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
                      num_heads,
                      head_size,
                      q, k, v, out,
-                     cu_seqlens_q.mutable_data_ptr(),
-                     cu_seqlens_k.mutable_data_ptr(),
-                     loop ? o_tmp.mutable_data_ptr() : nullptr,
-                     return_softmax ? flash_softmax.mutable_data_ptr() : nullptr,
-                     softmax_lse.mutable_data_ptr(),
+                     cu_seqlens_q.data_ptr(),
+                     cu_seqlens_k.data_ptr(),
+                     loop ? o_tmp.data_ptr() : nullptr,
+                     return_softmax ? flash_softmax.data_ptr() : nullptr,
+                     softmax_lse.data_ptr(),
                      p_dropout,
                      softmax_scale,
                      is_causal,
@@ -472,12 +472,12 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                      head_size,
                      q, k, v, out,
                      dq, dk, dv,
-                     cu_seqlens_q.mutable_data_ptr(),
-                     cu_seqlens_k.mutable_data_ptr(),
-                     loop ? dq_tmp.mutable_data_ptr() : nullptr,
-                     dout.mutable_data_ptr(),
-                     softmax_lse.mutable_data_ptr(),
-                     softmax_d.mutable_data_ptr(),
+                     cu_seqlens_q.data_ptr(),
+                     cu_seqlens_k.data_ptr(),
+                     loop ? dq_tmp.data_ptr() : nullptr,
+                     dout.data_ptr(),
+                     softmax_lse.data_ptr(),
+                     softmax_d.data_ptr(),
                      p_dropout,
                      softmax_scale,
                      is_causal,
@@ -488,7 +488,7 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     if (params.num_splits > 1) {
         if (!dq_tmp.defined()) {
             dq_tmp = at::zeros({total_q, num_heads, head_size}, opts.dtype(at::kFloat));
-            params.o_tmp_ptr = dq_tmp.mutable_data_ptr();  // o_tmp stores dq_tmp in the backward pass
+            params.o_tmp_ptr = dq_tmp.data_ptr();  // o_tmp stores dq_tmp in the backward pass
         } else {
             dq_tmp.zero_();
         }

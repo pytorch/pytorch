@@ -71,7 +71,7 @@ dnnl::graph::tensor llga_from_aten_tensor(const at::Tensor& tensor) {
   return {
       get_llga_desc(tensor).logical_tensor(),
       torch::jit::fuser::onednn::Engine::getEngine(),
-      tensor.mutable_data_ptr()};
+      tensor.data_ptr()};
 }
 
 using data_type = dnnl::graph::logical_tensor::data_type;

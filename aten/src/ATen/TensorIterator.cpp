@@ -1515,7 +1515,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
-    op.data = op.tensor_base().mutable_data_ptr();
+    op.data = op.tensor_base().data_ptr();
   }
 
   // zero out offsets

@@ -268,7 +268,7 @@ void launchFusion(
   // Asserts that t's dims can be compressed in the same way as in desc
   // (that's what the kernel assumes), and appends it to the arguments vector.
   auto addTensorInfo = [&](const TensorDesc& desc, const at::Tensor& t) {
-    addTensorInfoRaw(desc, t.mutable_data_ptr(), t.sizes(), t.strides());
+    addTensorInfoRaw(desc, t.data_ptr(), t.sizes(), t.strides());
   };
 
   // Adds (flattened) input arguments
@@ -280,7 +280,7 @@ void launchFusion(
     } else {
       size_t chunk_offset = map_size[chunk.dim()] * tensor.stride(chunk.dim()) *
           elementSize(tensor.scalar_type());
-      char* data_ptr = reinterpret_cast<char*>(tensor.mutable_data_ptr());
+      char* data_ptr = reinterpret_cast<char*>(tensor.data_ptr());
       for (size_t chunks = 0; chunks < chunk.nSubTensors(); ++chunks) {
         addTensorInfoRaw(
             *chunk.subTensorDesc(), data_ptr, map_size, tensor.strides());

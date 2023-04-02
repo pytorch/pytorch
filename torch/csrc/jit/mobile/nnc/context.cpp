@@ -227,7 +227,7 @@ void Function::init_execution_state() const {
   for (const auto& param : parameters_) {
     const c10::IValue& ivalue = (c10::IValue)param;
     if (ivalue.isTensor()) {
-      arguments.emplace_back(ivalue.toTensor().mutable_data_ptr());
+      arguments.emplace_back(ivalue.toTensor().data_ptr());
     } else if (torch::isCustomClass(ivalue)) {
       arguments.emplace_back(ivalue.toObjectRef().getSlot(0).toCapsule().get());
     } else {
@@ -268,7 +268,7 @@ c10::impl::GenericList Function::run(
     const auto& spec = input_specs_[i];
     const auto& input_tensor = input.toTensor();
     TORCH_CHECK(spec.validate(input_tensor), "Invalid input at pos: ", i);
-    args[i] = input_tensor.mutable_data_ptr();
+    args[i] = input_tensor.data_ptr();
   }
   offset += inputs.size();
 
@@ -288,7 +288,7 @@ c10::impl::GenericList Function::run(
   for (const auto i : c10::irange(output_specs_.size())) {
     at::Tensor output = output_specs_[i].allocate();
     outputs.emplace_back(output);
-    args[i + offset] = output.mutable_data_ptr();
+    args[i + offset] = output.data_ptr();
   }
 
   // TODO: check consistency, e.g.: code version, input shape and compiled

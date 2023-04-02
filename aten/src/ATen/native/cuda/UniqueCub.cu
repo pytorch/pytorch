@@ -80,7 +80,7 @@ std::tuple<Tensor, Tensor, Tensor> compute_unique(
     inverse_indices = at::empty(sorted.sizes(), options);
     Tensor inv_loc = consecutive ? at::empty({num_inp}, options.dtype(kInt))
                                  : inverse_indices;
-    int* inv_loc_ptr = static_cast<int*>(inv_loc.mutable_data_ptr());
+    int* inv_loc_ptr = static_cast<int*>(inv_loc.data_ptr());
     const dim3 block =
         dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), num_inp));
     dim3 grid;

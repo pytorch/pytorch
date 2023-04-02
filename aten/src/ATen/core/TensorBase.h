@@ -560,14 +560,7 @@ class TORCH_API TensorBase {
                           .layout(layout());
   }
 
-  const void* data_ptr() const {
-    return this->unsafeGetTensorImpl()->mutable_data();
-  }
-
-  // TODO(#97856) Make this a non-const method. This is currently
-  //              const because of the vast number of clients that
-  //              mutate const at::Tensor& values.
-  void* mutable_data_ptr() const {
+  void* data_ptr() const {
     return this->unsafeGetTensorImpl()->mutable_data();
   }
 

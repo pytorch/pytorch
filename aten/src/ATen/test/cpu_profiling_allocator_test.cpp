@@ -16,9 +16,9 @@ at::Tensor run_with_control_flow(
   if (cond) {
     input = input * 2;
   }
-  void* input_ptr = input.mutable_data_ptr();
+  void* input_ptr = input.data_ptr();
   auto conv_out = at::conv2d(input, conv_weight);
-  void* conv_out_ptr = input.mutable_data_ptr();  // TODO should this be conv_out.mutable_data_ptr()?
+  void* conv_out_ptr = input.data_ptr();
   auto conv_out_flat = conv_out.view({conv_out.size(0), -1});
   auto output = at::linear(conv_out_flat, linear_weight);
   if (record) {

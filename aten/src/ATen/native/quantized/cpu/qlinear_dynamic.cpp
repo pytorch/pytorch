@@ -508,7 +508,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
   ideep::attr_t op_attr = ReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
   ideep::tensor x;
-  x.init(input_desc, input_contig.mutable_data_ptr());
+  x.init(input_desc, input_contig.data_ptr());
   // Find quantization parameters
   float x_max = 0, x_min = 0;
 #ifdef USE_FBGEMM
@@ -549,13 +549,13 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   if (output.numel() == 0) return output;
   ideep::tensor y({dst_dims, ideep::tensor::data_type::f32,
                    {output.strides().cbegin(), output.strides().cend()}},
-                  output.mutable_data_ptr());
+                  output.data_ptr());
   bool with_bias = bias_.has_value();
   if (with_bias) {
     // Bias might be modified outside (e.g. by quantization bias correction).
     // If so, update the prepacked bias as well.
     if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
-      bias_.value().init(bias_.value().get_desc(), orig_bias_.value().mutable_data_ptr());
+      bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
     }
   }
   const auto& b = with_bias ? bias_.value() : ideep::tensor();

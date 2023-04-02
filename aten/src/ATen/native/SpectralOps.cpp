@@ -1231,7 +1231,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   auto out_strides = in_strides;
   out_strides.back() *= -1;
 
-  auto* data_ptr = static_cast<char*>(input.mutable_data_ptr());
+  auto* data_ptr = static_cast<char*>(input.data_ptr());
   const auto* in_data = data_ptr + input_strides[dim.back()] * element_size;
   auto* out_data = data_ptr + (
       input_strides[dim.back()] * (input_sizes[dim.back()] - 1) * element_size);

@@ -67,7 +67,7 @@ Tensor qcat_nhwc_kernel(
   std::vector<int64_t> Cs_sum;
   std::vector<double> scales;
   std::vector<int64_t> zero_pts;
-  std::vector<const void*> data_ptrs;
+  std::vector<void*> data_ptrs;
   std::vector<bool> is_fast_path;
 
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
@@ -127,15 +127,15 @@ Tensor qcat_nhwc_kernel(
         // loop over input tensors
         for (const auto tidx : c10::irange(Cs_in.size())) {
           scalar_t::underlying* optr =
-              reinterpret_cast<scalar_t::underlying*>(output.mutable_data_ptr()) +
+              reinterpret_cast<scalar_t::underlying*>(output.data_ptr()) +
               i * C_out + Cs_sum[tidx];
 
           auto curr_C = Cs_in[tidx];
           float curr_scale = scales[tidx];
           int64_t curr_zero_pt = zero_pts[tidx];
 
-          const scalar_t::underlying* iptr =
-              reinterpret_cast<const scalar_t::underlying*>(data_ptrs[tidx]) +
+          scalar_t::underlying* iptr =
+              reinterpret_cast<scalar_t::underlying*>(data_ptrs[tidx]) +
               i * curr_C;
 
           if (is_fast_path[tidx] && !ReLUFused) {
@@ -203,7 +203,7 @@ Tensor qcat_nhwc_kernel(
             auto float_val = at::native::dequantize_val(
                 curr_scale,
                 curr_zero_pt,
-                reinterpret_cast<const scalar_t*>(iptr)[c]);
+                reinterpret_cast<scalar_t*>(iptr)[c]);
             if (ReLUFused) {
               float_val = std::max(0.0f, float_val);
             }
@@ -1477,8 +1477,8 @@ void qmaxpool_2d_nhwc_kernel(
     int64_t dW, // dilation
     Tensor& qy) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d_nhwc", [&]() {
-    const scalar_t* idata = static_cast<const scalar_t*>(qx.data_ptr());
-    scalar_t* odata = static_cast<scalar_t*>(qy.mutable_data_ptr());
+    scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
+    scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
 
     int64_t nBatch = qx.size(0);
     at::parallel_for(0, nBatch * oH * oW, 0, [&](int64_t begin, int64_t end) {
@@ -1486,7 +1486,7 @@ void qmaxpool_2d_nhwc_kernel(
       data_index_init(begin, b, nBatch, row, oH, col, oW);
 
       for (const auto i : c10::irange(begin, end)) {
-        auto* i_p = reinterpret_cast<const scalar_t::underlying*>(idata + b * iW * iH * iC);
+        auto* i_p = reinterpret_cast<scalar_t::underlying*>(idata + b * iW * iH * iC);
         auto* o_p = reinterpret_cast<scalar_t::underlying*>(odata + i * iC);
 
         // Loop over reduction block
@@ -1649,7 +1649,7 @@ void do_avg_pool_nhwc_on_AVX_n(
 
 template <typename T>
 void do_avg_pool_on_AVX_n(
-    const typename T::underlying* i_p,
+    typename T::underlying* i_p,
     typename T::underlying* o_p,
     int64_t& c,
     int64_t channel_size,
@@ -1721,8 +1721,8 @@ void _qadaptive_avg_pool_kernel(
     int64_t istrideH,
     int64_t istrideW) {
 
-  const T* idata = static_cast<const T*>(qx.data_ptr());
-  T* odata = static_cast<T*>(qy.mutable_data_ptr());
+  T* idata = static_cast<T*>(qx.data_ptr());
+  T* odata = static_cast<T*>(qy.data_ptr());
 
   const float input_scale = qx.q_scale();
   const float output_scale = qy.q_scale();
@@ -1731,7 +1731,7 @@ void _qadaptive_avg_pool_kernel(
 
   at::parallel_for(0, nBatch, 0, [&](int64_t batch_start, int64_t batch_end) {
     for (const auto b : c10::irange(batch_start, batch_end)) {
-      auto* i_p = reinterpret_cast<const typename T::underlying*>(
+      auto* i_p = reinterpret_cast<typename T::underlying*>(
           idata + b * istrideB);
 
       for (const auto od : c10::irange(osizeD)) {
@@ -1908,8 +1908,8 @@ void _qavg_pool_nhwc_kernel(
     int padD,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
-  const T* idata = static_cast<const T*>(qx.data_ptr());
-  T* odata = static_cast<T*>(qy.mutable_data_ptr());
+  T* idata = static_cast<T*>(qx.data_ptr());
+  T* odata = static_cast<T*>(qy.data_ptr());
   int strideC = 1;
   int strideW = strideC * nInputPlane;
   int istrideH = strideW * inputWidth;
@@ -1929,7 +1929,7 @@ void _qavg_pool_nhwc_kernel(
     data_index_init(begin, b, nBatch, od, outputDepth, oh, outputHeight, ow, outputWidth);
 
     for (const auto i : c10::irange(begin, end)) {
-      auto* i_p = reinterpret_cast<const typename T::underlying*>(idata + b * istrideB);
+      auto* i_p = reinterpret_cast<typename T::underlying*>(idata + b * istrideB);
       auto* o_p = reinterpret_cast<typename T::underlying*>(odata + i * strideW);
       int dstart = od * dD - padD;
       int hstart = oh * dH - padH;
@@ -2177,8 +2177,8 @@ void qupsample_bilinear2d_nhwc_kernel(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   AT_DISPATCH_QINT_TYPES(input.scalar_type(), "upsample_bilinear2d_nhwc", [&]() {
-    const auto* idata = static_cast<const scalar_t*>(input.data_ptr());
-    auto* odata = static_cast<scalar_t*>(output.mutable_data_ptr());
+    auto* idata = static_cast<scalar_t*>(input.data_ptr());
+    auto* odata = static_cast<scalar_t*>(output.data_ptr());
     float inverse_scale = output.q_scale() / input.q_scale();
     const auto rheight = area_pixel_compute_scale<float>(
         input_height, output_height, align_corners, scales_h);
@@ -2193,7 +2193,7 @@ void qupsample_bilinear2d_nhwc_kernel(
 
       for (const auto i : c10::irange(begin, end)) {
         (void)i; //Suppress unused variable warning
-        auto* i_p = reinterpret_cast<const typename scalar_t::underlying*>(
+        auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
             idata + b * input_height * input_width * channels);
         auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
             odata + b * output_height * output_width * channels);
@@ -2299,7 +2299,7 @@ void qtopk_kernel(Tensor& values,
 
 template <typename T>
 inline void do_bn_compute(
-    const typename T::underlying* X_ptr,
+    typename T::underlying* X_ptr,
     typename T::underlying* Y_ptr,
     Vectorized<float> & fake_scale,
     Vectorized<float> & in_zp_vec,
@@ -2347,9 +2347,9 @@ void q_batch_norm_kernel(
     float* beta = b.data_ptr<float>();
     auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
     auto maximum = std::numeric_limits<scalar_t::underlying>::max();
-    const scalar_t::underlying* X =
-        reinterpret_cast<const scalar_t::underlying*>(input.data_ptr());
-    scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.mutable_data_ptr());
+    scalar_t::underlying* X =
+        reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
+    scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
 
     constexpr int kVLen = Vectorized<float>::size();
     const int64_t outer_size = N * HxW;
@@ -2362,7 +2362,7 @@ void q_batch_norm_kernel(
     const auto lanes = static_cast<int64_t>(Vec::float_num_vecs() * kVLen);
     at::parallel_for(0, outer_size, 0, [&](int64_t begin, int64_t end) {
       for (const auto i : c10::irange(begin, end)) {
-        auto* X_ptr = reinterpret_cast<const typename scalar_t::underlying*>(X + i * C);
+        auto* X_ptr = reinterpret_cast<typename scalar_t::underlying*>(X + i * C);
         auto* Y_ptr = reinterpret_cast<typename scalar_t::underlying*>(Y + i * C);
         int64_t ch = 0;
 

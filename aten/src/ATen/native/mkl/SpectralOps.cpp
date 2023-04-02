@@ -480,9 +480,9 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   // run the FFT
   if (forward) {
-    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), input.mutable_data_ptr(), out.mutable_data_ptr()));
+    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), input.data_ptr(), out.data_ptr()));
   } else {
-    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), input.mutable_data_ptr(), out.mutable_data_ptr()));
+    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), input.data_ptr(), out.data_ptr()));
   }
 
   // Inplace reshaping to original batch shape and inverting the dimension permutation

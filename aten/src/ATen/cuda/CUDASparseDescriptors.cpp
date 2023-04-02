@@ -81,7 +81,7 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t ba
 #endif
 
   auto batch_stride = ndim > 2 && batch_offset >= 0 ? input_strides[ndim - 3] : 0;
-  void* values_ptr = static_cast<char*>(input.mutable_data_ptr()) +
+  void* values_ptr = static_cast<char*>(input.data_ptr()) +
       batch_offset * batch_stride * input.itemsize();
 
   cudaDataType value_type = ScalarTypeToCudaDataType(input.scalar_type());
@@ -121,7 +121,7 @@ CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
 
   cusparseDnVecDescr_t raw_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseCreateDnVec(
-      &raw_descriptor, input.numel(), input.mutable_data_ptr(), value_type));
+      &raw_descriptor, input.numel(), input.data_ptr(), value_type));
   descriptor_.reset(raw_descriptor);
 }
 
@@ -163,13 +163,13 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
       cols,
       nnz,
       // row offsets of the sparse matrix, size = rows + 1
-      static_cast<char*>(crow_indices.mutable_data_ptr()) +
+      static_cast<char*>(crow_indices.data_ptr()) +
           batch_offset * crow_indices_batch_stride * crow_indices.itemsize(),
       // column indices of the sparse matrix, size = nnz
-      static_cast<char*>(col_indices.mutable_data_ptr()) +
+      static_cast<char*>(col_indices.data_ptr()) +
           batch_offset * col_indices_batch_stride * col_indices.itemsize(),
       // values of the sparse matrix, size = nnz
-      static_cast<char*>(values.mutable_data_ptr()) +
+      static_cast<char*>(values.data_ptr()) +
           batch_offset * values_batch_stride * values.itemsize(),
       index_type, // data type of row offsets index
       index_type, // data type of col indices

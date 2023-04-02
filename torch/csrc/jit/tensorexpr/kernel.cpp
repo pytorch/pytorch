@@ -615,7 +615,7 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
           "conv2d_bias_opt_" + sanitizeName(v->debugName()),
           ExprHandleVectorToExprVector(biasShape),
           dtype);
-      constants_.push_back({buf, bias_tensor.mutable_data_ptr()});
+      constants_.push_back({buf, bias_tensor.data_ptr()});
       argInputs[2] = BufHandle(buf);
     }
   } else {
@@ -1309,7 +1309,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   TORCH_INTERNAL_ASSERT(
       bufs_.count(v),
       buildErrorMessage(
-          "Ouput tensor has no corresponding bufs in the fuser."));
+          "Output tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
   TORCH_INTERNAL_ASSERT(buf != nullptr);
   TORCH_INTERNAL_ASSERT(tt != nullptr);
@@ -1346,7 +1346,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
   TORCH_INTERNAL_ASSERT(
       bufs_.count(v),
       buildErrorMessage(
-          "Ouput tensor has no corresponding bufs in the fuser."));
+          "Output tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
 
   // No shape info is present in the graph
@@ -1453,7 +1453,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
     unpacked_constant_tensors_.push_back(const_tensor);
   }
 
-  constants_.push_back({buf, const_tensor.mutable_data_ptr()});
+  constants_.push_back({buf, const_tensor.data_ptr()});
   bufs_[v] = buf;
 }
 
@@ -1576,7 +1576,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
 
 void TensorExprKernel::deduceMemoryLayoutPolicy() {
   // If the tensor is channels-last contiguous, the preferred memory layout
-  // propagation policy is to use channes-last. Otherwise, the preferred policy
+  // propagation policy is to use channels-last. Otherwise, the preferred policy
   // is to use contiguous.
   auto _prefer_symbolic_mem =
       [](const torch::jit::Value* val,
@@ -1650,7 +1650,7 @@ void TensorExprKernel::optimizeOwningGraph() {
   GRAPH_DUMP("TensorExprKernel graph (Before graph optimization):", graph_);
 
   // We may manipulate output pointers in graph manipulation. So we store the
-  // orignal outputs for symbolic strides information synchronization
+  // original outputs for symbolic strides information synchronization
   auto _orignal_graph_outputs = graph_->outputs().vec();
 
   // Get the graph device information first. The graph optimization
@@ -2083,7 +2083,7 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
       int_inputs[i] = inp.toInt();
       args.emplace_back(&int_inputs[i]);
     } else if (inp.isTensor()) {
-      args.emplace_back(inp.toTensor().mutable_data_ptr());
+      args.emplace_back(inp.toTensor().data_ptr());
     } else {
       TORCH_INTERNAL_ASSERT(
           false, "Unhandled input type while calling TensorExprKernel");
@@ -2113,11 +2113,11 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
       // This has only been tested on CPUs.
       // TODO: Test on GPUs.
       out.resize_(static_sizes[i]);
-      args.emplace_back(out.mutable_data_ptr());
+      args.emplace_back(out.data_ptr());
     }
   } else {
     for (auto i : c10::irange(nOutputs_)) {
-      args.emplace_back(stack_outputs[i].toTensor().mutable_data_ptr());
+      args.emplace_back(stack_outputs[i].toTensor().data_ptr());
     }
   }
 

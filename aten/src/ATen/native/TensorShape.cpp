@@ -580,7 +580,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
     const Tensor& source_slice = materialized[valid];
     auto slice_dim_size = source_slice.sizes()[dim];
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
-    auto result_slice_data = result_slice.mutable_data_ptr();
+    auto result_slice_data = result_slice.data_ptr();
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
 
     auto iter = TensorIteratorConfig()
@@ -595,7 +595,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
       if (cat_should_skip_tensor(tensor)) {
         continue;
       }
-      auto source_data = static_cast<char*>(tensor.mutable_data_ptr());
+      auto source_data = static_cast<char*>(tensor.data_ptr());
       auto result_data = static_cast<char*>(result_slice_data) + offset * result_stride_bytes;
       iter.unsafe_replace_operand(0, result_data);
       iter.unsafe_replace_operand(1, source_data);
@@ -1318,22 +1318,22 @@ Tensor& narrow_copy_dense_cpu_out(
     return output;
   }
 
-  const char* src_bytes = static_cast<const char*>(self_contig->data_ptr());
-  char* dst_bytes = static_cast<char*>(output.mutable_data_ptr());
+  char* src_bytes = static_cast<char*>(self_contig->data_ptr());
+  char* dst_bytes = static_cast<char*>(output.data_ptr());
 
   size_t src_block_size_bytes = itemsize * src_block_size;
   size_t dst_block_size_bytes = itemsize * dst_block_size;
   size_t src_offset = unit * start;
 
-  const char* src_offset_bytes = src_bytes + itemsize * src_offset;
+  char* src_offset_bytes = src_bytes + itemsize * src_offset;
   char* dst_offset_bytes = dst_bytes;
 
   for (const auto i : c10::irange(num_blocks)) {
-    const char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
+    char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
     char* local_dst_offset_bytes = dst_offset_bytes + i * dst_block_size_bytes;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        static_cast<const void*>(local_src_offset_bytes + dst_block_size_bytes) <=
-        static_cast<const void*>(src_bytes + src_nbytes));
+        static_cast<void*>(local_src_offset_bytes + dst_block_size_bytes) <=
+        static_cast<void*>(src_bytes + src_nbytes));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes) <=
         static_cast<void*>(dst_bytes + dst_nbytes));

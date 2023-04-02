@@ -49,7 +49,7 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int bit_width, scale_bias_bytes;
-  const uint8_t* weight_data = static_cast<const uint8_t*>(weight_contig.data_ptr());
+  uint8_t* weight_data = static_cast<uint8_t*>(weight_contig.data_ptr());
   if (qweight.scalar_type() == c10::kQUInt8) {
     bit_width = 8;
     scale_bias_bytes = 8; // extra 8 bytes to store FP scale and bias per row.
@@ -245,7 +245,7 @@ Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
 #ifdef USE_FBGEMM
   if (weight_contig->scalar_type() == at::ScalarType::Half) {
     const auto weight_data =
-        static_cast<const fbgemm::float16*>(weight_contig->data_ptr());
+        static_cast<fbgemm::float16*>(weight_contig->data_ptr());
     at::parallel_for(
         0, embedding_rows, 1, [&](int64_t start_idx, int64_t end_idx) {
           fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<
@@ -365,7 +365,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
   if (!optimized_qparams) {
     if (weight_contig.scalar_type() == at::ScalarType::Half) {
       const auto weight_data =
-          static_cast<const fbgemm::float16*>(weight_contig.data_ptr());
+          static_cast<fbgemm::float16*>(weight_contig.data_ptr());
       at::parallel_for(
           0, embedding_rows, 1, [&](int64_t start_idx, int64_t end_idx) {
             fbgemm::FloatOrHalfToFusedNBitRowwiseQuantizedSBHalf<

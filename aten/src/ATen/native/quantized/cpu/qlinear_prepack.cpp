@@ -244,7 +244,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
 
   // Prepack weight
   auto weight_copy = weight.clone();
-  ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.mutable_data_ptr());
+  ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
   wgt.transpose_(0, 1); // ONEDNN requires transposed weight
   auto w_desc = ideep::matmul_forward::expected_weights_desc(wgt.get_dims(), dnnl::memory::data_type::s8,
                                                              dnnl::memory::data_type::u8);
@@ -267,7 +267,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
         ", but got ", bias_size[1]);
     auto bias_desc = ideep::tensor::desc(bias_size, dnnl::memory::data_type::f32);
     ideep::tensor packed_bias;
-    packed_bias.init(bias_desc, b.mutable_data_ptr());
+    packed_bias.init(bias_desc, b.data_ptr());
     onednn_bias = c10::optional<ideep::tensor>(packed_bias);
   }
   auto ret_ptr = c10::make_intrusive<PackedLinearWeightsOnednn>(
