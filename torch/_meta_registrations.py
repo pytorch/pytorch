@@ -2023,20 +2023,6 @@ def full(size, fill_value, *args, **kwargs):
     return torch.empty(size, *args, **kwargs)
 
 
-@register_meta(
-    [
-        aten.randint_like.default,
-        aten.randint_like.low_dtype,
-        aten.randn_like.default,
-        aten.rand_like.default,
-        aten.full_like.default,
-        aten.ones_like.default,
-    ]
-)
-def meta_like(self, *args, **kwargs):
-    return aten.empty_like.default(self, **kwargs)
-
-
 # zeros_like is special cased to work for sparse
 @register_meta(aten.zeros_like.default)
 def zeros_like(
@@ -2070,7 +2056,7 @@ def zeros_like(
 
         res._coalesced_(True)
         return res
-    return aten.empty_like.default(
+    res = aten.empty_like.default(
         self,
         dtype=dtype,
         layout=layout,
@@ -2078,6 +2064,9 @@ def zeros_like(
         pin_memory=pin_memory,
         memory_format=memory_format,
     )
+    # device can be not "meta"
+    res.fill_(0)
+    return res
 
 
 @register_meta(aten.select.int)

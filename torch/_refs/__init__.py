@@ -5394,7 +5394,15 @@ def log_normal(self, mean=1, std=2, generator=None):
 def normal(self, mean=0, std=1, generator=None):
     assert generator is None
     utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
-    return std * torch.randn_like(self) + mean
+    normal_samples = prims.normal(
+        self.shape,
+        mean=0.,
+        std=1.,
+        dtype=self.dtype,
+        device=self.device,
+        requires_grad=False
+    )
+    return std * normal_samples + mean
 
 
 # inplace

@@ -1110,6 +1110,28 @@ class TestMeta(TestCase):
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
 
+            # Special test for functions taking "device" kwarg
+            # The crossref tests that replacing the device with "meta" works
+            # This part makes sure that *_like functions work well with a "meta"
+            # Tensor and their original device argument.
+            if "device" in kwargs and "_like" in op.name:
+                with torch.random.fork_rng():
+                    torch.manual_seed(123)
+                    ref = func(*args, **kwargs)
+
+                # *_like functions take a Tensor as first argument
+                assert isinstance(args[0], torch.Tensor)
+                with torch.random.fork_rng():
+                    torch.manual_seed(123)
+                    args[0] = args[0].to(device="meta")
+                    meta = func(*args, **kwargs)
+
+                # empty_like is not deterministic
+                if op.name != "empty_like":
+                    self.assertEqual(ref, meta)
+
+
+
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
