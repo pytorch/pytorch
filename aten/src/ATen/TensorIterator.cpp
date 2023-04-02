@@ -22,6 +22,7 @@
 #endif
 
 #include <c10/util/irange.h>
+#include <c10/util/ssize.h>
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
@@ -835,6 +836,17 @@ void TensorIteratorBase::remove_operand(int arg) {
 
 void TensorIteratorBase::unsafe_replace_operand(int arg, void* data) {
   operands_[arg].data = data;
+}
+
+void TensorIteratorBase::unsafe_replace_input(int arg, const void* data) {
+  TORCH_INTERNAL_ASSERT(arg >= 0);
+  TORCH_INTERNAL_ASSERT(arg < ninputs());
+  int operand_idx = num_outputs_ + arg;
+  using c10::ssize;
+  TORCH_INTERNAL_ASSERT(operand_idx < ssize(operands_));
+  // We know this is an input, so we can safely cast away constness as
+  // we will not mutate it anyways.
+  operands_[operand_idx].data = const_cast<void*>(data);
 }
 
 void TensorIteratorBase::narrow(int dim, int64_t start, int64_t size) {

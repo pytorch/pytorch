@@ -358,6 +358,25 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// The new pointer should have the same sizes, strides and dtype as the
   /// original
   void unsafe_replace_operand(int arg, void* data);
+  /// Replaces the data pointer for the input operand at index `arg`.
+  ///
+  /// The new pointer should have the same sizes, strides and dtype as the
+  /// original
+  ///
+  /// Note that the index skips any outputs. Conecretely, in the
+  /// following example, the valid input indexes are [0, 1].
+  ///
+  /// auto iter = TensorIteratorConfig()
+  ///  .add_output(output_0)
+  ///  .add_output(output_1)
+  ///  .add_input(input_0)
+  ///  .add_input(input_1)
+  ///  .build();
+  ///
+  /// iter.unsafe_replace_operand(1, other_output);         // this correctly replaces output_1
+  /// iter.unsafe_replace_input(1, other_input);            // this correctly replaces input_1
+  /// /* BAD! */ iter.unsafe_replace_input(2, other_input); // BAD! this will throw
+  void unsafe_replace_input(int arg, const void* data);
 
   /// Splits this TensorIterator into two iterators. Together they iterate over
   /// the entire operation. Used by `with_32bit_indexing()`.
