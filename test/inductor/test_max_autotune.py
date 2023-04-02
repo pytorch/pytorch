@@ -17,6 +17,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
+if HAS_CUDA:
+    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):

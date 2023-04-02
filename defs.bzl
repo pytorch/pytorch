@@ -1,3 +1,4 @@
+--------
 def get_blas_gomp_arch_deps():
     return [
         ("x86_64", [
@@ -38,7 +39,6 @@ default_compiler_flags = [
     "-DUSE_FBGEMM",
     "-DUSE_QNNPACK",
     "-DUSE_PYTORCH_QNNPACK",
-    "-DUSE_BAZEL",
     # The dynamically loaded NVRTC trick doesn't work in fbcode,
     # and it's not necessary anyway, because we have a stub
     # nvrtc library which we load canonically anyway
