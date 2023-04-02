@@ -262,7 +262,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     def create_for_inference(tx):
         return tx.output.side_effects.track_object_new(
             None,
-            torch.autograd.Function,
+            torch.autograd.function.FunctionCtx,
             functools.partial(AutogradFunctionContextVariable, inference=True),
             {},
         )

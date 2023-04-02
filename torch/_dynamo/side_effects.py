@@ -228,7 +228,7 @@ class SideEffects:
         variable_cls: Any,
         options,
     ):
-        if user_cls is torch.autograd.Function:
+        if user_cls is torch.autograd.function.FunctionCtx:
             obj = torch.autograd.Function()
         else:
             obj = object_new(user_cls)

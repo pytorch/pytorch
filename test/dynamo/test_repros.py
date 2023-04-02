@@ -2533,7 +2533,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_hf_classinstantier(self):
         # hf activations.py
-        class ClassInstantier(OrderedDict):
+        class ClassInstantier(collections.OrderedDict):
             def __getitem__(self, key):
                 content = super().__getitem__(key)
                 cls, kwargs = content if isinstance(content, tuple) else (content, {})
