@@ -267,18 +267,16 @@ class ContinueExecutionCache:
             prefix = []
             cleanup = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
-            null_idxes_i = 0
             for i in range(nstack):
-                while (
-                    null_idxes_i < len(null_idxes)
-                    and null_idxes[null_idxes_i] == i + null_idxes_i
-                ):
-                    prefix.append(create_instruction("PUSH_NULL"))
-                    null_idxes_i += 1
                 prefix.append(create_instruction("LOAD_FAST", argval=f"___stack{i}"))
                 if i in hooks:
                     prefix.extend(hooks.pop(i)(code_options, cleanup))
             assert not hooks
+
+            if sys.version_info >= (3, 11):
+                for idx in null_idxes:
+                    prefix.append(create_instruction("PUSH_NULL"))
+                    prefix.extend(create_rot_n(idx))
 
             prefix.append(create_jump_absolute(target))
 
