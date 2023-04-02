@@ -61,7 +61,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
           zero_points.toType(c10::kFloat),
           0, // The output channel axis is 0
           device(c10::kCPU).dtype(c10::kQUInt8));
-      output_data = static_cast<uint8_t*>(weight_origin.mutable_data_ptr());
+      output_data = static_cast<uint8_t*>(weight_origin.data_ptr());
     } else {
       // We create empty qtensor with the full output shape, and dtype set to
       // quint4x2 This will internally allocate appropriate storage bytes to
@@ -72,7 +72,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
           zero_points.toType(c10::kFloat),
           0, // The output channel axis is 0
           device(c10::kCPU).dtype(c10::kQUInt4x2));
-      output_data = static_cast<uint8_t*>(weight_origin.mutable_data_ptr());
+      output_data = static_cast<uint8_t*>(weight_origin.data_ptr());
     }
 
     // Copy over the data from the packed weight to the output.

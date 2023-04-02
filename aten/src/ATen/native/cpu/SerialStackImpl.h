@@ -13,7 +13,7 @@
 namespace at { namespace native { namespace detail {
 
 struct InputMeta {
-  const void* data_ptr;
+  void* data_ptr;
   int64_t inner_size;
 
   InputMeta(const Tensor& t, int64_t dim, int64_t inner)

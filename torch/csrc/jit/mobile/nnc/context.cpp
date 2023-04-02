@@ -288,7 +288,7 @@ c10::impl::GenericList Function::run(
   for (const auto i : c10::irange(output_specs_.size())) {
     at::Tensor output = output_specs_[i].allocate();
     outputs.emplace_back(output);
-    args[i + offset] = output.mutable_data_ptr();
+    args[i + offset] = output.data_ptr();
   }
 
   // TODO: check consistency, e.g.: code version, input shape and compiled

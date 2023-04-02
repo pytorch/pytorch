@@ -189,7 +189,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         nullptr,  // z descriptor for BN-Add-Relu
         nullptr,  // z for BN-Add-ReLU
         idesc.desc(),
-        output->mutable_data_ptr(),
+        output->data_ptr(),
         wdesc.desc(),
         weight->data_ptr(),
         bias->data_ptr(),
@@ -197,12 +197,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         at::maybe_data_ptr(running_mean),
         at::maybe_data_ptr(running_var),
         epsilon,
-        save_mean.mutable_data_ptr(),
-        save_var.mutable_data_ptr(),
+        save_mean.data_ptr(),
+        save_var.data_ptr(),
         nullptr,
-        workspace.mutable_data_ptr(),
+        workspace.data_ptr(),
         workspace_size,
-        reserve.mutable_data_ptr(),
+        reserve.data_ptr(),
         reserve_size));
 #else
     reserve = at::empty({0}, input->options().dtype(kByte));
@@ -228,7 +228,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     AT_CUDNN_CHECK(cudnnBatchNormalizationForwardInference(
       handle, mode, &one, &zero,
       idesc.desc(), input->data_ptr(),
-      idesc.desc(), output->mutable_data_ptr(),
+      idesc.desc(), output->data_ptr(),
       wdesc.desc(),
       weight->data_ptr(),
       bias->data_ptr(),
@@ -341,18 +341,18 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     nullptr, nullptr,
     odesc.desc(), grad_output->data_ptr(),
     nullptr, nullptr,
-    idesc.desc(), grad_input_t.mutable_data_ptr(),
+    idesc.desc(), grad_input_t.data_ptr(),
     wdesc.desc(), weight->data_ptr(),
     nullptr,
-    grad_weight_t.mutable_data_ptr(),
-    grad_bias_t.mutable_data_ptr(),
+    grad_weight_t.data_ptr(),
+    grad_bias_t.data_ptr(),
     epsilon,
     save_mean->data_ptr(),
     save_var->data_ptr(),
     nullptr,
-    workspace.mutable_data_ptr(),
+    workspace.data_ptr(),
     workspace_size,
-    reserve->mutable_data_ptr(),
+    reserve->data_ptr(),
     reserve->numel()));
 #else
   AT_CUDNN_CHECK(cudnnBatchNormalizationBackward(

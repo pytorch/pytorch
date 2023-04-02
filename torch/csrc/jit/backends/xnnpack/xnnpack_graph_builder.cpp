@@ -229,7 +229,7 @@ void XNNGraph::defineAllTensorValues() {
       uint32_t flags = 0;
 
       // Check if value was produced by prim::Constant
-      const void* value_data = nullptr;
+      void* value_data = nullptr;
       size_t buffer_idx = 0;
       size_t num_bytes = 0;
       if (val->node()->kind() == prim::Constant) {

@@ -184,7 +184,7 @@ TORCH_CUDA_CPP_API void all2all_single_equal_split(
     at::cuda::CUDAStream& stream);
 
 TORCH_CUDA_CPP_API void all2all_single_unequal_split(
-    const void* sendbuff,
+    void* sendbuff,
     const size_t* sendcounts,
     const size_t* senddispls,
     void* recvbuff,

@@ -75,7 +75,7 @@ Tensor cudnn_affine_grid_generator_forward(
   setSamplerDescriptor(desc, dataType, N, C, H, W);
   AT_CUDNN_CHECK(cudnnSpatialTfGridGeneratorForward(getCudnnHandle(), desc.desc(),
                                                  theta->data_ptr(),
-                                                 grid_t.mutable_data_ptr()));
+                                                 grid_t.data_ptr()));
   return grid_t;
 }
 
@@ -97,7 +97,7 @@ Tensor cudnn_affine_grid_generator_backward(
   setSamplerDescriptor(desc, dataType, N, C, H, W);
   AT_CUDNN_CHECK(cudnnSpatialTfGridGeneratorBackward(getCudnnHandle(), desc.desc(),
                                                   grad_grid->data_ptr(),
-                                                  grad_theta_t.mutable_data_ptr()));
+                                                  grad_theta_t.data_ptr()));
   return grad_theta_t;
 }
 

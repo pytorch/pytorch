@@ -851,7 +851,7 @@ unsigned long long int GraphEncoder::GetGraphProtoSize(
       t = tensor.contiguous().cpu();
     }
     tensor_proto->set_raw_data(std::string(
-        static_cast<const char*>(t.data_ptr()), t.element_size() * t.numel()));
+        static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
     sizes += tensor_proto->ByteSizeLong();
     delete graph_proto_copy;
     graph_proto_copy = nullptr;
@@ -1270,8 +1270,7 @@ void GraphEncoder::EncodeTensor(
       tensor_proto->set_data_location(onnx::TensorProto_DataLocation_EXTERNAL);
     } else {
       tensor_proto->set_raw_data(std::string(
-          static_cast<const char*>(t.data_ptr()),
-          t.element_size() * t.numel()));
+          static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
     }
   }
 }

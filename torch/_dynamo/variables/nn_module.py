@@ -12,7 +12,13 @@ from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
-from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
+from ..source import (
+    AttrSource,
+    FSDPNNModuleSource,
+    GetItemSource,
+    NNModuleSource,
+    NotNNModuleSource,
+)
 from ..utils import (
     get_custom_getattr,
     is_lazy_module,
@@ -664,7 +670,34 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     args,
                     kwargs,
                 )
+
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
         return super().call_method(tx, name, args, kwargs)
+
+
+class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
+    """
+    Tracing behavior: trace into submodules and treat them as Unspecialized, do not
+    register parameters to the top-level, treat them as function inputs.
+
+    Guards behavior: if 'skip_fsdp_guards', many guards that would be installed
+    by a vanilla UnspecializedNNModuleVariable are simply dropped, on the basis
+    that a user wrapping their model in FSDP(model) is already opting into a
+    requirement to not modify internal model state, which would already break FSDP without
+    compilation.
+    """
+
+    def __init__(self, value, **kwargs):
+        source = kwargs.get("source", None)
+        assert (
+            source is not None
+        ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
+
+        super().__init__(value=value, **kwargs)
+        if torch._dynamo.config.skip_fsdp_guards:
+            self.source = FSDPNNModuleSource(source)
+        else:
+            # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
+            self.source = NotNNModuleSource(source)

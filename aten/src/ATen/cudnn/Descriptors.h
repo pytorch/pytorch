@@ -227,14 +227,14 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
     AT_ASSERT(options.device().type() == kCUDA);
     AT_ASSERT(options.dtype() == kByte);
     state = at::empty({static_cast<int64_t>(state_size)}, options);
-    AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.mutable_data_ptr(), state_size, seed));
+    AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }
 
   // Restore a dropout descriptor given a dropout probability and existing RNG state.
   void set(cudnnHandle_t handle, float dropout, at::Tensor state_) {
     TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     state = state_;
-    void *state_ptr = state.mutable_data_ptr();
+    void *state_ptr = state.data_ptr();
     size_t state_size = state.size(0);
     // NB: The seed doesn't actually matter, so we give a dummy value
     AT_CUDNN_CHECK(cudnnRestoreDropoutDescriptor(mut_desc(), handle, dropout, state_ptr, state_size, 0 /* seed */));

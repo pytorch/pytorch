@@ -129,8 +129,8 @@ Tensor embedding_dense_backward_cpu(
     .declare_static_shape(grad.sizes(), /*squash_dims=*/0)
     .build();
 
-  const auto gW_data = reinterpret_cast<char*>(grad_weight.mutable_data_ptr());
-  const auto gO_data = reinterpret_cast<char*>(grad.mutable_data_ptr());
+  const auto gW_data = reinterpret_cast<char*>(grad_weight.data_ptr());
+  const auto gO_data = reinterpret_cast<char*>(grad.data_ptr());
   const auto gW_stride = grad_weight.strides()[0] * grad_weight.element_size();
   const auto gO_stride = grad.strides()[0] * grad.element_size();
 

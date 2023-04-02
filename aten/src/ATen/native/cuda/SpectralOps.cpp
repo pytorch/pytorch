@@ -301,10 +301,10 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   // prepare cufft for execution
   CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));
   auto workspace = at::empty({ config->workspace_size() }, at::device(at::kCUDA).dtype(at::kByte));
-  CUFFT_CHECK(cufftSetWorkArea(plan, workspace.mutable_data_ptr()));
+  CUFFT_CHECK(cufftSetWorkArea(plan, workspace.data_ptr()));
 
   // execute transform plan
-  exec_cufft_plan(*config, input.mutable_data_ptr(), out.mutable_data_ptr(), forward);
+  exec_cufft_plan(*config, input.data_ptr(), out.data_ptr(), forward);
 
   // Inplace reshaping to original batch shape and inverting the dimension permutation
   DimVector out_strides(ndim);

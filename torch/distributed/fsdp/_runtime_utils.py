@@ -130,7 +130,7 @@ def _validate_and_get_hybrid_shard_state(
         return None
     error_prefix = "At least one instance uses a hybrid sharding strategy but has no "
     if len(intra_node_pgs) > 0 and len(inter_node_pgs) == 0:
-        raise AssertionError(error_prefix + "inter-node proces group set")
+        raise AssertionError(error_prefix + "inter-node process group set")
     if len(intra_node_pgs) == 0 and len(inter_node_pgs) > 0:
         raise AssertionError(error_prefix + "intra-node process group set")
     error_prefix = "Some instances use a hybrid sharding strategy, but "
@@ -307,7 +307,7 @@ def _unshard(
     forced to full precision.
 
     Postcondition: Each handle's ``FlatParameter`` 's data is the padded
-    unsharded flattened parameter on the compute device.
+    unsharded flat parameter on the compute device.
     """
     if not handles:
         return
@@ -337,8 +337,7 @@ def _reshard(
     """
     Reshards the handles in ``handles``. ``free_unsharded_flat_params`` should
     have the same length as ``handles``, and each element should give whether
-    the corresponding handle should free its padded unsharded flattened
-    parameter.
+    the corresponding handle should free its padded unsharded flat parameter.
     """
     if not handles:
         return
@@ -459,18 +458,18 @@ def _post_forward(
         module (nn.Module): Module whose forward just ran, which should be a
             fully sharded module (see [Note: Fully Sharded Module]); expected
             by the hook signature.
-        input (Any): Unused; exepcted by the hook signature.
+        input (Any): Unused; expected by the hook signature.
         output (Any): Forward pass output; pre-backward hooks are registered on
             the tensors that require gradients in this output.
 
-    Postcondition: Each ``FlatParameter`` 's data points to the sharded
-    flattened parameter.
+    Postcondition: Each ``FlatParameter`` 's data points to the sharded flat
+    parameter.
     """
     state._exec_order_data.record_post_forward(handles)
     if reshard_fn is not None:
         reshard_fn()
-    # Register pre-backward hooks to unshard the flattened parameters
-    # for the gradient computation (if needed)
+    # Register pre-backward hooks to unshard the flat parameters for the
+    # gradient computation (if needed)
     output = _register_pre_backward_hooks(state, module, output, handles)
     state.training_state = TrainingState.IDLE
     for handle in handles:
@@ -489,7 +488,6 @@ def _post_forward_reshard(
     # Do not free the root's parameters in the post-forward for `FULL_SHARD`
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
-
     free_unsharded_flat_params = [
         not state._is_root
         and handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
@@ -626,12 +624,17 @@ def _pre_backward_hook(
         for handle in _handles:
             handle._training_state = HandleTrainingState.BACKWARD_PRE
 
-        # If the handles have been prefetched, this `_unshard()` simply
-        # switches to using the unsharded parameter
-        _unshard(
-            state, _handles, state._streams["unshard"], state._streams["pre_unshard"]
-        )
-        torch.cuda.current_stream().wait_stream(state._streams["unshard"])
+        if state._needs_pre_backward_unshard[_handles_key]:
+            # If the handles have been prefetched, then there is no need to
+            # call `_unshard()` again
+            if not state._handles_prefetched.get(_handles_key, False):
+                _unshard(
+                    state,
+                    _handles,
+                    state._streams["unshard"],
+                    state._streams["pre_unshard"],
+                )
+            torch.cuda.current_stream().wait_stream(state._streams["unshard"])
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
@@ -806,16 +809,17 @@ def _should_free_in_backward(
     handle: FlatParamHandle,
 ) -> bool:
     """
-    Returns whether FSDP should free the unsharded flattened parameter in the
+    Returns whether FSDP should free the unsharded flat parameter in the
     post-backward or not.
     """
-    # We always free if we are syncing gradients (i.e. not in no_sync) and parameters
-    # are sharded.
-    free_unsharded = state._sync_gradients and handle.uses_sharded_strategy
-    # For NO_SHARD we don't need to free full parameters, for ZeRO-2 strategies, we skip
-    # freeing in backward.
-    return free_unsharded or (
-        handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
+    if not handle.uses_sharded_strategy:
+        return False
+    # If not syncing gradients, then we do not free for strategies that do not
+    # reshard after forward as a *heuristic* to tradeoff higher memory for
+    # higher throughput.
+    return (
+        state._sync_gradients
+        or handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
     )
 
 
@@ -909,6 +913,7 @@ def _post_backward_final_callback(
     for fsdp_state in state._all_fsdp_states:
         _catch_all_reshard(fsdp_state)
         _finalize_params(fsdp_state)
+        fsdp_state._needs_pre_backward_unshard.clear()
         fsdp_state._ran_pre_backward_hook.clear()
         fsdp_state.training_state = TrainingState.IDLE
         for handle in fsdp_state._handles:
@@ -1186,9 +1191,9 @@ def _register_pre_backward_hooks(
 
     handles_key = tuple(handles)
     if handles_key:
+        state._needs_pre_backward_unshard[handles_key] = False
         # Since these handles' `FlatParameter`s participated in a forward, we
         # conservatively assume that they will be used in the backward
-        state._needs_pre_backward_unshard[handles_key] = False
         state._ran_pre_backward_hook[handles_key] = False
 
     def _register_hook(t: torch.Tensor) -> torch.Tensor:

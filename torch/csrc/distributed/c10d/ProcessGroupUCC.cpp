@@ -893,7 +893,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allgather(
     coll.src.info.count = tensor.numel();
     coll.src.info.datatype = to_ucc_dType(tensor);
     coll.src.info.mem_type = to_ucc_memType(tensor.device().type());
-    coll.dst.info.buffer = flat_output[0].mutable_data_ptr();
+    coll.dst.info.buffer = flat_output[0].data_ptr();
     coll.dst.info.count = flat_output[0].numel();
     coll.dst.info.datatype = to_ucc_dType(flat_output[0]);
     coll.dst.info.mem_type =
@@ -953,7 +953,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::_allgather_base(
   coll.src.info.count = inputTensor.numel();
   coll.src.info.datatype = ucc_dtype_map.at(inputTensor.scalar_type());
   coll.src.info.mem_type = to_ucc_memType(inputTensor.device().type());
-  coll.dst.info.buffer = outputTensor.mutable_data_ptr();
+  coll.dst.info.buffer = outputTensor.data_ptr();
   coll.dst.info.count = outputTensor.numel();
   coll.dst.info.datatype = ucc_dtype_map.at(outputTensor.scalar_type());
   coll.dst.info.mem_type = to_ucc_memType(outputTensor.device().type());
@@ -992,7 +992,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce(
   coll.src.info.count = tensor.numel();
   coll.src.info.datatype = to_ucc_dType(tensor);
   coll.src.info.mem_type = to_ucc_memType(tensor.device().type());
-  coll.dst.info.buffer = tensor.mutable_data_ptr();
+  coll.dst.info.buffer = tensor.data_ptr();
   coll.dst.info.count = tensor.numel();
   coll.dst.info.datatype = to_ucc_dType(tensor);
   coll.dst.info.mem_type = to_ucc_memType(tensor.device().type());
@@ -1104,7 +1104,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall_base(
     coll.src.info.count = inputTensor.element_size() * inputTensor.numel();
     coll.src.info.datatype = UCC_DT_UINT8;
     coll.src.info.mem_type = to_ucc_memType(inputTensor.device().type());
-    coll.dst.info.buffer = outputTensor.mutable_data_ptr();
+    coll.dst.info.buffer = outputTensor.data_ptr();
     coll.dst.info.count = outputTensor.element_size() * outputTensor.numel();
     coll.dst.info.datatype = UCC_DT_UINT8;
     coll.dst.info.mem_type = to_ucc_memType(outputTensor.device().type());
@@ -1127,7 +1127,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall_base(
     coll.src.info_v.displacements = (ucc_aint_t*)data->send_offsets.data();
     coll.src.info_v.datatype = to_ucc_dType(inputTensor);
     coll.src.info_v.mem_type = to_ucc_memType(inputTensor.device().type());
-    coll.dst.info_v.buffer = outputTensor.mutable_data_ptr();
+    coll.dst.info_v.buffer = outputTensor.data_ptr();
     coll.dst.info_v.counts = (ucc_count_t*)data->recv_lengths.data();
     coll.dst.info_v.displacements = (ucc_aint_t*)data->recv_offsets.data();
     coll.dst.info_v.datatype = to_ucc_dType(outputTensor);
@@ -1339,7 +1339,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::reduce(
   coll.src.info.count = tensor.numel();
   coll.src.info.datatype = ucc_dtype_map.at(tensor.scalar_type());
   coll.src.info.mem_type = to_ucc_memType(tensor.device().type());
-  coll.dst.info.buffer = tensor.mutable_data_ptr();
+  coll.dst.info.buffer = tensor.data_ptr();
   coll.dst.info.count = tensor.numel();
   coll.dst.info.datatype = ucc_dtype_map.at(tensor.scalar_type());
   coll.dst.info.mem_type = to_ucc_memType(tensor.device().type());
@@ -1386,7 +1386,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter(
   coll.src.info.count = flat_input[0].numel();
   coll.src.info.datatype = to_ucc_dType(flat_input[0]);
   coll.src.info.mem_type = to_ucc_memType(flat_input[0].device().type());
-  coll.dst.info.buffer = outputTensors[0].mutable_data_ptr();
+  coll.dst.info.buffer = outputTensors[0].data_ptr();
   coll.dst.info.count = outputTensors[0].numel();
   coll.dst.info.datatype = to_ucc_dType(outputTensors[0]);
   coll.dst.info.mem_type = to_ucc_memType(outputTensors[0].device().type());
@@ -1487,7 +1487,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::scatter(
     }
   }
 
-  coll.dst.info.buffer = tensor.mutable_data_ptr();
+  coll.dst.info.buffer = tensor.data_ptr();
   coll.dst.info.count = (uint64_t)tensor.element_size() * tensor.numel();
   coll.dst.info.datatype = UCC_DT_UINT8;
   coll.dst.info.mem_type = to_ucc_memType(tensor.device().type());

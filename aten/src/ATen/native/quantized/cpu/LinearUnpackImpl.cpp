@@ -127,7 +127,7 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightFp16::
   at::Tensor unpacked_weight =
       at::empty({ncols, nrows}, at::kHalf, c10::MemoryFormat::Contiguous);
   packed_weight_ptr->unpack(
-      static_cast<fbgemm::float16*>(unpacked_weight.mutable_data_ptr()),
+      static_cast<fbgemm::float16*>(unpacked_weight.data_ptr()),
       fbgemm::matrix_op_t::Transpose);
 
   return std::make_tuple(unpacked_weight.to(at::kFloat), bias_);

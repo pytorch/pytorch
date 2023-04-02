@@ -2615,7 +2615,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::send(
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
-  auto ptr = tensor.mutable_data_ptr();
+  auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
@@ -2634,7 +2634,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::recv(
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
-  auto ptr = tensor.mutable_data_ptr();
+  auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
@@ -2652,7 +2652,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::recvAnysource(
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
-  auto ptr = tensor.mutable_data_ptr();
+  auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
