@@ -5396,11 +5396,11 @@ def normal(self, mean=0, std=1, generator=None):
     utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
     normal_samples = prims.normal(
         self.shape,
-        mean=0.,
-        std=1.,
+        mean=0.0,
+        std=1.0,
         dtype=self.dtype,
         device=self.device,
-        requires_grad=False
+        requires_grad=False,
     )
     return std * normal_samples + mean
 
