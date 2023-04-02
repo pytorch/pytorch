@@ -80,10 +80,10 @@ class TestPythonKey(AOTTestCase):
     def test_make_fx(self, device):
         def f(x):
             return torch.sin(x)
-        inp = torch.randn(3)
+        inp = [torch.randn(3)]
         fx_f = make_fx(f)(inp)
 
-        new_inp = torch.randn(3)
+        new_inp = [torch.randn(3)]
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
     def test_make_fx_grad(self, device):
@@ -106,19 +106,19 @@ class TestPythonKey(AOTTestCase):
     def test_make_fx_vmap(self, device):
         def f(x):
             return torch.sin(x)
-        inp = torch.randn(5, 3)
+        inp = [torch.randn(5, 3)]
         f = vmap(f)
         fx_f = make_fx(f)(inp)
-        new_inp = torch.randn(5, 3)
+        new_inp = [torch.randn(5, 3)]
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
     def test_make_fx_jacrev(self, device):
         def f(x):
             return x.sin().sum()
-        inp = torch.randn(3)
+        inp = [torch.randn(3)]
         f = jacrev(jacrev(f))
         fx_f = make_fx(f)(inp)
-        new_inp = torch.randn(3)
+        new_inp = [torch.randn(3)]
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
     def test_make_fx_vjp(self, device):
@@ -175,7 +175,7 @@ class TestPythonKey(AOTTestCase):
 
         jit_f = nnc_jit(f)
 
-        inp = torch.randn(3)
+        inp = [torch.randn(3)]
         self.assertEqual(jit_f(inp), f(inp))
 
     def test_nnc_scalar(self, device):
@@ -184,7 +184,7 @@ class TestPythonKey(AOTTestCase):
 
         jit_f = nnc_jit(f)
 
-        inp = torch.randn(())
+        inp = [torch.randn(())]
         self.assertEqual(jit_f(inp), f(inp))
 
     def test_nnc_pytrees(self, device):
@@ -213,7 +213,7 @@ class TestPythonKey(AOTTestCase):
         def f(x):
             x['a'] = x['a'] * 2
             return x
-        inp = ({'a': torch.randn(3), 'b': torch.randn(3)},)
+        inp = [{'a': torch.randn(3), 'b': torch.randn(3)}, ]
         jit_f = nnc_jit(f)
         self.assertEqual(jit_f(*inp), f(*inp))
 
@@ -1860,8 +1860,6 @@ def forward(self, arg0_1):
         b.masked_fill_(c, 0) **also** mutates a (because b and a are aliased)
         The autograd engine yells at us if we save "a" for backward, and then try to mutate it.
         """
-        inp = torch.randn(2, 2, requires_grad=True)
-
         def f(a):
             b = a[0]
             c = torch.ones_like(b, dtype=torch.bool)
@@ -1937,7 +1935,7 @@ def forward(self, arg0_1):
                 return x.sum() + self.buffer.sum()
 
         m = M().eval()
-        inp = torch.randn(2, 5)
+        inp = [torch.randn(2, 5)]
         # inplace mutation on attr is not allowed
         with self.assertRaisesRegex(Exception, "Can't call metadata"):
             make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)

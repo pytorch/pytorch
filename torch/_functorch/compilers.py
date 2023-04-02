@@ -93,7 +93,8 @@ def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
         f = torch.jit.freeze(f.eval())
         f = torch.jit.optimize_for_inference(f)
         if not any(isinstance(t, torch._subclasses.FakeTensor) for t in inps):
-            f(*inps)
+            f(inps)
+        inps.clear()
     return f
 
 
