@@ -6114,21 +6114,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     # The grid_tensor_2d_x is of shape
                     # [batch_size, 1, num_inqueries]
                     grid_tensor_2d_x = torch.cat(
-                            tensors=(
-                                inquery_indices.reshape(num_inqueries, 1),
-                                torch.full((num_inqueries, 1), 0.5, dtype=torch.float32),
-                            ),
-                            dim=1
-                        ).repeat(batch_size, 1, 1, 1)
+                        tensors=(
+                            inquery_indices.reshape(num_inqueries, 1),
+                            torch.full((num_inqueries, 1), 0.5, dtype=torch.float32),
+                        ),
+                        dim=1
+                    ).repeat(batch_size, 1, 1, 1)
                     # The output_tensor_2d_x is of shape
                     # [batch_size, channel_size, 1, num_inqueries]
                     output_tensor_2d_x = F.grid_sample(
-                            input=input_tensor_2d_x,
-                            grid=grid_tensor_2d_x,
-                            mode=mode,
-                            padding_mode=padding_mode,
-                            align_corners=align_corners,
-                        )
+                        input=input_tensor_2d_x,
+                        grid=grid_tensor_2d_x,
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    )
                     # 2D grid sample y-dim interpolation
                     # The input_tensor_2d_y is of shape
                     # [batch_size, channel_size, test_dim_size, non_test_dim_size]
@@ -6145,7 +6145,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         padding_mode=padding_mode,
                         align_corners=align_corners,
                     )
-                    self.assertEqual(output_tensor_2d_x[0,0,0,:], output_tensor_2d_y[0,0,0,:], atol=0, rtol=0)
+                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_2d_y[0, 0, 0, :], atol=0, rtol=0)
                     # 3D grid sample x-dim interpolation
                     # The input_tensor_3d_x is of shape
                     # [batch_size, channel_size, non_test_dim_size, non_test_dim_size, test_dim_size]
@@ -6154,13 +6154,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     # The grid_tensor_3d_x is of shape
                     # [batch_size, 1, 1, num_inqueries]
                     grid_tensor_3d_x = torch.cat(
-                            tensors=(
-                                inquery_indices.reshape(num_inqueries, 1),
-                                torch.full((num_inqueries, 1), 0.5),
-                                torch.full((num_inqueries, 1), 0.5),
-                            ),
-                            dim=1
-                        ).repeat(batch_size, 1, 1, 1, 1).to(torch.float32)
+                        tensors=(
+                            inquery_indices.reshape(num_inqueries, 1),
+                            torch.full((num_inqueries, 1), 0.5),
+                            torch.full((num_inqueries, 1), 0.5),
+                        ),
+                        dim=1
+                    ).repeat(batch_size, 1, 1, 1, 1).to(torch.float32)
                     # The output_tensor_3d_x is of shape
                     # [batch_size, channel_size, 1, 1, num_inqueries]
                     output_tensor_3d_x = F.grid_sample(
@@ -6170,7 +6170,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         padding_mode=padding_mode,
                         align_corners=align_corners,
                     )
-                    self.assertEqual(output_tensor_2d_x[0,0,0,:], output_tensor_3d_x[0,0,0,0,:], atol=0, rtol=0)
+                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_x[0, 0, 0, 0, :], atol=0, rtol=0)
                     # 3D grid sample y-dim interpolation
                     # The input_tensor_3d_y is of shape
                     # [batch_size, channel_size, non_test_dim_size, test_dim_size, non_test_dim_size]
@@ -6187,7 +6187,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         padding_mode=padding_mode,
                         align_corners=align_corners,
                     )
-                    self.assertEqual(output_tensor_2d_x[0,0,0,:], output_tensor_3d_y[0,0,0,0,:], atol=0, rtol=0)
+                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_y[0, 0, 0, 0, :], atol=0, rtol=0)
                     # 3D grid sample z-dim interpolation
                     # The input_tensor_3d_z is of shape
                     # [batch_size, channel_size, non_test_dim_size, non_test_dim_size, test_dim_size]
@@ -6204,7 +6204,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         padding_mode=padding_mode,
                         align_corners=align_corners,
                     )
-                    self.assertEqual(output_tensor_2d_x[0,0,0,:], output_tensor_3d_z[0,0,0,0,:], atol=0, rtol=0)
+                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_z[0, 0, 0, 0, :], atol=0, rtol=0)
 
     def test_affine_grid(self):
         # test known input on CPU
