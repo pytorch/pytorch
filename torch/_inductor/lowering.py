@@ -1087,7 +1087,7 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
-    assert train, "inference should have been handled as a decomp"
+    assert train and p not in (0, 1), "inference should have been handled as a decomp"
     if config.fallback_random:
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
@@ -1778,6 +1778,7 @@ def constant_like(fill_value):
 
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
 ones_like = create_tensor_like(tensor_constructor(1))
+zeros_like = create_tensor_like(tensor_constructor(0))
 rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
 randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
 
