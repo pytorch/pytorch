@@ -1013,7 +1013,7 @@ def emit_body(
             f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
         )
 
-    if requires_derivative and len(fw_derivatives) > 0:
+    if requires_derivative and not len(fw_derivatives) == 0:
         assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(
             differentiable_outputs
         ), (

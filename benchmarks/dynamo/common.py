@@ -1694,11 +1694,6 @@ def parse_args(args=None):
         help="Runs a dynamic shapes version of the benchmark, if available.",
     )
     parser.add_argument(
-        "--dynamic-batch-only",
-        action="store_true",
-        help="Only assume batch dimension is dynamic.  Implies --dynamic-shapes",
-    )
-    parser.add_argument(
         "--specialize-int", action="store_true", help="Run with specialize_int=True."
     )
     parser.add_argument(
@@ -1961,10 +1956,6 @@ def run(runner, args, original_dir=None):
     if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
         args.ci = True
-    if args.dynamic_batch_only:
-        args.dynamic_shapes = True
-        torch._dynamo.config.assume_static_by_default = True
-        torch._dynamo.config.allow_ignore_mark_dynamic = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
     if args.specialize_int:
@@ -2337,21 +2328,6 @@ def run(runner, args, original_dir=None):
                 model, example_inputs = cast_to_fp16(model, example_inputs)
             elif args.bfloat16:
                 model, example_inputs = cast_to_bf16(model, example_inputs)
-
-            # Look for stuff that looks like batch size, and mark it dynamic.
-            # Better integration would integrate directly with benchmark suite
-            # but cannot conveniently do this
-            # NB: This must be done late enough so that we don't do more
-            # conversions on the inputs
-            # NB: Assumes only the first batch-y like dimension is the batch
-            def detect_and_mark_batch(t):
-                for i, s in enumerate(t.size()):
-                    if s == batch_size:
-                        torch._dynamo.mark_dynamic(t, i)
-                        break
-
-            if args.dynamic_batch_only:
-                tree_map(detect_and_mark_batch, example_inputs)
 
             if args.log_operator_inputs:
                 log_operator_inputs(

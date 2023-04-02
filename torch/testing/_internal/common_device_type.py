@@ -1235,7 +1235,9 @@ def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
 def has_cusolver():
-    return not TEST_WITH_ROCM
+    version = _get_torch_cuda_version()
+    # cuSolver is disabled on cuda < 10.1.243
+    return version >= (10, 2)
 
 # Skips a test on CUDA if cuSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
