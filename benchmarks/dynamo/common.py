@@ -275,6 +275,8 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     "convit_base",  # TypeError: Cannot convert symbols to int
     "pnasnet5large",  # CompilationError: math.ceil
     "tf_efficientnet_b0",  # CompilationError: math.ceil
+    # huggingface
+    "GoogleFnet",  # Cannot call sizes() on tensor with symbolic sizes/strides
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -285,7 +287,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # timm_models
     "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
-
 
 CI_SKIP_OPTIMIZER = {
     # TIMM
