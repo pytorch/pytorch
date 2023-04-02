@@ -2999,6 +2999,7 @@ else:
             self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
 
     # FIXME: move to data movement test suite
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/98175")
     @onlyNativeDeviceTypes
     @dtypes(torch.int64, torch.float32, torch.complex64)
     def test_copy_transpose_math_view(self, device, dtype):
