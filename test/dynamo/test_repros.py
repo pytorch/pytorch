@@ -14,7 +14,7 @@ import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from typing import List, OrderedDict
+from typing import List
 
 import numpy as np
 import torch
