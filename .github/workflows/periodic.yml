@@ -36,30 +36,6 @@ jobs:
       docker-image: ${{ needs.parallelnative-linux-focal-py3_8-gcc7-build.outputs.docker-image }}
       test-matrix: ${{ needs.parallelnative-linux-focal-py3_8-gcc7-build.outputs.test-matrix }}
 
-  linux-bionic-cuda11_7-py3-gcc7-slow-gradcheck-build:
-    name: linux-bionic-cuda11.7-py3-gcc7-slow-gradcheck
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-cuda11.7-py3-gcc7-slow-gradcheck
-      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-        ]}
-
-  linux-bionic-cuda11_7-py3-gcc7-slow-gradcheck-test:
-    name: linux-bionic-cuda11.7-py3-gcc7-slow-gradcheck
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_7-py3-gcc7-slow-gradcheck-build
-    with:
-      build-environment: linux-bionic-cuda11.7-py3-gcc7-slow-gradcheck
-      docker-image: ${{ needs.linux-bionic-cuda11_7-py3-gcc7-slow-gradcheck-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_7-py3-gcc7-slow-gradcheck-build.outputs.test-matrix }}
-      timeout-minutes: 300
-
   linux-bionic-cuda11_7-py3_10-gcc7-periodic-dynamo-benchmarks-build:
     name: cuda11.7-py3.10-gcc7-sm86-periodic-dynamo-benchmarks
     uses: ./.github/workflows/_linux-build.yml
@@ -91,28 +67,6 @@ jobs:
       build-environment: linux-bionic-cuda11.7-py3.10-gcc7-sm86
       docker-image: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
-
-  linux-bionic-cuda11_7-py3_10-gcc7-sm86-build:
-    name: linux-bionic-cuda11.7-py3.10-gcc7-sm86
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-cuda11.7-py3.10-gcc7-sm86
-      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
-      cuda-arch-list: 8.6
-      test-matrix: |
-        { include: [
-          { config: "slow", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "slow", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-        ]}
-
-  linux-bionic-cuda11_7-py3_10-gcc7-sm86-test:
-    name: linux-bionic-cuda11.7-py3.10-gcc7-sm86
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_7-py3_10-gcc7-sm86-build
-    with:
-      build-environment: linux-bionic-cuda11.7-py3.10-gcc7-sm86
-      docker-image: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-sm86-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-sm86-build.outputs.test-matrix }}
 
   linux-focal-rocm5_4_2-py3_8-build:
     name: linux-focal-rocm5.4.2-py3.8
@@ -375,23 +329,3 @@ jobs:
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
-
-  linux-bionic-py3_8-clang9-build:
-    name: linux-bionic-py3.8-clang9
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-py3.8-clang9
-      docker-image-name: pytorch-linux-bionic-py3.8-clang9
-      test-matrix: |
-        { include: [
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-        ]}
-
-  linux-bionic-py3_8-clang9-test:
-    name: linux-bionic-py3.8-clang9
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-py3_8-clang9-build
-    with:
-      build-environment: linux-bionic-py3.8-clang9
-      docker-image: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.test-matrix }}
