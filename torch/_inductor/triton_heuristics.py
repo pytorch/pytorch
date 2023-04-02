@@ -442,6 +442,13 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     if z:
         cfg["ZBLOCK"] = z
     num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 256, 1), 8))
+    # we are going to arrive at 2 warps only if bs was too small due to
+    # numel being too small. However to workaround some ptx bugs we still
+    # want at least 4 warps if there's enough elements per thread
+    # given that this is a rare situation, don't expect this to affect perf
+    # in general
+    # see https://github.com/pytorch/pytorch/pull/97950
+    num_warps = max(num_warps, 4) if conditional_product(x, y, z) >= 128 else num_warps
     xnumel = size_hints[0]
     ynumel = size_hints[1] if y else None
     znumel = size_hints[2] if z else None

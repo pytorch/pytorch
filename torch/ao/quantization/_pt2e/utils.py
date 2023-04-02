@@ -41,7 +41,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
         bn_rv = _get_tensor_constant_from_node(bn_op.args[4], m)
         bn_eps = bn_op.args[7]
 
-        fused_weight, fused_bias = fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, transpose=False)
+        fused_weight, fused_bias = fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, transpose=transpose)
 
         # update the weight and bias for conv
         conv_args = list(conv_op.args)
