@@ -844,9 +844,12 @@ void TensorIteratorBase::unsafe_replace_input(int arg, const void* data) {
   int operand_idx = num_outputs_ + arg;
   using c10::ssize;
   TORCH_INTERNAL_ASSERT(operand_idx < ssize(operands_));
+  OperandInfo& operand = operands_[operand_idx];
+  TORCH_INTERNAL_ASSERT(!operand.is_output);
+  TORCH_INTERNAL_ASSERT(!operand.is_read_write);
   // We know this is an input, so we can safely cast away constness as
   // we will not mutate it anyways.
-  operands_[operand_idx].data = const_cast<void*>(data);
+  operand.data = const_cast<void*>(data);
 }
 
 void TensorIteratorBase::narrow(int dim, int64_t start, int64_t size) {
