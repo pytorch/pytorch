@@ -13,7 +13,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
-from .source import AttrSource, LocalSource, Source
+from .source import LocalSource, Source
 from .utils import object_new
 from .variables.base import VariableTracker
 
