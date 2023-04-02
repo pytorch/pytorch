@@ -68,13 +68,6 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # see [Note - on the state of mark_dynamic]
 assume_static_by_default = False
 
-# Typically, if you mark_dynamic a dimension, we will error if the dimension
-# actually ended up getting specialized.  This knob changes the behavior so
-# that we don't error at all.  This is helpful for our CI where I'm using a
-# heuristic to mark batch dimensions as dynamic and the heuristic may get it
-# wrong.
-allow_ignore_mark_dynamic = False
-
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 

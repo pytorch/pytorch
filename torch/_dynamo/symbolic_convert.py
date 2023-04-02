@@ -1880,22 +1880,14 @@ class InstructionTranslator(InstructionTranslatorBase):
         # Python does not allow null to be an arg to a function, so
         # we remove nulls from the stack and restore them in the
         # prologue of the resume function
-
-        # sorted list of indices of nulls on the stack
         null_idxes: List[int] = []
         if sys.version_info >= (3, 11):
-            # find indices of NullVariables
-            for i, var in enumerate(self.stack):
-                if isinstance(var, NullVariable):
-                    null_idxes.append(i)
-            # generate bytecode to pop the nulls
-            null_cnt = 0
             for i, var in enumerate(reversed(self.stack)):
                 if isinstance(var, NullVariable):
-                    for j in range(2, i + 2 - null_cnt):
+                    for j in range(2, i + 2 - len(null_idxes)):
                         cg.append_output(create_instruction("SWAP", j))
+                    null_idxes.append(i + 1)
                     cg.extend_output(cg.pop_null())
-                    null_cnt += 1
 
         # we popped all nulls from the stack at runtime,
         # so we should not count NullVariables
