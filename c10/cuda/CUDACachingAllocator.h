@@ -145,10 +145,9 @@ struct TraceEntry {
                     // This event is generated when a free actually completes.
     SEGMENT_ALLOC, // a call to cudaMalloc to get more memory from the OS
     SEGMENT_FREE, // a call to cudaFree to return memory to the OS (e.g. to
-                  // defragement or empty_caches)
-    SEGMENT_MAP, // a call to cudaMalloc to get more memory from the OS
-    SEGMENT_UNMAP, // a call to cudaFree to return memory to the OS (e.g. to
-                   // defragement or empty_caches)
+                  // defragment or empty_caches)
+    SEGMENT_MAP, // a call to cuMemMap (used with expandable_segments)
+    SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
     OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free

@@ -124,8 +124,8 @@ def set_meta(proxy, val):
     elif isinstance(val, py_sym_types):
         proxy.node.meta['val'] = val
     elif isinstance(val, (list, tuple)):
-        if all(isinstance(x, FakeTensor) for x in val):
-            proxy.node.meta['val'] = [snapshot_fake(x) for x in val]
+        if any(isinstance(x, FakeTensor) for x in val):
+            proxy.node.meta['val'] = [snapshot_fake(x) if isinstance(x, FakeTensor) else None for x in val]
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
