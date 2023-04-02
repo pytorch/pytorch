@@ -99,11 +99,13 @@ class TestCuda(TestCase):
         expected_each_device = collections.defaultdict(lambda: collections.defaultdict(int))
 
         for segment in snapshot:
+            expandable = segment["is_expandable"]
             expected = expected_each_device[segment["device"]]
             pool_str = segment["segment_type"] + "_pool"
 
-            expected["segment.all.current"] += 1
-            expected["segment." + pool_str + ".current"] += 1
+            if not expandable:
+                expected["segment.all.current"] += 1
+                expected["segment." + pool_str + ".current"] += 1
 
             expected["allocated_bytes.all.current"] += segment["allocated_size"]
             expected["allocated_bytes." + pool_str + ".current"] += segment["allocated_size"]
@@ -129,7 +131,7 @@ class TestCuda(TestCase):
                     expected["active.all.current"] += 1
                     expected["active." + pool_str + ".current"] += 1
 
-                if block["state"] == "inactive" and is_split:
+                if block["state"] == "inactive" and is_split and not expandable:
                     expected["inactive_split.all.current"] += 1
                     expected["inactive_split." + pool_str + ".current"] += 1
                     expected["inactive_split_bytes.all.current"] += block["size"]
@@ -140,6 +142,7 @@ class TestCuda(TestCase):
         for device, expected in expected_each_device.items():
             stats = torch.cuda.memory_stats(device)
             for k, v in expected.items():
+                print(k, v, stats[k])
                 self.assertEqual(v, stats[k])
 
     @staticmethod
@@ -5013,7 +5016,7 @@ class TestCudaComm(TestCase):
             del x
             torch.cuda.empty_cache()
             ss = torch.cuda.memory._snapshot()
-            self.assertTrue(ss['device_traces'][0][-1]['action'] == 'segment_free')
+            self.assertTrue(ss['device_traces'][0][-1]['action'] in ('segment_free', 'segment_unmap'))
 
         finally:
             torch.cuda.memory._record_memory_history(None)
