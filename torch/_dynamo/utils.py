@@ -774,6 +774,12 @@ tuple_iterator_len = tuple_iterator.__length_hint__
 object_new = object.__new__
 
 
+def nn_module_new(cls):
+    obj = object_new(cls)
+    torch.nn.Module.__init__(obj)
+    return obj
+
+
 def product(it):
     return functools.reduce(operator.mul, it, 1)
 

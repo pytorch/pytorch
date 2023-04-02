@@ -121,9 +121,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
         ):
             var = tx.output.side_effects.track_object_new(
-                self.source, self.value, UserDefinedObjectVariable, options
+                self.source,
+                self.value,
+                variables.UnspecializedNNModuleVariable
+                if issubclass(self.value, torch.nn.Module)
+                else UserDefinedObjectVariable,
+                options,
             )
-            return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+            if (
+                inspect.getattr_static(self.value, "__init__", None)
+                is torch.nn.Module.__init__
+            ):
+                tx.output.side_effects.store_attr(
+                    var, "__call_nn_module_init", variables.ConstantVariable(True)
+                )
+                return var
+            else:
+                return var.add_options(var.call_method(tx, "__init__", args, kwargs))
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
             return variables.DataClassVariable.create(self.value, args, kwargs, options)

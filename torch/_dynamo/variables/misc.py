@@ -62,6 +62,22 @@ class SuperVariable(VariableTracker):
         source = None if self.source is None else AttrSource(self.source, name)
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
+        elif inner_fn is torch.nn.Module.__init__:
+            objvar = self.objvar
+            from ..side_effects import AttributeMutationNew
+
+            if (
+                isinstance(objvar, variables.UserDefinedObjectVariable)
+                and isinstance(objvar.mutable_local, AttributeMutationNew)
+                and not (args or kwargs)
+            ):
+                tx.output.guards.update(options.get("guards", set()))
+                tx.output.side_effects.store_attr(
+                    objvar, "__call_nn_module_init", variables.ConstantVariable(True)
+                )
+                return variables.ConstantVariable(None)
+            else:
+                unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
                 inner_fn, source=source, **options
