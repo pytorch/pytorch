@@ -7,6 +7,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    List,
     Optional,
     Sequence,
     Tuple,
@@ -135,6 +136,14 @@ class Override(ABC):
         pass
 
 
+_placements_override: Dict[int, List[Placement]] = {}
+
+
+def _override_placements(t: torch.Tensor, placements: List[Placement]):
+    global _placements_override
+    _placements_override[id(t)] = placements
+
+
 def _dtensor_expand(
     gm: fx.GraphModule,
     args: Tuple[Any, ...],
@@ -153,10 +162,21 @@ def _dtensor_expand(
     for a in flat_args:
         if isinstance(a, torch.Tensor):
             inps.append(a)
-            schemas.append(shard_schema)
-        elif isinstance(a, nn.Module) or isinstance(a, torch.optim.Optimizer):
-            # nn.Module or optimizer placeholder is captured by make_fx but
-            # never used in the graph
+            if id(a) in _placements_override:
+                schemas.append(
+                    Schema(
+                        mesh=mesh,
+                        placements=_placements_override[id(a)]
+                    )
+                )
+            else:
+                schemas.append(shard_schema)
+        else:
+            # Create dummy tensor and schema for non-tensor inputs for
+            # the purpose of dtensor expansion. Non-tensor inputs are
+            # guaranteed unused in dispatcher graphs produced by make_fx.
+            # However, we still need to respect them so that tensor inputs
+            # match wtih their placeholders.
             inps.append(torch.empty(0))
             schemas.append(shard_schema)
 
