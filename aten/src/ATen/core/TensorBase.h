@@ -560,7 +560,15 @@ class TORCH_API TensorBase {
                           .layout(layout());
   }
 
+  // TODO(#97856) Make this return a const pointer. This currently
+  //              returns a non-const pointer because of the large
+  //              number of clients that we still want to audit before
+  //              migrating to mutable_data_ptr().
   void* data_ptr() const {
+    return this->unsafeGetTensorImpl()->mutable_data();
+  }
+
+  void* mutable_data_ptr() const {
     return this->unsafeGetTensorImpl()->mutable_data();
   }
 
