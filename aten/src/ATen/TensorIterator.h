@@ -13,6 +13,7 @@
 
 #include <array>
 #include <bitset>
+#include <type_traits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
@@ -340,8 +341,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     return tensor_base(num_outputs_ + arg);
   }
   const Tensor& input(int arg = 0) const {
-    AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
-    return tensor(num_outputs_ + arg);
+    return input_operand(arg).tensor();
   }
 
   // Copies from temporary outputs back to the original outputs
@@ -609,6 +609,23 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   void compute_names(const TensorIteratorConfig&);
   void propagate_names_to_outputs();
   void coalesce_dimensions();
+
+ private:
+  /// Gets the input operand.
+  ///
+  /// requires(arg >= 0 && arg < ninputs())
+  const OperandInfo& input_operand(int arg) const;
+  OperandInfo& input_operand(int arg);
+
+  // Implements input_operand by templatizing over the constness of
+  // *this.
+  template <
+      typename Self,
+      typename OperandInfo = std::conditional_t<
+          std::is_const<Self>::value,
+          const OperandInfo,
+          OperandInfo>>
+  static OperandInfo& input_operand(Self& self, int arg);
 
  protected:
   /// Records the "computation" shape of the output tensor. The computation
