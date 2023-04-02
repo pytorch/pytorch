@@ -144,6 +144,7 @@ std::string _memory_snapshot_pickled() {
   IValue frames_s = "frames";
   IValue history_s = "history";
   IValue blocks_s = "blocks";
+  IValue is_expandable_s = "is_expandable";
 
   auto empty_frames = new_list();
 
@@ -164,6 +165,7 @@ std::string _memory_snapshot_pickled() {
     segmentDict.insert(
         segment_pool_id,
         std::tuple<int64_t, int64_t>(segmentInfo.owner_private_pool_id));
+    segmentDict.insert(is_expandable_s, segmentInfo.is_expandable);
 
     auto blocks = new_list();
     for (const auto& blockInfo : segmentInfo.blocks) {
