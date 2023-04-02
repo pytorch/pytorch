@@ -311,6 +311,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             options = VariableTracker.propagate(self, args, kwargs.values())
+            options.setdefault("guards", set())
+            if self.source:
+                options["guards"].add(
+                    AttrSource(self.source, "func").make_guard(GuardBuilder.ID_MATCH)
+                )
+                options["guards"].add(
+                    AttrSource(self.source, "args").make_guard(
+                        GuardBuilder.CONSTANT_MATCH
+                    )
+                )
+                options["guards"].add(
+                    AttrSource(self.source, "keywords").make_guard(
+                        GuardBuilder.CONSTANT_MATCH
+                    )
+                )
+
             partial_args = [variables.ConstantVariable(v) for v in self.value.args]
             partial_args.extend(args)
             partial_kwargs = {
