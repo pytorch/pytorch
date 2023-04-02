@@ -16,20 +16,6 @@ def unwrap_single_placement(e):
     return e.placements[0]
 
 
-# convenient wrapper to register custom operator impls
-# pyre-fixme[3]: Return type must be annotated.
-# pyre-fixme[2]: Parameter must be annotated.
-def register_impl(func):
-    # pyre-fixme[53]: Captured variable `func` is not annotated.
-    # pyre-fixme[3]: Return type must be annotated.
-    # pyre-fixme[2]: Parameter must be annotated.
-    def wrapper(impl):
-        DTensor._custom_dispatch_ops[func] = impl
-        return impl
-
-    return wrapper
-
-
 # convenient wrapper to register sharding propagation rules
 # pyre-fixme[3]: Return type must be annotated.
 # pyre-fixme[2]: Parameter must be annotated.
