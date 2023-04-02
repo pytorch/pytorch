@@ -298,8 +298,11 @@ struct ExpandableSegment {
     if (begin == end) {
       return rangeFromHandles(begin, end);
     }
+
+    std::cout << "MAP " << (void*) ptr() << " " << begin << " " << end << "\n";
+
     while (end > handles_.size()) {
-      handles_.push_back(c10::nullopt);
+      handles_.push_back(std::nullopt);
     }
     for (auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_[i]);
@@ -312,7 +315,7 @@ struct ExpandableSegment {
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(begin, i)) {
           auto handle = handles_[j].value();
-          handles_[j] = c10::nullopt;
+          handles_[j] = std::nullopt;
           C10_CUDA_DRIVER_CHECK(cuMemRelease(handle));
         }
         trimHandles();
@@ -380,6 +383,7 @@ struct ExpandableSegment {
   }
 
   void unmapHandles(size_t begin, size_t end) {
+    std::cout << "UNMAP " << (void*) ptr() << " " << begin << " " << end << "\n";
     // note: unlike cudaFree, MemUnmap and MemRelease do
     // not appear to synchronize in all cases, so we have to wait for the
     // stream to finish before this memory is truly free.
@@ -390,7 +394,7 @@ struct ExpandableSegment {
     C10_CUDA_CHECK(cudaStreamSynchronize(stream_));
     for (auto i : c10::irange(begin, end)) {
       CUmemGenericAllocationHandle h = handles_.at(i).value();
-      handles_[i] = c10::nullopt;
+      handles_[i] = std::nullopt;
       C10_CUDA_DRIVER_CHECK(cuMemUnmap(ptr_ + kSegmentSize * i, kSegmentSize));
       C10_CUDA_DRIVER_CHECK(cuMemRelease(h));
     }
@@ -432,7 +436,7 @@ struct ExpandableSegment {
   CUdeviceptr ptr_;
   size_t max_handles_;
   size_t kSegmentSize;
-  std::vector<c10::optional<CUmemGenericAllocationHandle>> handles_;
+  std::vector<std::optional<CUmemGenericAllocationHandle>> handles_;
   std::vector<int> peers_;
 };
 #else

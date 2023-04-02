@@ -1,3 +1,4 @@
+
 def define_targets(rules):
     rules.cc_library(
         name = "cuda",
@@ -34,6 +35,7 @@ def define_targets(rules):
             "//c10/util:base",
         ],
         target_compatible_with = rules.requires_cuda_enabled(),
+        copts = ["-DUSE_BAZEL"],
     )
 
     rules.cc_library(
