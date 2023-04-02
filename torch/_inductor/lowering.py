@@ -1041,7 +1041,7 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 
 
 def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
-    if t.dtype in (torch.complex32, torch.complex64):
+    if t.dtype in (torch.complex32, torch.complex64, torch.complex128):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
