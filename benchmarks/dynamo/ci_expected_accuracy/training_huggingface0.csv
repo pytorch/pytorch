@@ -25,11 +25,11 @@ MobileBertForMaskedLM,4
 MobileBertForQuestionAnswering,4
 PLBartForCausalLM,7
 PLBartForConditionalGeneration,7
-PegasusForCausalLM,10
-PegasusForConditionalGeneration,16
+PegasusForCausalLM,7
+PegasusForConditionalGeneration,4
 RobertaForCausalLM,7
 RobertaForQuestionAnswering,7
-Speech2Text2ForCausalLM,10
+Speech2Text2ForCausalLM,7
 T5ForConditionalGeneration,7
 T5Small,7
 TrOCRForCausalLM,7
