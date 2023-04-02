@@ -330,7 +330,7 @@ if __name__ == "__main__":
             args.workflow_run_id, args.workflow_run_attempt
         )
 
-    # Flush stdout so that any errors in rockset upload show up last in the logs.
+    # Flush stdout so that any errors in Rockset upload show up last in the logs.
     sys.stdout.flush()
 
     # For PRs, only upload a summary of test_runs. This helps lower the
@@ -355,7 +355,7 @@ if __name__ == "__main__":
     )
 
     # Separate out the failed test cases.
-    # Uploading everying is too data intensive most of the time,
+    # Uploading everything is too data intensive most of the time,
     # but these will be just a tiny fraction.
     failed_tests_cases = []
     for test_case in test_cases:
@@ -370,7 +370,7 @@ if __name__ == "__main__":
     )
 
     if args.head_branch == "master":
-        # For master jobs, upload everytihng.
+        # For master jobs, upload everything.
         upload_workflow_stats_to_s3(
             args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
         )
