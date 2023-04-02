@@ -18,7 +18,7 @@ void cpu_channel_shuffle(
     const TensorBase& input,
     int64_t groups) {
   auto input_data = input.data_ptr<scalar_t>();
-  auto output_data = output.mutable_data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
   int64_t channels = input.size(1);
@@ -39,7 +39,7 @@ void cpu_channel_shuffle(
 
     for (const auto i : c10::irange(begin, end)) {
       scalar_t* output_ptr = output_data + i * image_size;
-      const scalar_t* input_ptr = input_data + n * channels * image_size +
+      scalar_t* input_ptr = input_data + n * channels * image_size +
           g * channels_per_group * image_size + oc * image_size;
 
       int64_t d = 0;
@@ -63,7 +63,7 @@ void cpu_channel_shuffle_cl(
     const TensorBase& input,
     int64_t groups) {
   auto input_data = input.data_ptr<scalar_t>();
-  auto output_data = output.mutable_data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
   int64_t channels = input.size(1);
@@ -75,7 +75,7 @@ void cpu_channel_shuffle_cl(
   at::parallel_for(0, nbatch * image_size, 0, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       scalar_t* output_ptr = output_data + i * channels;
-      const scalar_t* input_ptr = input_data + i * channels;
+      scalar_t* input_ptr = input_data + i * channels;
 
       // transpose each channel lane:
       // from [groups, channels_per_group] to [channels_per_group, groups]

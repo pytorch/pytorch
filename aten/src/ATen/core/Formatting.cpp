@@ -191,7 +191,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
     }
     for (const auto l : c10::irange(self.size(0))) {
       Tensor row = self.select(0,l);
-      const double *row_ptr = row.data_ptr<double>();
+      double *row_ptr = row.data_ptr<double>();
       for (const auto c : c10::irange(firstColumn, lastColumn+1)) {
         stream << std::setw(sz) << row_ptr[c]/scale;
         if(c == lastColumn) {
@@ -291,7 +291,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         if(scale != 1) {
           printScale(stream, scale);
         }
-        const double* tensor_p = tensor.data_ptr<double>();
+        double* tensor_p = tensor.data_ptr<double>();
         for (const auto i : c10::irange(tensor.size(0))) {
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }

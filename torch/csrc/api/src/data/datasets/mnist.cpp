@@ -76,8 +76,7 @@ Tensor read_images(const std::string& root, bool train) {
 
   auto tensor =
       torch::empty({count, 1, kImageRows, kImageColumns}, torch::kByte);
-  images.read(
-      reinterpret_cast<char*>(tensor.mutable_data_ptr()), tensor.numel());
+  images.read(reinterpret_cast<char*>(tensor.data_ptr()), tensor.numel());
   return tensor.to(torch::kFloat32).div_(255);
 }
 
@@ -93,7 +92,7 @@ Tensor read_targets(const std::string& root, bool train) {
   expect_int32(targets, count);
 
   auto tensor = torch::empty(count, torch::kByte);
-  targets.read(reinterpret_cast<char*>(tensor.mutable_data_ptr()), count);
+  targets.read(reinterpret_cast<char*>(tensor.data_ptr()), count);
   return tensor.to(torch::kInt64);
 }
 } // namespace

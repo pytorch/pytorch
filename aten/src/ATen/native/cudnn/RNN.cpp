@@ -1079,11 +1079,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           descs.hx_desc.desc(), hx.data_ptr(),
           descs.cx_desc.desc(), cx.defined() ? cx.data_ptr() : nullptr,
           w_desc.desc(), weight_buf.data_ptr(),
-          y_descs_arr.data(), y.mutable_data_ptr(),
-          descs.hy_desc.desc(), hy.mutable_data_ptr(),
-          descs.cy_desc.desc(), cy.defined() ? cy.mutable_data_ptr() : nullptr,
-          workspace.mutable_data_ptr(), workspace.size(0),
-          reserve.mutable_data_ptr(), reserve.size(0)
+          y_descs_arr.data(), y.data_ptr(),
+          descs.hy_desc.desc(), hy.data_ptr(),
+          descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr,
+          workspace.data_ptr(), workspace.size(0),
+          reserve.data_ptr(), reserve.size(0)
           ));
   } else { // inference
     reserve = at::empty({0}, input.options().dtype(kByte));
@@ -1095,10 +1095,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           descs.hx_desc.desc(), hx.data_ptr(),
           descs.cx_desc.desc(), cx.defined() ? cx.data_ptr() : nullptr,
           w_desc.desc(), weight_buf.data_ptr(),
-          y_descs_arr.data(), y.mutable_data_ptr(),
-          descs.hy_desc.desc(), hy.mutable_data_ptr(),
-          descs.cy_desc.desc(), cy.defined() ? cy.mutable_data_ptr() : nullptr,
-          workspace.mutable_data_ptr(), workspace.size(0)
+          y_descs_arr.data(), y.data_ptr(),
+          descs.hy_desc.desc(), hy.data_ptr(),
+          descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr,
+          workspace.data_ptr(), workspace.size(0)
           ));
 
   }
@@ -1217,11 +1217,11 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
         w_desc.desc(), w.data_ptr(),
         descs.hx_desc.desc(), hx.data_ptr(),
         descs.cx_desc.desc(), cx.defined() ? cx.data_ptr() : nullptr,
-        x_descs_arr.data(), dx.mutable_data_ptr(),
-        descs.hx_desc.desc(), dhx.mutable_data_ptr(),
-        descs.cx_desc.desc(), cx.defined() ? dcx.mutable_data_ptr() : nullptr,
-        workspace.mutable_data_ptr(), workspace.size(0),
-        fn_reserve.mutable_data_ptr(), fn_reserve.size(0)
+        x_descs_arr.data(), dx.data_ptr(),
+        descs.hx_desc.desc(), dhx.data_ptr(),
+        descs.cx_desc.desc(), cx.defined() ? dcx.data_ptr() : nullptr,
+        workspace.data_ptr(), workspace.size(0),
+        fn_reserve.data_ptr(), fn_reserve.size(0)
         ));
 
   if (batch_first && !is_input_packed) {
@@ -1316,7 +1316,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
         descs.hx_desc.desc(), hx.data_ptr(),
         y_descs_arr.data(), y.data_ptr(),
         workspace.data_ptr(), workspace.size(0),
-        w_desc.desc(), dw.mutable_data_ptr(),
+        w_desc.desc(), dw.data_ptr(),
         fn_reserve.data_ptr(), fn_reserve.size(0)
         ));
 

@@ -151,7 +151,7 @@ struct Dist {
     int64_t n = self.size(0);
     int64_t m = self.size(1);
 
-    scalar_t * const res_start = result.mutable_data_ptr<scalar_t>();
+    scalar_t * const res_start = result.data_ptr<scalar_t>();
     int64_t combs = result.numel(); // n * (n - 1) / 2
 
     // We conceptually iterate over tuples of (i, j, k) where i is the first
@@ -299,7 +299,7 @@ struct Dist {
     const scalar_t * const grad_start = grad.data_ptr<scalar_t>();
     const scalar_t * const dist_start = dist.data_ptr<scalar_t>();
     const scalar_t * const self_start = self.data_ptr<scalar_t>();
-    scalar_t * const res_start = result.mutable_data_ptr<scalar_t>();
+    scalar_t * const res_start = result.data_ptr<scalar_t>();
 
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the

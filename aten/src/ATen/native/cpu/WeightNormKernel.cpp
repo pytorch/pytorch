@@ -23,8 +23,8 @@ void weight_norm_first_dim_kernel(
     int64_t M, int64_t N) {
   const auto v_data = v.data_ptr<scalar_t>();
   const auto g_data = g.data_ptr<scalar_t>();
-  auto w_data = w.mutable_data_ptr<scalar_t>();
-  auto norm_data = norm.mutable_data_ptr<accscalar_t>();
+  auto w_data = w.data_ptr<scalar_t>();
+  auto norm_data = norm.data_ptr<accscalar_t>();
 
   using Vec = vec::Vectorized<accscalar_t>;
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
@@ -131,12 +131,12 @@ void weight_norm_last_dim_kernel(
     int64_t M, int64_t N) {
   const auto v_data = v.data_ptr<scalar_t>();
   const auto g_data = g.data_ptr<scalar_t>();
-  auto w_data = w.mutable_data_ptr<scalar_t>();
-  auto norm_data = norm.mutable_data_ptr<accscalar_t>();
+  auto w_data = w.data_ptr<scalar_t>();
+  auto norm_data = norm.data_ptr<accscalar_t>();
 
   int num_threads = at::get_num_threads();
   TensorBase buffer = at::detail::empty_cpu({num_threads, N}, norm.options()).zero_();
-  auto buffer_data = buffer.mutable_data_ptr<accscalar_t>();
+  auto buffer_data = buffer.data_ptr<accscalar_t>();
 
   // vertical parallel reduction
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
@@ -187,8 +187,8 @@ void weight_norm_backward_first_dim_kernel(
   const auto saved_v_data = saved_v.data_ptr<scalar_t>();
   const auto saved_g_data = saved_g.data_ptr<scalar_t>();
   const auto saved_norm_data = saved_norm.data_ptr<accscalar_t>();
-  auto grad_v_data = grad_v.mutable_data_ptr<scalar_t>();
-  auto grad_g_data = grad_g.mutable_data_ptr<scalar_t>();
+  auto grad_v_data = grad_v.data_ptr<scalar_t>();
+  auto grad_g_data = grad_g.data_ptr<scalar_t>();
 
   using Vec = vec::Vectorized<accscalar_t>;
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
@@ -328,8 +328,8 @@ void weight_norm_backward_last_dim_kernel(
   const auto saved_v_data = saved_v.data_ptr<scalar_t>();
   const auto saved_g_data = saved_g.data_ptr<scalar_t>();
   const auto saved_norm_data = saved_norm.data_ptr<accscalar_t>();
-  auto grad_v_data = grad_v.mutable_data_ptr<scalar_t>();
-  auto grad_g_data = grad_g.mutable_data_ptr<scalar_t>();
+  auto grad_v_data = grad_v.data_ptr<scalar_t>();
+  auto grad_g_data = grad_g.data_ptr<scalar_t>();
 
   // the temp buffer will be used twice:
   // 1. vertical reduction from [M, N] to [T, N]
@@ -339,7 +339,7 @@ void weight_norm_backward_last_dim_kernel(
   int num_threads = at::get_num_threads();
   int K = std::max(3, num_threads);
   TensorBase buffer = at::detail::empty_cpu({K, N}, saved_norm.options()).zero_();
-  auto buffer_data = buffer.mutable_data_ptr<accscalar_t>();
+  auto buffer_data = buffer.data_ptr<accscalar_t>();
 
   // vertical parallel reduction
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {

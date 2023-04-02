@@ -35,12 +35,12 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
     at::Tensor scales = at::empty(
         {static_cast<long>(w_scale.size())},
         at::device(c10::kCPU).dtype(c10::kFloat));
-    std::copy(w_scale.begin(), w_scale.end(), scales.mutable_data_ptr<float>());
+    std::copy(w_scale.begin(), w_scale.end(), scales.data_ptr<float>());
 
     at::Tensor zero_points = at::empty(
         {static_cast<long>(w_zp.size())},
         at::device(c10::kCPU).dtype(c10::kInt));
-    std::copy(w_zp.begin(), w_zp.end(), zero_points.mutable_data_ptr<int>());
+    std::copy(w_zp.begin(), w_zp.end(), zero_points.data_ptr<int>());
 
     weight_origin = at::_empty_per_channel_affine_quantized(
         {N, K},
@@ -51,7 +51,7 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
   }
 
   int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>());
+      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
 
   packW->unpack(weight_ptr_int8);
 
@@ -69,7 +69,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
   const int64_t N = static_cast<int64_t>(output_channels_);
   const int64_t K = static_cast<int64_t>(input_channels_);
 
-  const float* w_scales_ptr = w_scales_.data_ptr<float>();
+  float* w_scales_ptr = w_scales_.data_ptr<float>();
 
   at::Tensor weight_origin;
   if (q_scheme_ == c10::kPerTensorAffine) {
@@ -105,7 +105,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
   }
 
   int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>());
+      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
 
   bcsr_matrix_->unpack(
       weight_ptr_int8,

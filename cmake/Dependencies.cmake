@@ -155,6 +155,7 @@ endif()
 
 # ---[ BLAS
 
+set(AT_MKLDNN_ACL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -1288,7 +1289,7 @@ if(USE_ROCM)
     # host linker to link.
     list(APPEND HIP_CLANG_FLAGS -fno-gpu-rdc)
     foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
-      list(APPEND HIP_CLANG_FLAGS --amdgpu-target=${pytorch_rocm_arch})
+      list(APPEND HIP_CLANG_FLAGS --offload-arch=${pytorch_rocm_arch})
     endforeach()
 
     set(Caffe2_HIP_INCLUDE
@@ -1729,6 +1730,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   set(AT_MKLDNN_ENABLED 0)
+  set(AT_MKLDNN_ACL_ENABLED 0)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1736,6 +1738,9 @@ if(NOT INTERN_BUILD_MOBILE)
         "Not compiling with MKLDNN. "
         "Turn this warning off by USE_MKLDNN=OFF.")
       set(USE_MKLDNN OFF)
+    endif()
+    if(USE_MKLDNN_ACL)
+      set(AT_MKLDNN_ACL_ENABLED 1)
     endif()
   endif()
   if(USE_MKLDNN)

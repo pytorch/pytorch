@@ -1888,10 +1888,8 @@ graph(%x : int,
 
   // Verify that TEK::runFast works correctly with mixed scalar and tensor
   // inputs/utputs
-  std::vector<void*> inputs = {
-      &x, xt.mutable_data_ptr(), &y, yt.mutable_data_ptr()};
-  std::vector<void*> outputs = {
-      &r, rt.mutable_data_ptr(), &z, zt.mutable_data_ptr()};
+  std::vector<void*> inputs = {&x, xt.data_ptr(), &y, yt.data_ptr()};
+  std::vector<void*> outputs = {&r, rt.data_ptr(), &z, zt.data_ptr()};
   k.runFast(inputs, outputs);
   TORCH_CHECK_EQ(z, x * y);
   TORCH_CHECK_EQ(r, z * x);

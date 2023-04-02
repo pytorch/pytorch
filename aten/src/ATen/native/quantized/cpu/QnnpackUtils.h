@@ -452,7 +452,7 @@ C10_UNUSED std::vector<float> generate_requantization_scales(
   // Since weight scale is allocated with padding
   // weight_scales.numel() gives us padded num elements.
   const auto num_output_channels_padded = weight_scales.numel();
-  const float *const weight_scales_data = weight_scales.data_ptr<float>();
+  float *const weight_scales_data = weight_scales.data_ptr<float>();
   if (static_cast<int64_t>(requant_scales.size()) < num_output_channels_padded) {
     requant_scales.resize(num_output_channels_padded);
   }
@@ -500,7 +500,7 @@ C10_UNUSED std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scal
     at::empty(
         {num_output_channels_padded},
         at::device(at::kCPU).dtype(at::kFloat));
-  float *const weight_scales_data = weight_scales.mutable_data_ptr<float>();
+  float *const weight_scales_data = weight_scales.data_ptr<float>();
   if (qtype == at::kPerTensorAffine) {
     for (const auto i : c10::irange(num_output_channels)) {
       weight_scales_data[i] = weight_contig.q_scale();

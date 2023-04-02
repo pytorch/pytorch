@@ -23,8 +23,8 @@ void cpu_adaptive_max_pool(
   auto indices = indices_.contiguous();
 
   auto input_data = input.data_ptr<scalar_t>();
-  auto output_data = output.mutable_data_ptr<scalar_t>();
-  auto indices_data = indices.mutable_data_ptr<int64_t>();
+  auto output_data = output.data_ptr<scalar_t>();
+  auto indices_data = indices.data_ptr<int64_t>();
 
   int64_t ndim = input.ndimension();
   // treat batch size and channels as one dimension
@@ -37,7 +37,7 @@ void cpu_adaptive_max_pool(
   // parallel on dim of N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
-      const scalar_t* input_ptr = input_data + c * input_height * input_width;
+      scalar_t* input_ptr = input_data + c * input_height * input_width;
       scalar_t* output_ptr = output_data + c * output_height * output_width;
       int64_t* indices_ptr = indices_data + c * output_height * output_width;
 
@@ -93,8 +93,8 @@ void cpu_adaptive_max_pool_channels_last(
   auto indices = indices_.contiguous(memory_format);
 
   auto input_data = input.data_ptr<scalar_t>();
-  auto output_data = output.mutable_data_ptr<scalar_t>();
-  auto indices_data = indices.mutable_data_ptr<int64_t>();
+  auto output_data = output.data_ptr<scalar_t>();
+  auto indices_data = indices.data_ptr<int64_t>();
 
   int64_t nbatch = input.size(0);
   int64_t channels = input.size(1);
@@ -209,8 +209,8 @@ void cpu_adaptive_max_pool_channels_last<BFloat16>(
   auto indices = indices_.contiguous(memory_format);
 
   auto input_data = input.data_ptr<BFloat16>();
-  auto output_data = output.mutable_data_ptr<BFloat16>();
-  auto indices_data = indices.mutable_data_ptr<int64_t>();
+  auto output_data = output.data_ptr<BFloat16>();
+  auto indices_data = indices.data_ptr<int64_t>();
 
   int64_t nbatch = input.size(0);
   int64_t channels = input.size(1);
@@ -346,7 +346,7 @@ void cpu_adaptive_max_pool_backward(
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
-  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.data_ptr<scalar_t>();
 
   int64_t ndim = grad_output.ndimension();
   // treat batch size and channels as one dimension
@@ -360,8 +360,8 @@ void cpu_adaptive_max_pool_backward(
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + c * input_height * input_width;
-      const scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
-      const int64_t* indices_ptr = indices_data + c * output_height * output_width;
+      scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
+      int64_t* indices_ptr = indices_data + c * output_height * output_width;
 
       for (const auto oh : c10::irange(output_height)) {
         for (const auto ow : c10::irange(output_width)) {
@@ -393,7 +393,7 @@ void cpu_adaptive_max_pool_backward_channels_last(
   auto grad_output = grad_output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
 
-  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.data_ptr<scalar_t>();
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
@@ -408,8 +408,8 @@ void cpu_adaptive_max_pool_backward_channels_last(
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (const auto n : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + n * input_height * input_width * channels;
-      const scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
-      const int64_t* indices_ptr = indices_data + n * output_height * output_width * channels;
+      scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
+      int64_t* indices_ptr = indices_data + n * output_height * output_width * channels;
 
       for (const auto oh : c10::irange(output_height)) {
         for (const auto ow : c10::irange(output_width)) {

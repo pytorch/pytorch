@@ -105,7 +105,7 @@ void multi_tensor_apply(
 
             tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
-                tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].mutable_data_ptr();
+                tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr();
             }
             loc_tensor_info++;
 
@@ -164,7 +164,7 @@ void multi_tensor_apply(
             }
             tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
-                tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].mutable_data_ptr();
+                tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr();
             }
             loc_tensor_info++;
 
@@ -221,10 +221,10 @@ void multi_tensor_apply_for_fused_optimizer(
     if (tensor_lists[0][tensor_index].numel() == 0) {
       continue;
     }
-    tensorListMeta.state_steps_addresses[loc_tensor_info] = state_steps[tensor_index].mutable_data_ptr();
+    tensorListMeta.state_steps_addresses[loc_tensor_info] = state_steps[tensor_index].data_ptr();
     tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][tensor_index].numel();
     for (const auto & d : c10::irange(depth)) {
-      tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][tensor_index].mutable_data_ptr();
+      tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][tensor_index].data_ptr();
     }
     loc_tensor_info++;
 

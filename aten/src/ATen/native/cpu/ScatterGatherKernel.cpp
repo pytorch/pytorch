@@ -599,9 +599,9 @@ struct cpu_scatter_gather_base_kernel {
 //
 template <typename scalar_t, ReductionType reduce>
 void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
-  const int64_t* index_data = index.data_ptr<int64_t>();
-  scalar_t* self_data = self.mutable_data_ptr<scalar_t>();
-  const scalar_t* src_data = src.data_ptr<scalar_t>();
+  int64_t* index_data = index.data_ptr<int64_t>();
+  scalar_t* self_data = self.data_ptr<scalar_t>();
+  scalar_t* src_data = src.data_ptr<scalar_t>();
 
   const int64_t M = ensure_nonempty_size(self, 0);
   const int64_t nnz = ensure_nonempty_size(index, 0);
@@ -701,9 +701,9 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 
 template <typename scalar_t>
 void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
-  const int64_t* index_data = index.data_ptr<int64_t>();
-  scalar_t* result_data = result.mutable_data_ptr<scalar_t>();
-  const scalar_t* self_data = self.data_ptr<scalar_t>();
+  int64_t* index_data = index.data_ptr<int64_t>();
+  scalar_t* result_data = result.data_ptr<scalar_t>();
+  scalar_t* self_data = self.data_ptr<scalar_t>();
 
   const int64_t M = ensure_nonempty_size(result, 0);
   const int64_t N = ensure_nonempty_size(self, 0);

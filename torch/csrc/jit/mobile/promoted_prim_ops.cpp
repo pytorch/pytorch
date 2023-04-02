@@ -190,7 +190,7 @@ void toList(Stack& stack) {
   auto sizes = t.sizes();
   auto strides = t.strides();
   size_t element_size = t.element_size();
-  char* data = static_cast<char*>(t.mutable_data_ptr());
+  char* data = static_cast<char*>(t.data_ptr());
   auto result = tensorToListRecursive(
       data, 0, dim, out_ty, t.scalar_type(), sizes, strides, element_size);
   push(stack, std::move(result));

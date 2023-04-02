@@ -826,13 +826,13 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   }
   ideep::tensor y({dst_dims, ideep::tensor::data_type::u8,
                    {output.strides().cbegin(), output.strides().cend()}},
-                  output.mutable_data_ptr());
+                  output.data_ptr());
   bool with_bias = bias_.has_value();
   if (with_bias) {
     // Bias might be modified outside (e.g. by quantization bias correction).
     // If so, update the prepacked bias as well.
     if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
-      bias_.value().init(bias_.value().get_desc(), orig_bias_.value().mutable_data_ptr());
+      bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
     }
   }
   const auto& b = with_bias ? bias_.value() : ideep::tensor();

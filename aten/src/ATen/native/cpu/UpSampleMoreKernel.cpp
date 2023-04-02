@@ -26,7 +26,7 @@ void cpu_upsample_nearest_backward(
   auto grad_input = grad_input_.contiguous();
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
   auto ndim = input_sizes.size();
@@ -120,7 +120,7 @@ void cpu_upsample_nearest_backward_channels_last(
   auto grad_input = grad_input_.contiguous(channels_last_memory_format);
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.data_ptr<scalar_t>();
 
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
@@ -135,7 +135,7 @@ void cpu_upsample_nearest_backward_channels_last(
   int64_t output_width = output_sizes[ndim - 1];
 
   using Vec = vec::Vectorized<scalar_t>;
-  auto acc = [](scalar_t* gin, const scalar_t* gout, int64_t size) {
+  auto acc = [](scalar_t* gin, scalar_t* gout, int64_t size) {
     int64_t d = 0;
     for (; d < size - (size % Vec::size()); d += Vec::size()) {
       Vec gin_vec = Vec::loadu(gin + d) + Vec::loadu(gout + d);
@@ -152,7 +152,7 @@ void cpu_upsample_nearest_backward_channels_last(
         int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[0]);
         for (const auto ow : c10::irange(output_width)) {
           int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[1]);
-          const scalar_t* grad_output_ptr = grad_output_data +
+          scalar_t* grad_output_ptr = grad_output_data +
               (n * output_height * output_width + oh * output_width + ow) * channels;
           scalar_t* grad_input_ptr = grad_input_data +
               (n * input_height * input_width + ih * input_width + iw) * channels;
@@ -426,7 +426,7 @@ void cpu_upsample_linear_backward_channels_last(
   auto grad_input = grad_input_.contiguous(channels_last_memory_format);
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.data_ptr<scalar_t>();
 
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
@@ -442,7 +442,7 @@ void cpu_upsample_linear_backward_channels_last(
 
   using opmath_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<scalar_t>;
-  auto acc = [](scalar_t* gin, const scalar_t* gout, opmath_t w, int64_t size) {
+  auto acc = [](scalar_t* gin, scalar_t* gout, opmath_t w, int64_t size) {
     int64_t d = 0;
     for (; d < size - (size % Vec::size()); d += Vec::size()) {
       Vec gin_vec = Vec::loadu(gin + d) + Vec(w) * Vec::loadu(gout + d);

@@ -70,7 +70,7 @@ void cpu_take_put_kernel(
   const auto numel = indexed.numel();
   const auto offset_indexed = IndexToOffset(indexed);
 
-  auto* indexed_data = indexed.mutable_data_ptr<scalar_t>();
+  auto* indexed_data = indexed.data_ptr<scalar_t>();
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
@@ -333,7 +333,7 @@ template <typename scalar_t, typename mask_t>
 void cpu_masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
   auto is_mask_bool = std::is_same<mask_t, bool>::value;
   std::ptrdiff_t source_cntr = 0;
-  const scalar_t* source_ptr = source.data_ptr<scalar_t>();
+  scalar_t* source_ptr = source.data_ptr<scalar_t>();
   auto numel = source.numel();
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {

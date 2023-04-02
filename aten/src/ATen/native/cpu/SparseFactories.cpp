@@ -16,7 +16,7 @@ void _spdiags_kernel_cpu(
     const TensorBase& diagonals,
     TensorBase& values,
     TensorBase& indices) {
-  auto* row_index_write_ptr = indices.mutable_data_ptr<int64_t>();
+  auto* row_index_write_ptr = indices.data_ptr<int64_t>();
   auto* col_index_write_ptr = row_index_write_ptr + indices.stride(0);
   const int64_t diagonals_index_stride = diagonals.stride(0);
   const int64_t diagonals_read_stride = diagonals.stride(1);
@@ -28,7 +28,7 @@ void _spdiags_kernel_cpu(
       diagonals.scalar_type(),
       "spdiags_cpu",
       [&] {
-        auto* const values_write_ptr = values.mutable_data_ptr<scalar_t>();
+        auto* const values_write_ptr = values.data_ptr<scalar_t>();
         const auto* const diagonals_ptr = diagonals.data_ptr<scalar_t>();
 
         cpu_kernel(

@@ -209,7 +209,7 @@ c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
   static_assert(std::is_standard_layout<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
-  auto rng_state = state_tensor.mutable_data_ptr();
+  auto rng_state = state_tensor.data_ptr();
 
   // accumulate generator data to be copied into byte tensor
   auto accum_state = std::make_unique<CPUGeneratorImplState>();

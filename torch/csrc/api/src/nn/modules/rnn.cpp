@@ -203,7 +203,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
   // This is a sufficient check, because overlapping parameter buffers that
   // don't completely alias would break the assumptions of the uniqueness check
   // in Module::named_parameters().
-  std::unordered_set<const void*> unique_data_ptrs;
+  std::unordered_set<void*> unique_data_ptrs;
   for (const auto& p : flat_weights_) {
     unique_data_ptrs.emplace(p.data_ptr());
   }

@@ -227,7 +227,7 @@ class MemoryPlanner {
     return impl_p >= start && impl_p < end;
   }
 
-  bool overlapWithInternalBuffer(const void* data_ptr) {
+  bool overlapWithInternalBuffer(void* data_ptr) {
     return buffer_start_ <= data_ptr && data_ptr < buffer_end_;
   }
 

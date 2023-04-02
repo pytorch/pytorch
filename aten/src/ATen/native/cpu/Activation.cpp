@@ -27,9 +27,9 @@ template <typename scalar_t>
 inline void _vec_log_sigmoid(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
   if (input.scalar_type() == kBFloat16) {
     using Vec = Vectorized<BFloat16>;
-    BFloat16* output_data = output.mutable_data_ptr<BFloat16>();
-    BFloat16* buffer_data = buffer.mutable_data_ptr<BFloat16>();
-    const BFloat16* input_data = input.data_ptr<BFloat16>();
+    BFloat16* output_data = output.data_ptr<BFloat16>();
+    BFloat16* buffer_data = buffer.data_ptr<BFloat16>();
+    BFloat16* input_data = input.data_ptr<BFloat16>();
     parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
       int64_t size = end - begin;
       int64_t d = 0;
@@ -62,9 +62,9 @@ inline void _vec_log_sigmoid(TensorBase &output, TensorBase &buffer, const Tenso
     });
   } else {
     using Vec = Vectorized<scalar_t>;
-    scalar_t* output_data = output.mutable_data_ptr<scalar_t>();
-    scalar_t* buffer_data = buffer.mutable_data_ptr<scalar_t>();
-    const scalar_t* input_data = input.data_ptr<scalar_t>();
+    scalar_t* output_data = output.data_ptr<scalar_t>();
+    scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
+    scalar_t* input_data = input.data_ptr<scalar_t>();
     parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
       int64_t size = end - begin;
       int64_t d = 0;

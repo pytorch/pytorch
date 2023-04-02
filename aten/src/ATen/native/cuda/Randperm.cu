@@ -69,10 +69,10 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   Tensor shuffled;
   void *shuffled_data;
   if (result.is_contiguous()) {
-    shuffled_data = result.mutable_data_ptr();
+    shuffled_data = result.data_ptr();
   } else {
     shuffled = at::empty(n, result.options());
-    shuffled_data = shuffled.mutable_data_ptr();
+    shuffled_data = shuffled.data_ptr();
   }
 
   auto opt = TensorOptions().device(result.device());
@@ -97,7 +97,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       using dtype = OpaqueType<sizeof(scalar_t)>;
       auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
-      const dtype* range_data = reinterpret_cast<const dtype*>(range.data_ptr());
+      dtype* range_data = reinterpret_cast<dtype*>(range.data_ptr());
       at::cuda::cub::radix_sort_pairs<int, dtype>(
         keys.data_ptr<int>(), keys_out,
         range_data, shuffled_data_,
@@ -113,7 +113,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       using dtype = OpaqueType<sizeof(scalar_t)>;
       auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
-      const dtype* range_data = reinterpret_cast<const dtype*>(range.data_ptr());
+      dtype* range_data = reinterpret_cast<dtype*>(range.data_ptr());
       at::cuda::cub::radix_sort_pairs<int64_t, dtype>(
         keys.data_ptr<int64_t>(), keys_out,
         range_data, shuffled_data_,

@@ -195,9 +195,9 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_contiguous());
     TORCH_CUDASPARSE_CHECK(cusparseCsrSetPointers(
         this->descriptor(),
-        crow_indices.mutable_data_ptr(),
-        col_indices.mutable_data_ptr(),
-        values.mutable_data_ptr()));
+        crow_indices.data_ptr(),
+        col_indices.data_ptr(),
+        values.data_ptr()));
   }
 
 #if AT_USE_CUSPARSE_GENERIC_SPSV()

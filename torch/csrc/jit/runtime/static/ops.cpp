@@ -109,7 +109,7 @@ at::Tensor& reshape_copy_out(
   }
 
   const void* self_data = self_contig->data_ptr();
-  void* out_data = out.mutable_data_ptr();
+  void* out_data = out.data_ptr();
   memcpy(out_data, self_data, nbytes);
 
   return out;
@@ -673,8 +673,8 @@ REGISTER_OPERATOR_FUNCTOR(
         auto nan = in3_s.has_value() ? static_cast<float>(*in3_s) : 0.f;
 
         te->call(
-            {out_t.mutable_data_ptr(),
-             in0_t.mutable_data_ptr(),
+            {out_t.data_ptr(),
+             in0_t.data_ptr(),
              &clamp_min,
              &clamp_max,
              &nan,
@@ -706,12 +706,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
                                    : -std::numeric_limits<float>::infinity();
       auto max = in2_s.has_value() ? in2_s->toFloat()
                                    : std::numeric_limits<float>::infinity();
-      te->call(
-          {out_t.mutable_data_ptr(),
-           in0_t.mutable_data_ptr(),
-           &min,
-           &max,
-           &output_size});
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &min, &max, &output_size});
     };
   }
   if (n->matches(
@@ -959,7 +954,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
     }
     at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
     int64_t nn = in0_t.numel();
-    te->call({out_t.mutable_data_ptr(), in0_t.mutable_data_ptr(), &nn});
+    te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
   };
 });
 
@@ -982,7 +977,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     }
     at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
     int64_t nn = in0_t.numel();
-    te->call({out_t.mutable_data_ptr(), in0_t.mutable_data_ptr(), &nn});
+    te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
   };
 });
 
@@ -1043,7 +1038,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
         int64_t nn = in0_t.numel();
-        te->call({out_t.mutable_data_ptr(), in0_t.mutable_data_ptr(), &nn});
+        te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
       };
     });
 
@@ -1078,7 +1073,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
     at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
     int64_t nn = in0_t.numel();
     float c = clamp_value;
-    te->call({out_t.mutable_data_ptr(), in0_t.mutable_data_ptr(), &nn, &c});
+    te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn, &c});
   };
 });
 
@@ -1941,9 +1936,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
       }
       at::native::resize_(out_t, in0_t.sizes());
       te->call(
-          {out_t.mutable_data_ptr(),
-           in0_t.mutable_data_ptr(),
-           in1_t.mutable_data_ptr(),
+          {out_t.data_ptr(),
+           in0_t.data_ptr(),
+           in1_t.data_ptr(),
            &i_rounding_mode,
            &dim});
     } else {
@@ -2757,7 +2752,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         at::native::resize_(out, input.sizes(), c10::nullopt);
         int64_t nn = input.numel();
-        te->call({out.mutable_data_ptr(), input.mutable_data_ptr(), &nn});
+        te->call({out.data_ptr(), input.data_ptr(), &nn});
       };
     });
 

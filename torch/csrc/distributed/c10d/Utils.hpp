@@ -409,7 +409,7 @@ inline T* getDataPointer(const at::Tensor& tensor) {
   // chunk(..., dim=0)[1]. Hence, we need to use data_ptr() instead of
   // tensor.storage().data()
   // NB: not using tensor.data<T>() because tensor is not aware of gloo::TYPE
-  return static_cast<T*>(tensor.mutable_data_ptr());
+  return static_cast<T*>(tensor.data_ptr());
 }
 
 template <typename T>

@@ -33,7 +33,7 @@ void max_pool1d_impl(
     const PoolingParams1D& p) {
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool1d_impl", [&] {
     const Tensor in = input.contiguous();
-    scalar_t* const OP = output.mutable_data_ptr<scalar_t>();
+    scalar_t* const OP = output.data_ptr<scalar_t>();
     const scalar_t* const IP = in.data_ptr<scalar_t>();
 
     // Value used for padding

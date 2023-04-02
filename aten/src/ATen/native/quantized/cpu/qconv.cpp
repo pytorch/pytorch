@@ -1222,7 +1222,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   auto src_desc = ideep::tensor::desc(src_dims, src_data_type,
       kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
   ideep::tensor src;
-  src.init(src_desc, act_contig.mutable_data_ptr());
+  src.init(src_desc, act_contig.data_ptr());
   // weights & bias
   ideep::tensor& weights = *(weight_.get());
   bool with_bias = bias_.has_value();
@@ -1279,10 +1279,10 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     accum_contig = accum.value().contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
     TORCH_CHECK(accum_contig.dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
     // When fused with sum, the dst tensor will share the data ptr as the accum tensor.
-    dst.init(dst_desc, accum_contig.mutable_data_ptr());
+    dst.init(dst_desc, accum_contig.data_ptr());
   } else {
     dst = ideep::tensor({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
-                      output.mutable_data_ptr());
+                      output.data_ptr());
   }
 
   // Parameters
@@ -1320,7 +1320,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   // Bias might be modified outside (e.g. by quantization bias correction).
   // If so, update the prepacked bias as well.
   if (with_bias && bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
-    bias_.value().init(bias_.value().get_desc(), orig_bias_.value().mutable_data_ptr());
+    bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
   }
   const auto& b = with_bias ? bias_.value() : ideep::tensor();
   int num_threads = at::get_num_threads();

@@ -179,7 +179,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
       sizes.data(),
       dtype,
       strides.data(),
-      prepared_tensor.mutable_data_ptr(),
+      prepared_tensor.data_ptr(),
       0,
       NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE,
       nullptr));

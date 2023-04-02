@@ -111,7 +111,7 @@ Tensor cudnn_grid_sampler_forward(
       handle, desc.desc(),
       &one, idesc.desc(), input->data_ptr(),
       grid->data_ptr(),
-      &zero, odesc.desc(), output_t.mutable_data_ptr()
+      &zero, odesc.desc(), output_t.data_ptr()
   ));
 
   return output_t;
@@ -161,11 +161,11 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
   AT_CUDNN_CHECK(cudnnSpatialTfSamplerBackward(
     handle, desc.desc(),
     &one, idesc.desc(), input->data_ptr(),
-    &zero, gdesc.desc(), grad_input_t.mutable_data_ptr(),
+    &zero, gdesc.desc(), grad_input_t.data_ptr(),
     &one, odesc.desc(), grad_output->data_ptr(),
     // intruigingly, the outputs don't need descriptors
-    grid->mutable_data_ptr(),
-    &zero, grad_grid_t.mutable_data_ptr()
+    grid->data_ptr(),
+    &zero, grad_grid_t.data_ptr()
   ));
 
   return std::tuple<Tensor, Tensor>{ grad_input_t, grad_grid_t };

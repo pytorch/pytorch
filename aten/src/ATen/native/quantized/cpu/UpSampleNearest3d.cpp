@@ -27,7 +27,7 @@ typedef int64_t (*nn_compute_source_index_fn_t)(const float, int64_t, int64_t);
 template <typename scalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
 static void upsample_nearest3d_out_frame(
     scalar_t* odata,
-    const scalar_t* idata,
+    scalar_t* idata,
     int64_t input_depth,
     int64_t input_height,
     int64_t input_width,
@@ -47,7 +47,7 @@ static void upsample_nearest3d_out_frame(
   if (channels == 0 || output_depth == 0 || output_height == 0 || output_width == 0) {
     return;
   }
-  auto* i_p = reinterpret_cast<const typename scalar_t::underlying*>(idata);
+  auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
   // special case: just copy
@@ -85,7 +85,7 @@ static void upsample_nearest3d_out_frame(
 template <typename scalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
 static void upsample_nearest3d_out_frame_nhwc(
     scalar_t* odata,
-    const scalar_t* idata,
+    scalar_t* idata,
     int64_t input_depth,
     int64_t input_height,
     int64_t input_width,
@@ -102,7 +102,7 @@ static void upsample_nearest3d_out_frame_nhwc(
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
 
   for (const auto b : c10::irange(nbatch)) {
-    auto* i_p = reinterpret_cast<const typename scalar_t::underlying*>(idata + b * input_depth * input_height * input_width * channels);
+    auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * input_depth * input_height * input_width * channels);
     auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * output_depth * output_height * output_width * channels);
     // special case: just copy
     if (input_depth == output_depth && input_height == output_height && input_width == output_width) {
@@ -166,8 +166,8 @@ Tensor _upsample_nearest3d_quantized_cpu(
         c10::nullopt);
 
     AT_DISPATCH_QINT_TYPES(input.scalar_type(), "upsample_nearest3d", [&] {
-      auto* idata = static_cast<const scalar_t*>(input.data_ptr());
-      auto* odata = static_cast<scalar_t*>(output.mutable_data_ptr());
+      auto* idata = static_cast<scalar_t*>(input.data_ptr());
+      auto* odata = static_cast<scalar_t*>(output.data_ptr());
       upsample_nearest3d_out_frame_nhwc<scalar_t, nn_compute_source_index_fn>(
           odata,
           idata,
@@ -194,8 +194,8 @@ Tensor _upsample_nearest3d_quantized_cpu(
     auto input_contig = input.contiguous();
 
     AT_DISPATCH_QINT_TYPES(input_contig.scalar_type(), "upsample_nearest3d", [&] {
-      auto* idata = static_cast<const scalar_t*>(input_contig.data_ptr());
-      auto* odata = static_cast<scalar_t*>(output.mutable_data_ptr());
+      auto* idata = static_cast<scalar_t*>(input_contig.data_ptr());
+      auto* odata = static_cast<scalar_t*>(output.data_ptr());
       upsample_nearest3d_out_frame<scalar_t, nn_compute_source_index_fn>(
           odata,
           idata,

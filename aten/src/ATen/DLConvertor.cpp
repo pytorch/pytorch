@@ -97,13 +97,17 @@ DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
     case DeviceType::HIP:
       ctx.device_type = DLDeviceType::kDLROCM;
       break;
+    case DeviceType::XPU:
+      ctx = at::detail::getXPUHooks().getDLPackDeviceFromATenDevice(
+          ctx, tensor.device(), tensor.data_ptr());
+      break;
     default:
       TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());
   }
   return ctx;
 }
 
-static Device getATenDevice(const DLDevice& ctx) {
+static Device getATenDevice(const DLDevice& ctx, void* data) {
   switch (ctx.device_type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -121,6 +125,8 @@ static Device getATenDevice(const DLDevice& ctx) {
 #else
       return at::Device(DeviceType::HIP, ctx.device_id);
 #endif
+    case DLDeviceType::kDLOneAPI:
+      return at::detail::getXPUHooks().getATenDeviceFromDLPackDevice(ctx, data);
     default:
       TORCH_CHECK(
           false, "Unsupported device_type: " + c10::to_string(ctx.device_type));
@@ -237,7 +243,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->handle = view;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
   atDLMTensor->tensor.deleter = &deleter;
-  atDLMTensor->tensor.dl_tensor.data = view.mutable_data_ptr();
+  atDLMTensor->tensor.dl_tensor.data = view.data_ptr();
   int64_t device_id = 0;
   if (src.is_cuda()) {
     device_id = src.get_device();
@@ -268,13 +274,15 @@ Tensor fromDLPack(const DLManagedTensor* src) {
 Tensor fromDLPack(
     const DLManagedTensor* src,
     std::function<void(void*)> deleter) {
-  Device device = getATenDevice(src->dl_tensor.device);
+  Device device = getATenDevice(src->dl_tensor.device, src->dl_tensor.data);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   if (!src->dl_tensor.strides) {
-    return at::from_blob(src->dl_tensor.data,
+    return at::from_blob(
+        src->dl_tensor.data,
         IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
         deleter,
-        at::device(device).dtype(stype));
+        at::device(device).dtype(stype),
+        {device});
   }
   return at::from_blob(
       src->dl_tensor.data,
