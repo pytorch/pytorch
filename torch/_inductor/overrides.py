@@ -35,8 +35,7 @@ class AutogradMonkeypatch(TorchFunctionMode):
         return replace_fn(func)(*args, **kwargs)
 
 
-# patch_functions = AutogradMonkeypatch
-patch_functions = contextlib.nullcontext
+patch_functions = AutogradMonkeypatch
 
 
 def replace_fx(gm: torch.fx.GraphModule, example_inputs):
