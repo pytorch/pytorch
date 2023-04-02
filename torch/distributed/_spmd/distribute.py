@@ -23,7 +23,7 @@ from torch.distributed._tensor import (
 )
 from torch.distributed._tensor.dispatch import (
     _CURRENT_DECOMPOSITION_TABLE,
-    operator_dispatch,
+    _operator_dispatch,
 )
 from torch.distributed._tensor.redistribute import (
     _redistribute_with_local_tensor,
@@ -129,10 +129,28 @@ def _update_specs_for_redistribute(args, target_schema, redistribute):
     return specs, unflattened_args
 
 
+# When no tensor redistribution is required, we only need to update non-tensor args
+# of the node according to op_schema and avoid building a GraphModule just for the
+# node.
+def _update_node_from_op_schema(node: torch.fx.Node, op_schema: OpSchema) -> None:
+    flat_args, args_tree_spec = tree_flatten(node.args)
+    flat_args_schema, _ = tree_flatten(op_schema.args_schema)
+
+    assert len(flat_args) == len(flat_args_schema)
+    for i, (arg, arg_schema) in enumerate(zip(flat_args, flat_args_schema)):
+        if isinstance(arg, torch.fx.Node) and isinstance(arg_schema, int):
+            flat_args[i] = arg_schema
+
+    args = tree_unflatten(flat_args, args_tree_spec)
+    for idx, arg in enumerate(args):
+        node.update_arg(idx, arg)
+    return None
+
+
 def _get_dtensor_dispatch_graph(
     node: fx.Node,
     node_to_obj: Dict[fx.Node, object],
-) -> fx.GraphModule:
+) -> Optional[fx.GraphModule]:
     def _remap_arg(arg: object) -> object:
         if isinstance(arg, torch.fx.Node):
             obj = node_to_obj[arg]
@@ -153,7 +171,7 @@ def _get_dtensor_dispatch_graph(
         op_overload = cast(torch._ops.OpOverload, node.target)
 
         # run dispatch once to get the real DTensor output.
-        out = operator_dispatch(
+        out, op_schema, output_sharding = _operator_dispatch(
             op_overload,
             args,
             kwargs,  # kwargs in this set of tests are all constants
@@ -161,18 +179,15 @@ def _get_dtensor_dispatch_graph(
         )
         node_to_obj[node] = out
 
-        op_schema = DTensor._propagator.prepare_op_schema(
-            op_overload, args, kwargs
-        )
-        # get DTensor specs for inputs and outputs
-        output_sharding = DTensor._propagator.propagate_op_sharding(
-            op_overload,
-            op_schema,
-        )
-
         assert output_sharding.schema_suggestions is not None
         target_schema = output_sharding.schema_suggestions[0]
         redistribute = target_schema is not op_schema
+
+        # If no redistribution is needed, we don't need to replace
+        # the original node.
+        if not redistribute:
+            _update_node_from_op_schema(node, target_schema)
+            return None
 
         # TODO: this is broken when kwargs contains tensors
         # or if a non-tensor kwarg was modified by the sharding propagation
@@ -481,9 +496,11 @@ def _convert_to_distributed(
             )
 
         elif isinstance(node.target, torch._ops.OpOverload):
-            node_replacements[node] = _get_dtensor_dispatch_graph(
+            replacement = _get_dtensor_dispatch_graph(
                 node, node_to_obj
             )
+            if replacement is not None:
+                node_replacements[node] = replacement
         elif node.op == OP.OUTPUT:
             if not _allow_partial:
                 # Returns an expanded dummy add node that ensures
