@@ -1281,23 +1281,38 @@ class CppVecKernel(CppKernel):
             f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
         )
 
-        reduce_all_body = "{"
-        if reduction_type == "sum":
-            reduce_all_body += "return x + y;"
-        else:
-            reduce_all_body += f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
-        reduce_all_body += "}"
-        vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
-        next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
-        self.reduction_suffix.writeline(
-            DeferredLine(
-                name,
-                f"{reduction_combine(reduction_type, tmpvar, next_value)};",
+        if self.tiling_idx >= self.reduction_depth:
+            # Horizontal reduction
+            # NOTE(jgong5): we do not generate the real stores here with the assumption that
+            # the scalar kernel that handles the loop tail would be generated and generates
+            # the stores there.
+            reduce_all_body = "{"
+            if reduction_type == "sum":
+                reduce_all_body += "return x + y;"
+            else:
+                reduce_all_body += (
+                    f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
+                )
+            reduce_all_body += "}"
+            vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+            next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
+            self.reduction_suffix.writeline(
+                DeferredLine(
+                    name,
+                    f"{reduction_combine(reduction_type, tmpvar, next_value)};",
+                )
             )
-        )
-        # NOTE(jgong5): we do not generate the real stores here with the assumption that
-        # the scalar kernel that handles the loop tail would be generated and generates
-        # the stores there.
+        elif name not in V.graph.removed_buffers:
+            # Vertical reduction
+            var = self.args.output(name)
+            new_index = self.scale_index_with_offset(
+                index, self.tiling_factor, itervar_idx=self.tiling_idx
+            )
+            self.reduction_suffix.writeline(
+                DeferredLine(
+                    name, f"{tmpvar_vec}.store({var} + {cexpr_index(new_index)});"
+                )
+            )
         self.cse.store_cache[name] = tmpvar
 
 
@@ -2228,11 +2243,7 @@ class CppKernelProxy(CppKernel):
                 ) as vec_checker:
                     run(vec_checker)
                 if vec_checker.simd_vec:
-                    if (
-                        len(tiling_indices) == 1
-                        and tiling_indices[0] == len(self.itervars) - 1
-                    ):
-                        # TODO(jgong5): support vec on outer loop
+                    if len(tiling_indices) == 1:
                         return [tiling_factor], tiling_indices
                     if len(tiling_indices) == 2 and self.reduction_depth == len(
                         self.itervars
