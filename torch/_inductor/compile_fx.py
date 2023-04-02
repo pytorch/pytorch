@@ -13,12 +13,13 @@ import torch._dynamo.config as dynamo_config
 
 import torch.fx
 import torch.utils._pytree as pytree
-
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics, overrides, pattern_matcher
@@ -164,14 +165,23 @@ def compile_fx_inner(
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
-    fake_mode = fake_mode_from_tensors(
-        example_inputs
-    ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+    fake_mode = fake_mode_from_tensors(example_inputs)
+    if not fake_mode:
+        fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+    else:
+        FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
+            *example_inputs
+        )
+    # pattern matcher passes might not preserve striding information
+    # on node.meta["val"]. if in the future we rely on these being
+    # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
         pattern_matcher.fx_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
+    with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
             gm,
             shape_env=shape_env,
