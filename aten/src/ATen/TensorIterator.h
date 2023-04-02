@@ -373,9 +373,12 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   ///  .add_input(input_1)
   ///  .build();
   ///
-  /// iter.unsafe_replace_operand(1, other_output);         // this correctly replaces output_1
-  /// iter.unsafe_replace_input(1, other_input);            // this correctly replaces input_1
-  /// /* BAD! */ iter.unsafe_replace_input(2, other_input); // BAD! this will throw
+  /// // This correctly replaces output_1.
+  /// iter.unsafe_replace_operand(1, other_output);
+  /// // This correctly replaces input_1.
+  /// iter.unsafe_replace_input(1, other_input);
+  /// // BAD! This will throw.
+  /// /* BAD! */ iter.unsafe_replace_input(2, other_input);
   void unsafe_replace_input(int arg, const void* data);
 
   /// Splits this TensorIterator into two iterators. Together they iterate over
