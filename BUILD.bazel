@@ -1260,7 +1260,7 @@ cc_library(
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
     deps = [
-        ":caffe2_core_macros_h",
+        ":caffe2_core_macros",
         "//c10:headers",
         "//caffe2/proto:caffe2_pb",
     ],
@@ -1325,6 +1325,8 @@ cc_library(
         "caffe2/utils/math/*.h",
         "caffe2/utils/threadpool/*.h",
         "modules/**/*.h",
+    ], exclude=[
+        "caffe2/core/macros.h",
     ]) + if_cuda(glob([
         "caffe2/**/*.cuh",
         "caffe2/image/*.h",
@@ -1336,6 +1338,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":caffe2_core_macros",
         ":caffe2_for_aten_headers",
         "//caffe2/proto:caffe2_pb",
         "//caffe2/proto:cc_proto",
@@ -1394,6 +1397,7 @@ cc_library(
     linkstatic = 1,
     visibility = ["//visibility:public"],
     deps = [
+        ":caffe2_core_macros",
         ":caffe2_dnnlowp_avx2_ops",
         ":caffe2_headers",
         ":caffe2_perfkernels_avx",
