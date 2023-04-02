@@ -20,7 +20,7 @@ from .qnnpack import (
     qnnpack_default_op_qint8_symmetric_dtype_config
 )
 from ._common_operator_config_utils import _Conv2dMetadata
-from ..fuser_method_mappings import _sequential_wrapper2
+from ..fuser_method_mappings import _sequential_wrapper2, fuse_conv_bn, fuse_conv_bn_relu
 
 
 __all__ = [
@@ -175,6 +175,26 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
             BackendPatternConfig((convs.func, F.relu))
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs))
+        # conv + batchnorm (+ relu)
+        conv_configs.append(
+            BackendPatternConfig((convs.root, convs.bn))
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                .set_fuser_method(fuse_conv_bn)
+                .set_fused_module(convs.fused_conv_bn))
+        # conv + bn + relu module fusion
+        conv_configs.append(
+            BackendPatternConfig((convs.root, convs.bn, nn.ReLU))
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                .set_fuser_method(fuse_conv_bn_relu)
+                .set_fused_module(convs.fused_conv_bn_relu))
+        # conv + bn + relu functional fusion
+        conv_configs.append(
+            BackendPatternConfig((convs.root, convs.bn, F.relu))
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                .set_root_module(convs.root)
+                .set_fuser_method(fuse_conv_bn_relu)
+                .set_fused_module(convs.fused_conv_bn_relu))
+        # TODO: we can add fusion for torch.relu as well
     return conv_configs
 
 def _get_binary_ops_configs() -> List[BackendPatternConfig]:
@@ -218,10 +238,13 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     ]
     share_qparams_ops = [
         F.adaptive_avg_pool2d,
+        F.hardtanh,
         F.relu,
         F.relu6,
         torch.nn.AdaptiveAvgPool2d,
+        torch.nn.Hardtanh,
         torch.squeeze,
+        "mean",
         "permute",
         "reshape",
         "relu",
