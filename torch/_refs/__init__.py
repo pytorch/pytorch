@@ -346,7 +346,7 @@ def _broadcast_shapes(*_shapes):
 def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     # Computes common shape
     common_shape = _broadcast_shapes(
-        *map(lambda t: t.shape if isinstance(t, TensorLike) else None, args)
+        *(t.shape if isinstance(t, TensorLike) else None for t in args)
     )
 
     def __maybe_broadcast(x, shape):
@@ -4287,8 +4287,6 @@ def empty_like(
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
-    strides: Tuple[int, ...]
-
     if memory_format != torch.preserve_format:
         return torch.empty(
             a.shape,
@@ -4570,7 +4568,7 @@ def meshgrid(
     # This ref simultaneously handles two overloads (see stubs above)
     # The `indexing` argument is currently optional for torch.meshgrid, but we
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
-    if isinstance(tensors[0], list) or isinstance(tensors[0], tuple):
+    if isinstance(tensors[0], (list, tuple)):
         assert len(tensors) == 1
         tensors = tuple(tensors[0])
 

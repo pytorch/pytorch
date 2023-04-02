@@ -4,6 +4,7 @@ from torch._dynamo.testing import make_test_cls_with_patches
 
 try:
     from . import (
+        test_ctx_manager,
         test_export,
         test_functions,
         test_misc,
@@ -12,6 +13,7 @@ try:
         test_subgraphs,
     )
 except ImportError:
+    import test_ctx_manager
     import test_export
     import test_functions
     import test_misc
@@ -29,8 +31,6 @@ ALL_DYNAMIC_XFAILS = {
     "ReproTests": [
         # Could not infer dtype of torch._C.SymIntNode
         "test_convert_boxes_to_pooler_format",
-        # Cannot call sizes() on tensor with symbolic sizes/strides
-        "test_hf_t5_forward",
     ],
     "SubGraphTests": [
         "test_enumerate_not_break_graph",
@@ -72,6 +72,7 @@ def make_dynamic_cls(cls, *, static_default=False):
 
 
 tests = [
+    test_ctx_manager.CtxManagerTests,
     test_functions.FunctionTests,
     test_misc.MiscTests,
     test_repros.ReproTests,

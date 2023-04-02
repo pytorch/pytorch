@@ -299,7 +299,7 @@ struct ExpandableSegment {
       return rangeFromHandles(begin, end);
     }
     while (end > handles_.size()) {
-      handles_.push_back(std::nullopt);
+      handles_.push_back(c10::nullopt);
     }
     for (auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_[i]);
@@ -312,7 +312,7 @@ struct ExpandableSegment {
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(begin, i)) {
           auto handle = handles_[j].value();
-          handles_[j] = std::nullopt;
+          handles_[j] = c10::nullopt;
           C10_CUDA_DRIVER_CHECK(cuMemRelease(handle));
         }
         trimHandles();
@@ -390,7 +390,7 @@ struct ExpandableSegment {
     C10_CUDA_CHECK(cudaStreamSynchronize(stream_));
     for (auto i : c10::irange(begin, end)) {
       CUmemGenericAllocationHandle h = handles_.at(i).value();
-      handles_[i] = std::nullopt;
+      handles_[i] = c10::nullopt;
       C10_CUDA_DRIVER_CHECK(cuMemUnmap(ptr_ + kSegmentSize * i, kSegmentSize));
       C10_CUDA_DRIVER_CHECK(cuMemRelease(h));
     }
@@ -432,7 +432,7 @@ struct ExpandableSegment {
   CUdeviceptr ptr_;
   size_t max_handles_;
   size_t kSegmentSize;
-  std::vector<std::optional<CUmemGenericAllocationHandle>> handles_;
+  std::vector<c10::optional<CUmemGenericAllocationHandle>> handles_;
   std::vector<int> peers_;
 };
 #else
