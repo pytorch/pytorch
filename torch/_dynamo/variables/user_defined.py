@@ -215,6 +215,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (
+                method is collections.OrderedDict.__contains__
+                and len(args) == 1
+                and isinstance(args[0], ConstantVariable)
+                and inspect.getattr_static(type(self.value), "keys")
+                is collections.OrderedDict.keys
+            ):
+                assert not kwargs
+                return ConstantVariable(
+                    args[0].as_python_constant() in self.value, **options
+                ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+
+            if (
                 method is collections.OrderedDict.items
                 and isinstance(self.value, collections.OrderedDict)
                 and self.source
