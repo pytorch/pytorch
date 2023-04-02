@@ -471,7 +471,6 @@ filegroup(
         "caffe2/core/allocator.cc",
         "caffe2/core/blob_serialization.cc",
         "caffe2/core/blob_stats.cc",
-        "caffe2/core/common.cc",
         "caffe2/core/context.cc",
         "caffe2/core/context_base.cc",
         "caffe2/core/db.cc",
@@ -1246,7 +1245,6 @@ filegroup(
 cc_library(
     name = "caffe2_for_aten_headers",
     hdrs = [
-        "caffe2/core/common.h",
         "caffe2/core/logging.h",
         "caffe2/core/types.h",
         "caffe2/perfkernels/common.h",
@@ -1260,6 +1258,7 @@ cc_library(
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
     deps = [
+        ":caffe2_core_common",
         ":caffe2_core_macros",
         "//c10:headers",
         "//caffe2/proto:caffe2_pb",
@@ -1400,6 +1399,7 @@ cc_library(
     linkstatic = 1,
     visibility = ["//visibility:public"],
     deps = [
+        ":caffe2_core_common",
         ":caffe2_core_macros",
         ":caffe2_dnnlowp_avx2_ops",
         ":caffe2_headers",
