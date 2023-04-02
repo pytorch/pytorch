@@ -6162,7 +6162,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                             inquery_fixed_indices.reshape(num_inqueries, 1),
                         ),
                         dim=1
-                    ).repeat(batch_size, 1, 1, 1, 1).to(torch.float32)
+                    ).repeat(batch_size, 1, 1, 1, 1)
                     # The output_tensor_3d_x is of shape
                     # [batch_size, channel_size, 1, 1, num_inqueries]
                     output_tensor_3d_x = F.grid_sample(
