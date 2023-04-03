@@ -35,13 +35,10 @@ from torch.distributed.fsdp.flat_param import (
     FlatParamHandle,
     HandleShardingStrategy,
     HandleTrainingState,
+    RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES,
 )
 from torch.distributed.utils import _apply_to_tensors, _p_assert, _to_kwargs
 
-RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES = {
-    HandleShardingStrategy.FULL_SHARD,
-    HandleShardingStrategy.HYBRID_SHARD,
-}
 
 # Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (

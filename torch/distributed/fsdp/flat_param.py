@@ -80,6 +80,24 @@ _FSDP_USE_UNSAFE_SETATTR = "FSDP_USE_UNSAFE_SETATTR"
 # Some value to set padding in tensors to for debuggability
 _FLAT_PARAM_PADDING_VALUE = 42
 
+# TODO: Define this for now to avoid circular imports. See if we can remove.
+class HandleShardingStrategy(Enum):
+    FULL_SHARD = auto()
+    SHARD_GRAD_OP = auto()
+    NO_SHARD = auto()
+    HYBRID_SHARD = auto()
+    _HYBRID_SHARD_ZERO2 = auto()
+
+
+RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES = (
+    HandleShardingStrategy.FULL_SHARD,
+    HandleShardingStrategy.HYBRID_SHARD,
+)
+NO_RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES = (
+    HandleShardingStrategy.SHARD_GRAD_OP,
+    HandleShardingStrategy._HYBRID_SHARD_ZERO2,
+)
+
 
 class ParamInfo(NamedTuple):
     """Information for an original parameter."""
@@ -142,17 +160,6 @@ class FlatParamShardMetadata(NamedTuple):
     param_shapes: Tuple[torch.Size, ...]
     param_numels: Tuple[int, ...]
     param_offsets: Tuple[Tuple[int, int], ...]
-
-
-# TODO (awgu): Prefix these with "Handle" for now to avoid circular imports and
-# inadvertent misuses; coalesce with those in fully_sharded_data_parallel.py
-# later
-class HandleShardingStrategy(Enum):
-    FULL_SHARD = auto()
-    SHARD_GRAD_OP = auto()
-    NO_SHARD = auto()
-    HYBRID_SHARD = auto()
-    _HYBRID_SHARD_ZERO2 = auto()
 
 
 class FlatParameter(nn.Parameter):
@@ -418,7 +425,6 @@ class FlatParamHandle:
         self._debug_level = dist.get_debug_level()
         self._fully_sharded_module = fully_sharded_module
         self._skipped_use_sharded_views = False
-        # TODO: Do we need `_skipped_use_sharded_grad_views`?
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1525,13 +1531,10 @@ class FlatParamHandle:
         flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
             in_forward = self._training_state == HandleTrainingState.FORWARD
-            no_reshard_after_forward_strategies = (
-                HandleShardingStrategy.SHARD_GRAD_OP,
-                HandleShardingStrategy._HYBRID_SHARD_ZERO2,
-            )
             if (
                 in_forward
-                and self._sharding_strategy in no_reshard_after_forward_strategies
+                and self._sharding_strategy
+                in NO_RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
             ):
                 self._skipped_use_sharded_views = True
             else:
@@ -1542,7 +1545,8 @@ class FlatParamHandle:
             # call to after the reduce-scatter.
             if (
                 in_forward
-                and self._sharding_strategy not in no_reshard_after_forward_strategies
+                and self._sharding_strategy
+                not in NO_RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
             ):
                 # TODO: Change `_unpadded_unsharded_size` if we change the
                 # gradient to be computed directly with padding.
