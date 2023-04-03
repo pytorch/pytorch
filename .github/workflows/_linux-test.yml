@@ -91,7 +91,7 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         id: install-nvidia-driver
-        uses: huydhn/test-infra/.github/actions/setup-nvidia@update-nvidia-smi-error-check
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
 
       - name: Lock NVIDIA A100 40GB Frequency
@@ -284,9 +284,7 @@ jobs:
       # As both the root cause and recovery path are unclear, let's take the runner out of
       # service so that it doesn't get any more jobs
       - name: Check NVIDIA driver installation step
-        if:
-          failure() &&
-          ((steps.install-nvidia-driver.conclusion && steps.install-nvidia-driver.conclusion == 'failure') || (contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')))
+        if: failure() && steps.install-nvidia-driver.outcome && steps.install-nvidia-driver.outcome != 'skipped'
         shell: bash
         env:
           RUNNER_WORKSPACE: ${{ runner.workspace }}
