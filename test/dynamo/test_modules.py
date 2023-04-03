@@ -1403,7 +1403,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 7)
         self.assertEqual(cc.frame_count, 1)
 
-    @patch.object(torch._dynamo.config, "enable_nnmodule_hooks", False)
+    @patch.object(torch._dynamo.config, "enable_nnmodule_hooks", True)
     def test_hooks_allowed_modules(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):

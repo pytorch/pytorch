@@ -233,7 +233,7 @@ class NNModuleVariable(VariableTracker):
             elif is_allowed(mod.__class__):
                 if module_has_hooks(mod):
                     unimplemented(
-                        f"Can't support hooks on 'allowed' modules ({mod.__class__}) becuase allowed modules don't get traced through."
+                        f"Can't support hooks on 'allowed' modules ({mod.__class__}), which don't get traced through."
                     )
                 # The module type will change after it is called
                 if is_lazy:
