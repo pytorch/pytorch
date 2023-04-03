@@ -619,6 +619,8 @@ class FlatParamHandle:
             requires_grad_mask.append(tensor.requires_grad)
             device = tensor.device
         assert requires_grad is not None, "Requires non-empty `tensors` list"
+        # `use_orig_params=False` uses the uniform `requires_grad`, and
+        # `use_orig_params=True` uses the mask to set each `requires_grad`
         return dtype, requires_grad, device, requires_grad_mask
 
     def flatten_tensors(
