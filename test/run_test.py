@@ -1066,6 +1066,8 @@ def get_pytest_args(
             pytest_args.append(f"--sc={stepcurrent_key}")
         if options.save_xml:
             pytest_args.extend(["--save-xml"])
+        if options.filter:
+            pytest_args.extend(["-k", options.filter])
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
@@ -1202,6 +1204,34 @@ def parse_args():
         metavar="TESTS",
         default=[],
         help="select a set of tests to exclude",
+    )
+    parser.add_argument(
+        "--filter",
+        help="PyTest filter to apply to the test suite. "
+    )
+    parser.add_argument(
+        "-f",
+        "--first",
+        choices=TESTS,
+        metavar="TESTS",
+        help="select the test to start from (excludes previous tests)",
+    )
+    parser.add_argument(
+        "-l",
+        "--last",
+        choices=TESTS,
+        metavar="TESTS",
+        help="select the last test to run (excludes following tests)",
+    )
+    parser.add_argument(
+        "--bring-to-front",
+        nargs="+",
+        choices=TestChoices(TESTS),
+        default=[],
+        metavar="TESTS",
+        help="select a set of tests to run first. This can be used in situations"
+        " where you want to run all tests, but care more about some set, "
+        "e.g. after making a change to a specific component",
     )
     parser.add_argument(
         "--ignore-win-blocklist",
