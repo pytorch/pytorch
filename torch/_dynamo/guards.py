@@ -1,5 +1,6 @@
 import builtins
 import collections
+import itertools
 import logging
 import math
 import os
@@ -256,27 +257,33 @@ class GuardBuilder(GuardBuilderBase):
             if HAS_NUMPY
             else ()
         )
-        assert istype(
-            val,
-            (
-                int,
-                float,
-                bool,
-                type(None),
-                str,
-                type,
-                list,
-                tuple,
-                set,
-                slice,
-                frozenset,
-                range,
-                torch.Size,
-                torch.device,
-                torch.dtype,
+        ok_types = (
+            int,
+            float,
+            bool,
+            type(None),
+            str,
+            type,
+            list,
+            tuple,
+            set,
+            slice,
+            frozenset,
+            range,
+            torch.Size,
+            torch.device,
+            torch.dtype,
+            *np_types,
+        )
+        if istype(val, dict):
+            assert all(
+                istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
             )
-            + np_types,
-        ), t.__name__
+        else:
+            assert istype(
+                val,
+                ok_types,
+            ), t.__name__
 
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it
