@@ -1066,6 +1066,8 @@ def get_pytest_args(
             pytest_args.append(f"--sc={stepcurrent_key}")
         if options.save_xml:
             pytest_args.extend(["--save-xml"])
+        if options.filter:
+            pytest_args.extend(["-k", options.filter])
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
@@ -1202,6 +1204,10 @@ def parse_args():
         metavar="TESTS",
         default=[],
         help="select a set of tests to exclude",
+    )
+    parser.add_argument(
+        "--filter",
+        help="PyTest filter to apply to the test suite. "
     )
     parser.add_argument(
         "-f",
