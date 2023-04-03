@@ -7,12 +7,18 @@ from typing import Dict, List
 
 import torch.nn
 
-from .. import skipfiles, variables
+from .. import config, skipfiles, variables
 from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
-from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
+from ..source import (
+    AttrSource,
+    FSDPNNModuleSource,
+    GetItemSource,
+    NNModuleSource,
+    NotNNModuleSource,
+)
 from ..utils import (
     get_custom_getattr,
     is_lazy_module,
@@ -244,14 +250,18 @@ class NNModuleVariable(VariableTracker):
                     "Must provide a valid source in order to inline, "
                     "since inlined function may have default args which must be guarded."
                 )
-                if isinstance(mod, torch.fx.GraphModule):
+                if not is_lazy and (
+                    not config.enable_nnmodule_hooks
+                    or isinstance(mod, torch.fx.GraphModule)
+                ):
                     # TODO: do we want to support __call__ for GM's?
                     # If so at least some changes are needed, we don't allow inlining
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
+                    fn_source = AttrSource(self.source, "forward")
                 else:
                     fn = mod.__call__
-                fn_source = AttrSource(self.source, "__call__")
+                    fn_source = AttrSource(self.source, "__call__")
                 if istype(mod.__call__, types.MethodType):
                     fn = fn.__func__
                     fn_source = AttrSource(fn_source, "__func__")
@@ -610,12 +620,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         # TODO mlazos: only support __call__ for lazy modules
         # until we can support a larger swath of python
-        if is_lazy_module(self.value):
-            fn = self.value_type.__call__
-            source = AttrSource(AttrSource(self.source, "__class__"), "__call__")
+        if is_lazy_module(self.value) and self.source:
+            name = "__call__"
         else:
-            fn = self.value_type.forward
-            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
+            name = "forward"
+
+        fn = getattr(self.value_type, name)
+        if self.source:
+            source = AttrSource(AttrSource(self.source, "__class__"), name)
+        else:
+            source = None
 
         return variables.UserFunctionVariable(
             fn, source=source, **options
@@ -664,7 +678,34 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     args,
                     kwargs,
                 )
+
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
         return super().call_method(tx, name, args, kwargs)
+
+
+class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
+    """
+    Tracing behavior: trace into submodules and treat them as Unspecialized, do not
+    register parameters to the top-level, treat them as function inputs.
+
+    Guards behavior: if 'skip_fsdp_guards', many guards that would be installed
+    by a vanilla UnspecializedNNModuleVariable are simply dropped, on the basis
+    that a user wrapping their model in FSDP(model) is already opting into a
+    requirement to not modify internal model state, which would already break FSDP without
+    compilation.
+    """
+
+    def __init__(self, value, **kwargs):
+        source = kwargs.get("source", None)
+        assert (
+            source is not None
+        ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
+
+        super().__init__(value=value, **kwargs)
+        if torch._dynamo.config.skip_fsdp_guards:
+            self.source = FSDPNNModuleSource(source)
+        else:
+            # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
+            self.source = NotNNModuleSource(source)

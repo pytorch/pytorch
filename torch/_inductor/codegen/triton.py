@@ -20,6 +20,7 @@ from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     get_fused_kernel_name,
+    get_kernel_category_by_source_code,
     get_kernel_metadata,
     instance_descriptor,
     next_power_of_2,
@@ -911,13 +912,17 @@ class TritonKernel(Kernel):
                 have_dense = False
             dense_mask_vars.add(f"{tree.prefix}mask")
 
+        expand_str = None
+
         if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             if copy_shape:
                 index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+                expand_str = f"{copy_shape}.shape"
             else:
                 index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
+                expand_str = self.dense_size_str()
             if isinstance(index, sympy.Integer):
-                return index_str, set(), "None"
+                return index_str, set(), "None", expand_str
             else:
                 mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
@@ -933,7 +938,7 @@ class TritonKernel(Kernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return index_str, mask_vars, mask_str
+        return index_str, mask_vars, mask_str, expand_str
 
     def filter_masks(self, mask_vars):
         for tree in self.range_trees:
@@ -991,7 +996,7 @@ class TritonKernel(Kernel):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
-        index, mask_vars, mask = self.indexing(index)
+        index, mask_vars, mask, expand_str = self.indexing(index)
 
         if "rmask" in mask and not self.persistent_reduction:
             # This eviction policy heuristic is untested.
@@ -1014,9 +1019,8 @@ class TritonKernel(Kernel):
             line = var
         else:
             if isinstance(original_index, sympy.Integer):
-                dense_size = self.dense_size_str()
                 line = f"tl.load({var} + ({original_index}))"
-                append_broadcast = dense_size
+                append_broadcast = expand_str
             else:
                 line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
             if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
@@ -1048,14 +1052,14 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask_vars, mask = self.indexing(index, dense_indexing=True)
+        index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
             line = f"tl.atomic_add({var} + ({index}), {value}, {mask})"
         else:
             raise NotImplementedError(f"store mode={mode}")
-        self.stores.writeline(name, line)
+        self.stores.writeline(DeferredLine(name, line))
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
@@ -1144,7 +1148,7 @@ class TritonKernel(Kernel):
             self.suffix.writeline(f"{result_var} = {var_name}")
             result_var.mask_vars = var_name.mask_vars
         self.inside_reduction = False
-        index, mask_vars, mask = self.indexing(index)
+        index, mask_vars, mask, _ = self.indexing(index)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)
@@ -1205,23 +1209,27 @@ class TritonKernel(Kernel):
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
+            name_cnt = itertools.count()
+            var_names = []
             for arg_name in call_args:
+                var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.get_buffer(arg_name)
                 if buf:
                     result.writeline(
-                        f"{arg_name} = rand_strided({tuple(buf.get_size())}, {tuple(buf.get_stride())}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({tuple(buf.get_size())}, {tuple(buf.get_stride())}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
                     result.writeline(
-                        f"{arg_name} = rand_strided({tuple(const_tensor.size())}, {tuple(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({tuple(const_tensor.size())}, {tuple(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
                     )
                 else:
                     raise KeyError(
                         f"Don't find the buffer or const tensor for {arg_name}"
                     )
-            result.writeline(f"return {', '.join(call_args)},")
+                var_names.append(var_name)
+            result.writeline(f"return {', '.join(var_names)},")
 
         result.writelines(["\n", "\n", "def call(args):"])
         grid = []
@@ -1245,7 +1253,7 @@ class TritonKernel(Kernel):
                 result.writeline(f"{stream_name} = get_cuda_stream({index})")
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 result.writeline(
-                    f"triton_.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
+                    f"KERNEL_NAME.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
                 )
 
         # benchmark all configs
@@ -1257,7 +1265,7 @@ class TritonKernel(Kernel):
                     f"torch.cuda.set_device({index})"
                 )  # no-op to ensure context
                 result.writeline(
-                    f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
+                    f"return KERNEL_NAME.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
                 )
 
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
@@ -1681,7 +1689,10 @@ class TritonScheduling:
                 if config.triton.descriptive_names
                 else ""
             )
-            kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
+            kernel_category = get_kernel_category_by_source_code(src_code)[:3]
+            kernel_name = "_".join(
+                ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
+            )
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
