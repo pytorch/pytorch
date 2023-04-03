@@ -104,7 +104,7 @@ DEFAULTS = {
     ],
     "flag_compilers": {
         "training": ["inductor", "inductor_no_cudagraphs"],
-        "inference": ["inductor", "inductor_no-cudagraphs"],
+        "inference": ["inductor", "inductor_no_cudagraphs"],
     },
     "dtypes": [
         "float32",
