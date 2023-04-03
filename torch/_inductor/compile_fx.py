@@ -225,7 +225,6 @@ def compile_fx_inner(
                 is_inference=is_inference,
             )
         else:
-
             BoxedBool.disable(cudagraphs)
 
             if len(set(graph.device_types)) > 1:
