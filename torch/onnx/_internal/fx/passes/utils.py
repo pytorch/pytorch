@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from typing import Callable
+
 import torch.fx
 import torch.fx.traceback as fx_traceback
 from torch.onnx._internal import _beartype
-
-from typing import Callable
 
 
 @_beartype.beartype

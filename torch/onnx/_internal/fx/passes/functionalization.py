@@ -4,7 +4,6 @@ import torch
 import torch.func
 import torch.fx
 
-from torch.fx import traceback as fx_traceback
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass
@@ -29,6 +28,7 @@ class Functionalize(_pass.Transform):
     ``RemoveInputMutation`` removes the "fix up" nodes that were added by ``Functionalize``,
     which are not needed for ONNX inference.
     """
+
     @_beartype.beartype
     def __init__(self, module: torch.fx.GraphModule, enable_dynamic_axes: bool):
         super().__init__(module)
@@ -67,7 +67,6 @@ class RemoveInputMutation(_pass.Transform):
 
     @_beartype.beartype
     def _run(self, *args) -> torch.fx.GraphModule:
-
         for node in reversed(self.module.graph.nodes):
             if (
                 node.op == "call_function"
