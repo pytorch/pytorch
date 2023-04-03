@@ -11,6 +11,10 @@ import torch.distributed.distributed_c10d as c10d
 
 from torch.utils._pytree import tree_map_only
 
+from torch.fx.experimental.proxy_tensor import (
+    get_innermost_proxy_mode,
+)
+
 """
 New traceable, functional collectives.
 RFC: https://github.com/pytorch/pytorch/issues/93173
@@ -247,6 +251,18 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
 
     return (tag, rankset, group_size)
 
+def _are_we_tracing() -> bool:
+    mode = get_innermost_proxy_mode()
+    if mode is None:
+        return False
+    return mode.tracer is not None
+
+def _maybe_wrap_tensor(self):
+    if _are_we_tracing():
+        return wait_tensor(self)
+    res = AsyncCollectiveTensor(self)
+    _register_wrapper_tensor(res, self)
+    return res
 
 def wait_tensor(tensor):
     """
@@ -276,9 +292,9 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     """
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
-    res = AsyncCollectiveTensor(tensor)
-    _register_wrapper_tensor(res, tensor)
-    return res
+    return _maybe_wrap_tensor(tensor)
+
+
 
 def reduce_scatter_tensor(
     self: torch.Tensor,
@@ -308,9 +324,7 @@ def reduce_scatter_tensor(
         self.size(0) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
     tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, scatter_dim, tag, rankset, group_size)  # type: ignore[attr-defined]
-    res = AsyncCollectiveTensor(tensor)
-    _register_wrapper_tensor(res, tensor)
-    return res
+    return _maybe_wrap_tensor(tensor)
 
 
 c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
