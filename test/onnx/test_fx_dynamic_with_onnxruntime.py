@@ -12,31 +12,31 @@ from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-import onnx.reference
 import onnx_test_common
 
 import onnxruntime  # type: ignore[import]
 
 import torch
-import torchvision
-from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
+from torch.onnx import ExportOptions, ExportOutput
+from torch.onnx._internal import _beartype, diagnostics
 from torch.testing._internal import common_utils
 from torch.types import Number
 from torch.utils import _pytree as pytree
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
-_ONNXModelType = Union["onnx.ModelProto", bytes, str, io.BytesIO]
 _InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
 _OutputsType = Sequence[_NumericType]
 
 
 @_beartype.beartype
 def _run_ort(
-    onnx_model: _ONNXModelType, pytorch_inputs: _InputArgsType
+    export_output: ExportOutput, pytorch_inputs: _InputArgsType
 ) -> _OutputsType:
+    buffer = io.BytesIO()
+    export_output.save(buffer)
     session = onnxruntime.InferenceSession(
-        onnx_model, providers=["CPUExecutionProvider"]
+        buffer.getvalue(), providers=["CPUExecutionProvider"]
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
     return session.run(
@@ -81,7 +81,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
 
     @_beartype.beartype
     def compare_pytorch_onnx_with_ort(
-        onnx_model: Union["onnx.ModelProto", bytes],
+        export_output: ExportOutput,
         model_input_args: _InputArgsType,
     ):
         # Inspect the model's signature. It will be used
@@ -101,7 +101,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
 
         pt_cloned_model = _try_clone_model(model)
         ref_outputs, _ = pytree.tree_flatten(pt_cloned_model(*model_input_args))
-        ort_outputs = _run_ort(onnx_model, bound.args)
+        ort_outputs = _run_ort(export_output, bound.args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(
                 ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
@@ -110,13 +110,15 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     # Feed args and kwargs into exporter.
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
-    onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
+
+    onnx_model = torch.onnx.dynamo_export(
         model,
         *input_args,
-        opset_version=opset_version,
-        use_binary_format=True,
-        enable_dynamic_axes=True,  # export models with dynamic shapes
         **input_kwargs,
+        export_options=ExportOptions(
+            opset_version=opset_version,
+            dynamic_shapes=True,
+        ),
     )
 
     compare_pytorch_onnx_with_ort(onnx_model, input_args)
@@ -149,6 +151,8 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         " typing.Sequence[int], torch.Tensor], as [None, None]:"
     )
     def test_shufflenet_v2_dynamic_axes(self):
+        import torchvision
+
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
         test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
@@ -349,6 +353,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
+    @unittest.skip("ORT segfault")
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -377,6 +382,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(another_x,)],
         )
 
+    @unittest.skip("ORT segfault")
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):

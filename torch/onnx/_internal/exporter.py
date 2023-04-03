@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import abc
+import inspect
 import io
 import logging
 from typing import (
@@ -19,8 +20,10 @@ from typing import (
 )
 
 import torch
+import torch._ops
 
 from torch.onnx._internal import _beartype
+from torch.utils import _pytree
 
 # We can only import onnx from this module in a type-checking context to ensure that
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
@@ -50,6 +53,11 @@ class ExportOptions:
     - ``True``: all input shapes are considered dynamic.
     - ``False``: all input shapes are considered static."""
 
+    op_level_debug: Optional[bool] = None
+    """Whether to export the model with op-level debug information by evaluating
+    ops through ONNX Runtime. Note: ``op_level_debug`` is not supported when
+    ``dynamic_shapes`` is ``True``."""
+
     logger: Optional[logging.Logger] = None
     """The logger for the ONNX exporter to use. Defaults to creating a child
     logger named "torch.onnx" under the current logger (as returned by
@@ -61,11 +69,44 @@ class ExportOptions:
         *,
         opset_version: Optional[int] = None,
         dynamic_shapes: Optional[bool] = None,
+        op_level_debug: Optional[bool] = None,
         logger: Optional[logging.Logger] = None,
     ):
         self.opset_version = opset_version
         self.dynamic_shapes = dynamic_shapes
+        self.op_level_debug = op_level_debug
         self.logger = logger
+
+
+class ResolvedExportOptions:
+    @_beartype.beartype
+    def __init__(self, options: Optional[ExportOptions]):
+        if options is None:
+            options = ExportOptions()
+
+        T = TypeVar("T")
+
+        @_beartype.beartype
+        def resolve(value: Optional[T], fallback: Union[T, Callable[[], T]]) -> T:
+            if value is not None:
+                return value
+            if callable(fallback):
+                return fallback()
+            return fallback
+
+        self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
+        self.dynamic_shapes = resolve(options.dynamic_shapes, False)
+        self.op_level_debug = resolve(options.op_level_debug, False)
+        self.logger = resolve(
+            options.logger, lambda: logging.getLogger().getChild("torch.onnx")
+        )
+
+        if self.dynamic_shapes and self.op_level_debug:
+            raise RuntimeError(
+                "Both ExportOptions.op_level_debug and ExportOptions.dynamic_shapes "
+                + "are True but these options are mutually execusive. Please set only "
+                + "one of them to True.",
+            )
 
 
 @runtime_checkable
@@ -153,21 +194,39 @@ class ExportOutput:
 
 
 class Exporter(abc.ABC):
+    class WrappedFuncModule(torch.nn.Module):
+        def __init__(self, forward: Callable):
+            super().__init__()
+            self.actual_forward = forward
+
+        def forward(self, *args, **kwargs):
+            result, _ = _pytree.tree_flatten(self.actual_forward(*args, **kwargs))
+            return result
+
     @_beartype.beartype
     def __init__(
         self,
-        options: ExportOptions,
-        model: torch.nn.Module,
+        options: Union[ExportOptions, ResolvedExportOptions],
+        model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
-        self.options = options
-        self.model = model
+        if isinstance(options, ExportOptions):
+            self.options = ResolvedExportOptions(options)
+        elif isinstance(options, ResolvedExportOptions):
+            self.options = options
+        assert self.options is not None
+
+        self.model: torch.nn.Module = (
+            model
+            if isinstance(model, torch.nn.Module)
+            else Exporter.WrappedFuncModule(model)
+        )
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
     @abc.abstractmethod
-    def run(self) -> ExportOutput:
+    def export(self) -> ExportOutput:
         pass
 
     @property
@@ -176,24 +235,13 @@ class Exporter(abc.ABC):
         assert isinstance(self.options.logger, logging.Logger)
         return self.options.logger
 
-
-@_beartype.beartype
-def _resolve_export_options(options: Optional[ExportOptions]) -> ExportOptions:
-    if options is None:
-        options = ExportOptions()
-
-    T = TypeVar("T")
-
-    def resolve(value: Optional[T], fallback: Callable[[], T]):
-        return fallback() if value is None else value
-
-    return ExportOptions(
-        opset_version=resolve(options.opset_version, lambda: _DEFAULT_OPSET_VERSION),
-        dynamic_shapes=options.dynamic_shapes,
-        logger=resolve(
-            options.logger, lambda: logging.getLogger().getChild("torch.onnx")
-        ),
-    )
+    @property
+    def model_signature(self) -> inspect.Signature:
+        return inspect.signature(
+            self.model.actual_forward
+            if isinstance(self.model, Exporter.WrappedFuncModule)
+            else self.model.forward
+        )
 
 
 class UnsatisfiedDependencyError(RuntimeError):
@@ -254,7 +302,7 @@ def _assert_dependencies(export_options: ExportOptions):
 
 @_beartype.beartype
 def dynamo_export(
-    model: torch.nn.Module,
+    model: Union[torch.nn.Module, Callable],
     /,
     *model_args,
     export_options: Optional[ExportOptions] = None,
@@ -286,18 +334,18 @@ def dynamo_export(
         ).save("my_model.onnx")
     """
 
-    resolved_export_options = _resolve_export_options(export_options)
+    resolved_export_options = ResolvedExportOptions(export_options)
 
     _assert_dependencies(resolved_export_options)
 
-    from torch.onnx._internal.exporter_impl import DynamoExporter
+    from torch.onnx._internal.exporters import DynamoOptimizeExporter
 
-    return DynamoExporter(
+    return DynamoOptimizeExporter(
         options=resolved_export_options,
         model=model,
         model_args=model_args,
         model_kwargs=model_kwargs,
-    ).run()
+    ).export()
 
 
 __all__ = [
