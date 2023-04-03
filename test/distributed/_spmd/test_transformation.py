@@ -126,6 +126,10 @@ class TransformationTest(DTensorTestBase):
             batch = torch.randn(batch_size, dim).cuda()
             out = train_step(model, optim, batch)
 
+            # TODO: using _test_tran_step_with_ddp_without_optim_step()
+            # does not work because some mismatched accuracy. Need to
+            # debug the issue.
+
 
 if __name__ == "__main__":
     run_tests()
