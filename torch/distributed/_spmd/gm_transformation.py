@@ -1,7 +1,6 @@
 import operator
-from typing import Any, Callable, cast
+from typing import Any, Callable, Dict, List, Optional
 
-import numpy
 import torch
 import torch.nn as nn
 
@@ -11,7 +10,7 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.decomposition import select_decomp_table
 from torch.distributed._spmd.graph_utils import OP
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
-from torch.utils._pytree import tree_flatten, tree_map, tree_map_only
+from torch.utils._pytree import tree_flatten, tree_map_only
 
 
 class InductorWrapper(nn.Module):
@@ -29,15 +28,15 @@ class InductorWrapper(nn.Module):
                 list(args),
                 cudagraphs=self._enable_cudagraphs,
             )
-        args, _ = tree_flatten(args)
-        return self._compiled(list(args))
+        list_args, _ = tree_flatten(args)
+        return self._compiled(list_args)
 
 
 def lower_to_inductor(
     gm: torch.fx.GraphModule, enable_cudagraphs: bool
 ) -> torch.fx.GraphModule:
     orig_placeholders = []
-    orig_output_args = []
+    orig_output_args: List[Any] = []
     output = next(iter(gm.graph.nodes))
     move_nodes = []
 
@@ -83,7 +82,7 @@ def lower_to_inductor(
     )
     subgraph.output(result=output_args)
     sub_gm = torch.fx.GraphModule(root=attrs, graph=subgraph)
-    setattr(gm, "subgraph", InductorWrapper(sub_gm, enable_cudagraphs))
+    gm.subgraph = InductorWrapper(sub_gm, enable_cudagraphs)
     with gm.graph.inserting_after(move_nodes[-1]):
         subgraph_call = gm.graph.create_node(
             op=OP.CALL_MODULE, target="subgraph", args=tuple(placeholders)
