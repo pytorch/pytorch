@@ -3,7 +3,18 @@ from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Any, Callable, cast, Dict, Optional, Sequence, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 
 from functorch import make_fx
 
@@ -306,6 +317,43 @@ FOREACH_DECOMP_TABLE = {
 }
 
 
+DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
+    aten.all_reduce.default,
+    aten.wait_tensor.default,
+}
+
+
+def _lint(gm: fx.GraphModule) -> fx.Graph:
+    # deduplicate collectives
+    node_to_node: Dict[fx.Node, fx.Node] = {}
+    args_to_node: Dict[Tuple[Callable, Tuple[Any, ...]], fx.Node] = {}
+
+    nodes_to_erase: List[fx.Node] = []
+
+    for node in gm.graph.nodes:
+        # replace all args with the results from the first unique comm op
+        args, spec = pytree.tree_flatten(node.args)
+        unique_args = [node_to_node.get(a, a) for a in args]
+        node.args = pytree.tree_unflatten(unique_args, spec)
+
+        if node.target in DEDUP_TARGETS:
+            args_key = (node.target, *unique_args)
+            unique_node = args_to_node.get(args_key, None)
+            if unique_node is None:
+                # first time seeing this combination, remember it
+                args_to_node[args_key] = node
+            else:
+                # the current node is a duplicate, replace it
+                node_to_node[node] = unique_node
+                nodes_to_erase.append(node)
+
+    # erase all duplicated nodes
+    for node in nodes_to_erase:
+        gm.graph.erase_node(node)
+
+    return gm
+
+
 @dataclass
 class _CompiledResult:
     gm: fx.GraphModule
@@ -392,12 +440,26 @@ def _compile(
             _allow_non_fake_inputs=False,
         )(args, kwargs, named_states, params_and_buffers)
 
+    if torch.distributed.get_rank() == 0:
+        gm.graph.print_tabular()
+
     # 4. Use DTensor to insert collectives
     gm, name_to_spec = _dtensor_expand(
         gm, args, kwargs, named_states, params_and_buffers
     )
 
-    # 5. Replace previously inserted dummy ones with real graphs.
+    # 5. dedup comm operators. The duplication could come from DTensor args
+    # redistribution. Suppose one operator produces Partial gradient tensor,
+    # then every optimizer operation using that Partial gradient tensor would
+    # trigger an allreduce. This is becuase DTensor only has local information
+    # on individual tensor/operator, which is not sufficient to detect
+    # duplications. This situation can also happen when inserting FSDP allgather
+    # if a parameter is used multiple times.
+    # TODO(@mrshenli): @yifuwang has a suggestion of conducting expansion and
+    # dedup at tracer-level to avoid multiple graph passes.
+    gm = _lint(gm)
+
+    # 6. Replace previously inserted dummy ones with real graphs.
     if module_override:
         for _, override in module_override.items():
             gm = override.transform(gm, name_to_spec)
