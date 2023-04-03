@@ -90,7 +90,7 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
 
 
 def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
-    if not isinstance(url, str):
+    if not isinstance(url, (str, bytes)):
         raise RuntimeError("`url` must be a string. {}: {}".format(type(url), url))
 
     if not isinstance(rank, numbers.Integral):

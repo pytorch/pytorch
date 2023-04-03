@@ -14,12 +14,12 @@ from torch.distributed.distributed_c10d import (
     is_initialized,
     ProcessGroup,
 )
+from torch.testing._internal.common_distributed import TEST_SKIPS
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.common_distributed import TEST_SKIPS
 
 
 def _get_device_type_and_backend():
@@ -81,7 +81,6 @@ class DeviceMeshTest(DTensorTestBase):
                 dim_ranks[0] if self.rank in dim_ranks[0] else dim_ranks[1]
             )
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
-
 
     @with_comms
     def test_lazy_init_device_mesh(self):
@@ -182,8 +181,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         my_rank = device_mesh.get_rank()
         tensor_to_split = torch.randn(
-            device_mesh.size() + 3, device_mesh.size() + 1,
-            device=self.device_type
+            device_mesh.size() + 3, device_mesh.size() + 1, device=self.device_type
         )
 
         for shard_dim in range(tensor_to_split.ndim):
