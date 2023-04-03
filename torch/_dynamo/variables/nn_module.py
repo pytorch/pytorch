@@ -7,7 +7,7 @@ from typing import Dict, List
 
 import torch.nn
 
-from .. import skipfiles, variables
+from .. import config, skipfiles, variables
 from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
@@ -250,14 +250,18 @@ class NNModuleVariable(VariableTracker):
                     "Must provide a valid source in order to inline, "
                     "since inlined function may have default args which must be guarded."
                 )
-                if isinstance(mod, torch.fx.GraphModule):
+                if not is_lazy and (
+                    not config.enable_nnmodule_hooks
+                    or isinstance(mod, torch.fx.GraphModule)
+                ):
                     # TODO: do we want to support __call__ for GM's?
                     # If so at least some changes are needed, we don't allow inlining
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
+                    fn_source = AttrSource(self.source, "forward")
                 else:
                     fn = mod.__call__
-                fn_source = AttrSource(self.source, "__call__")
+                    fn_source = AttrSource(self.source, "__call__")
                 if istype(mod.__call__, types.MethodType):
                     fn = fn.__func__
                     fn_source = AttrSource(fn_source, "__func__")

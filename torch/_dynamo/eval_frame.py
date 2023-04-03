@@ -99,7 +99,10 @@ class OptimizedModule(torch.nn.Module):
         super().__setattr__(name, value)
 
     def __call__(self, *args, **kwargs):
-        return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
+        if config.enable_nnmodule_hooks:
+            return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
+        else:
+            return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
         log.warning(

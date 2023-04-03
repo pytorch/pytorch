@@ -198,6 +198,12 @@ optimize_ddp = True
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 
+# By default, Dynamo traces nn.Module.forward instead of .__call__, bypassing
+# all forward/backward hooks as if they don't exist.  Enabling hook support
+# traces .__call__ instead.  This adds additional overhead due to guarding
+# on hook-related data structures in every nn module.
+enable_nnmodule_hooks = False
+
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
 # dynamo will not notice and will execute whichever version you first compiled.

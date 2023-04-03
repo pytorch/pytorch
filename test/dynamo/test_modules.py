@@ -1195,6 +1195,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    @patch.object(torch._dynamo.config, "enable_nnmodule_hooks", True)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1241,6 +1242,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             the eval_frame entrypoint to Module.__call__?
         """
 
+    @patch.object(torch._dynamo.config, "enable_nnmodule_hooks", True)
     def test_hooks_inner(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1307,6 +1309,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 16)
         self.assertTrue("check_obj_id(m._forward_hooks" in failure_reason)
 
+    @patch.object(torch._dynamo.config, "enable_nnmodule_hooks", True)
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
     def test_hooks_skip_guards(self):
         class TestModule(torch.nn.Module):
@@ -1341,8 +1344,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             backend=cc,
         )(outer_func)
 
-        m = TestModule()
-        handle = m.register_forward_hook(forward_hook)
+        # m = TestModule()
+        # handle = m.register_forward_hook(forward_hook)
         failure_reason = None
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
@@ -1353,6 +1356,52 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         handle.remove()
         self.assertNotEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
+        self.assertEqual(cc.frame_count, 1)
+
+    @patch.object(torch._dynamo.config, "enable_nnmodule_hooks", False)
+    def test_hooks_disabled(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return 2 * x + 1
+
+        m = TestModule()
+
+        def forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 1
+
+        handle = m.register_forward_hook(forward_hook)
+
+        def outer_func(tensor):
+            x = tensor * 2 + 1
+            y = m(x)
+            return y
+
+        inp = torch.tensor(1.0, requires_grad=True)
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_func = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn,
+            backend=cc,
+        )(outer_func)
+
+        failure_reason = None
+        self.assertNotEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 7)
+        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.op_count, 4)
+
+        # if we remove the hook, dynamo shouldn't notice
+        handle.remove()
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 7)
         self.assertEqual(cc.frame_count, 1)
 
 
