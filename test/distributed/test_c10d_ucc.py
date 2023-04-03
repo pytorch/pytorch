@@ -111,65 +111,6 @@ def simple_reduce_tests(rank, world_size):
 
     return tests
 
-
-def simple_coalesced_reduce_tests(rank, world_size):
-    return [
-        (
-            c10d.ReduceOp.SUM,
-            [torch.tensor([rank + 1]), torch.tensor([(rank + 1) ** 2])],
-            [
-                torch.tensor([float(world_size * (world_size + 1) / 2)]),
-                torch.tensor(
-                    [float(world_size * (world_size + 1) * (2 * world_size + 1) / 6)]
-                ),
-            ],
-        ),
-        (
-            c10d.ReduceOp.PRODUCT,
-            [torch.tensor([rank + 1.0]), torch.tensor([rank + 2.0])],
-            [
-                torch.tensor([float(math.factorial(world_size))]),
-                torch.tensor([float(math.factorial(world_size + 1))]),
-            ],
-        ),
-        (
-            c10d.ReduceOp.MIN,
-            [torch.tensor([rank + x]) for x in [0.0, 1.0]],
-            [torch.tensor([0.0]), torch.tensor([1.0])],
-        ),
-        (
-            c10d.ReduceOp.MAX,
-            [torch.tensor([rank + x]) for x in [1.0, 2.0]],
-            [torch.tensor([world_size]), torch.tensor([world_size + 1.0])],
-        ),
-    ]
-
-
-def simple_multi_input_reduce_tests(rank, world_size):
-    return [
-        (
-            c10d.ReduceOp.SUM,
-            [torch.tensor([2 * rank + 0.0]), torch.tensor([2 * rank + 1.0])],
-            torch.tensor([float(world_size * (2 * world_size - 1))]),
-        ),
-        (
-            c10d.ReduceOp.PRODUCT,
-            [torch.tensor([2 * rank + 1.0]), torch.tensor([2 * rank + 2.0])],
-            torch.tensor([float(math.factorial(2 * world_size))]),
-        ),
-        (
-            c10d.ReduceOp.MIN,
-            [torch.tensor([2 * rank + 1.0]), torch.tensor([2 * rank + 2.0])],
-            torch.tensor([1.0]),
-        ),
-        (
-            c10d.ReduceOp.MAX,
-            [torch.tensor([2 * rank + 1.0]), torch.tensor([2 * rank + 2.0])],
-            torch.tensor([2 * world_size]),
-        ),
-    ]
-
-
 class RendezvousEnvTest(TestCase):
     @requires_ucc()
     @retry_on_connect_failures
@@ -204,11 +145,11 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
         return c10d.ProcessGroupUCC(store, self.rank, self.world_size)
 
     def setUp(self):
-        super(ProcessGroupUCCTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(ProcessGroupUCCTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -223,7 +164,8 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
         fut.wait()
         output = fut.value()
         self.assertEqual(0, output[0].numel())
-        self.assertEqualIgnoreType(xs[0], output[0])
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqual(xs[0], output[0], exact_dtype=False)
 
     # TODO: add error check testing
 
@@ -244,7 +186,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
             x = fn(torch.tensor([self.rank]))
             output = broadcast([x], i, 0)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(torch.tensor([i]), output[0])
+            self.assertEqual(torch.tensor([i]), output[0], exact_dtype=False)
 
             # TODO: UCC currently does not support multi tensor input
 
@@ -274,7 +216,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
             fut.wait()
             result = fut.value()
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(expected, result[0])
+            self.assertEqual(expected, result[0], exact_dtype=False)
 
         # TODO: UCC currently does not support multi tensor input
 
@@ -309,7 +251,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
                 result = fut.value()
                 if root == self.rank:
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(output, result[0])
+                    self.assertEqual(output, result[0], exact_dtype=False)
 
     @requires_ucc()
     def test_reduce_basics(self):
@@ -1071,7 +1013,7 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
     @skip_if_lt_x_gpu(2)
     def test_allreduce_work_wait_gpu(self):
-        self._test_allgather_work_wait(
+        self._test_allreduce_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank,
         )
 
@@ -1088,7 +1030,7 @@ class CompilerTest(test_c10d_common.CompilerTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_nested_comm_tensor_wrapping(self):
+    def test_nested_comm_tensor_wrapping_gpu(self):
         self._test_nested_comm_tensor_wrapping(
             torch.ones(2, 2, device=self.rank) * self.rank
         )

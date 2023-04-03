@@ -2879,7 +2879,7 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
     @skip_if_lt_x_gpu(2)
     def test_allreduce_work_wait_gpu(self):
-        self._test_allgather_work_wait(
+        self._test_allreduce_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank,
         )
 
