@@ -1675,7 +1675,7 @@ class FlatParamHandle:
                 # NOTE: This is a hack using `.data` to side step the
                 # check that parameter/gradient sizes and dtypes match. Here,
                 # `param` can have the sharded size, and `grad` can have the
-                # unsharded size. Orthgonally, `param` can have the full
+                # unsharded size. Orthogonally, `param` can have the full
                 # precision dtype from `reshard()`, and `grad` can have the
                 # parameter low precision dtype. Both of these mismatches
                 # happen when running in `no_sync()`.

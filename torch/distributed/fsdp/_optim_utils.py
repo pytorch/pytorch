@@ -96,7 +96,7 @@ class _OptimStateKey(NamedTuple):
     """
     This represents an optimizer state key that may be used commonly across
     ranks. It is based on the unflattened parameter names rather than parameter
-    IDs to make it indepenendent of each rank's own optimizer construction.
+    IDs to make it independent of each rank's own optimizer construction.
     """
 
     unflat_param_names: Tuple[str, ...]
@@ -389,7 +389,7 @@ def _flatten_optim_state_dict(
             key = _OptimStateKey(tuple(fqns), False)
             flat_osd_state[key] = copy.copy(unflat_osd_state[fqn])
 
-    # Handle user-defined state, states that are not accosiated with parameters.
+    # Handle user-defined state, states that are not associated with parameters.
     for key in all_state_keys:
         flat_osd_state[key] = copy.copy(unflat_osd_state[key])
 
@@ -1588,7 +1588,7 @@ def _all_gather_optim_state(
     """
     All-gathering state from all the ranks. This API is slow as it uses
     ``all_gather_object``. However, optim state_dict is not in the critical path.
-    We can fuse the communication across differnt state if the performance
+    We can fuse the communication across different state if the performance
     becomes a problem.
     """
     # Allgather the scalar tensor state, non-tensor states and tensors metadata.
@@ -1609,7 +1609,7 @@ def _all_gather_optim_state(
     ]
     dist.all_gather_object(object_list, processed_state)
 
-    # Convert the gathered, pre-proccessed state of each rank to the original one.
+    # Convert the gathered, pre-processed state of each rank to the original one.
     gathered_state: Dict[str, Any] = {}
 
     all_tensor_states = sorted(
