@@ -433,6 +433,24 @@ class TestSaveLoad(JitTestCase):
         output = m_loaded(FooTuple(a=5))
         self.assertEqual(output, torch.tensor(3))
 
+    def test_save_namedtuple_input_only_forwardref(self):
+        """
+        Even if a NamedTuple is only used as an input argument, saving and
+        loading should work correctly.
+        """
+        global FooTuple  # see [local resolution in python]
+
+        class FooTuple(NamedTuple):
+            a: 'int'
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x: FooTuple) -> torch.Tensor:
+                return torch.tensor(3)
+
+        m_loaded = self.getExportImportCopy(torch.jit.script(MyModule()))
+        output = m_loaded(FooTuple(a=5))
+        self.assertEqual(output, torch.tensor(3))
+
     def test_save_namedtuple_output_only(self):
         """
         Even if a NamedTuple is only used as an output argument, saving and
@@ -657,6 +675,7 @@ def script_module_to_buffer(script_module):
     return module_buffer
 
 
+# TODO(qihqi): This param is not setup correctly.
 @unittest.skipIf(
     not ENABLE_FLATBUFFER, "Need to enable flatbuffer to run the below tests"
 )

@@ -15,10 +15,10 @@ from typing import List
 import torch
 from torch._dynamo.utils import dynamo_timed
 
-from .. import config
-from ..codecache import cache_dir
-from ..ir import ReductionHint, TileHint
-from ..utils import (
+from . import config
+from .codecache import cache_dir
+from .ir import ReductionHint, TileHint
+from .utils import (
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -27,10 +27,7 @@ from ..utils import (
     has_triton,
     next_power_of_2,
 )
-from .conv_perf_model import (
-    early_config_prune as conv_early_config_prune,
-    estimate_conv_time,
-)
+
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +100,7 @@ class CachingAutotuner(KernelInterface):
                 self.fn,
                 **compile_meta,
             )
+            binary._init_handles()
 
         call_args = [
             arg
@@ -136,8 +134,6 @@ class CachingAutotuner(KernelInterface):
 
         launcher = scope["launcher"]
         launcher.config = cfg
-
-        binary._init_handles()
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
@@ -162,7 +158,7 @@ class CachingAutotuner(KernelInterface):
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        from ..compile_fx import clone_preserve_strides
+        from .compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
@@ -446,6 +442,13 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     if z:
         cfg["ZBLOCK"] = z
     num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 256, 1), 8))
+    # we are going to arrive at 2 warps only if bs was too small due to
+    # numel being too small. However to workaround some ptx bugs we still
+    # want at least 4 warps if there's enough elements per thread
+    # given that this is a rare situation, don't expect this to affect perf
+    # in general
+    # see https://github.com/pytorch/pytorch/pull/97950
+    num_warps = max(num_warps, 4) if conditional_product(x, y, z) >= 128 else num_warps
     xnumel = size_hints[0]
     ynumel = size_hints[1] if y else None
     znumel = size_hints[2] if z else None
@@ -628,89 +631,6 @@ def template(num_stages, num_warps, meta, filename=None):
     return cached_autotune(
         [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta
     )
-
-
-def conv_heuristics():
-    configs = [
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=2
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 128}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        ),
-        # triton.Config(
-        #     {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        # ),
-    ]
-    key = [
-        "BATCH",
-        "IN_C",
-        "IN_H",
-        "IN_W",
-        "KERNEL_N",
-        "KERNEL_H",
-        "KERNEL_W",
-        "OUT_H",
-        "OUT_W",
-        # parameters of conv
-        "stride_h",
-        "stride_w",
-        "padding_h",
-        "padding_w",
-        "dilation_h",
-        "dilation_w",
-        "output_padding_h",
-        "output_padding_w",
-        "groups",
-    ]
-    prune_configs_by = {
-        "early_config_prune": conv_early_config_prune,
-        "perf_model": estimate_conv_time,
-        "top_k": 10,
-    }
-    return triton.autotune(configs, key, prune_configs_by=prune_configs_by)
 
 
 def grid(xnumel, ynumel=None, znumel=None):
