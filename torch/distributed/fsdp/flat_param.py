@@ -417,6 +417,8 @@ class FlatParamHandle:
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
         self._fully_sharded_module = fully_sharded_module
+        self._skipped_use_sharded_views = False
+        # TODO: Do we need `_skipped_use_sharded_grad_views`?
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1055,7 +1057,7 @@ class FlatParamHandle:
         matches the dtype of the expected unsharded parameter.
         """
         ret = False
-        if self._use_orig_params:
+        if self._use_orig_params and not self._skipped_use_sharded_views:
             ret = self._writeback_orig_params()
         if (
             self.uses_sharded_strategy
@@ -1205,6 +1207,11 @@ class FlatParamHandle:
         in_forward = self._training_state == HandleTrainingState.FORWARD
         in_pre_backward = self._training_state == HandleTrainingState.BACKWARD_PRE
         if self._use_orig_params:
+            if self._skipped_use_sharded_views and in_pre_backward:
+                # This call corresponds to the complementary pre-backward
+                # `_use_unsharded_views()` to the skipped pre-forward
+                # `_use_sharded_views()`, so we should skip this one too.
+                return
             # We use `Tensor` views in the forward so that they are tracked by
             # autograd. We use them in the pre-backward as well to support
             # reentrant activation checkpointing, which needs the views to be
@@ -1517,12 +1524,26 @@ class FlatParamHandle:
             )
         flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
-            self._use_sharded_views()
+            in_forward = self._training_state == HandleTrainingState.FORWARD
+            no_reshard_after_forward_strategies = (
+                HandleShardingStrategy.SHARD_GRAD_OP,
+                HandleShardingStrategy._HYBRID_SHARD_ZERO2,
+            )
+            if (
+                in_forward
+                and self._sharding_strategy in no_reshard_after_forward_strategies
+            ):
+                self._skipped_use_sharded_views = True
+            else:
+                self._use_sharded_views()
             # For the post-forward reshard, we may try to use sharded gradient
             # views (or unsharded gradient views if a gradient was accumulated
             # in `no_sync()`), but for the post-backward reshard, we delay the
             # call to after the reduce-scatter.
-            if self._training_state == HandleTrainingState.FORWARD:
+            if (
+                in_forward
+                and self._sharding_strategy not in no_reshard_after_forward_strategies
+            ):
                 # TODO: Change `_unpadded_unsharded_size` if we change the
                 # gradient to be computed directly with padding.
                 accumulated_grad_in_no_sync = (
@@ -1761,6 +1782,7 @@ class FlatParamHandle:
         printability. Parameters whose data is present must preserve their
         variables to be passable to an optimizer.
         """
+        self._skipped_use_sharded_views = False
         if not self.uses_sharded_strategy:
             # For `NO_SHARD`, use the *unflattened* unsharded views since we
             # have the unsharded parameter

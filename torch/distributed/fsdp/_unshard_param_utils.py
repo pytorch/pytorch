@@ -189,6 +189,8 @@ def _unshard_fsdp_state_params(
 
     for handle in handles:
         handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
+        if handle._skipped_use_sharded_views:
+            handle._use_sharded_views()
 
     _clear_grads_if_needed(handles)
     free_unsharded_flat_params = [handle.needs_unshard() for handle in handles]

@@ -38,7 +38,7 @@ from torch.distributed.fsdp.flat_param import (
 )
 from torch.distributed.utils import _apply_to_tensors, _p_assert, _to_kwargs
 
-RESHARD_AFTER_FORWARD_STRATEGIES = {
+RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES = {
     HandleShardingStrategy.FULL_SHARD,
     HandleShardingStrategy.HYBRID_SHARD,
 }
@@ -501,7 +501,7 @@ def _post_forward_reshard(
     # computation (though this may not be true)
     free_unsharded_flat_params = [
         not state._is_root
-        and handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
+        and handle._sharding_strategy in RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
         for handle in handles
     ]
     _reshard(state, handles, free_unsharded_flat_params)
@@ -830,7 +830,7 @@ def _should_free_in_backward(
     # higher throughput.
     return (
         state._sync_gradients
-        or handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
+        or handle._sharding_strategy in RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
     )
 
 

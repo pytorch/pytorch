@@ -448,6 +448,13 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
 
         # Check that FSDP correctly exposes gradients even after forward
         # (namely, `None` for weights and non-`None` for biases)
+        if sharding_strategy in (
+            ShardingStrategy.SHARD_GRAD_OP,
+            ShardingStrategy._HYBRID_SHARD_ZERO2,
+        ):
+            # Skip the check since we do not expose the gradients after forward
+            # for these strategies
+            return
         for (ddp_n, ddp_p), (fsdp_n, fsdp_p) in zip(
             ddp_model.module.named_parameters(),
             fsdp_model.named_parameters(),
@@ -707,7 +714,9 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
             def get_loss(self, inp, out):
                 return out.sum()
 
-        def check_parameter_parity(ddp_model, fsdp_model):
+        def check_parameter_parity(
+            ddp_model: DDP, fsdp_model: FSDP, between_fwd_and_bwd: bool
+        ):
             assert self.rank in (
                 0,
                 1,
@@ -720,6 +729,13 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
                 if sharding_strategy == ShardingStrategy.NO_SHARD:
                     # For `NO_SHARD`, do nothing since the original parameters
                     # are unflattened
+                    pass
+                elif between_fwd_and_bwd and sharding_strategy in (
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy._HYBRID_SHARD_ZERO2,
+                ):
+                    # For no reshard after forward strategies, do nothing since
+                    # FSDP did not use sharded views after forward
                     pass
                 # Otherwise, case on the parameter (see the model definition)
                 elif n1 == "lin1.weight":
@@ -754,7 +770,7 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         inp = fsdp_model.get_input(device)
         ddp_out = ddp_model(*inp)
         fsdp_out = fsdp_model(*inp)
-        check_parameter_parity(ddp_model, fsdp_model)
+        check_parameter_parity(ddp_model, fsdp_model, True)
 
         ddp_loss = ddp_model.module.get_loss(inp, ddp_out)
         fsdp_loss = fsdp_model.get_loss(inp, fsdp_out)
@@ -762,12 +778,12 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         fsdp_loss.backward()
         ddp_optim.step()
         fsdp_optim.step()
-        check_parameter_parity(ddp_model, fsdp_model)
+        check_parameter_parity(ddp_model, fsdp_model, False)
 
         inp = fsdp_model.get_input(device)
         ddp_out = ddp_model(*inp)
         fsdp_out = fsdp_model(*inp)
-        check_parameter_parity(ddp_model, fsdp_model)
+        check_parameter_parity(ddp_model, fsdp_model, True)
 
 
 class TestFSDPUseOrigParamsWriteback(FSDPTest):
