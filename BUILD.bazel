@@ -1,7 +1,6 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
-load("@rules_proto//proto:defs.bzl", "proto_library")
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@pytorch//third_party:substitution.bzl", "header_template_rule")
 load("@pytorch//:tools/bazel.bzl", "rules")
 load("@pytorch//tools/rules:cu.bzl", "cu_library")
@@ -264,6 +263,7 @@ header_template_rule(
     include = "aten/src",
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
+        "@AT_MKLDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
         "@AT_FFTW_ENABLED@": "0",
@@ -449,19 +449,6 @@ CAFFE2_COPTS = COMMON_COPTS + [
     "-fno-math-errno",
     "-fno-trapping-math",
 ]
-
-proto_library(
-    name = "caffe2_proto_source",
-    srcs = glob([
-        "caffe2/proto/*.proto",
-    ]),
-    visibility = ["//visibility:public"],
-)
-
-cc_proto_library(
-    name = "caffe2_protos",
-    deps = [":caffe2_proto_source"],
-)
 
 header_template_rule(
     name = "caffe2_core_macros_h",
@@ -1040,7 +1027,6 @@ filegroup(
         "caffe2/utils/math/utils.cc",
         "caffe2/utils/math_cpu.cc",
         "caffe2/utils/murmur_hash3.cc",
-        "caffe2/utils/proto_convert.cc",
         "caffe2/utils/proto_utils.cc",
         "caffe2/utils/proto_wrap.cc",
         "caffe2/utils/signal_handler.cc",
@@ -1293,14 +1279,13 @@ cc_library(
         "caffe2/utils/fixed_divisor.h",
     ] + glob([
         "caffe2/utils/threadpool/*.h",
-        "caffe2/proto/*.h",
     ]),
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_core_macros_h",
-        ":caffe2_protos",
         "//c10:headers",
+        "//caffe2/proto:caffe2_pb",
     ],
 )
 
@@ -1353,7 +1338,6 @@ cc_library(
         "caffe2/perfkernels/*.h",
         "caffe2/predictor/*.h",
         "caffe2/predictor/emulator/*.h",
-        "caffe2/proto/*.h",
         "caffe2/quantization/server/*.h",
         "caffe2/queue/*.h",
         "caffe2/serialize/*.h",
@@ -1376,7 +1360,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_for_aten_headers",
-        ":caffe2_protos",
+        "//caffe2/proto:caffe2_pb",
+        "//caffe2/proto:cc_proto",
     ],
 )
 
@@ -1437,7 +1422,8 @@ cc_library(
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
-        ":caffe2_protos",
+        "//caffe2/proto:caffe2_pb",
+        "//caffe2/proto:cc_proto",
         "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
@@ -1658,6 +1644,7 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
+        "//caffe2/proto:torch_cc_proto",
         "@kineto",
     ] + if_cuda([
         ":torch_distributed_cuda",
