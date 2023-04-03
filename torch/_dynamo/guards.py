@@ -1,5 +1,6 @@
 import builtins
 import collections
+import itertools
 import logging
 import math
 import os
@@ -53,6 +54,10 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___check_type_id", check_type_id),
         ("___check_obj_id", check_obj_id),
         ("___is_grad_enabled", torch.is_grad_enabled),
+        (
+            "___are_deterministic_algorithms_enabled",
+            torch.are_deterministic_algorithms_enabled,
+        ),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
@@ -252,27 +257,33 @@ class GuardBuilder(GuardBuilderBase):
             if HAS_NUMPY
             else ()
         )
-        assert istype(
-            val,
-            (
-                int,
-                float,
-                bool,
-                type(None),
-                str,
-                type,
-                list,
-                tuple,
-                set,
-                slice,
-                frozenset,
-                range,
-                torch.Size,
-                torch.device,
-                torch.dtype,
+        ok_types = (
+            int,
+            float,
+            bool,
+            type(None),
+            str,
+            type,
+            list,
+            tuple,
+            set,
+            slice,
+            frozenset,
+            range,
+            torch.Size,
+            torch.device,
+            torch.dtype,
+            *np_types,
+        )
+        if istype(val, dict):
+            assert all(
+                istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
             )
-            + np_types,
-        ), t.__name__
+        else:
+            assert istype(
+                val,
+                ok_types,
+            ), t.__name__
 
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it
@@ -425,6 +436,16 @@ class GuardBuilder(GuardBuilderBase):
             code = "___is_grad_enabled()"
         else:
             code = "not ___is_grad_enabled()"
+        self._produce_guard_code(guard, [code])
+
+    def DETERMINISTIC_ALGORITHMS(self, guard: Guard):
+        """Guard on the initial determinism algorithms state"""
+        assert guard.source is GuardSource.GLOBAL
+        code = None
+        if convert_frame.initial_deterministic_algorithms_state:
+            code = "___are_deterministic_algorithms_enabled()"
+        else:
+            code = "not ___are_deterministic_algorithms_enabled()"
         self._produce_guard_code(guard, [code])
 
     def SHAPE_ENV(self, guard: Guard):
