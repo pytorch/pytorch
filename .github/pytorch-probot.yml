@@ -10,5 +10,6 @@ ciflow_push_tags:
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic
+- ciflow/slow
 - ciflow/trunk
 - ciflow/unstable
