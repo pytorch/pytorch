@@ -1,4 +1,4 @@
-from .optimizer import Optimizer, required, _use_grad_for_differentiable  # type: ignore[attr-defined]
+from .optimizer import Optimizer, required, _use_grad_for_differentiable, _differentiable_doc, _maximize_doc  # type: ignore[attr-defined]
 import torch
 from typing import List, Optional
 from torch import Tensor
@@ -7,8 +7,6 @@ __all__ = ["LARS", "lars"]
 
 
 class LARS(Optimizer):
-    """Implements LARS algorithm."""
-
     def __init__(
         self,
         params,
@@ -55,6 +53,12 @@ class LARS(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
+        """Performs a single optimization step.
+
+        Args:
+            closure (Callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -94,6 +98,35 @@ class LARS(Optimizer):
 
         return loss
 
+LARS.__doc__ = r"""Implements LARS algorithm.
+
+    For further details regarding the algorithm we refer to `Large Batch Training of Convolutional Networks`_.
+    """ + r"""
+    Args:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float): learning rate
+        momentum (float, optional): momentum factor (default: 0)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        nesterov (bool, optional): enables Nesterov momentum (default: False)
+        trust_coefficient (float, optional): coefficient for computing LR (default: 0.001)
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-8)
+        {maximize}
+        {differentiable}
+
+    .. _Large Batch Training of Convolutional Networks:
+        https://arxiv.org/abs/1708.03888
+
+    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc) + r"""
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> optimizer = torch.optim.LARS(model.parameters(), lr=0.1, momentum=0.9)
+        >>> optimizer.zero_grad()
+        >>> loss_fn(model(input), target).backward()
+        >>> optimizer.step()
+    """
 
 def lars(
     params: List[Tensor],
@@ -109,6 +142,9 @@ def lars(
     eps: float,
     maximize: bool,
 ):
+    r"""Functional API that performs LARS algorithm computation.
+    See :class:`~torch.optim.LARS` for details.
+    """
     if torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
