@@ -1059,16 +1059,17 @@ class CppKernel(Kernel):
             def gen_loop(loop: LoopLevel, in_reduction=False):
                 with contextlib.ExitStack() as stack:
                     loop_lines = loop.lines()
-                    if loop_lines is not None:
-                        code.writelines(loop_lines)
-                        stack.enter_context(code.indent())
-                        # generate inner loops or loop body
-                        if loop.inner:
-                            gen_loops(loop.inner, loop.is_reduction())
-                        else:
-                            kernels = loop.get_kernels()
-                            assert len(kernels) == 1
-                            gen_kernel(kernels[0])
+                    if loop_lines is None:
+                        return
+                    code.writelines(loop_lines)
+                    stack.enter_context(code.indent())
+                    # generate inner loops or loop body
+                    if loop.inner:
+                        gen_loops(loop.inner, loop.is_reduction())
+                    else:
+                        kernels = loop.get_kernels()
+                        assert len(kernels) == 1
+                        gen_kernel(kernels[0])
 
             stack.enter_context(code.indent())
             if loop_nest.root:
