@@ -1244,14 +1244,20 @@ class CUDAGraphTreeManager:
 
         self.id_to_mode: Dict[int, CompilationMode] = {}
 
-        # Typically we run a series of forwards then a series of backwards/
-        # When we have invoked forwards backwards we do not want to ignore outputs of a previous
-        # generation, even if torch.compile has been invoked again.
-        # In some occassions, a backward corresponding to a forward will not be invoked
-        # so we cannot wait for all backwards of pending forwards to complete.
-        # calling the backward will not usually trigger another torch.compile
-        # invocation, so we are unlikely to increment generation between multiple backward
-        # calls.
+        # Note: [Backward Generation Handling]
+        # We generally perform a sequence of forward executions followed by backward executions.
+        # If multiple torch.compile wrapped forwards are executed with their backwards pending,
+        # we should not disregard the outputs from a prior torch.compile since the entire training
+        # loop hasn't completed.  Occasionally, a backward pass corresponding to a forward pass may
+        # not be executed, so we cannot wait for all pending forward pass backward completions, so
+        # we cannot wait for all backwards to have been invoked. Instead we wait for a single backward
+        # invocation. Triggering a backward pass typically doesn't lead to another torch.compile
+        # invocation, making it less likely for the generation to increase between multiple
+        # backward calls. The following use case is covered by this approach:
+        # mod1 = torch.compile(...)
+        # mod2 = torch.compile(...)
+        # mod2(mod1(x)).sum().backward()
+
         self.running_forwards_with_pending_backwards = False
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
