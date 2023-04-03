@@ -21,6 +21,7 @@ from ..source import (
 )
 from ..utils import (
     get_custom_getattr,
+    get_fake_value,
     is_lazy_module,
     is_safe_constant,
     istensor,
@@ -255,15 +256,28 @@ class NNModuleVariable(VariableTracker):
                     # If so at least some changes are needed, we don't allow inlining
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
+                elif is_lazy:
+                    # In the case of a lazy module, we want to run
+                    # the pre-hooks which initialize it.
+                    # Afterwards, lazy module deletes its pre-hooks
+                    # to avoid treating it as lazy on subsequent recompile.
+                    assert len(kwargs) == 0
+                    if hasattr(mod, "_initialize_hook"):
+                        input = [
+                            get_fake_value(x.node, tx)
+                            for x in proxy_args_kwargs(args, {})[0]
+                        ]
+                        mod._infer_parameters(mod, input)
+                    fn = mod.__call__
                 else:
                     fn = mod.__call__
                 fn_source = AttrSource(self.source, "__call__")
-                if istype(mod.__call__, types.MethodType):
+                if istype(fn, types.MethodType):
                     fn = fn.__func__
                     fn_source = AttrSource(fn_source, "__func__")
                     args = [self] + args
                 else:
-                    assert istype(mod.__call__, types.FunctionType)
+                    assert istype(fn, types.FunctionType)
 
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
