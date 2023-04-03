@@ -558,9 +558,9 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     gm = fuse_unary(gm)
     if not dynamo_config.dynamic_shapes:
         gm = fuse_binary(gm)
-    # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
-    # such as conv+add+relu for vision model.
-    gm = fuse_unary(gm)
+        # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
+        # such as conv+add+relu for vision model.
+        gm = fuse_unary(gm)
     # if config.cpp.weight_prepack and not dynamo_config.dynamic_shapes:
     if config.cpp.weight_prepack:
         gm = pack_module(gm)
@@ -803,35 +803,31 @@ def pack_module(gm: torch.fx.GraphModule):
                 if dynamo_config.dynamic_shapes:
                     computation_node_input_meta = None
                     computation_node_input_size = None
+                    if (
+                        type(cur_module) in [torch.nn.Linear]
+                        and cur_module.weight.dtype == torch.float32
+                    ):
+                        continue
                 else:
                     computation_node_input_meta = node.args[0].meta.get("tensor_meta")
                     computation_node_input_size = computation_node_input_meta.shape
-                # for fp32 linear, only packed when has mkl and static shape
-                if (
-                    computation_node_input_meta is not None
-                    and computation_node_input_meta.dtype == torch.float32
-                    and type(cur_module) in [torch.nn.Linear]
-                    and (not torch._C.has_mkl or dynamo_config.dynamic_shapes)
-                ):
-                    continue
-                if (
-                    type(cur_module) in [torch.nn.Linear]
-                    and computation_node_input_size is not None
-                    and len(computation_node_input_size) < 2
-                ):
-                    continue
+                    if type(cur_module) in [torch.nn.Linear]:
+                        # for fp32 linear, only packed when has mkl.
+                        if (
+                            cur_module.weight.dtype == torch.float32
+                            and (not torch._C.has_mkl)
+                        ) or len(computation_node_input_size) < 2:
+                            continue
                 if type(cur_module) in [nn.Conv2d] and isinstance(
                     cur_module.padding, str
                 ):
                     continue
                 # TODO: remove this when group depthwise ConvTranspose is supported
-                if is_group_depthwise_conv_transpose(cur_module) or (
-                    type(cur_module) in [nn.ConvTranspose2d]
-                    and dynamo_config.dynamic_shapes
+                if type(cur_module) in [nn.ConvTranspose2d] and (
+                    is_group_depthwise_conv_transpose(cur_module)
+                    or dynamo_config.dynamic_shapes
                 ):
                     continue
-                if dynamo_config.dynamic_shapes:
-                    computation_node_input_size = None
                 new_module = computation_op_packed_map[type(cur_module)](
                     cur_module, computation_node_input_size
                 )
