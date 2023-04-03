@@ -544,9 +544,11 @@ def compute_exception_table(
     """Compute pythonic exception table from instructions with exn_tab_entry's"""
     exn_dict = {}
     indexof = {id(inst): i for i, inst, in enumerate(instructions)}
+    print("\n".join(list(map(str, instructions))))
 
     for inst in instructions:
         if inst.exn_tab_entry:
+            print("!!!", inst)
             start = _get_instruction_front(
                 instructions, indexof[id(inst.exn_tab_entry.start)]
             ).offset

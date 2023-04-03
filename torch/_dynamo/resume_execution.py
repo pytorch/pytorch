@@ -11,6 +11,7 @@ from .bytecode_transformation import (
     create_instruction,
     create_jump_absolute,
     Instruction,
+    InstructionExnTabEntry,
     transform_code_object,
     unique_id,
 )
@@ -67,6 +68,14 @@ class ReenterWith:
             setup_finally.append(
                 create_instruction("SETUP_FINALLY", target=except_jump_target)
             )
+        else:
+            exn_tab_begin = create_instruction("NOP")
+            exn_tab_end = create_instruction("NOP")
+            exn_tab_begin.exn_tab_entry = InstructionExnTabEntry(
+                exn_tab_begin, exn_tab_end, except_jump_target, self.stack_index, False
+            )
+            breakpoint()
+            setup_finally.append(exn_tab_begin)
 
         reset = [
             create_instruction("LOAD_FAST", argval=ctx_name),
@@ -97,15 +106,16 @@ class ReenterWith:
             ]
         else:
             epilogue = [
+                exn_tab_end,
                 *reset,
                 create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
                 except_jump_target,
                 create_instruction("PUSH_EXC_INFO"),
                 *reset,
-                create_instruction("RERAISE", 0),
-                create_instruction("COPY", 3),
+                create_instruction("RERAISE", arg=0),
+                create_instruction("COPY", arg=3),
                 create_instruction("POP_EXCEPT"),
-                create_instruction("RERAISE", 1),
+                create_instruction("RERAISE", arg=1),
                 cleanup_complete_jump_target,
             ]
 
