@@ -5,7 +5,6 @@ from typing import List, Optional, TYPE_CHECKING, Union
 import torch
 import torch.distributed._functional_collectives as funcol
 
-import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     all_to_all,
@@ -428,7 +427,9 @@ class DeviceMesh(object):
         op_name: str = op.name  # type: ignore[attr-defined]
         if self._backend == "nccl" or self._backend == "threaded":
             dim_group = self._dim_groups[mesh_dim]
-            scatter_tensor = funcol.reduce_scatter_tensor(input, reduceOp=op_name, scatter_dim=scatter_dim, group=dim_group)
+            scatter_tensor = funcol.reduce_scatter_tensor(
+                input, reduceOp=op_name, scatter_dim=scatter_dim, group=dim_group
+            )
 
         elif self._backend == "gloo":
             # it's gloo, which does not have reduce_scatter

@@ -240,9 +240,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             local_tensor = tensor_padded_list[my_rank]
             big_tensor = device_mesh.all_gather(
-                local_tensor,
-                mesh_dim=0,
-                gather_dim=shard_dim
+                local_tensor, mesh_dim=0, gather_dim=shard_dim
             )
             if pad_idx != 0:
                 big_tensor = shard_placement._unpad_concat_tensor(
@@ -261,7 +259,9 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             input_size[dim] *= self.world_size
             input_tensor = torch.ones(input_size, device=self.device_type) * self.rank
             res_num = ((0 + self.world_size - 1) * self.world_size) / 2
-            scattered_tensor = mesh.reduce_scatter(input_tensor, mesh_dim=0, scatter_dim=dim)
+            scattered_tensor = mesh.reduce_scatter(
+                input_tensor, mesh_dim=0, scatter_dim=dim
+            )
             self.assertEqual(scattered_tensor, torch.ones(3, 3) * res_num)
 
     @with_comms
@@ -290,11 +290,12 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             res_num = ((0 + self.world_size - 1) * self.world_size) / 2
 
-            scattered_tensor = device_mesh.reduce_scatter(tensor_to_reduce, mesh_dim=0, scatter_dim=shard_dim)
+            scattered_tensor = device_mesh.reduce_scatter(
+                tensor_to_reduce, mesh_dim=0, scatter_dim=shard_dim
+            )
 
             if pad_idx <= device_mesh.get_coordinate()[0]:
                 scattered_tensor = shard_placement._unpad_tensor(scattered_tensor)
-
 
             self.assertEqual(
                 scattered_tensor.size(), tensor_splitted_list[my_rank].size()
@@ -335,7 +336,9 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             input_tensor = torch.ones(input_size, device=self.device_type) * self.rank
             global_ranks = get_process_group_ranks(dim_group)
 
-            scattered_tensor = mesh.reduce_scatter(input_tensor, mesh_dim=dim, scatter_dim=dim)
+            scattered_tensor = mesh.reduce_scatter(
+                input_tensor, mesh_dim=dim, scatter_dim=dim
+            )
 
             res_num = torch.sum(torch.tensor(global_ranks))
             self.assertEqual(scattered_tensor, torch.ones(3, 3, 3) * res_num)

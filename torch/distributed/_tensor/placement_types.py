@@ -79,16 +79,15 @@ class Shard(Placement):
         # unpad tensor by 1 on the shard dim
         return tensor.narrow(self.dim, start=0, length=tensor.size(self.dim) - 1)
 
-    def _unpad_concat_tensor(self, tensor: torch.Tensor, padding_idx: int, shard_count: int) -> torch.Tensor:
+    def _unpad_concat_tensor(
+        self, tensor: torch.Tensor, padding_idx: int, shard_count: int
+    ) -> torch.Tensor:
         gathered_list = torch.chunk(tensor, shard_count, dim=self.dim)
         gathered_list = [
-            self._unpad_tensor(gathered_tensor)
-            if i >= padding_idx
-            else gathered_tensor
+            self._unpad_tensor(gathered_tensor) if i >= padding_idx else gathered_tensor
             for i, gathered_tensor in enumerate(gathered_list)
         ]
         return torch.cat(gathered_list, dim=self.dim)
-
 
     def _local_shard_size_on_dim(
         self,
@@ -162,7 +161,9 @@ class Shard(Placement):
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
 
-        output = mesh.reduce_scatter(tensor, op=reduce_op, mesh_dim=mesh_dim, scatter_dim=self.dim)
+        output = mesh.reduce_scatter(
+            tensor, op=reduce_op, mesh_dim=mesh_dim, scatter_dim=self.dim
+        )
 
         if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
             output = self._unpad_tensor(output)
@@ -200,9 +201,7 @@ class Shard(Placement):
         if pad_idx != 0:
             gathered_list = torch.chunk(result, num_chunks, dim=self.dim)
             gathered_list = [
-                self._unpad_tensor(gathered_tensor)
-                if i >= pad_idx
-                else gathered_tensor
+                self._unpad_tensor(gathered_tensor) if i >= pad_idx else gathered_tensor
                 for i, gathered_tensor in enumerate(gathered_list)
             ]
 

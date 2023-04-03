@@ -364,7 +364,7 @@ def reduce_scatter_tensor(
         self = torch.cat(tensor_list)
 
     tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, 0, tag, rankset, group_size)  # type: ignore[attr-defined]
-    res =_maybe_wrap_tensor(tensor)
+    res = _maybe_wrap_tensor(tensor)
     return res
 
 
