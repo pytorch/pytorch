@@ -1,9 +1,11 @@
 import logging
+import traceback
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 import torch
 from torch import fx
+from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
 from torch.fx.node import Node
 
@@ -43,9 +45,11 @@ def pretty_print_buckets(buckets: List[Bucket]):
     try:
         from tabulate import tabulate
 
+        # TODO: Do you really want to log.info this?  It would get
+        # suppressed if log level is too low
         log.info(
-            "\nDDPOptimizer bucket assignments\n"
-            + tabulate(rows, headers=headers, tablefmt="simple_grid")
+            "\nDDPOptimizer bucket assignments\n%s",
+            tabulate(rows, headers=headers, tablefmt="simple_grid"),
         )
     except ImportError:
         log.info(
@@ -54,7 +58,7 @@ def pretty_print_buckets(buckets: List[Bucket]):
 
 
 class DDPOptimizer:
-    """
+    """Note [DDPOptimizer]
     DDPOptimizer applies when dynamo compiles models wrapped in DistributedDataParallel (DDP),
     breaking the dynamo graph into chunks to compile separately, with the breaks aligning to
     the boundaries of gradient-allreduce buckets chosen by DDP.
@@ -63,7 +67,7 @@ class DDPOptimizer:
      - DDP uses allreduce collectives to synchronize partial gradients computed on different workers
      - DDP groups gradient allreduces into 'buckets' to optimize communication efficiency of all-reduce
      - Parameters grouped into buckets are assumed to be adjacent in time, so they become ready
-       at around the same time during backward and thus can share the same allreduce efficently
+       at around the same time during backward and thus can share the same allreduce efficiently
      - Allreduces must overlap with backward compute for optimal training performance
      - DDP schedules allreduces using 'hooks' fired from the c++ autograd engine in pytorch, which
        operates when individual grads become 'ready'
@@ -164,10 +168,9 @@ class DDPOptimizer:
 
             if node.op == "call_module":
                 target = gm.get_submodule(node.target)
-                for name, p in target.named_parameters():
-                    param = target.get_parameter(name)
-                    if p.requires_grad and not self._ignore_parameter(param):
-                        buckets[0].size += p.untyped_storage().nbytes()
+                for name, param in target.named_parameters():
+                    if param.requires_grad and not self._ignore_parameter(param):
+                        buckets[0].size += param.untyped_storage().nbytes()
                         buckets[0].params.append(f"{node.target}_{name}")
                         buckets[0].param_ids.append(id(param))
             elif node.op == "get_attr":
@@ -259,6 +262,14 @@ class DDPOptimizer:
                             sn.args = (sn.args,)
 
                 input_mod.recompile()
+                input_mod.compile_subgraph_reason = GraphCompileReason(
+                    "DDPOptimizer intentional graph-break (See Note [DDPOptimizer])."
+                    " Set `torch._dynamo.config.optimize_ddp = False` to disable.",
+                    [
+                        # it's close to useless to get a real stacktrace here, and quite verbose.
+                        traceback.FrameSummary(__file__, 0, DDPOptimizer),
+                    ],
+                )
                 wrapper = WrapperModule(
                     self.compiler(input_mod, args),
                     unwrap_singleton_tuple,
@@ -267,7 +278,7 @@ class DDPOptimizer:
 
             # Note:
             #
-            # The way distributed works today around fake tensors can be somehwat confusing.
+            # The way distributed works today around fake tensors can be somewhat confusing.
             # Some of these codepaths are shared in both runtime, and compile time. The presence
             # of a fake_mode, read off of fake tensor inputs, dictates how we will operate.
             #
@@ -284,7 +295,7 @@ class DDPOptimizer:
             # 4) Fake tensors should never be around at runtime.
             #
             # 5) We end up with a compilation mode that takes a real submodule and fake tensors,
-            # to match what aot_autograd exepcts. See Note: [Fake Modules and AOTAutograd]
+            # to match what aot_autograd expects. See Note: [Fake Modules and AOTAutograd]
             def run_node(self, n: Node) -> Any:
                 with self._set_current_node(n):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -309,9 +320,7 @@ class DDPOptimizer:
                         else:
                             curr_submod = real_mod
 
-                        log.debug(
-                            f"\n---{n.target} graph---\n" + str(curr_submod.graph)
-                        )
+                        log.debug(f"\n---{n.target} graph---\n{curr_submod.graph}")
 
                         # When calling the compiler on the submod, inputs (new_args) are expected to
                         # be FakeTensors already since Dynamo would have made them FakeTensors in the
@@ -339,5 +348,5 @@ class DDPOptimizer:
         submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
-        log.debug("\n---final graph---\n" + str(split_gm.graph) + "\n---------------\n")
+        log.debug(f"\n---final graph---\n{split_gm.graph}\n---------------\n")
         return split_gm

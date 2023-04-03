@@ -11,7 +11,7 @@ import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util
 from caffe2.python.models.seq2seq.seq2seq_model_helper import Seq2SeqModelHelper
 
 
-class BeamSearchForwardOnly(object):
+class BeamSearchForwardOnly:
     """
     Class generalizing forward beam search for seq2seq models.
 

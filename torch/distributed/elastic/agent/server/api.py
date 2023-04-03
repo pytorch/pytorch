@@ -36,7 +36,7 @@ __all__ = ['WorkerSpec', 'Worker', 'WorkerState', 'WorkerGroup', 'RunResult', 'E
 _TERMINAL_STATE_SYNC_ID = "torchelastic/agent/terminal_state"
 
 DEFAULT_ROLE = "default"
-log = get_logger()
+log = get_logger(__name__)
 
 
 @dataclass
@@ -928,7 +928,7 @@ class SimpleElasticAgent(ElasticAgent):
                 f"Done waiting for other agents. Elapsed: {time.time() - start} seconds"
             )
         except SignalException as e:
-            log.warn(f"Got termination signal: {e.sigval}")
+            log.warning(f"Got termination signal: {e.sigval}")
             raise
         except Exception:
             log.exception(

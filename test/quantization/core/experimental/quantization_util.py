@@ -2,7 +2,7 @@ import torch
 import torchvision
 import torchvision.transforms.transforms as transforms
 import os
-import torch.quantization
+import torch.ao.quantization
 from torchvision.models.quantization.resnet import resnet18
 from torch.autograd import Variable
 
@@ -15,7 +15,7 @@ warnings.filterwarnings(
 )
 warnings.filterwarnings(
     action='default',
-    module=r'torch.quantization'
+    module=r'torch.ao.quantization'
 )
 
 """
@@ -28,7 +28,7 @@ _ = torch.manual_seed(191009)
 train_batch_size = 30
 eval_batch_size = 50
 
-class AverageMeter(object):
+class AverageMeter:
     """Computes and stores the average and current value"""
     def __init__(self, name, fmt=':f'):
         self.name = name

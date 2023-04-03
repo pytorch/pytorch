@@ -9,7 +9,7 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE, freeze_rng_state,
+    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo,
 )
 import torch
 import torch.nn as nn
@@ -20,8 +20,10 @@ import sys
 import unittest
 import warnings
 import math
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
+from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing import make_tensor
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
@@ -37,10 +39,10 @@ from torch._functorch.make_functional import (
 )
 from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._functorch.utils import enable_single_level_autograd_function
 import torch.autograd.forward_ad as fwAD
-from torch.func import functional_call, stack_module_state
+from torch.func import functional_call, stack_module_state, linearize
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -368,9 +370,10 @@ class TestGradTransform(TestCase):
             assert not x.is_conj()
             y = x.conj()
             assert y.is_conj()
-            return y
+            return y.abs()
         res = grad(foo)(x)
-        self.assertEqual(res, torch.ones_like(res))
+        with torch.no_grad():
+            self.assertEqual(res, torch.ones_like(res) * torch.sgn(x))
 
     def test_composed_with_autograd(self, device):
         x = torch.randn([], requires_grad=True, device=device)
@@ -1565,6 +1568,17 @@ class TestJac(TestCase):
         expected = expected.view(2, 3, 2, 3)
         assert torch.allclose(y, expected)
 
+    @jacrev_and_jacfwd
+    def test_take(self, device, jacapi):
+        x = torch.rand(5)
+
+        def func(x):
+            y = torch.ones(3, dtype=torch.long)
+            z = torch.take(x, y)
+            return z
+
+        self.assertEqual(jacrev(func)(x), torch.autograd.functional.jacobian(func, x))
+
     @FIXME_jacrev_only
     def test_diff_numel(self, device, jacapi):
         x = torch.randn(2, 4, device=device)
@@ -2091,27 +2105,76 @@ class TestJac(TestCase):
     def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
         # With chunk_size=1, we shouldn't `vmap` and hence not be limited
         # by it's constraints.
+        x = torch.randn(3, 3, device=device)
 
-        x = torch.randn(3, device=device)
-        idx_1 = torch.tensor([0, ], device=device)
-        idx_2 = torch.tensor([0, 1], device=device)
-        chunk_size = 1
+        # Function with Dynamic Op in Backward.
+        # This should cause jacrev/vmap(vjp) to fail.
+        class IdentityWithDynamicBackwardOp(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input
 
-        def f(x, idx):
-            # `take` doesn't work with vmap
-            # as it returns an output with dynamic shape.
-            return torch.take(x, idx)
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
 
-        for fn, idx in ((f, idx_1), (f, idx_2)):
-            jacfn = jacrev(fn, chunk_size=chunk_size, _preallocate_and_copy=_preallocate_and_copy)
-            actual = jacfn(x, idx)
-            expected = torch.autograd.functional.jacobian(partial(fn, idx=idx), x, vectorize=False)
-            self.assertEqual(actual, expected)
+            @staticmethod
+            def backward(ctx, grad_output):
+                # dynamic op in backward pass.
+                grad_output.nonzero()
+                return grad_output
 
-            msg = r"vmap: .* is not possible because there exists a Tensor"
-            with self.assertRaisesRegex(RuntimeError, msg):
-                jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
+        def f(x):
+            return IdentityWithDynamicBackwardOp.apply(x)
 
+        # With `chunk_size=1`, we don't use vmap. So the following should work.
+        jacfn = jacrev(f, chunk_size=1, _preallocate_and_copy=_preallocate_and_copy)
+        actual = jacfn(x)
+        expected = torch.autograd.functional.jacobian(f, x, vectorize=False)
+        self.assertEqual(actual, expected)
+
+        # Should fail with `chunk_size=2`.
+        msg = r"vmap: We do not support batching operators that can output dynamic shape."
+        with self.assertRaisesRegex(RuntimeError, msg):
+            jacrev(f, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x)
+
+    def test_complex_error(self, device):
+        # Verify complex input raises error
+        # C -> C
+        def fn(x):
+            return x.conj()
+
+        x = torch.randn(1, device=device, dtype=torch.cfloat)
+
+        with self.assertRaisesRegex(RuntimeError, "jacrev: Expected all inputs"):
+            jacrev(fn)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all inputs"):
+            jacfwd(fn)(x)
+
+        # Verify complex output raises error
+        # R -> C
+        def fn(x):
+            return torch.conj(x * 0.5j)
+
+        x = torch.randn(1, device=device, dtype=torch.float)
+
+        with self.assertRaisesRegex(RuntimeError, "jacrev: Expected all outputs"):
+            jacrev(fn)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all outputs"):
+            jacfwd(fn)(x)
+
+    @jacrev_and_jacfwd
+    def test_jac_with_non_tensor_args(self, device, jacapi):
+        def f(t, int_x):
+            return t + int_x
+
+        t = torch.randn(3, 3, device=device)
+
+        actual = jacapi(f)(t, 3)
+        expected = torch.autograd.functional.jacobian(partial(f, int_x=3), t)
+        self.assertEqual(actual, expected)
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
@@ -2499,6 +2562,106 @@ class TestJvp(TestCase):
         # Should not error
         vmap(vmap(push_jvp, (0, None)))(dummy, x)
 
+class TestLinearize(TestCase):
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
+    @dtypes(torch.float)
+    def test_linearize_basic(self, device, dtype):
+        x_p = make_tensor((3, 1), device=device, dtype=dtype)
+        x_t = make_tensor((3, 1), device=device, dtype=dtype)
+
+        def fn(x):
+            return x.cos()
+
+        actual_output, jvp_fn = linearize(fn, x_p)
+        actual_jvp = jvp_fn(x_t)
+        expected_output, expected_jvp = jvp(fn, (x_p,), (x_t,))
+        self.assertEqual(actual_output, expected_output)
+        self.assertEqual(actual_jvp, expected_jvp)
+
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
+    @dtypes(torch.float)
+    def test_linearize_return(self, device, dtype):
+        x_p = make_tensor((3, 1), device=device, dtype=dtype)
+        x_t = make_tensor((3, 1), device=device, dtype=dtype)
+
+        def fn(x):
+            return (x.cos(), x.sum())
+
+        actual_output, jvp_fn = linearize(fn, x_p)
+        actual_jvp = jvp_fn(x_t)
+        expected_output, expected_jvp = jvp(fn, (x_p,), (x_t,))
+        self.assertEqual(actual_output, expected_output)
+        self.assertEqual(actual_jvp, expected_jvp)
+
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
+    @dtypes(torch.float)
+    def test_linearize_composition(self, device, dtype):
+        x_p = make_tensor((3, 1), device=device, dtype=dtype)
+        x_t = make_tensor((3, 3, 1), device=device, dtype=dtype)
+
+        def fn(x):
+            return (x.cos(), x.sum())
+
+        _, jvp_fn = linearize(fn, x_p)
+        actual_batched_jvp = vmap(jvp_fn)(x_t)
+
+        def jvp_fn(x_t):
+            return jvp(fn, (x_p,), (x_t,))[1]
+        expected_batched_jvp = vmap(jvp_fn)(x_t)
+
+        self.assertEqual(actual_batched_jvp, expected_batched_jvp)
+
+    @dtypes(torch.float)
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
+    def test_linearize_nested_input_nested_output(self, device, dtype):
+        x_p = make_tensor((3, 1), device=device, dtype=dtype)
+        x_t = make_tensor((3, 1), device=device, dtype=dtype)
+        y_p = make_tensor((3, 1), device=device, dtype=dtype)
+        y_t = make_tensor((3, 1), device=device, dtype=dtype)
+        z_p = make_tensor((3, 1), device=device, dtype=dtype)
+        z_t = make_tensor((3, 1), device=device, dtype=dtype)
+
+        def fn(arg):
+            x = arg['x']
+            y = arg['yz'][0]
+            z = arg['yz'][1]
+
+            return {'a': x.sum(), 'b': {'c': y + z, 'd': (x * z, y.exp())}}
+
+        inp_p = {'x': x_p, 'yz': (y_p, z_p)}
+        inp_t = {'x': x_t, 'yz': (y_t, z_t)}
+        actual_output, jvp_fn = linearize(fn, inp_p)
+        actual_jvp = jvp_fn(inp_t)
+
+        expected_output, expected_jvp = jvp(fn, (inp_p,), (inp_t,))
+
+        self.assertEqual(actual_output, expected_output)
+        self.assertEqual(actual_jvp, expected_jvp)
+
+    @onlyCUDA
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
+    def test_linearize_errors(self):
+        dtype = torch.float
+        device = torch.device('cpu')
+        x_p = make_tensor((3, 1), device=device, dtype=dtype)
+        x_t = make_tensor((3, 1), device=device, dtype=dtype)
+
+        def fn(x):
+            return x.sin()
+
+        _, jvp_fn = linearize(fn, x_p)
+
+        with self.assertRaisesRegex(RuntimeError, "to have the same argspec as the primals"):
+            jvp_fn((x_t, x_t))
+
+        with self.assertRaisesRegex(RuntimeError, "in flattened pytree doesn't match the shape"):
+            jvp_fn(x_t.unsqueeze(0))
+
+        with self.assertRaisesRegex(RuntimeError, "in flattened pytree doesn't match the dtype"):
+            jvp_fn(x_t.to(torch.double))
+
+        with self.assertRaisesRegex(RuntimeError, "in flattened pytree doesn't match the device"):
+            jvp_fn(x_t.to(torch.device('cuda')))
 
 # The tests here follow the cases in [Forward Grad View/inplace]
 # https://github.com/pytorch/pytorch/blob/master/torch/csrc/autograd/autograd_meta.cpp#L18-L43
@@ -2959,7 +3122,7 @@ class TestComposability(TestCase):
             [sys.executable, "-W", "all", "-c", "import functorch"],
             stderr=subprocess.STDOUT,
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
-        self.assertEquals(out, "")
+        self.assertEqual(out, "")
 
     def test_requires_grad_inside_transform(self, device):
         def f(x):
@@ -3317,7 +3480,7 @@ class TestMakeFunctional(TestCase):
     def test_correctness_mnist(self, mechanism):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
                 self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
                 self.conv2_drop = nn.Dropout2d()
@@ -3476,7 +3639,7 @@ class TestExamplesCorrectness(TestCase):
     def test_maml_regression(self, device, mechanism):
         class ThreeLayerNet(nn.Module):
             def __init__(self):
-                super(ThreeLayerNet, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(1, 40)
                 self.relu1 = nn.ReLU()
                 self.fc2 = nn.Linear(40, 40)
@@ -3899,6 +4062,7 @@ class TestExamplesCorrectness(TestCase):
         self.assertNotEqual(tuple(weight[0] for weight in result_weights),
                             tuple(weight[1] for weight in result_weights))
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     @parametrize('mechanism', ["make_functional", "functional_call"])
     def test_resnet18_per_sample_grads(self, device, mechanism):
@@ -4308,7 +4472,7 @@ def forward(self, x_1):
 
 
 def construct_sum_pyop():
-    mysum = PyOperator("mysum")
+    mysum = HigherOrderOperator("mysum")
 
     @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
     def mysum_batch_rule(interpreter, x, dim):
@@ -4362,7 +4526,7 @@ def construct_sum_pyop():
 
 sum_pyop = construct_sum_pyop()
 
-class TestPyOperatorInteraction(TestCase):
+class TestHigherOrderOperatorInteraction(TestCase):
 
     def test_basic_sum(self, device):
         x = torch.randn(2, 3, 4, device=device)
@@ -4453,6 +4617,11 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(
+    TestLinearize,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
     TestVmapJvpInplaceView,
     globals(),
     only_for=only_for,
@@ -4473,7 +4642,7 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(
-    TestPyOperatorInteraction,
+    TestHigherOrderOperatorInteraction,
     globals(),
     only_for=only_for,
 )

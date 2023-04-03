@@ -189,11 +189,9 @@ class _OverlappingCpuLoader(_TensorLoader):
         while not self._done:
             drained = self._drain()
             self._refill()
-            for obj in drained:
-                yield obj
+            yield from drained
 
-        for val in self._finish():
-            yield val
+        yield from self._finish()
 
 
 def _item_size(item: WriteItem) -> int:
@@ -321,7 +319,7 @@ class FileSystemWriter(StorageWriter):
     def __init__(
         self,
         path: Union[str, os.PathLike],
-        single_file_per_rank: bool = False,
+        single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
@@ -330,7 +328,7 @@ class FileSystemWriter(StorageWriter):
         Initialize the writer pointing to `path`
 
         Args:
-            path: diretory where the checkpoint will be writen to.
+            path: directory where the checkpoint will be written to.
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
@@ -508,7 +506,7 @@ class FileSystemReader(StorageReader):
         fut.set_result(None)
         return fut
 
-    # Implementating the abstract function in StorageReader
+    # Implementing the abstract function in StorageReader
     def read_metadata(self) -> Metadata:
         with (self.path / ".metadata").open("rb") as metadata_file:
             return pickle.load(metadata_file)

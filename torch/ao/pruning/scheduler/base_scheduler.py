@@ -7,7 +7,7 @@ import weakref
 
 __all__ = ["BaseScheduler"]
 
-class BaseScheduler(object):
+class BaseScheduler:
 
     def __init__(self, sparsifier, last_epoch=-1, verbose=False):
 

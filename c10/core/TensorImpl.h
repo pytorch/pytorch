@@ -331,9 +331,9 @@ struct C10_API VariableVersion {
   // doesn't allocate the intrusive_ptr.
   // Example use cases are:
   //  - Inference tensors don't track version counter, so they'll just always
-  //    have disbaled VariableVersion.
+  //    have disabled VariableVersion.
   //  - In SavedVariable class we override version_counter_ inside its
-  //  construtor
+  //  constructor
   //    so that we can use the cheap constructor there.
   enum Disabled { DISABLED };
   // It's okay to return true even for inference tensor which
@@ -386,6 +386,15 @@ struct C10_API VariableVersion {
     if (version_counter_) {
       ++version_counter_->version_;
     }
+  }
+
+  void set_version(int64_t i) {
+    TORCH_CHECK(
+        version_counter_,
+        "Tried to call torch.autograd._unsafe_set_version() on a tensor "
+        "that does not have a version counter. Was it created in inference mode?");
+    TORCH_CHECK(i >= 0, "Cannot set a version_counter to a value below 0: ", i);
+    version_counter_->version_ = i;
   }
 
   // Inference tensor doesn't have version counter so it shouldn't be
@@ -1887,7 +1896,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            BackendComponent::CUDABit,
            BackendComponent::MPSBit,
            BackendComponent::HIPBit,
-           BackendComponent::XPUBit});
+           BackendComponent::XPUBit,
+           BackendComponent::HPUBit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };
@@ -2095,7 +2105,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * If the existing data does not match the desired type, it will be deleted
    * and a new storage will be created.
    */
-  inline void* raw_mutable_data(const caffe2::TypeMeta meta) {
+  inline void* raw_mutable_data(const caffe2::TypeMeta& meta) {
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(

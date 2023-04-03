@@ -164,7 +164,6 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
         fut.wait()
         output = fut.value()
         self.assertEqual(0, output[0].numel())
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqual(xs[0], output[0], exact_dtype=False)
 
     # TODO: add error check testing
@@ -185,7 +184,6 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
             # Run with 1 input tensor
             x = fn(torch.tensor([self.rank]))
             output = broadcast([x], i, 0)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqual(torch.tensor([i]), output[0], exact_dtype=False)
 
             # TODO: UCC currently does not support multi tensor input
@@ -215,7 +213,6 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
             fut = pg.allreduce([tensor], opts).get_future()
             fut.wait()
             result = fut.value()
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqual(expected, result[0], exact_dtype=False)
 
         # TODO: UCC currently does not support multi tensor input
@@ -250,7 +247,6 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
                 fut.wait()
                 result = fut.value()
                 if root == self.rank:
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                     self.assertEqual(output, result[0], exact_dtype=False)
 
     @requires_ucc()

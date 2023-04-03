@@ -1,7 +1,6 @@
 import functools
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
-
-from typing_extensions import Protocol
+import sys
+from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 import torch
 from torch import fx
@@ -44,23 +43,42 @@ def register_backend(
     return compiler_fn
 
 
+register_debug_backend = functools.partial(register_backend, tags=("debug",))
+register_experimental_backend = functools.partial(
+    register_backend, tags=("experimental",)
+)
+
+
 def lookup_backend(compiler_fn):
     """Expand backend strings to functions"""
     if isinstance(compiler_fn, str):
         if compiler_fn not in _BACKENDS:
             _lazy_import()
+        if compiler_fn not in _BACKENDS:
+            _lazy_import_entry_point(compiler_fn)
+        if compiler_fn not in _BACKENDS:
+            from ..exc import InvalidBackend
+
+            raise InvalidBackend(name=compiler_fn)
         compiler_fn = _BACKENDS[compiler_fn]
     return compiler_fn
 
 
-def list_backends():
+def list_backends(exclude_tags=("debug", "experimental")):
     """
     Return valid strings that can be passed to:
 
         torch.compile(..., backend="name")
     """
     _lazy_import()
-    return sorted(_BACKENDS.keys())
+    exclude_tags = set(exclude_tags or ())
+    return sorted(
+        [
+            name
+            for name, backend in _BACKENDS.items()
+            if not exclude_tags.intersection(backend._tags)
+        ]
+    )
 
 
 @functools.lru_cache(None)
@@ -70,9 +88,26 @@ def _lazy_import():
 
     import_submodule(backends)
 
-    # TODO(jansel): refactor backends defined in other places
-    from .. import debug_utils
-    from ..optimizations import backends
+    from ..debug_utils import dynamo_minifier_backend
 
-    assert backends is not None
-    assert debug_utils is not None
+    assert dynamo_minifier_backend is not None
+
+
+@functools.lru_cache(None)
+def _lazy_import_entry_point(backend_name: str):
+    from importlib.metadata import entry_points
+
+    compiler_fn = None
+    group_name = "torch_dynamo_backends"
+    if sys.version_info < (3, 10):
+        backend_eps = entry_points()
+        eps = [ep for ep in backend_eps.get(group_name, ()) if ep.name == backend_name]
+        if len(eps) > 0:
+            compiler_fn = eps[0].load()
+    else:
+        backend_eps = entry_points(group=group_name)
+        if backend_name in backend_eps.names:
+            compiler_fn = backend_eps[backend_name].load()
+
+    if compiler_fn is not None and backend_name not in list_backends(tuple()):
+        register_backend(compiler_fn=compiler_fn, name=backend_name)

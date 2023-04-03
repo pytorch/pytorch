@@ -28,7 +28,7 @@ static PyObject* THCPStream_pynew(
   uint64_t stream_ptr = 0;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  static char* kwlist[] = {
+  constexpr const char* kwlist[] = {
       "priority",
       "stream_id",
       "device_index",
@@ -39,7 +39,7 @@ static PyObject* THCPStream_pynew(
           args,
           kwargs,
           "|iLLLK",
-          kwlist,
+          const_cast<char**>(kwlist),
           &priority,
           &stream_id,
           &device_index,

@@ -512,7 +512,7 @@ class WeakKeyDictionaryTestCase(TestCase):
 
         d = self._empty_mapping()
 
-        class badseq(object):
+        class badseq:
             def __iter__(self):
                 return self
 

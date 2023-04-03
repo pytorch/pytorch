@@ -4,12 +4,16 @@ from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, 
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
+import sympy
 import weakref
 import torch
-from torch import sym_float, sym_int
+from torch import sym_float, sym_int, sym_max
 
 try:
-    from nvfuser._C import DataType  # type: ignore[import]
+    try:
+        from nvfuser import DataType  # type: ignore[import, attr-defined]
+    except ImportError:
+        from nvfuser._C import DataType  # type: ignore[import]
 
     _torch_dtype_to_nvfuser_dtype_map = {
         torch.cdouble: DataType.ComplexDouble,
@@ -74,6 +78,7 @@ torch_function_passthrough = {
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
     torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.is_contiguous,
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
@@ -243,14 +248,12 @@ def is_channels_last_contiguous_3d(a: Tensor) -> bool:
     return True
 
 
-_memory_formats = set(
-    (
-        torch.contiguous_format,
-        torch.preserve_format,
-        torch.channels_last,
-        torch.channels_last_3d,
-    )
-)
+_memory_formats = {
+    torch.contiguous_format,
+    torch.preserve_format,
+    torch.channels_last,
+    torch.channels_last_3d,
+}
 
 
 def validate_memory_format(memory_format: torch.memory_format):
@@ -320,7 +323,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
     lengths_and_strides = sorted(
-        tuple(zip(a.shape, a.stride())), key=operator.itemgetter(1)
+        zip(a.shape, a.stride()), key=operator.itemgetter(1)
     )
 
     expected_stride = 1
@@ -345,33 +348,41 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 # non overlapping and dense strides.
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
-def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
-    """
-    Computes the output strides for elementwise operations.
-    """
-
-    if len(tensors) == 0:
+def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=False) -> List[int]:
+    if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
 
-    check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
+    if not _skip_checks:
+        check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
 
     # Filters the tensors to actual tensors
-    tensors = tuple(
-        a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
-    )
+    if not _skip_checks:
+        tensors = tuple(
+            a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
+        )
 
     # Short-circuits for CPU scalar case
     if len(tensors) == 0:
-        return ()
+        return []
 
     # Short-circuits for shapes with zero or one dimensions
     # TODO: are these necessary?
     ndim = tensors[0].ndim
     if ndim == 0:
-        return ()
+        return []
     if ndim == 1:
-        return (1,)
+        return [0]
+
+    # Short-circuits if contiguous, following the fake fast path.
+    # This reduces the number of guards we end up making
+    # TODO: do channels last too
+    is_contiguous = True
+    for t in tensors:
+        is_contiguous = is_contiguous and t.is_contiguous(memory_format=torch.contiguous_format)
+
+    if is_contiguous:
+        return list(range(ndim))
 
     shape = tensors[0].shape
 
@@ -397,6 +408,11 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
         # or all strides are equal and all dimensions have the same length
         return 0
 
+    # The "sort" order for the permutation is back-to-front, but
+    # the natural order for permutations is front-to-back.  Do the
+    # sorting back-to-front and then reverse it on output.
+    #
+    # also, note this returns the logical to physical shape permutation
     perm = list(reversed(range(ndim)))
 
     # insertion sort with support for ambiguous comparisons
@@ -410,16 +426,62 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
             elif comparison < 0:
                 break
 
-    permuted_shape = [-1] * ndim
-    for idx, x in enumerate(reversed(perm)):
-        permuted_shape[idx] = shape[x]
+    return list(reversed(perm))
+
+
+def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
+    """
+    Computes the output strides for elementwise operations.
+    """
+    if len(tensors) == 0:
+        msg = "Can't compute elementwise output strides for zero tensors!"
+        raise ValueError(msg)
+
+    check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
+
+    # Filters the tensors to actual tensors
+    tensors = tuple(
+        a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
+    )
+
+    # Short-circuits for CPU scalar case
+    if len(tensors) == 0:
+        return ()
+
+    ndim = tensors[0].ndim
+    shape = tensors[0].shape
+
+    if ndim == 0:
+        return ()
+    if ndim == 1:
+        return (1,)
+
+    logical_to_physical_perm = compute_elementwise_output_logical_to_physical_perm(
+        *tensors, _skip_checks=True
+    )
+    permuted_shape = apply_perm(shape, logical_to_physical_perm)  # to physical
 
     new_strides = make_contiguous_strides_for(permuted_shape)
-    permuted_strides = [-1] * ndim
-    for idx, x in enumerate(reversed(perm)):
-        permuted_strides[x] = new_strides[idx]
+    permuted_strides = apply_perm(new_strides, invert_perm(logical_to_physical_perm))  # to logical
 
     return tuple(permuted_strides)
+
+
+# Identity permutation is [0, 1, 2]
+def apply_perm(inp, perm):
+    ndim = len(inp)
+    permuted_inp = [-1] * ndim
+    for idx, x in enumerate(perm):
+        permuted_inp[idx] = inp[x]
+    return permuted_inp
+
+
+def invert_perm(perm):
+    ndim = len(perm)
+    new_perm = [-1] * ndim
+    for idx, x in enumerate(perm):
+        new_perm[x] = idx
+    return new_perm
 
 
 #
@@ -1160,6 +1222,14 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
         return type(x)
 
 
+def symbol_type(x: sympy.Symbol) -> Type:
+    if x.is_integer:  # type: ignore[attr-defined]
+        return int
+    else:
+        # NB: Not strictly correct, but we don't support SymPy complex or bool.
+        return float
+
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -1255,7 +1325,7 @@ def elementwise_dtypes(
 
     highest_type: type = bool
     for x in args:
-        if not isinstance(x, (Number, TensorLike)):
+        if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = (
                 "Unexpected type {0} when computing elementwise type promotion!".format(
                     str(type(x))
@@ -1265,6 +1335,8 @@ def elementwise_dtypes(
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
+        elif isinstance(x, sympy.Symbol):
+            highest_type = get_higher_type(highest_type, symbol_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1388,8 +1460,7 @@ def make_contiguous_strides_for(
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        if l != 0:
-            multiplier *= l
+        multiplier *= sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
@@ -1480,20 +1551,20 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
 
 def set_correction(
     unbiased: Optional[bool] = None,
-    correction: Optional[int] = None,
-):
+    correction: Optional[NumberType] = None,
+) -> float:
     if correction is not None and unbiased is not None:
         raise RuntimeError("cannot specify both correction and unbiased arguments")
     elif correction is None and unbiased is None:
-        correction = 1
+        correction = 1.0
     elif correction is None and unbiased is not None:
-        correction = 0 if unbiased is False else 1
+        correction = 0.0 if unbiased is False else 1.0
     # NB: we don't actually support symint here, but it's harmless to accept
-    if not isinstance(correction, IntLike):
-        raise ValueError("correction argument should be integer")
+    if not isinstance(correction, (IntLike, FloatLike)):
+        raise ValueError("correction argument should be integer or float")
     if correction < 0:
         raise ValueError("correction argument should be non-negative")
-    return correction
+    return sym_float(correction)
 
 
 def compute_required_storage_length(

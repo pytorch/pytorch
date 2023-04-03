@@ -58,10 +58,6 @@ Note that you might need to uninstall existing Eigen and pybind11 packages due t
 
 ## Python support
 
-To use Caffe2 in Python, you need two libraries, future and six.
-
-    pip install future six
-
 To run the tutorials, download additional source from GitHub.
 
     git clone --recursive https://github.com/caffe2/tutorials.git caffe2_tutorials

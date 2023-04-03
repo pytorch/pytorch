@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Union
 import math  # noqa: F401
 
 # Testing utils
-from torch._six import inf
+from torch import inf
 
 # TODO: include files like this should not set the default dtype
 torch.set_default_dtype(torch.double)
@@ -50,7 +50,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
         def conjugate(tensor):
             return tensor.conj()
 
-        if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
+        if isinstance(arg, (torch.Size, dont_convert)):
             return arg
         elif isinstance(arg, tuple) and len(arg) == 0:
             var = conjugate(torch.randn((), dtype=dtype, device=device))
@@ -605,7 +605,7 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
             __constants__ = submodule_constants
 
             def __init__(self):
-                super(TheModule, self).__init__()
+                super().__init__()
                 self.submodule = nn_module(*constructor_args)
 
         def make_module(script):

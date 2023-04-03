@@ -87,7 +87,7 @@ if __name__ == '__main__':
     parser.add_argument('--bench', type=str, choices=BENCHMARK_NAMES, nargs='+', default=BENCHMARK_NAMES)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--samples', type=int, default=10)
-    parser.add_argument('--probability_regular', type=float, default=1.0)
+    parser.add_argument('--probability-regular', '--probability_regular', type=float, default=1.0)
     parser.add_argument('-o', '--output', type=str)
     args = parser.parse_args()
 

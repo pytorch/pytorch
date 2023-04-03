@@ -1,7 +1,6 @@
 import csv
 import os
 import re
-import subprocess
 import sys
 
 # This script takes the logs produced by the benchmark scripts (e.g.,
@@ -24,11 +23,6 @@ m = re.search(r"https://gist.github.com/[a-f0-9]+", full_log)
 if m is not None:
     gist_url = m.group(0)
 
-# Record the current commit hash for ease of reproducibility
-hash = subprocess.check_output(
-    "git rev-parse HEAD".split(" "), encoding="utf-8"
-).rstrip()
-
 # Split the log into an entry per benchmark
 entries = re.split(
     r"(?:cuda (?:train|eval) +([^ ]+)|WARNING:root:([^ ]+) failed to load)", full_log
@@ -45,25 +39,27 @@ def chunker(seq, size):
 c = 0
 i = 0
 
-out = csv.writer(sys.stdout, dialect="excel")
-out.writerow(
+out = csv.DictWriter(
+    sys.stdout,
     [
-        "",
-        hash,
-        "",
-        "",
-        "",
-        "",
-        gist_url,
+        "bench",
+        "name",
+        "result",
+        "component",
+        "context",
+        "explain",
         "frame_time",
         "backend_time",
-        "total_ops",
-        "fake_tensor_dispatch_calls",
-        "proxy_torch_dispatch_calls",
-        "time_per_op",
-        "dispatches_per_op",
-    ]
+        "graph_count",
+        "op_count",
+        "graph_breaks",
+        "unique_graph_breaks",
+    ],
+    dialect="excel",
 )
+out.writeheader()
+out.writerow({"explain": gist_url})
+
 
 # Sometimes backtraces will be in third party code, which results
 # in very long file names.  Delete the absolute path in this case.
@@ -148,27 +144,24 @@ for name, name2, log in chunker(entries, 3):
             backend_time = float(split_str[1])
             frame_time = float(split_str[0].split("entire_frame_compile:")[1])
 
-    tot_ops = None
-    fm_dispatches = None
-    pm_dispatches = None
     if "STATS:" in log:
         result = re.search("STATS:(.*)\n", log).group(1)
         # call_* op count: 970 | FakeTensor.__torch_dispatch__:35285 | ProxyTorchDispatchMode.__torch_dispatch__:13339
         split_all = result.split("|")
+        # TODO: rewrite this to work with arbitrarily many stats
 
-        if len(split_all) == 3:
-            tot_ops = int(split_all[0].split("call_* op count:")[1])
-            fm_dispatches = int(split_all[1].split("FakeTensor.__torch_dispatch__:")[1])
-            pm_dispatches = int(
-                split_all[2].split("ProxyTorchDispatchMode.__torch_dispatch__:")[1]
-            )
-    time_per_op = None
-    if frame_time is not None and tot_ops is not None:
-        time_per_op = frame_time / tot_ops * 1000  # ms
-
-    dispatches_per_op = None
-    if fm_dispatches is not None and pm_dispatches is not None and tot_ops is not None:
-        dispatches_per_op = (fm_dispatches + pm_dispatches) / tot_ops
+    graph_count = None
+    op_count = None
+    graph_breaks = None
+    unique_graph_breaks = None
+    if m := re.search(
+        r"Dynamo produced (\d+) graphs covering (\d+) ops with (\d+) graph breaks \((\d+) unique\)",
+        log,
+    ):
+        graph_count = m.group(1)
+        op_count = m.group(2)
+        graph_breaks = m.group(3)
+        unique_graph_breaks = m.group(4)
 
     # If the context string is too long, don't put it in the CSV.
     # This is a hack to try to make it more likely that Google Sheets will
@@ -183,22 +176,20 @@ for name, name2, log in chunker(entries, 3):
         context = ""
 
     out.writerow(
-        [
-            bench,
-            name,
-            "",
-            r,
-            component,
-            context,
-            explain,
-            frame_time,
-            backend_time,
-            tot_ops,
-            fm_dispatches,
-            pm_dispatches,
-            time_per_op,
-            dispatches_per_op,
-        ]
+        {
+            "bench": bench,
+            "name": name,
+            "result": r,
+            "component": component,
+            "context": context,
+            "explain": explain,
+            "frame_time": frame_time,
+            "backend_time": backend_time,
+            "graph_count": graph_count,
+            "op_count": op_count,
+            "graph_breaks": graph_breaks,
+            "unique_graph_breaks": unique_graph_breaks,
+        }
     )
     i += 1
 

@@ -715,7 +715,7 @@ class MixtureOfExperts(NestedWrappedModule):
 
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
-        super(FSDPTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     @property
@@ -767,9 +767,7 @@ class FSDPTest(MultiProcessTestCase):
         ]
         for values in itertools.product(*subtest_config_values):
             # Map keyword to chosen value
-            subtest_kwargs = {
-                kwarg: value for kwarg, value in zip(subtest_config_keys, values)
-            }
+            subtest_kwargs = dict(zip(subtest_config_keys, values))
             with self.subTest(**subtest_kwargs):
                 test_fn(*test_args, **test_kwargs, **subtest_kwargs)
             dist.barrier()
