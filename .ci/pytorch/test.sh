@@ -302,7 +302,7 @@ test_perf_for_dashboard() {
         --accuracy --"$dtype" --backend "$backend" "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_accuracy.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$dtype" --backend "$backend" --dynamic-shapes --disable-cudagraphs "$@" \
+        --accuracy --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_training_cuda_accuracy.csv"
 
     # Run performance test
@@ -316,7 +316,7 @@ test_perf_for_dashboard() {
         --performance --cold-start-latency --"$dtype" --backend "$backend" "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$dtype" --backend "$backend" --dynamic-shapes --disable-cudagraphs "$@" \
+        --performance --cold-start-latency --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_training_cuda_performance.csv"
   done
 }

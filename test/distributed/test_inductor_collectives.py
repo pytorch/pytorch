@@ -306,7 +306,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         FileCheck() \
             .check("buf0 = empty_strided(") \
             .check("buf2 = empty_strided") \
-            .check("triton__0.run(arg0_1, buf0, buf2") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf2") \
             .check_not("copy_(") \
             .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf1_work = dist.all_reduce(buf1") \
