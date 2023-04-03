@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 from typing import Dict, Any
 from torch.overrides import is_tensor_like
+from torch.types import _int, _float
 
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
@@ -155,3 +156,13 @@ def vec_to_tril_matrix(vec, diag=0):
     tril_mask = arange < arange.view(-1, 1) + (diag + 1)
     mat[..., tril_mask] = vec
     return mat
+
+def uniform(low: _float, high: _float, *size: _int) -> torch.Tensor:
+    """
+    Returns a tensor filled with numbers sampled from a uniform random distribution
+    Args:
+        low (float): Lower bound of the distribution.
+        high (float): Upper bound of the distribution.
+        *size (int): Sequence of integers that defines the shape of the Tensor. Can be a variable number or a list.
+    """
+    return torch.empty(size).uniform_(low, high)

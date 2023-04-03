@@ -1580,6 +1580,14 @@ class TestDistributions(DistributionsTestCase):
         low.grad.zero_()
         high.grad.zero_()
 
+        # check uniform alias 
+        rand = uniform(0, 1, low.size())
+        torch.set_rng_state(state)
+        u = Uniform(low, high).rsample()
+        u.backward(torch.ones_like(u))
+        self.assertEqual(low.grad, 1 - rand)
+        self.assertEqual(high.grad, rand)
+
         self._check_forward_ad(lambda x: x.uniform_())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
