@@ -70,7 +70,7 @@ if HAS_CPU:
         device = "cpu"
 
     class DynamicShapesCppWrapperCpuTests(TestCase):
-        pass
+        device = "cpu"
 
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
     copy_tests(

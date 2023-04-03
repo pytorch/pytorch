@@ -23,7 +23,7 @@ class CppWrapperTemplate:
 
 
 class TestCppWrapper(TorchTestCase):
-    pass
+    device = "cpu"
 
 
 def make_test_case(name, device="cpu"):

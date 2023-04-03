@@ -1677,6 +1677,9 @@ class CommonTemplate:
         self.common(fn, [torch.randint(5, (1, 8)), 5400])
 
     def test_int_div(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu int_div test")
+
         def fn(x, y):
             s3 = x.size(1)
             a = torch.zeros((1 + s3) // 2)
