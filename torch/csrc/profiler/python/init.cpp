@@ -10,10 +10,6 @@
 #include <torch/csrc/profiler/standalone/execution_graph_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
-#ifdef USE_KINETO
-#include <libkineto.h>
-#endif
-
 namespace torch {
 namespace profiler {
 
@@ -297,13 +293,9 @@ void initPythonBindings(PyObject* module) {
   m.def(
       "_disable_execution_graph_observer",
       &torch::profiler::impl::disableExecutionGraphObserver);
-  m.def("_is_kineto_profiler_registered", []() {
-#ifdef USE_KINETO
-    return libkineto::api().isProfilerRegistered();
-#else
-      return false;
-#endif
-  });
+  m.def(
+      "_is_kineto_profiler_registered",
+      &torch::profiler::impl::kineto::kinetoProfilerIsRegistered);
 
   py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
       m, "CapturedTraceback");

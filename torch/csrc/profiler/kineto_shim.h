@@ -115,6 +115,7 @@ struct ActivityTraceWrapper {
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 TORCH_API void initializeKineto();
+TORCH_API bool kinetoProfilerIsRegistered();
 void prepareTrace(
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config);

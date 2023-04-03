@@ -211,6 +211,17 @@ void initializeKineto() {
 #endif
 }
 
+bool kinetoProfilerIsRegistered() {
+  // Why not call libkineto::api().isProfilerRegistered()?
+  // This is a workaround for cases where direct calls fail builds (e.g.
+  // Windows)
+#ifdef USE_KINETO
+  return libkineto::api().isProfilerRegistered();
+#else
+  return false;
+#endif
+}
+
 void prepareTrace(
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config) {
