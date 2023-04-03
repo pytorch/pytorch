@@ -1976,7 +1976,6 @@ class CommonTemplate:
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
-    @unittest.skipIf(not has_bf16_support(), "requires bf16 support")
     def test_linear_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -2002,16 +2001,17 @@ class CommonTemplate:
 
         options = itertools.product(unary_list, [[2, 3, 10], [2, 10]], [True, False])
         dtype = torch.bfloat16
-        for eltwise_fn, input_shape, bias in options:
-            mod = M(eltwise_fn, input_shape[-1], 30, bias=bias).eval()
-            # only fuse for linear when the dtype is bf16
-            mod = mod.to(dtype)
-            v = torch.randn(input_shape).to(dtype)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
+        if has_bf16_support():
+            for eltwise_fn, input_shape, bias in options:
+                mod = M(eltwise_fn, input_shape[-1], 30, bias=bias).eval()
+                # only fuse for linear when the dtype is bf16
+                mod = mod.to(dtype)
+                v = torch.randn(input_shape).to(dtype)
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     def test_linear_binary(self):
         class M(torch.nn.Module):
