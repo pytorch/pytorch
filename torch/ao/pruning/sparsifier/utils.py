@@ -17,23 +17,24 @@ __all__ = [
 def module_contains_param(module: nn.Module, parametrization: Type[nn.Module]) -> bool:
     if is_parametrized(module):
         # see if any of the module tensors have a parametriztion attached that matches the one passed in
+        parametrizations: nn.ModuleDict = module.parameterizations
+
         return any(
             [
                 any(isinstance(param, parametrization) for param in param_list)
-                for key, param_list in module.parametrizations.items()
+                for key, param_list in parametrizations.items()
             ]
         )
     return False
 
 
-def swap_module(mod: nn.Module, mapping: Dict[nn.Module, nn.Module]) -> nn.Module:
-    r"""Swaps the module if it has a quantized counterpart and it has an
-    `observer` attached.
+def swap_module(mod: nn.Module, mapping: Dict[Type[nn.Module], Type[nn.Module]]) -> nn.Module:
+    r"""Swaps the module using from_dense according to the mapping passed in. 
     Args:
         mod: input module
         mapping: a dictionary that maps from nn module to sparse nn module
     Return:
-        The corresponding sparse module of `mod` according to mapping
+        The corresponding sparse module of `mod` according to mapping, created using from_dense
     """
     new_mod = mod
     if type_before_parametrizations(mod) in mapping:
@@ -46,8 +47,7 @@ def swap_module(mod: nn.Module, mapping: Dict[nn.Module, nn.Module]) -> nn.Modul
         # Preserve module's post forward hooks except _observer_forward_hook
         # After convert they'll work with quantized output
         for hook_fn in mod._forward_hooks.values():
-            if hook_fn is not _observer_forward_hook:
-                new_mod.register_forward_hook(hook_fn)
+            new_mod.register_forward_hook(hook_fn)
 
         # respect device affinity when swapping modules
         devices = {p.device for p in chain(mod.parameters(), mod.buffers())}
