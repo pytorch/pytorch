@@ -788,7 +788,6 @@ class TestOperators(TestCase):
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op
         xfail("pca_lowrank"),  # calls random op
-        xfail("put"),  # vmap: inplace into a regular tensor
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('linalg.pinv', 'hermitian', decorator=skipIfRocm),
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
@@ -882,7 +881,6 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),  # dynamic
         xfail('nn.functional.fractional_max_pool2d'),  # random
         xfail('nn.functional.fractional_max_pool3d'),  # random
-        xfail('take'),  # dynamic
         xfail('pca_lowrank', ''),  # randomness
         xfail('svd_lowrank', ''),  # randomness
         xfail('to_sparse', ''),  # non-dense output
@@ -2204,6 +2202,22 @@ class TestOperators(TestCase):
                 result = jvpvjpvmap_fn(*new_args)
                 self.assertEqual(result, expected)
 
+    def test_data_write_errors_under_transform(self, device):
+        t = torch.randn(3, 3, device=device)
+
+        def fn(t):
+            t.data = torch.randn(3, 3)
+            return t.sum()
+
+        msg = "mutating directly with `.data` inside functorch transform"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            grad(fn)(t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vjp(fn, t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            jvp(fn, (t,), (torch.randn_like(t),))
 
 
 only_for = ("cpu", "cuda")

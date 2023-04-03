@@ -92,6 +92,9 @@ class GraphLowering(torch.fx.Interpreter):
             # TODO: this should not be needed once #93059 lands
             # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
             # TODO: make a dedicated UnknownSource for this?
+            # NB: This is using the legacy default behavior from
+            # create_symbolic_sizes_strides_storage_offset but we hope we can
+            # just delete this entirely
             source = ConstantSource(
                 f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
             )
@@ -99,7 +102,10 @@ class GraphLowering(torch.fx.Interpreter):
                 size,
                 stride,
                 _,
-            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(ex, source)
+            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(
+                ex,
+                source,
+            )
 
         size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
@@ -303,6 +309,11 @@ class GraphLowering(torch.fx.Interpreter):
             expr = example.node.expr
             self.graph_inputs[target] = expr
             return expr
+        elif isinstance(example, (int, bool, float)):
+            expr = sympy.sympify(example)
+            self.graph_inputs[target] = expr
+            return expr
+        assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
@@ -445,7 +456,11 @@ class GraphLowering(torch.fx.Interpreter):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
         with ir.IRNode.current_origins(origins):
-            if n.op == "call_function" and fallback_node_due_to_unsupported_type(n):
+            if (
+                n.op == "call_function"
+                and n.target is not operator.getitem
+                and fallback_node_due_to_unsupported_type(n)
+            ):
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
