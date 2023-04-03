@@ -1186,7 +1186,6 @@ class CUDAGraphTreeManager:
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
-
         if self.in_recording:
             self.try_end_curr_recording()
 
@@ -1247,7 +1246,6 @@ class CUDAGraphTreeManager:
 
     def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
         torch.cuda.synchronize()
-        print(f"Recording {function_id}")
         node = CUDAGraphNode(
             self.ids_to_funcs[function_id],
             self.new_graph_id(),
@@ -1403,9 +1401,9 @@ class CUDAGraphTreeManager:
         # but that adds some complications.
         deleted = set()
         for t, stack_trace in self.current_node.path_live_weakrefs_and_stacktraces():
-            if t() and t() not in deleted:
+            if t() and t.data_ptr() not in deleted:
+                deleted.add(t.data_ptr())
                 torch._C._free_And_Remove_DeleterFn(t())
-                deleted.add(t())
                 stack_trace = (
                     stack_trace.strip()
                     if stack_trace
