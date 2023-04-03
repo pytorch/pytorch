@@ -891,7 +891,7 @@ def read_batch_size_from_file(args, filename, model_name):
             if model_name == cur_name:
                 batch_size = int(b)
     if batch_size is None:
-        log.warning("Could not find batch size for {}".format(model_name))
+        log.warning("Could not find batch size for %s", model_name)
     elif batch_size == -1:
         raise RuntimeError(
             f"Batch size is unset for {model_name} in {args.batch_size_file}"
@@ -1521,6 +1521,9 @@ class BenchmarkRunner:
                 f"{stats['graph_breaks']} graph breaks ({stats['unique_graph_breaks']} unique)"
             )
 
+        if self.args.stats:
+            Stats.print_summary()
+
 
 def help(fn):
     return fn.__doc__
@@ -1757,23 +1760,24 @@ def parse_args(args=None):
         "--profiler_trace_name",
         help="Overwrites exported trace name",
     )
-
     parser.add_argument(
         "--diff-branch",
         default=diff_branch_default,
         help="delta current branch against given branch.",
     )
-
     parser.add_argument(
         "--tag", default=None, help="Specify a tag to be included in csv files."
     )
-
     parser.add_argument(
         "--explain",
         action="store_true",
         help="print some graph/op statistics during the run, similar to .explain()",
     )
-
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="print graph counter stats",
+    )
     parser.add_argument(
         "--cold-start-latency",
         "--cold_start_latency",

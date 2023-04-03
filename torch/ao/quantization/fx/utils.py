@@ -6,7 +6,6 @@ from torch.ao.quantization import (
     QuantType,
 )
 from torch.ao.quantization.backend_config import (
-    BackendConfig,
     DTypeWithConstraints,
 )
 from torch.ao.quantization.fake_quantize import (

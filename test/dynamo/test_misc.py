@@ -3170,21 +3170,6 @@ def fn():
             f3(torch.ones(6))
         self.assertEqual(cnt.frame_count, 0)
 
-    def test_config_log_level(self):
-        @torch._dynamo.optimize("eager")
-        def fn(a, b):
-            return a + b
-
-        with self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log:
-            torch._dynamo.config.log_level = logging.DEBUG
-            fn(torch.randn(10), torch.randn(10))
-            cur_len = len(log)
-            self.assertGreater(cur_len, 0)
-
-            torch._dynamo.config.log_level = logging.WARNING
-            fn(torch.randn(10), torch.randn(10))
-            self.assertEqual(cur_len, len(log))
-
     @patch.object(torch._dynamo.config, "print_graph_breaks", True)
     def test_duplicate_graph_break_warning(self):
         @torch._dynamo.optimize("eager")
