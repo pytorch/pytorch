@@ -1,6 +1,7 @@
-name: Nightly Upload t orockset
+name: Nightly Upload to rockset
 
 on:
+  pull_request:
   schedule:
     # Choose a random time near midnight PST because it may be delayed if there are high loads
     - cron:  37 7 * * *
@@ -39,6 +40,7 @@ jobs:
     runs-on: [self-hosted, linux.2xlarge]
     steps:
       - name: Checkout PyTorch
+        fetch-depth: 1
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - run: |
