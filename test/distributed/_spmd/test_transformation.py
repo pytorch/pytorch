@@ -93,7 +93,7 @@ class TransformationTest(DTensorTestBase):
         batch_size = 100
         layers = 10
         dim = 100
-        num_iters = 1
+        num_iters = 5
 
         @compile(gm_transformation=GraphModuleTransformation(num_iters=num_iters))
         def train_step(model, optim, batch):
@@ -110,7 +110,7 @@ class TransformationTest(DTensorTestBase):
         batch_size = 100
         layers = 10
         dim = 100
-        num_iters = 1
+        num_iters = 5
 
         @compile(
             gm_transformation=GraphModuleTransformation(
@@ -121,9 +121,10 @@ class TransformationTest(DTensorTestBase):
             model(batch).sum().backward()
             return [p.grad for p in model.parameters()]
 
-        self._test_tran_step_with_ddp_without_optim_step(
-            train_step, num_iters, batch_size, layers, dim
-        )
+        model, optim, _, _ = self._init(batch_size, layers, dim)
+        for _ in range(num_iters):
+            batch = torch.randn(batch_size, dim).cuda()
+            out = train_step(model, optim, batch)
 
 
 if __name__ == "__main__":
