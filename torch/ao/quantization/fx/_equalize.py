@@ -11,8 +11,6 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.ao.quantization.fx.graph_module import _get_observed_graph_module_attr
 
-from torch.ao.quantization.backend_config import get_native_backend_config
-
 from ..observer import _with_args, ObserverBase, PerChannelMinMaxObserver
 from ..utils import _parent_name, check_min_max_valid
 
