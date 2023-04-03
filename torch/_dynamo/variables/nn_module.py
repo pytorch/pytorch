@@ -455,14 +455,14 @@ class NNModuleVariable(VariableTracker):
             )
         elif name == "__getitem__":
             assert not kwargs and len(args) == 1
-            inline_supported = (
+            builtin_supported = (
                 torch.nn.ModuleDict.__getitem__,
                 torch.nn.ModuleList.__getitem__,
                 torch.nn.ParameterList.__getitem__,
                 torch.nn.Sequential.__getitem__,
             )
 
-            if type(module).__getitem__ not in inline_supported:
+            if type(module).__getitem__ not in builtin_supported:
                 assert isinstance(args[0], variables.ConstantVariable), typestr(args[0])
                 key = args[0].as_python_constant()
                 assert isinstance(key, (str, int))
