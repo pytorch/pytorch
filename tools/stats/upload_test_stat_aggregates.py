@@ -74,7 +74,7 @@ if __name__ == "__main__":
         required=True,
     )
     args = parser.parse_args()
-    if args.date > datetime.datetime.now().date() - datetime.timedelta(days=30):
+    if args.date < datetime.datetime.now().date() - datetime.timedelta(days=30):
         raise ValueError("date must be in the last 30 days")
     data = get_test_stat_aggregates(date=args.date)
     upload_to_s3(
