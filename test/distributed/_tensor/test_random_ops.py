@@ -4,10 +4,8 @@
 import torch
 
 from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.placement_types import (
-    Replicate,
-    Shard,
-)
+from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed._tensor.random import _set_offset, get_rng_state, manual_seed
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -16,11 +14,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 
-from torch.distributed._tensor.random import (
-    _set_offset,
-    get_rng_state,
-    manual_seed,
-)
 
 class DistTensorRandomOpTest(DTensorTestBase):
     def check_rng_state(self, seed: int, offset: int, device_mesh: DeviceMesh) -> None:
@@ -45,9 +38,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
         size = [4, 1]
 
         # initialize rng state
-        manual_seed_all(1234, device_mesh)
+        manual_seed(1234, device_mesh)
         self.check_rng_state(1234, 0, device_mesh)
-        _tensor = torch.empty(*size, device='cuda')
+        _tensor = torch.empty(*size, device="cuda")
         dtensor = DTensor.from_local(_tensor, device_mesh, [Shard(1)])
 
         # get rng offset for checking correctness
@@ -83,7 +76,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
             if self.rank == shard_num:
                 self.assertEqual(local_tensor[:, shard_num], local_tensor[:, self.rank])
             else:
-                self.assertNotEqual(local_tensor[:, shard_num], local_tensor[:, self.rank])
+                self.assertNotEqual(
+                    local_tensor[:, shard_num], local_tensor[:, self.rank]
+                )
 
         # TODO: support dropout
         with self.assertRaisesRegex(RuntimeError, "supported"):
@@ -97,7 +92,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, mesh)
         dtensor_size = [4 for l in mesh.size()]  # DTensor shape replace with self.world_size
         # initialize rng state
-        manual_seed_all(1234, device_mesh)
+        manual_seed(1234, device_mesh)
         self.check_rng_state(1234, 0, device_mesh)
 
         placements_list = [  # this list of placements should be enough to cover

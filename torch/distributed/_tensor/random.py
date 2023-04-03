@@ -4,6 +4,7 @@ from torch import Tensor
 
 from torch.distributed._tensor import DeviceMesh
 
+
 def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
     """Sets the random number generator state of the specified device mesh.
 
@@ -28,6 +29,7 @@ def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
                 f"DTensor randomness only supports cuda device type, but got {device_mesh.device_type}"
             )
 
+
 def get_rng_state(device_mesh: DeviceMesh) -> Tensor:
     """Returns the random number generator state of the calling rank as a ByteTensor.
 
@@ -42,7 +44,9 @@ def get_rng_state(device_mesh: DeviceMesh) -> Tensor:
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
         `get_rng_state` still returns its GPU device's generator state.
     """
-    assert device_mesh is not None, f"expect a DeviceMesh parameter but {device_mesh} was passed in."
+    assert (
+        device_mesh is not None
+    ), f"expect a DeviceMesh parameter but {device_mesh} was passed in."
 
     if device_mesh.device_type == "cuda":
         return torch.cuda.get_rng_state()
@@ -50,6 +54,7 @@ def get_rng_state(device_mesh: DeviceMesh) -> Tensor:
         raise NotImplementedError(
             f"DTensor randomness only supports cuda device type, but got {device_mesh.device_type}"
         )
+
 
 def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     """Sets the seed for generating random numbers for the calling rank.
@@ -69,9 +74,12 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
         `manual_seed` will not set its GPU device's generator seed.
         Current implementation only supports a GPU device mesh.
     """
-    assert device_mesh is not None, f"expect a DeviceMesh parameter but {device_mesh} was passed in."
+    assert (
+        device_mesh is not None
+    ), f"expect a DeviceMesh parameter but {device_mesh} was passed in."
 
     import torch.distributed as dist
+
     # broadcast the seed from rank 0 over the default PG
     object_list = [seed] * dist.get_world_size()
     dist.all_gather_object(object_list, seed)
@@ -90,6 +98,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
             raise NotImplementedError(
                 f"DTensor randomness only supports cuda device type, but got {device_mesh.device_type}"
             )
+
 
 def _set_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
     """Sets the random number generator state offset for the calling rank.
