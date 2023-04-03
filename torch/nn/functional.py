@@ -430,7 +430,7 @@ def fractional_max_pool2d_with_indices(
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False)
+    fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
     Applies 2D fractional max pooling over an input signal composed of several input planes.
 
@@ -527,7 +527,7 @@ def fractional_max_pool3d_with_indices(
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False)
+    fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
     Applies 3D fractional max pooling over an input signal composed of several input planes.
 

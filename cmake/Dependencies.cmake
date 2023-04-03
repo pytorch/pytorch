@@ -155,6 +155,7 @@ endif()
 
 # ---[ BLAS
 
+set(AT_MKLDNN_ACL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -201,7 +202,7 @@ elseif(BLAS STREQUAL "MKL")
     message(STATUS "MKL OpenMP type: ${MKL_OPENMP_TYPE}")
     message(STATUS "MKL OpenMP library: ${MKL_OPENMP_LIBRARY}")
     include_directories(AFTER SYSTEM ${MKL_INCLUDE_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::mkl)
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
     set(CAFFE2_USE_MKL ON)
     set(BLAS_INFO "mkl")
     set(BLAS_FOUND 1)
@@ -1729,6 +1730,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   set(AT_MKLDNN_ENABLED 0)
+  set(AT_MKLDNN_ACL_ENABLED 0)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1736,6 +1738,9 @@ if(NOT INTERN_BUILD_MOBILE)
         "Not compiling with MKLDNN. "
         "Turn this warning off by USE_MKLDNN=OFF.")
       set(USE_MKLDNN OFF)
+    endif()
+    if(USE_MKLDNN_ACL)
+      set(AT_MKLDNN_ACL_ENABLED 1)
     endif()
   endif()
   if(USE_MKLDNN)
