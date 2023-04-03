@@ -101,7 +101,9 @@ class OptimizedModule(torch.nn.Module):
     def __call__(self, *args, **kwargs):
         if hasattr(self._orig_mod, "_initialize_hook"):
             # In the case of a lazy module, we want to run
-            # the pre-hooks which initialize it
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
         return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)

@@ -1193,7 +1193,9 @@ def get_fake_value(node, tx):
 
         if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
             # In the case of a lazy module, we want to run
-            # the pre-hooks which initialize it
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
             nnmodule._infer_parameters(nnmodule, args)
 
         # no matter it's lazy module or not, we should copy to fake mode.

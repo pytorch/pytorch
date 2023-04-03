@@ -257,7 +257,10 @@ class NNModuleVariable(VariableTracker):
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
                 elif is_lazy:
-                    # Initialize lazy module eagerly to reduce graph breaks.
+                    # In the case of a lazy module, we want to run
+                    # the pre-hooks which initialize it.
+                    # Afterwards, lazy module deletes its pre-hooks
+                    # to avoid treating it as lazy on subsequent recompile.
                     assert len(kwargs) == 0
                     if hasattr(mod, "_initialize_hook"):
                         input = [
