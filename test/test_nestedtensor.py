@@ -674,6 +674,19 @@ class TestNestedTensorDeviceType(TestCase):
         for i, inp in enumerate(inputs):
             self.assertEqual(emb(inp), ys[i])
 
+
+    @skipMeta
+    @torch.inference_mode()
+    @dtypes(*floating_types_and_half())
+    def test_masked_fill(self, device, dtype):
+        # nested tensor * nested tensor
+        (nt, mask) = self.random_nt_pair(device, dtype, 4, (4, 4))
+        mask = torch.nested.nested_tensor([m < 0 for m in mask.unbind()])
+        ref = torch.nested.nested_tensor([t.masked_fill(m, 0) for (t, m) in zip(nt.unbind(), mask.unbind())])
+        out = nt.masked_fill(mask, 0)
+        self.assertEqual(ref, out)
+
+
     @dtypes(torch.float, torch.float16)
     def test_to_padded_tensor_simple(self, device, dtype):
         t = torch.randn(4, 4, 4, device=device, dtype=dtype)
@@ -851,7 +864,8 @@ class TestNestedTensorDeviceType(TestCase):
                           subtest(partial(torch.nn.functional.silu, inplace=True), name='silu_'),
                           subtest(torch.abs, name="abs"),
                           subtest(torch.abs_, name="abs_"),
-                          subtest(torch.sgn, name="sgn")])
+                          subtest(torch.sgn, name="sgn"),
+                          subtest(torch.logical_not, name='logical_not'),])
     def test_activations(self, device, func):
         nt, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7), device=device, dtype=torch.float32)
         nested_result = func(nt)
@@ -2498,6 +2512,20 @@ class TestNestedTensorAutograd(TestCase):
         nt[0].backward(grad_x0)
         expected_grad = torch.nested.nested_tensor([grad_x0, torch.zeros((3, 4), device=device)])
         self.assertEqual(nt.grad, expected_grad)
+
+    def test_masked_fill_backward(self, device):
+        a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            mask = nt.detach().clone().to(bool)
+            out = nt.masked_fill(mask, 0)
+            out = torch.nested.to_padded_tensor(out, 0)
+            return out
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_gelu_backward(self, device):
         a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)

@@ -5214,7 +5214,7 @@ class ModuleTest(TestBase):
         type_map = {torch.double: torch.float}
         cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
 
-        is_any_input_complex = any(map(lambda t: isinstance(t, torch.Tensor) and t.dtype.is_complex, cpu_input_tuple))
+        is_any_input_complex = any((isinstance(t, torch.Tensor) and t.dtype.is_complex for t in cpu_input_tuple))
 
         gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
