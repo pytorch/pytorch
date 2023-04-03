@@ -136,7 +136,7 @@ def is_concrete_int(a: Union[int, SymInt]):
     Args:
         a (SymInt or int): Object to test if it int
     """
-    assert isinstance(a, SymInt) or isinstance(a, int)
+    assert isinstance(a, (SymInt, int))
 
     if isinstance(a, int):
         return True
