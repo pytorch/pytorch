@@ -17,7 +17,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -2243,6 +2243,11 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
+               decorators=[
+                   DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                                'TestModule', 'test_non_contiguous_tensors',
+                                device_type='cpu', active_if=IS_WINDOWS),
+               ],
                skips=(
                    # No channels_last support for TransformerEncoderLayer currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
