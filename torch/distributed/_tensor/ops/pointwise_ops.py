@@ -384,9 +384,7 @@ def _register_non_deterministic_op(op):
 
         # TODO: we will support native_dropout in future
         if op == aten.native_dropout.default:
-            return OutputSharding(
-                None, failed_reason=f"{op} is not supported yet!"
-            )
+            return OutputSharding(None, failed_reason=f"{op} is not supported yet!")
         else:
             return OutputSharding(self_spec)
 
