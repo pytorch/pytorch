@@ -227,6 +227,7 @@ struct Block {
         stream_uses(),
         size(size),
         requested_size(0) {}
+
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
   }
@@ -297,14 +298,11 @@ struct ExpandableSegment {
     if (begin == end) {
       return rangeFromHandles(begin, end);
     }
-
-    while (end > handles_present_.size()) {
-      handles_present_.push_back(false);
-      handles_value_.push_back(0);
+    while (end > handles_.size()) {
+      handles_.push_back(c10::nullopt);
     }
-
     for (auto i : c10::irange(begin, end)) {
-      TORCH_INTERNAL_ASSERT(!handles_present_.at(i));
+      TORCH_INTERNAL_ASSERT(!handles_[i]);
       CUmemGenericAllocationHandle handle;
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -313,24 +311,22 @@ struct ExpandableSegment {
       auto status = cuMemCreate(&handle, kSegmentSize, &prop, 0);
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(begin, i)) {
-          auto handle = handles_value_.at(j);
-          handles_value_.at(j) = 0;
-          handles_present_.at(j) = false;
+          auto handle = handles_[j].value();
+          handles_[j] = c10::nullopt;
           C10_CUDA_DRIVER_CHECK(cuMemRelease(handle));
         }
         trimHandles();
         return rangeFromHandles(begin, begin);
       }
       C10_CUDA_DRIVER_CHECK(status);
-      handles_value_.at(i) = handle;
-      handles_present_.at(i) = true;
+      handles_[i] = handle;
     }
     for (auto i : c10::irange(begin, end)) {
       C10_CUDA_DRIVER_CHECK(cuMemMap(
           ptr_ + i * kSegmentSize,
           kSegmentSize,
           0,
-          handles_value_.at(i),
+          handles_.at(i).value(),
           0ULL));
     }
 
@@ -393,29 +389,25 @@ struct ExpandableSegment {
     // Locking order must be GIL -> Allocator Lock
     C10_CUDA_CHECK(cudaStreamSynchronize(stream_));
     for (auto i : c10::irange(begin, end)) {
-      TORCH_INTERNAL_ASSERT(handles_present_.at(i));
-      CUmemGenericAllocationHandle h = handles_value_.at(i);
-      handles_value_.at(i) = 0;
-      handles_present_.at(i) = false;
+      CUmemGenericAllocationHandle h = handles_.at(i).value();
+      handles_[i] = c10::nullopt;
       C10_CUDA_DRIVER_CHECK(cuMemUnmap(ptr_ + kSegmentSize * i, kSegmentSize));
       C10_CUDA_DRIVER_CHECK(cuMemRelease(h));
     }
     trimHandles();
   }
   void trimHandles() {
-    while (!handles_present_.empty() && !handles_present_.back()) {
-      handles_present_.pop_back();
-      handles_value_.pop_back();
+    while (!handles_.empty() && !handles_.back()) {
+      handles_.pop_back();
     }
   }
   void forEachAllocatedRange(std::function<void(size_t, size_t)> fn) {
     auto start = 0;
-    for (auto i : c10::irange(handles_value_.size())) {
-      if (handles_present_.at(i) && (i == 0 || !handles_present_.at(i - 1))) {
+    for (auto i : c10::irange(handles_.size())) {
+      if (handles_[i] && (i == 0 || !handles_[i - 1])) {
         start = i;
       }
-      if (handles_present_.at(i) &&
-          (i + 1 == handles_present_.size() || !handles_present_.at(i + 1))) {
+      if (handles_[i] && (i + 1 == handles_.size() || !handles_[i + 1])) {
         fn(start, i + 1);
       }
     }
@@ -440,8 +432,7 @@ struct ExpandableSegment {
   CUdeviceptr ptr_;
   size_t max_handles_;
   size_t kSegmentSize;
-  std::vector<bool> handles_present_;
-  std::vector<CUmemGenericAllocationHandle> handles_value_;
+  std::vector<c10::optional<CUmemGenericAllocationHandle>> handles_;
   std::vector<int> peers_;
 };
 #else
