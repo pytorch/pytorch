@@ -441,9 +441,6 @@ def _compile(
             _allow_non_fake_inputs=False,
         )(args, kwargs, named_states, params_and_buffers)
 
-    if torch.distributed.get_rank() == 0:
-        gm.graph.print_tabular()
-
     # 4. Use DTensor to insert collectives
     gm, name_to_spec = _dtensor_expand(
         gm, args, kwargs, named_states, params_and_buffers
