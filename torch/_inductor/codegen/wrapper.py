@@ -762,10 +762,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
                     if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
-                        # TODO: hard-coded to int for now
-                        self.wrapper_call.writeline(f"long int {input_key};")
+                        from ..graph import may_get_constant_buffer_dtype
+                        from .cpp import DTYPE_TO_CPP
+
+                        dtype = may_get_constant_buffer_dtype(
+                            V.graph.graph_inputs[input_key]
+                        )
+                        assert (
+                            dtype is not None
+                        ), "Fails to get the dtype of the sympy.Expr"
+                        cpp_dtype = DTYPE_TO_CPP[dtype]
+                        self.wrapper_call.writeline(f"{cpp_dtype} {input_key};")
                         self.wrapper_call.writeline(
-                            f"{input_key} = args[{idx}].item<long int>();"
+                            f"{input_key} = args[{idx}].item<{cpp_dtype}>();"
                         )
                     else:
                         self.wrapper_call.writeline(f"at::Tensor {input_key};")

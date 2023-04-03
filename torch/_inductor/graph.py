@@ -70,6 +70,18 @@ def supported_dtype_of_cpp_wrapper(dtype):
     return dtype in supported_dtype
 
 
+def may_get_constant_buffer_dtype(constant_buffer):
+    assert isinstance(
+        constant_buffer, sympy.Symbol
+    ), "get_constant_buffer_dtype only supports input of sympy.Symbol"
+    if constant_buffer.is_integer:
+        return torch.int64
+    elif constant_buffer.is_float:
+        return torch.float64
+    else:
+        return None
+
+
 def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
     return op in magic_ops
@@ -566,18 +578,12 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
+            dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
             elif isinstance(value, sympy.Symbol):
-                dtype = (
-                    torch.int64
-                    if value.is_integer
-                    else torch.float64
-                    if value.is_float
-                    else None
-                )
-            else:
-                dtype = None
+                dtype = may_get_constant_buffer_dtype(value)
+
             if not supported_dtype_of_cpp_wrapper(dtype):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
