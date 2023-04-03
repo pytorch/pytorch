@@ -214,8 +214,8 @@ def compile_fx_inner(
             for arg in output.args[0]
         ]
 
-        complex_memory_overlap_inputs = (
-            any(complex_memory_overlap(t) for t in example_inputs)
+        complex_memory_overlap_inputs = any(
+            complex_memory_overlap(t) for t in example_inputs
         )
 
         if (
@@ -244,6 +244,7 @@ def compile_fx_inner(
         else:
             BoxedBool.disable(cudagraphs)
 
+            # See [Backward Generation Handling]
             # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
             # know we are we running the backward even if we will not run it in cudagraphs
             if is_backward:
