@@ -1,13 +1,18 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
-from typing import List, Optional, Sequence, TypeVar, Union
+from typing import List, Optional, TYPE_CHECKING, Union
 
 import torch
+import torch.distributed._functional_collectives as funcol
+
+import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     all_gather,
     all_to_all,
+    Backend,
     broadcast,
+    get_backend,
     get_global_rank,
     get_rank,
     get_world_size,
@@ -22,8 +27,15 @@ from torch.distributed.distributed_c10d import (
     Work,
 )
 
-import torch.distributed.distributed_c10d as c10d
-import torch.distributed._functional_collectives as funcol
+# only import numpy typing when type checking
+if TYPE_CHECKING:
+    try:
+        from numpy.typing import ArrayLike
+    except ImportError:
+        warnings.warn(
+            "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
+        )
+
 
 _global_device_mesh: Optional["DeviceMesh"] = None
 
@@ -39,20 +51,7 @@ def set_global_device_mesh(mesh: Optional["DeviceMesh"]) -> None:
     _global_device_mesh = mesh
 
 
-# We want a type for "can be passed to torch.as_tensor()";
-# this is a recursive sequence type, which isn't fully supported
-# yet in python. This construct simulates that up to depth 7.
-T = TypeVar("T")
-_L = Union[T, Sequence[T]]
-NDIntList = _L[_L[_L[_L[_L[_L[_L[int]]]]]]]
-
-MeshExprT = Union[
-    torch.Tensor,
-    NDIntList,
-]
-
-
-class DeviceMesh:
+class DeviceMesh(object):
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
     represented as a n-d dimension array, and each value of the n-d dimensional
@@ -103,7 +102,7 @@ class DeviceMesh:
     def __init__(
         self,
         device_type: str,
-        mesh: MeshExprT,
+        mesh: Union[torch.Tensor, "ArrayLike"],
         *,
         _init_process_groups: bool = True,
     ) -> None:
@@ -121,32 +120,41 @@ class DeviceMesh:
             self._dim_groups = self._init_process_groups()
 
     def _get_or_create_default_group(self):
-        self._backend = "gloo" if self.device_type == "cpu" else "nccl"
-        if not is_initialized():
+        self._backend = Backend.GLOO if self.device_type == "cpu" else Backend.NCCL
+        default_initialized = is_initialized()
+        if not default_initialized:
             init_process_group(backend=self._backend)
-        else:
-            world_size = get_world_size()
-            if self.mesh.numel() > world_size:
-                raise RuntimeError(
-                    f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
-                )
+
+        world_size = get_world_size()
+        if self.mesh.numel() > world_size:
+            raise RuntimeError(
+                f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
+            )
 
         # TODO: we should do allgather the mesh tensor to ensure every rank have the same mesh value
         # TODO: if user want to pass pg_options, offer a way to do it
-        # check default pg backend, should support device_type
+        world_backend = get_backend()
         if self.device_type == "cpu":
+            cpu_backends = ["gloo", "threaded"]
             assert (
-                self._backend == "gloo" or self._backend == "threaded"
-            ), f"ProcessGroup backend: {self._backend} not supporting CPU!"
+                world_backend in cpu_backends
+            ), f"Default PG backend: {world_backend} not supporting CPU!"
         elif self.device_type == "cuda":
-            if self._backend == "gloo":
+            cuda_backends = ["nccl", "gloo", "threaded"]
+            if world_backend == "gloo":
                 warnings.warn(
                     "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
                 )
-            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "threaded"
+            assert (
+                world_backend in cuda_backends
+            ), f"Default PG backend: {world_backend} not supporting CUDA!"
+            if not default_initialized:
+                # automatically set the current cuda device base on num of gpu devices available in each host
+                # NOTE: This device selection would only work for homogenous hardware.
+                torch.cuda.set_device(get_rank() % torch.cuda.device_count())
         else:
             raise RuntimeError(
-                f"DeviceMesh only support cpu or cuda device type, but got {self.device_type}"
+                f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"
             )
 
         # calculate the coordinates of the current global rank on the mesh
@@ -387,7 +395,14 @@ class DeviceMesh:
         """
         dim_group = self._dim_groups[mesh_dim]
         op_name: str = op.name  # type: ignore[attr-defined]
-        return funcol.all_reduce(tensor, reduceOp=op_name, group=(self, mesh_dim,))
+        return funcol.all_reduce(
+            tensor,
+            reduceOp=op_name,
+            group=(
+                self,
+                mesh_dim,
+            ),
+        )
 
     def reduce_scatter(
         self,
@@ -446,7 +461,9 @@ class DeviceMesh:
                 memory_format=torch.contiguous_format
             )
             dim_group = self._dim_groups[mesh_dim]
-            fut = c10d.all_reduce(flat_tensor, op=op, group=dim_group, async_op=async_op)
+            fut = c10d.all_reduce(
+                flat_tensor, op=op, group=dim_group, async_op=async_op
+            )
 
             # scatter the tensor
             output_offset = offset_list[my_coordinate[mesh_dim]]

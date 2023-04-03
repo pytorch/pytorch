@@ -35,7 +35,7 @@
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/proto/caffe2_pb.h"
-#include "caffe2/proto/torch_pb.h"
+#include "caffe2/proto/torch.pb.h"
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/python/pybind_workspace.h"
 #include "caffe2/utils/cpuid.h"

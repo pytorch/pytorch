@@ -140,9 +140,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         >>> optim.step()
 
     .. warning::
-        The optimizer must be initialized *after* the module has been wrapped,
-        since FSDP will shard parameters in-place and this will break any
-        previously initialized optimizers.
+        The optimizer must be initialized *after* the module has been wrapped
+        with FSDP since FSDP will shard and transform the module's parameters
+        in a way that may not preserve the original parameter variables. Thus,
+        the previously initialized optimizer may have stale references to the
+        parameters.
 
     .. warning::
         If the destination CUDA device has ID ``dev_id``, either (1)
@@ -165,10 +167,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         lead to undefined behavior.
 
     .. warning::
-        Passing in `sync_module_states=True` flag requires module to be put
-        on GPU, or to use ``device_id`` argument to specify a CUDA device that
-        FSDP will move module to. This is because ``sync_module_states=True``
-        requires GPU communication.
+        Passing in the ``sync_module_states=True`` flag requires ``module`` to
+        be on GPU or to use the ``device_id`` argument to specify a CUDA device
+        that FSDP will move ``module`` to in the FSDP constructor. This is
+        because ``sync_module_states=True`` requires GPU communication.
 
     .. warning::
         As of PyTorch 1.12, FSDP only offers limited support for shared parameters
@@ -187,9 +189,15 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         resolve this, please wrap the submodule in its own FSDP unit.
 
     .. note::
-        Inputs into FSDP ``forward`` function will be moved to compute device
-        (same device FSDP module is on) before running ``forward``, so user does
-        not have to manually move inputs from CPU -> GPU.
+        FSDP moves input tensors to the ``forward`` method to the GPU compute
+        device, so the user does not need to manually move them from CPU.
+
+    .. warning::
+        The user should not modify the parameters between forward and backward
+        without using the :meth:`summon_full_params` context since the
+        modifications may not persist. Moreover, for ``use_orig_params=False``,
+        accessing the original parameters between forward and backward may
+        raise an illegal memory access.
 
     Args:
         module (nn.Module):
@@ -318,13 +326,32 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             prevent too many in-flight all-gathers. This ``bool`` only affects
             the sharded strategies that schedule all-gathers. Enabling this can
             help lower the number of CUDA malloc retries.
+        use_orig_params (bool): Setting this to ``True`` has FSDP use
+            ``module`` 's original parameters. FSDP exposes those original
+            parameters to the user via :meth:`nn.Module.named_parameters`
+            instead of FSDP's internal :class:`FlatParameter` s. This means
+            that the optimizer step runs on the original parameters, enabling
+            per-original-parameter hyperparameters. FSDP preserves the original
+            parameter variables and manipulates their data between unsharded
+            and sharded forms, where they are always views into the underlying
+            unsharded or sharded :class:`FlatParameter`, respectively. With the
+            current algorithm, the sharded form is always 1D, losing the
+            original tensor structure. An original parameter may have all,
+            some, or none of its data present for a given rank. In the none
+            case, its data will be like a size-0 empty tensor. Users should not
+            author programs relying on what data is present for a given
+            original parameter in its sharded form. ``True`` is required to
+            use ``torch.compile()``. Setting this to ``False`` exposes FSDP's
+            internal :class:`FlatParameter` s to the user via
+            :meth:`nn.Module.named_parameters`. (Default: ``False``)
         ignored_parameters (Optional[Iterable[torch.nn.Parameter]]): Ignored
-            parameters will not be managed by this FSDP instance,
-            that means these parameters will not be flattened and sharded by FSDP,
-            their gradients will not be synchronized as well. With this newly added
-            argument, ``ignored_modules`` could be deprecated soon. For backward compatibility,
-            both ``ignored_parameters`` and ``ignored_modules`` are kept for now,
-            but FSDP only allows one of them to be specified as not ``None``.
+            parameters will not be managed by this FSDP instance, which means
+            that they will not be flattened and sharded and that their
+            gradients will not be reduced across ranks. With this newly added
+            argument, ``ignored_modules`` could be deprecated soon. For
+            backward compatibility, we keep both ``ignored_modules`` and
+            ``ignored_parameters``, but FSDP only allows one of them to be
+            specified as not ``None``.
     """
 
     def __init__(
@@ -649,7 +676,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
             submodule._state_dict_type = state_dict_type
             submodule._state_dict_config = state_dict_config
-            submodule._optimstate_dict_config = optim_state_dict_config
+            submodule._optim_state_dict_config = optim_state_dict_config
 
         return StateDictSettings(
             prev_state_dict_type, prev_state_dict_config, prev_optim_state_dict_config

@@ -75,14 +75,14 @@ TABLE = {
         "inductor_no_cudagraphs": "--training --inductor --disable-cudagraphs ",
     },
     "inference": {
-        "aot_eager": "--backend=aot_eager ",
-        "eager": "--backend=eager ",
-        "ts_nnc": "--speedup-ts",
-        "ts_nvfuser": "-n100 --speedup-ts --nvfuser",
-        "trt": "-n100 --speedup-trt",
-        "ts_nvfuser_cudagraphs": "--backend=cudagraphs_ts",
-        "inductor": "--inductor ",
-        "inductor_no_cudagraphs": "--inductor --disable-cudagraphs ",
+        "aot_eager": "--inference --backend=aot_eager ",
+        "eager": "--inference --backend=eager ",
+        "ts_nnc": "--inference --speedup-ts ",
+        "ts_nvfuser": "--inference -n100 --speedup-ts --nvfuser ",
+        "trt": "--inference -n100 --speedup-trt ",
+        "ts_nvfuser_cudagraphs": "--inference --backend=cudagraphs_ts ",
+        "inductor": "--inference -n50 --inductor ",
+        "inductor_no_cudagraphs": "--inference -n50 --inductor --disable-cudagraphs ",
     },
 }
 
@@ -365,7 +365,7 @@ def get_skip_tests(suite):
     if hasattr(module, "SKIP_TRAIN"):
         skip_tests.update(module.SKIP_TRAIN)
 
-    skip_tests = map(lambda name: f"-x {name}", skip_tests)
+    skip_tests = (f"-x {name}" for name in skip_tests)
     skip_str = " ".join(skip_tests)
     return skip_str
 
