@@ -235,7 +235,7 @@ class MemoryTracker:
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
         """
-        The pre_foward_hook is to insert current module name with forward prefix for the operator
+        The pre_forward_hook is to insert current module name with forward prefix for the operator
         name, also it inserts the marker "fw_start" when the forward pass begins.
         """
 
