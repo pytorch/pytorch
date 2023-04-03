@@ -14,6 +14,8 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
+aten = torch.ops.aten
+
 
 def patches(fn):
     def skip_cache(self, choices, name, key, generate):
@@ -103,6 +105,18 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
+    def test__int_mm(self):
+        @torch.compile
+        def foo(a, b):
+            return torch._int_mm(a, b)
+
+        foo(
+            torch.randint(-10, 10, (64, 32), device="cuda", dtype=torch.int8),
+            torch.randint(-10, 10, (32, 64), device="cuda", dtype=torch.int8),
+        )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
     def test_mm_skip(self):
         @torch.compile
         def foo(a, b):
@@ -165,6 +179,96 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(32, 32, device="cuda"),
             torch.randn(32, 32, device="cuda"),
             torch.randn(32, 32, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_convolution1(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x + 1,
+                w,
+                b,
+                stride=(2, 3),
+                padding=(4, 5),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+            )
+
+        foo(
+            torch.randn(2, 33, 34, 41, device="cuda"),
+            torch.randn(34, 33, 3, 3, device="cuda"),
+            torch.randn(34, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_mm_dropout(self):
+        @torch.compile
+        def fn(x1, x2, seed):
+            mm_4 = torch.ops.aten.mm.default(x2, x1)
+            rnd = torch.ops.prims.philox_rand_like.default(mm_4, seed, 0)
+            return mm_4 * rnd
+
+        # sizes picked so triton autotuning wins
+        fn(
+            torch.randn(512, 1024, dtype=torch.float16, device="cuda"),
+            torch.randn(384, 512, dtype=torch.float16, device="cuda"),
+            torch.tensor(12345, device="cuda"),
+        )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    @torch._inductor.config.patch(conv_1x1_as_mm=False)
+    def test_convolution2(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x,
+                w,
+                b,
+                stride=(1, 1),
+                padding=(0, 0),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+            )
+
+        foo(
+            torch.randn(1, 33, 16, 16, device="cuda"),
+            torch.randn(34, 33, 1, 1, device="cuda"),
+            torch.randn(34, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    @torch._inductor.config.patch(conv_1x1_as_mm=True)
+    def test_convolution_as_mm(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x + 1,
+                w,
+                b,
+                stride=(1, 1),
+                padding=(0, 0),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+            )
+
+        foo(
+            torch.randn(2, 33, 16, 16, device="cuda"),
+            torch.randn(34, 33, 1, 1, device="cuda"),
+            torch.randn(34, device="cuda"),
         )
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)

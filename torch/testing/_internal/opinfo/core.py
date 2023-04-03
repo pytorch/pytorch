@@ -151,7 +151,7 @@ class SampleInput:
                 not var_args and not var_kwargs
             ), """
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
-explicitly setting the "args" and "kwargs" paremeters, but the two
+explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
         elif len(var_args) or len(var_kwargs):
             assert (
@@ -1829,7 +1829,7 @@ def generate_elementwise_binary_with_scalar_samples(
         yield SampleInput(lhs_scalar, args=(rhs_scalar,))
 
 
-# Returns a generator of pairs of contiguous tensors and 0d tensos and scalars and type promotion
+# Returns a generator of pairs of contiguous tensors and 0d tensors and scalars and type promotion
 def generate_elementwise_binary_with_scalar_and_type_promotion_samples(
     op, *, device, dtype, requires_grad=False
 ):
@@ -2054,8 +2054,9 @@ def sample_inputs_elementwise_unary(
     _L = S if kwargs.get("small_inputs_only", False) else L
 
     low, high = op_info.domain
-    low = low if low is None else low + op_info._domain_eps
-    high = high if high is None else high - op_info._domain_eps
+    is_floating = dtype.is_floating_point or dtype.is_complex
+    low = low if low is None or not is_floating else low + op_info._domain_eps
+    high = high if high is None or not is_floating else high - op_info._domain_eps
     if (
         op_info.supports_sparse_csr
         or op_info.supports_sparse_csc
@@ -2100,8 +2101,9 @@ def _replace_values_in_tensor(tensor, condition, safe_value):
 # Helper to create a unary elementwise tensor with valid inputs
 def _make_unary_elementwise_tensor(shape, *, op, dtype, **kwargs):
     low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
+    is_floating = dtype.is_floating_point or dtype.is_complex
+    low = low if low is None or not is_floating else low + op._domain_eps
+    high = high if high is None or not is_floating else high - op._domain_eps
 
     a = make_tensor(shape, low=low, high=high, dtype=dtype, **kwargs)
 
@@ -2120,8 +2122,9 @@ def _filter_unary_elementwise_tensor(a, *, op):
         return a
 
     low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
+    is_floating = a.dtype.is_floating_point or a.dtype.is_complex
+    low = low if low is None or not is_floating else low + op._domain_eps
+    high = high if high is None or not is_floating else high - op._domain_eps
 
     if a.dtype is torch.uint8 and low is not None:
         low = max(low, 0)
@@ -2215,10 +2218,6 @@ def generate_elementwise_unary_extremal_value_tensors(
 def generate_elementwise_unary_noncontiguous_tensors(
     op, *, device, dtype, requires_grad=False
 ):
-    low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
-
     make_arg = partial(
         _make_unary_elementwise_tensor,
         op=op,
@@ -2541,17 +2540,40 @@ class ShapeFuncInfo(OpInfo):
 
 
 def sample_inputs_foreach(
-    self, device, dtype, N, *, noncontiguous=False, same_size=False, low=None, high=None
+    self,
+    device,
+    dtype,
+    N,
+    *,
+    noncontiguous=False,
+    same_size=False,
+    low=None,
+    high=None,
+    zero_size: bool,
 ):
+    if zero_size:
+        return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
     if same_size:
         return [
-            make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous)
+            make_tensor(
+                (N, N),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
+            )
             for _ in range(N)
         ]
     else:
         return [
             make_tensor(
-                (N - i, N - i), dtype=dtype, device=device, noncontiguous=noncontiguous
+                (N - i, N - i),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
             )
             for i in range(N)
         ]

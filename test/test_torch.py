@@ -37,7 +37,8 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like)
+    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
+    AlwaysWarnTypedStorageRemoval)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -6494,30 +6495,30 @@ class TestTorch(TestCase):
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
         self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
-        shorts = torch.ShortStorage.from_buffer(a, 'big' if sys.byteorder == 'little' else 'little')
+        shorts = torch.ShortStorage.from_buffer(a, 'big')
         self.assertEqual(shorts.size(), 2)
         self.assertEqual(shorts.tolist(), [258, 772])
-        ints = torch.IntStorage.from_buffer(a, 'little' if sys.byteorder == 'little' else 'big')
+        ints = torch.IntStorage.from_buffer(a, 'little')
         self.assertEqual(ints.size(), 1)
         self.assertEqual(ints[0], 67305985)
         f = bytearray([0x40, 0x10, 0x00, 0x00])
-        floats = torch.FloatStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
+        floats = torch.FloatStorage.from_buffer(f, 'big')
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
         f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
-        bools = torch.BoolStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
         self.assertEqual(bools.size(), 8)
         self.assertEqual(bools.tolist(), [False, True, True, True, True, True, True, True])
         self.assertEqual(bools.type(), 'torch.BoolStorage')
         self.assertTrue(isinstance(bools, torch.BoolStorage))
 
         f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
-        bools = torch.BoolStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
         self.assertEqual(bools.size(), 19)
 
         f = bytearray(b'\0x4A')
-        bools = torch.BoolStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
         self.assertEqual(bools.size(), 4)
         self.assertEqual(bools.tolist(), [False, True, True, True])
         bytes = torch.ByteStorage.from_buffer(a)
@@ -6821,15 +6822,39 @@ class TestTorch(TestCase):
         # Check that each of the TypedStorage function calls produce a warning
         # if warnings are reset between each
         for f in funcs:
-            with warnings.catch_warnings(record=True) as w:
-                warnings.resetwarnings()
-                f()
-                self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
-                warning = w[0].message
-                self.assertTrue(warning, DeprecationWarning)
-                self.assertTrue(re.search(
-                    '^TypedStorage is deprecated',
-                    str(warning)))
+            with AlwaysWarnTypedStorageRemoval(True):
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.resetwarnings()
+                    f()
+                    self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
+                    warning = w[0].message
+                    self.assertTrue(warning, DeprecationWarning)
+                    self.assertTrue(re.search(
+                        '^TypedStorage is deprecated',
+                        str(warning)))
+
+        # Test that only the first warning is raised by default
+        torch.storage._reset_warn_typed_storage_removal()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.resetwarnings()
+            torch.FloatStorage()
+            torch.randn(10).storage()
+            self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
+            warning = w[0].message
+            self.assertTrue(re.search(
+                '^TypedStorage is deprecated',
+                str(warning)))
+            # Check the line of code from the warning's stack
+            with open(w[0].filename, encoding="utf-8") as f:
+                code_line = f.readlines()[w[0].lineno - 1]
+            self.assertTrue(re.search(re.escape('torch.FloatStorage()'), code_line))
+
+        # Check that warnings are not emitted if it happened in the past
+        with warnings.catch_warnings(record=True) as w:
+            warnings.resetwarnings()
+            torch.FloatStorage()
+            torch.randn(10).storage()
+            self.assertEqual(len(w), 0, msg=str([str(a) for a in w]))
 
     def test_from_file(self):
         def assert_with_filename(filename):
@@ -7591,6 +7616,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
         self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/97414")
     def test_upsample_nearest2d_meta(self):
         # TODO: the out tests cannot be triggered by test_nn.py because
         # we don't actually do out= arguments for nn functions, so there

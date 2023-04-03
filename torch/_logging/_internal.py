@@ -124,8 +124,7 @@ def set_logs(
     aot=DEFAULT_LOG_LEVEL,
     inductor=DEFAULT_LOG_LEVEL,
     bytecode=False,
-    aot_forward_graph=False,
-    aot_backward_graph=False,
+    aot_graphs=False,
     aot_joint_graph=False,
     graph=False,
     graph_code=False,
@@ -174,8 +173,7 @@ def set_logs(
         aot=aot,
         inductor=inductor,
         bytecode=bytecode,
-        aot_forward_graph=aot_forward_graph,
-        aot_backward_graph=aot_backward_graph,
+        aot_graphs=aot_graphs,
         aot_joint_graph=aot_joint_graph,
         graph=graph,
         graph_code=graph_code,
@@ -248,11 +246,24 @@ def configure_artifact_log(log):
 
 # match a comma separated list of loggable names (whitespace allowed after commas)
 def _gen_settings_regex():
-    return re.compile(r"((\+|-)?[\w\.]+,\\s*)*(\+|-)?[\w\.]+?")
+    return re.compile(r"((\+|-)?[\w\.]+,\s*)*(\+|-)?[\w\.]+?")
 
 
 def _validate_settings(settings):
     return re.fullmatch(_gen_settings_regex(), settings) is not None
+
+
+def _invalid_settings_err_msg(settings):
+    entities = "\n  " + "\n  ".join(
+        itertools.chain(
+            log_registry.log_alias_to_log_qname.keys(), log_registry.artifact_names
+        )
+    )
+    msg = (
+        f"Invalid log settings: {settings}, must be a comma separated list of fully qualified module names, "
+        f"registered log names or registered artifact names.\nCurrently registered names: {entities}"
+    )
+    return msg
 
 
 @functools.lru_cache()
@@ -261,9 +272,7 @@ def _parse_log_settings(settings):
         return dict()
 
     if not _validate_settings(settings):
-        raise ValueError(
-            f"Invalid log settings: {settings}, must be a comma separated list of registerered log or artifact names."
-        )
+        raise ValueError(_invalid_settings_err_msg(settings))
 
     settings = re.sub(r"\s+", "", settings)
     log_names = settings.split(",")
@@ -297,9 +306,7 @@ def _parse_log_settings(settings):
                 log_registry.register_child_log(name)
             log_state.enable_log(name, level)
         else:
-            raise ValueError(
-                f"Invalid log settings: '{settings}', must be a comma separated list of log or artifact names."
-            )
+            raise ValueError(_invalid_settings_err_msg(settings))
 
     return log_state
 

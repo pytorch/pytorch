@@ -701,6 +701,15 @@ See :func:`torch.as_strided`
 )
 
 add_docstr_all(
+    "as_strided_",
+    r"""
+as_strided_(size, stride, storage_offset=None) -> Tensor
+
+In-place version of :meth:`~Tensor.as_strided`
+""",
+)
+
+add_docstr_all(
     "atan",
     r"""
 atan() -> Tensor

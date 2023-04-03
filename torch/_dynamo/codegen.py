@@ -17,7 +17,7 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .exc import unimplemented
-from .source import AttrSource, Source
+from .source import AttrSource, GeneratorStateSource, Source
 from .utils import is_safe_constant, istype, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
@@ -96,7 +96,11 @@ class PyCodegen:
                 self.top_of_stack = value
                 return
 
-        if value.source is not None and allow_cache:
+        if (
+            value.source is not None
+            and allow_cache
+            and not isinstance(value.source, GeneratorStateSource)
+        ):
             output.extend(value.source.reconstruct(self))
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()

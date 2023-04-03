@@ -304,6 +304,21 @@ TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
   return containerTypePtrs[map_key];
 }
 
+std::string DictType::annotation_str_impl(TypePrinter printer) const {
+  auto keyAnnotation = getKeyType()->annotation_str(printer);
+  auto valueAnnotation = getValueType()->annotation_str(std::move(printer));
+
+  std::string result;
+  result.reserve(5 /* "Dict[" */ + keyAnnotation.size() + 2 /* ", " */ + valueAnnotation.size() + 1 /* "]" */);
+  result = "Dict[";
+  result += keyAnnotation;
+  result.push_back(',');
+  result.push_back(' ');
+  result += valueAnnotation;
+  result.push_back(']');
+  return result;
+}
+
 AnyListTypePtr AnyListType::get() {
   static AnyListTypePtr value(new AnyListType());
   return value;
@@ -887,26 +902,29 @@ std::string TupleType::str() const {
   return ss.str();
 }
 std::string TupleType::annotation_str_impl(TypePrinter printer) const {
-  std::stringstream ss;
   if (schema_ && name()) {
-    ss << name()->qualifiedName();
-  } else {
-    ss << "Tuple[";
-    if (elements().empty()) {
-      // `typing.Tuple` special-cases the annotation syntax for empty tuple
-      // with `typing.Tuple[()]`. See
-      // https://docs.python.org/3/library/typing.html#typing.Tuple
-      ss << "()";
-    } else {
-      for (size_t i = 0; i < elements().size(); ++i) {
-        if (i > 0)
-          ss << ", ";
-        ss << elements()[i]->annotation_str(printer);
-      }
-    }
-    ss << "]";
+    return name()->qualifiedName();
   }
-  return ss.str();
+
+  if (elements().empty()) {
+    // `typing.Tuple` special-cases the annotation syntax for empty tuple
+    // with `typing.Tuple[()]`. See
+    // https://docs.python.org/3/library/typing.html#typing.Tuple
+    return "Tuple[()]";
+  }
+
+  std::ostringstream ss;
+  ss << "Tuple[";
+  size_t i = 0;
+  for (const auto& element: elements()) {
+    if (i > 0) {
+      ss << ", ";
+    }
+    ss << element->annotation_str(printer);
+    i++;
+  }
+  ss << ']';
+  return std::move(ss).str();
 }
 
 InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module) {

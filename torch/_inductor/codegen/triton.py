@@ -85,10 +85,6 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"tl.math.floor({self.paren(self._print(expr.args[0]))})"
 
-    def _print_ceiling(self, expr):
-        assert len(expr.args) == 1
-        return f"tl.math.ceil({self.paren(self._print(expr.args[0]))})"
-
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
@@ -862,6 +858,23 @@ class TritonKernel(Kernel):
         # if simple replacements didn't get rid of floor/ceil, try full subs
         if len(index.atoms(sympy.floor)) or len(index.atoms(sympy.ceiling)):
             index = index.subs(V.graph.sizevars.precomputed_replacements)
+        # last resort, if no range vars are in the expr, hoist it
+        # TODO instead of trying to blindly find complicated exprs, we should hoist the
+        # inputs/outputs sizes and strides, but at the time indexing is generated
+        # kernel inputs and outputs are not set yet, we'd need a deeper refactor
+        # to do it this way
+
+        if len(index.atoms(sympy.ceiling)):
+            for a in index.atoms(sympy.ceiling):
+                # for nested exprs, atoms yields top level first (?)
+                # so if everything goes fine, lower level replacements will come up empty
+                symbols = a.free_symbols
+                if len(symbols) > 0 and all(
+                    s.name.startswith("s") or s.name.startswith("ps") for s in symbols
+                ):
+                    replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
+                    index = sympy_subs(index, replacements)
+
         index_vars = index.free_symbols
         index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
 
@@ -898,13 +911,17 @@ class TritonKernel(Kernel):
                 have_dense = False
             dense_mask_vars.add(f"{tree.prefix}mask")
 
+        expand_str = None
+
         if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             if copy_shape:
                 index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+                expand_str = f"{copy_shape}.shape"
             else:
                 index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
+                expand_str = self.dense_size_str()
             if isinstance(index, sympy.Integer):
-                return index_str, set(), "None"
+                return index_str, set(), "None", expand_str
             else:
                 mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
@@ -920,7 +937,7 @@ class TritonKernel(Kernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return index_str, mask_vars, mask_str
+        return index_str, mask_vars, mask_str, expand_str
 
     def filter_masks(self, mask_vars):
         for tree in self.range_trees:
@@ -978,7 +995,7 @@ class TritonKernel(Kernel):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
-        index, mask_vars, mask = self.indexing(index)
+        index, mask_vars, mask, expand_str = self.indexing(index)
 
         if "rmask" in mask and not self.persistent_reduction:
             # This eviction policy heuristic is untested.
@@ -1001,9 +1018,8 @@ class TritonKernel(Kernel):
             line = var
         else:
             if isinstance(original_index, sympy.Integer):
-                dense_size = self.dense_size_str()
                 line = f"tl.load({var} + ({original_index}))"
-                append_broadcast = dense_size
+                append_broadcast = expand_str
             else:
                 line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
             if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
@@ -1035,14 +1051,14 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask_vars, mask = self.indexing(index, dense_indexing=True)
+        index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
             line = f"tl.atomic_add({var} + ({index}), {value}, {mask})"
         else:
             raise NotImplementedError(f"store mode={mode}")
-        self.stores.writeline(name, line)
+        self.stores.writeline(DeferredLine(name, line))
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
@@ -1131,7 +1147,7 @@ class TritonKernel(Kernel):
             self.suffix.writeline(f"{result_var} = {var_name}")
             result_var.mask_vars = var_name.mask_vars
         self.inside_reduction = False
-        index, mask_vars, mask = self.indexing(index)
+        index, mask_vars, mask, _ = self.indexing(index)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)
@@ -1192,23 +1208,27 @@ class TritonKernel(Kernel):
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
+            name_cnt = itertools.count()
+            var_names = []
             for arg_name in call_args:
+                var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.get_buffer(arg_name)
                 if buf:
                     result.writeline(
-                        f"{arg_name} = rand_strided({tuple(buf.get_size())}, {tuple(buf.get_stride())}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({tuple(buf.get_size())}, {tuple(buf.get_stride())}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
                     result.writeline(
-                        f"{arg_name} = rand_strided({tuple(const_tensor.size())}, {tuple(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({tuple(const_tensor.size())}, {tuple(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
                     )
                 else:
                     raise KeyError(
                         f"Don't find the buffer or const tensor for {arg_name}"
                     )
-            result.writeline(f"return {', '.join(call_args)},")
+                var_names.append(var_name)
+            result.writeline(f"return {', '.join(var_names)},")
 
         result.writelines(["\n", "\n", "def call(args):"])
         grid = []
@@ -1232,7 +1252,7 @@ class TritonKernel(Kernel):
                 result.writeline(f"{stream_name} = get_cuda_stream({index})")
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 result.writeline(
-                    f"triton_.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
+                    f"KERNEL_NAME.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
                 )
 
         # benchmark all configs
@@ -1244,7 +1264,7 @@ class TritonKernel(Kernel):
                     f"torch.cuda.set_device({index})"
                 )  # no-op to ensure context
                 result.writeline(
-                    f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
+                    f"return KERNEL_NAME.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
                 )
 
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
@@ -1291,7 +1311,7 @@ class TritonKernel(Kernel):
                     import triton.language as tl
                     from torch._inductor.ir import ReductionHint
                     from torch._inductor.ir import TileHint
-                    from torch._inductor.triton_ops.autotune import {heuristics}
+                    from torch._inductor.triton_heuristics import {heuristics}
                     from torch._inductor.utils import instance_descriptor
                 """
             )
@@ -1301,7 +1321,7 @@ class TritonKernel(Kernel):
                         from torch._dynamo.testing import rand_strided
                         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                         import torch
-                        from torch._inductor.triton_ops.autotune import grid
+                        from torch._inductor.triton_heuristics import grid
                     """
                 )
 
