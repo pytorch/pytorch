@@ -1976,6 +1976,7 @@ class CommonTemplate:
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
+    @slow()
     @unittest.skipIf(not has_bf16_support(), "requires bf16 support")
     def test_linear_unary(self):
         class M(torch.nn.Module):
