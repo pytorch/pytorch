@@ -1665,6 +1665,11 @@ if(NOT INTERN_BUILD_MOBILE)
 
   set(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
+  if (USE_ROCM)
+    # MAGMA is no longer used in CUDA (non ROCM) build by default
+    set(USE_MAGMA 1)
+  endif()
+
   if(USE_MAGMA)
     find_package(MAGMA)
   endif()
