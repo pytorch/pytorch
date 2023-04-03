@@ -84,29 +84,43 @@ class IterGraph(fx.Graph):
             return self._cleanup_mapping.get(node, None)
         return node
 
-    def _insert_context(self, func: str, node: fx.Node):
-        with ExitStack() as stack:
-            for graph in self._all_graphs:
-                if node:
-                    actual_node = self._lookup_node(node, graph)
-                    assert actual_node is not None, "Cannot handle None case now."
-                else:
-                    actual_node = node
-                stack.enter_context(getattr(graph, func)(actual_node))
-            yield
-
     def _fx_graph_call(
         self, graph: fx.Graph, func: str, *args: Any, **kwargs: Any
     ) -> Any:
         fx_graph: fx.Graph = graph if graph != self else cast(fx.Graph, super())
         return getattr(fx_graph, func)(*args, **kwargs)
 
-    @contextmanager
+    def _insert_context(self, func: str, node: fx.Node):
+        class _InsertPoint:
+            def __init__(self, insert_points: List[Any]):
+                self.insert_points = insert_points
+
+            def __enter__(self):
+                pass
+
+            def __exit__(self, type, value, tb):
+                for insert_point in self.insert_points:
+                    insert_point.__exit__(type, value, tb)
+
+        insert_points = []
+        for graph in self._all_graphs:
+            if node:
+                actual_node = self._lookup_node(node, graph)
+                assert actual_node is not None, "Cannot handle None case now."
+            else:
+                actual_node = node
+            insert_points.append(getattr(graph, func)(actual_node))
+
+        return _InsertPoint(insert_points)
+
     def inserting_after(self, node):
+        if self.freeze_cross_iter_movement:
+            return super().inserting_after(node)
         return self._insert_context("inserting_after", node)
 
-    @contextmanager
     def inserting_before(self, node):
+        if self.freeze_cross_iter_movement:
+            return super().inserting_before(node)
         return self._insert_context("inserting_before", node)
 
     def _forward_subgraph_inputs(
@@ -420,7 +434,7 @@ class IterGraph(fx.Graph):
 
     def output(self, result: Argument, type_expr: Optional[Any] = None) -> fx.Node:
         if self._freeze_cross_iter_movement:
-            return super().placeholder(result, type_expr)
+            return super().output(result, type_expr)
 
         main_output = super().output(result, type_expr)
         setup_result = tree_map(
@@ -619,6 +633,7 @@ class IterGraphModule(nn.Module):
         self._iter = 0
         self._max_iters = 0
         self._previous_output: Tuple[Any, ...] = tuple()
+        self._num_extra_output = 0
 
     def setup(self, max_iters: int = 0) -> None:
         """
@@ -636,7 +651,7 @@ class IterGraphModule(nn.Module):
         self._max_iters = max_iters
 
     def _run(self, gm: fx.GraphModule, *args, **kwargs) -> Any:
-        if cast(IterGraph, self.main_gm.graph).num_extra_output > 0:
+        if self._num_extra_output > 0:
             new_args = args + (self._previous_output)
             output = gm(*new_args, **kwargs)
             if self._iter < self._max_iters:
@@ -678,6 +693,10 @@ class IterGraphModule(nn.Module):
         self.setup_gm.recompile()
         self.cleanup_gm.recompile()
         return self.main_gm.recompile()
+
+    def freeze_cross_iter_movement(self) -> None:
+        self.graph.freeze_cross_iter_movement()
+        self._num_extra_output = self.graph.num_extra_output
 
     def print_readable(self, print_output: bool = True) -> str:
         return self.main_gm.print_readable(print_output)

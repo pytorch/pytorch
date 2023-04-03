@@ -1165,7 +1165,10 @@ def wrap_to_fake_tensor_and_record(
                 # Precedence: export constraints > eager constraints
                 constraint = dim2constraint.get(i)
                 if constraint is None:
-                    if i in getattr(e, "_dynamo_dynamic_indices", set()):
+                    if (
+                        i in getattr(e, "_dynamo_dynamic_indices", set())
+                        and not config.allow_ignore_mark_dynamic
+                    ):
                         constraint = RelaxedUnspecConstraint()
                 constraint_dims.append(constraint)
 
