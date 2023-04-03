@@ -4586,12 +4586,24 @@ class TestDifferentiableOptimizer(TestCase):
         )
 
     def test_lars(self):
+        state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
-        mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
-        state = {'momentum_buffer': mbuff}
-        gradcheck(_diff_fn, (p, grad, state, torch.optim.LARS, {'lr': 0.9, 'differentiable': True}, *state.values()))
-
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["momentum_buffer"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn, 
+            (
+                p,
+                grad,
+                state,
+                torch.optim.LARS, 
+                {"lr": 0.9, "maximize": True, "momentum": 0.9, "differentiable": True, "weight_decay": 0.1},
+                *state.values()
+            )
+        )
 
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")

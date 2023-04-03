@@ -51,6 +51,19 @@ class LARS(Optimizer):
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
 
+    def _init_group(self, group, params_with_grad, grads, momentum_buffer_list):
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            params_with_grad.append(p)
+
+            grads.append(p.grad)
+
+            state = self.state[p]
+
+            if group["momentum"] > 0:
+                momentum_buffer_list.append(state["momentum_buffer"])
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -68,15 +81,6 @@ class LARS(Optimizer):
             params_with_grad = []
             grads = []
             momentum_buffer_list = []
-
-            for p in group["params"]:
-                if p.grad is not None:
-                    params_with_grad.append(p)
-                    grads.append(p.grad)
-
-                    state = self.state[p]
-
-                    momentum_buffer_list.append(state.get("momentum_buffer"))
 
             lars(
                 params_with_grad,
@@ -205,4 +209,4 @@ def _single_tensor_lars(
 
             d_p = d_p.add(buf, alpha=momentum) if nesterov else buf
 
-    param.add_(d_p, alpha=-lr)
+        param.add_(d_p, alpha=-lr)
