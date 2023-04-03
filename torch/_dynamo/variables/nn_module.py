@@ -272,16 +272,6 @@ class NNModuleVariable(VariableTracker):
                     kwargs,
                 )
 
-    def _custom_getitem_fallback(self, module, tx, name, options, key):
-        getitem_fn = getattr(module, name).__func__
-
-        if not isinstance(getitem_fn, types.FunctionType):
-            unimplemented("torch.nn.Module with a non-function custom __getitem__")
-
-        return variables.UserMethodVariable(getitem_fn, self, **options).call_function(
-            tx, [key], {}
-        )
-
     def call_method(
         self,
         tx,
@@ -475,7 +465,7 @@ class NNModuleVariable(VariableTracker):
             if type(module).__getitem__ not in inline_supported:
                 assert isinstance(args[0], variables.ConstantVariable), typestr(args[0])
                 key = args[0].as_python_constant()
-                assert isinstance(key, str)
+                assert isinstance(key, (str, int))
                 fn = getattr(module, name).__func__
 
                 assert isinstance(fn, types.FunctionType)

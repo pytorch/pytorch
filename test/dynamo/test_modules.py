@@ -274,7 +274,13 @@ class ModuleList(torch.nn.Module):
             ]
         )
 
+    def __getitem__(self, idx: int):
+        return self.layers[idx]
+
     def forward(self, x):
+        for i in range(len(self.layers)):
+            x = self[i](x)
+
         for i in range(len(self.layers)):
             x = self.layers[i](x)
 
