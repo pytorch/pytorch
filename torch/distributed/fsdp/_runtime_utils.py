@@ -300,6 +300,7 @@ def _unshard(
     handles: List[FlatParamHandle],
     unshard_stream: torch.cuda.Stream,
     pre_unshard_stream: torch.cuda.Stream,
+    is_prefetch: bool,
 ) -> None:
     """
     Unshards the handles in ``handles``. If the handles are in
@@ -324,7 +325,7 @@ def _unshard(
             event.synchronize()
     with torch.cuda.stream(unshard_stream):
         for handle in handles:
-            handle.unshard()
+            handle.unshard(is_prefetch)
             handle.post_unshard()
 
 
@@ -428,7 +429,9 @@ def _pre_forward_unshard(
     """Unshards parameters in the pre-forward."""
     if not handles:
         return
-    _unshard(state, handles, state._streams["unshard"], state._streams["pre_unshard"])
+    _unshard(
+        state, handles, state._streams["unshard"], state._streams["pre_unshard"], False
+    )
     handles_key = tuple(handles)
     state._needs_pre_forward_unshard[handles_key] = False
     torch.cuda.current_stream().wait_stream(state._streams["unshard"])
@@ -633,6 +636,7 @@ def _pre_backward_hook(
                     _handles,
                     state._streams["unshard"],
                     state._streams["pre_unshard"],
+                    False,
                 )
             torch.cuda.current_stream().wait_stream(state._streams["unshard"])
 
@@ -1006,7 +1010,11 @@ def _prefetch_handles(
         # Prefetch the next set of handles without synchronizing to allow
         # the sync to happen as late as possible to maximize overlap
         _unshard(
-            state, handles_key, state._streams["unshard"], state._streams["pre_unshard"]
+            state,
+            handles_key,
+            state._streams["unshard"],
+            state._streams["pre_unshard"],
+            True,
         )
         state._handles_prefetched[handles_key] = True
 
