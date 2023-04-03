@@ -381,8 +381,7 @@ class SizeMap:
             if isinstance(i, _TensorMetadata):
                 yield i
             elif isinstance(i, list):
-                for t in i:
-                    yield t
+                yield from i
 
     def __getitem__(self, key: TensorKey):
         return self._values[key]
