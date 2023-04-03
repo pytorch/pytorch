@@ -498,11 +498,24 @@ def _convert_to_distributed(
             )
 
         elif isinstance(node.target, torch._ops.OpOverload):
-            replacement = _get_dtensor_dispatch_graph(
-                node, node_to_obj
-            )
-            if replacement is not None:
-                node_replacements[node] = replacement
+            if node.target == torch.ops.aten.scalar_tensor.default:
+                node_to_obj[node] = DTensor.from_local(
+                    torch.ops.aten.scalar_tensor(
+                        node.args[0],
+                        dtype=node.kwargs["dtype"],
+                        device=node.kwargs["device"]
+                    ),
+                    schemas[0].mesh,
+                    [Replicate()],
+                    # prevent running this collective in backwards pass
+                    run_check=False,
+                )
+            else:
+                replacement = _get_dtensor_dispatch_graph(
+                    node, node_to_obj
+                )
+                if replacement is not None:
+                    node_replacements[node] = replacement
         elif node.op == OP.OUTPUT:
             if not _allow_partial:
                 # Returns an expanded dummy add node that ensures
