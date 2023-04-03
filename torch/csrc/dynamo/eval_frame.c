@@ -467,12 +467,10 @@ inline static void set_extra(PyCodeObject* code, CacheEntry* extra) {
   _PyCode_SetExtra((PyObject*)code, extra_index, extra);
 }
 
-#ifdef TORCHDYNAMO_DEBUG
 inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
   DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
   return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
-#endif
 
 static PyObject* call_guard_fail_hook(
     PyObject* hook,
@@ -592,27 +590,71 @@ inline static PyObject* eval_custom_code(
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
+  #if IS_PYTHON_3_11_PLUS
+  DEBUG_CHECK(ncells == frame->f_code->co_ncellvars);
+  DEBUG_CHECK(nfrees == frame->f_code->co_nfreevars);
+  #else
   DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
+  #endif
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
   PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
   #if IS_PYTHON_3_11_PLUS
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
+  Py_XINCREF(frame->f_func->func_closure);
+  shadow->f_func->func_closure = frame->f_func->func_closure;
   #else
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
   #endif
   if (shadow == NULL) {
+    Py_DECREF(shadow_obj);
     return NULL;
   }
 
   #if IS_PYTHON_3_11_PLUS
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
+
+  // copy from old fastlocals to new fastlocals:
+  // for i, name in enumerate(localsplusnames_new):
+  //   name_to_idx[name] = i
+  // for i, name in enumerate(localsplusnames_old):
+  //   fastlocals_new[name_to_idx[name]] = fastlocals_old[i]
+  PyObject* name_to_idx = PyDict_New();
+  if (name_to_idx == NULL) {
+    DEBUG_TRACE0("unable to create localsplus name dict");
+    Py_DECREF(shadow_obj);
+    return NULL;
+  }
+
+  for (Py_ssize_t i = 0; i < code->co_nlocalsplus; i++) {
+    PyObject *name = PyTuple_GET_ITEM(code->co_localsplusnames, i);
+    PyObject *idx = PyLong_FromSsize_t(i);
+    if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
+      Py_DECREF(shadow_obj);
+      Py_DECREF(name_to_idx);
+      return NULL;
+    }
+  }
+
+  for (Py_ssize_t i = 0; i < frame->f_code->co_nlocalsplus; i++) {
+    PyObject *name = PyTuple_GET_ITEM(frame->f_code->co_localsplusnames, i);
+    PyObject *idx = PyDict_GetItem(name_to_idx, name);
+    Py_ssize_t new_i = PyLong_AsSsize_t(idx);
+    if (name == NULL || idx == NULL || (new_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
+      Py_DECREF(shadow_obj);
+      Py_DECREF(name_to_idx);
+      return NULL;
+    }
+    Py_XINCREF(fastlocals_old[i]);
+    fastlocals_new[new_i] = fastlocals_old[i];
+  }
+
+  Py_DECREF(name_to_idx);
   #else
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
-  #endif
 
   for (Py_ssize_t i = 0; i < nlocals_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
@@ -623,6 +665,7 @@ inline static PyObject* eval_custom_code(
     Py_XINCREF(fastlocals_old[nlocals_old + i]);
     fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
+  #endif
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
   Py_DECREF(shadow_obj);
@@ -652,14 +695,22 @@ static PyObject* _custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback) {
+  #if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
-      "begin %s %s %i %i %i %i",
+      "begin %s %s %i %i",
+      name(frame),
+      PyUnicode_AsUTF8(frame->f_code->co_filename),
+      frame->f_code->co_firstlineno,
+      _PyInterpreterFrame_LASTI(frame));
+  #else
+  DEBUG_TRACE(
+      "begin %s %s %i %i %i",
       name(frame),
       PyUnicode_AsUTF8(frame->f_code->co_filename),
       frame->f_lineno,
       frame->f_lasti,
-      frame->f_iblock,
-      frame->f_executing);
+      frame->f_iblock);
+  #endif
 
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==
