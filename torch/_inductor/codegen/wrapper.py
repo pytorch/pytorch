@@ -538,7 +538,7 @@ class WrapperCodeGen(CodeGen):
             output.writeline(
                 call_str
                 if V.graph.aot_mode
-                else f"return print_performance(lambda: call([{call_str}]), times=times, repeat=repeat)"
+                else f"return print_performance(lambda: {call_str}, times=times, repeat=repeat)"
             )
 
     def add_benchmark_harness(self, output):
