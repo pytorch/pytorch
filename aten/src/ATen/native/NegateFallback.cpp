@@ -1,23 +1,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/MathBitsFallback.h>
 #include <ATen/native/MathBitFallThroughLists.h>
+#include <ATen/view/UnaryInvolutionFallback.h>
 
 namespace at {
 namespace native {
-struct NegFallback : MathOpFallback {
-  NegFallback() : MathOpFallback(DispatchKey::Negative, "negation") {}
-  bool is_bit_set(const Tensor& tensor) override {
-    return tensor.is_neg();
-  }
-};
-
-void negationFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  NegFallback object;
-  object.fallback_impl(op, dispatch_keys, stack);
-}
 
 TORCH_LIBRARY_IMPL(_, Negative, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&negationFallback>());
+  view::register_unary_involution_fallback<c10::DispatchKey::Negative>(m);
 }
 
 TORCH_LIBRARY_IMPL(aten, Negative, m) {

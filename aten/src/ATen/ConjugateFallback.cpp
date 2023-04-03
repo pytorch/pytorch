@@ -1,21 +1,10 @@
-#include <ATen/native/MathBitsFallback.h>
 #include <ATen/native/MathBitFallThroughLists.h>
+#include <ATen/view/UnaryInvolutionFallback.h>
 
 namespace at::native {
-struct ConjFallback : MathOpFallback {
-  ConjFallback() : MathOpFallback(DispatchKey::Conjugate, "conjugate") {}
-  bool is_bit_set(const Tensor& tensor) override {
-    return tensor.is_conj();
-  }
-};
-
-void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  ConjFallback object;
-  object.fallback_impl(op, dispatch_keys, stack);
-}
 
 TORCH_LIBRARY_IMPL(_, Conjugate, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&conjugateFallback>());
+  at::view::register_unary_involution_fallback<c10::DispatchKey::Conjugate>(m);
 }
 
 TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
