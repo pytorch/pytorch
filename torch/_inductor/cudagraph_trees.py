@@ -719,7 +719,7 @@ class CUDAGraphNode:
                 # static input, e.g., parameter
                 assert data_ptr == new_inputs[idx].data_ptr()
                 # TODO - shouldnt need to add this for persistent static inputs
-                # since we dont manage the lifetimes of those outputs
+                # since we dont manage the lifetimes of their aliased outputs
                 self.add_to_storage_cache(new_inputs[idx].untyped_storage())
             else:
                 # non-static input, need to copy it into CUDA graph
@@ -928,6 +928,9 @@ class CUDAGraphNode:
 
         live_blocks = get_block_addrs(self.cuda_graphs_pool)
 
+        live_storage_data_ptrs = set()
+        live_storage_weak_ptrs = set()
+
         for depth, outputs_liveness in enumerate(expected_liveness):
             for output_idx, output_liveness in enumerate(outputs_liveness):
                 # tensor can die early, but it can't be alive when it should be dead
@@ -936,15 +939,21 @@ class CUDAGraphNode:
                 )
 
                 if is_live(self.path_weakrefs[depth][output_idx]):
+                    stor_data_ptr = self.path_weakrefs[depth][output_idx].data_ptr()
+                    stor_weak_ptr = self.path_weakrefs[depth][output_idx]()
+
+                    assert (stor_data_ptr in live_storage_data_ptrs) == (
+                        stor_weak_ptr in live_storage_weak_ptrs
+                    )
+                    live_storage_data_ptrs.add(stor_data_ptr)
+                    live_storage_weak_ptrs.add(stor_weak_ptr)
+
                     is_persistent_alias = nodes[
                         depth
                     ].output_is_alias_of_persistent_static_inputs[output_idx]
 
                     if is_persistent_alias:
-                        assert (
-                            self.path_weakrefs[depth][output_idx].data_ptr()
-                            not in live_blocks
-                        )
+                        assert stor_data_ptr not in live_blocks
 
         for depth, output_index in newly_dead:
             assert not is_live(self.path_weakrefs[depth][output_index])
