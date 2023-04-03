@@ -32,9 +32,15 @@ def _export(
     export_options = options.ExportOptions()
     export_options.update(**kwargs)
     # Apply decomposition table to the input graph.
-    decomposed_module = passes.Decompose(
+    module = passes.Decompose(
         module, export_options.decomposition_table, export_options.enable_dynamic_axes
     ).run(*args)
+
+    # Resolve mutations.
+    module = passes.Functionalize(module, export_options.enable_dynamic_axes).run(*args)
+    # Input mutations are detected and distilled after `Functionalize` pass.
+    # Remove them since ONNX inference does not need them.
+    module = passes.RemoveInputMutation(module).run(*args)
 
     # We want to pass list of ints and floats to TorchScript graph correctly
     # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
@@ -42,9 +48,7 @@ def _export(
     # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
     # with FakeTensorMode.
     with torch.utils._mode_utils.no_dispatch():
-        onnxscript_graph = passes.export_fx_to_onnxscript(
-            decomposed_module, export_options
-        )
+        onnxscript_graph = passes.export_fx_to_onnxscript(module, export_options)
     # Export TorchScript graph to ONNX ModelProto.
     onnx_model = onnxscript_graph.to_model_proto(export_options.opset_version)
     if export_options.use_binary_format:

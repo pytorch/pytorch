@@ -200,6 +200,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(SigmoidAddModel(), (x,))
 
+    def test_mutation(self):
+        class MutationModel(torch.nn.Module):
+            def forward(self, x):
+                x.view(3, 2, -1).add_(2.0)
+                return x
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            MutationModel(), (torch.randn(12),)
+        )
+
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
         # Download pytorch model

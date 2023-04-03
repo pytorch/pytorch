@@ -196,6 +196,18 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
+    def test_mutation(self):
+        class MutationModel(torch.nn.Module):
+            def forward(self, x):
+                x.view(3, 2, -1).add_(2.0)
+                return x
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            MutationModel(),
+            (torch.randn(12),),
+            additional_test_inputs=[(torch.randn(24),)],
+        )
+
     @unittest.skip("flaky test: https://github.com/microsoft/onnx-script/issues/523")
     def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
