@@ -6,7 +6,7 @@ from functools import wraps
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._spmd.api import compile, Override
+from torch.distributed._spmd.api import compile
 from torch.distributed._spmd.gm_transformation import GraphModuleTransformation
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
