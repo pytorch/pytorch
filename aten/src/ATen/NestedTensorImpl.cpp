@@ -17,15 +17,18 @@ inline void validate_nested_tensor_metadata(
     const at::Tensor& nested_sizes,
     const at::Tensor& nested_strides,
     const at::Tensor& offsets) {
-  TORCH_INTERNAL_ASSERT(nested_sizes.is_contiguous());
-  int64_t size_dim = nested_sizes.dim();
-  TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
-  TORCH_INTERNAL_ASSERT(nested_strides.is_contiguous());
-  TORCH_INTERNAL_ASSERT(nested_strides.dim() == size_dim);
-  TORCH_INTERNAL_ASSERT(nested_sizes.sizes() == nested_strides.sizes());
-  TORCH_INTERNAL_ASSERT(
-      (size_dim == 0 && offsets.size(0) == 0) ||
-      (size_dim == 2 && nested_sizes.size(0) == offsets.size(0)));
+  // TODO: Make this more granular?
+  if (!nested_sizes.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    TORCH_INTERNAL_ASSERT(nested_sizes.is_contiguous());
+    int64_t size_dim = nested_sizes.dim();
+    TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
+    TORCH_INTERNAL_ASSERT(nested_strides.is_contiguous());
+    TORCH_INTERNAL_ASSERT(nested_strides.dim() == size_dim);
+    TORCH_INTERNAL_ASSERT(nested_sizes.sizes() == nested_strides.sizes());
+    TORCH_INTERNAL_ASSERT(
+        (size_dim == 0 && offsets.size(0) == 0) ||
+        (size_dim == 2 && nested_sizes.size(0) == offsets.size(0)));
+  }
 }
 
 /**
@@ -168,9 +171,7 @@ NestedTensorImpl::NestedTensorImpl(
     const caffe2::TypeMeta data_type,
     at::Tensor nested_sizes,
     at::Tensor nested_strides,
-    at::Tensor storage_offsets,
-    const bool validate_metadata,
-    const c10::optional<int64_t> dim)
+    at::Tensor storage_offsets)
     : TensorImpl(std::move(storage), key_set, data_type),
       nested_sizes_(std::move(nested_sizes)),
       nested_strides_(std::move(nested_strides)),
@@ -180,15 +181,8 @@ NestedTensorImpl::NestedTensorImpl(
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");
-  auto storage_device = storage_.device();
-  TORCH_INTERNAL_ASSERT(
-      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_meta(),
-      "NestedTensorImpl storage must be CUDA, CPU, or Meta; got ",
-      storage_device);
-  if (validate_metadata) {
-    validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
-  }
-  refresh_dim(dim);
+  validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
+  refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
@@ -196,18 +190,14 @@ NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
     at::Tensor nested_sizes,
     at::Tensor nested_strides,
-    at::Tensor storage_offsets,
-    const bool validate_metadata,
-    const c10::optional<int64_t> dim)
+    at::Tensor storage_offsets)
     : NestedTensorImpl(
           buffer.storage(),
           generate_nested_key_set_from_buffer(buffer),
           buffer.dtype(),
           nested_sizes,
           nested_strides,
-          storage_offsets,
-          validate_metadata,
-          dim) {
+          storage_offsets) {
 
   TORCH_INTERNAL_ASSERT(
       buffer.dim() == 1,
@@ -240,7 +230,7 @@ NestedTensorImpl::NestedTensorImpl(
       storage_offsets_(std::move(storage_offsets)),
       opt_sizes_(c10::nullopt) {
   validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
-  refresh_dim(c10::nullopt);
+  refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
@@ -256,10 +246,9 @@ c10::optional<int64_t> NestedTensorImpl::opt_size(int64_t d) const {
   return (*opt_sizes_)[d];
 }
 
-void NestedTensorImpl::refresh_dim(const c10::optional<int64_t> dim_) {
-  const auto my_dim = dim_.has_value() ? *dim_ :
-      (nested_sizes_.dim() ? nested_sizes_.size(1) + 1 : 1);
-  sizes_and_strides_.resize(my_dim);
+void NestedTensorImpl::refresh_dim() {
+  const auto my_dim = nested_sizes_.dim() ? nested_sizes_.sym_size(1) + 1 : 1;
+  sizes_and_strides_.resize(my_dim.guard_int(__FILE__, __LINE__));
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dim() == my_dim);
 }
 
@@ -341,9 +330,7 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
       data_type_,
       nested_sizes_,
       nested_strides_,
-      storage_offsets_,
-      /*validate_metadata=*/ false,
-      dim());
+      storage_offsets_);
 
       copy_tensor_metadata(
           /*src_impl=*/this,

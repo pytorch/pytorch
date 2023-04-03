@@ -1299,6 +1299,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._nested_tensor_size: lambda self: -1,
         Tensor._nested_tensor_storage_offsets: lambda self: -1,
         Tensor._nested_tensor_strides: lambda self: -1,
+        Tensor._nested_view_from_buffer: lambda self, nested_size, nested_strides, offsets: -1,
         Tensor.normal_: lambda self: -1,
         Tensor.numpy: lambda self: -1,
         Tensor.permute: lambda self, dim: -1,

@@ -31,8 +31,9 @@ TensorOptions verify_empty_parameters(
       memory_format,
       " instead.");
 
+  bool is_meta = (!device.has_value() && self.is_meta()) || (device.has_value() && device->is_meta());
   TORCH_CHECK(
-      self.is_contiguous(),
+      is_meta || self.is_contiguous(),
       "empty_like only supports contiguous memory format for Nested Tensors");
 
   TORCH_CHECK(
@@ -56,7 +57,7 @@ Tensor empty_like_nested(
   auto nested_strides = self_nt->get_nested_strides().clone();
   auto offsets = self_nt->get_storage_offsets().clone();
   auto tensor = detail::make_tensor_base<NestedTensorImpl>(
-      new_buffer, nested_size, nested_strides, offsets, /*validate_metadata=*/ false, self.dim());
+      new_buffer, nested_size, nested_strides, offsets);
   return tensor;
 }
 

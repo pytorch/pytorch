@@ -294,7 +294,13 @@ std::vector<void*> unwind() {
   return frames;
 }
 
-std::vector<Frame> symbolize(const std::vector<void*>& frames) {
+#ifdef FBCODE_CAFFE2
+// in CUDA binaries, we have to use the internal symbolizer because
+// addr2line seems to hang.
+__attribute__((weak))
+#endif
+std::vector<Frame>
+symbolize(const std::vector<void*>& frames) {
   // we need to make sure we don't write more than 64k bytes to
   // a pipe before reading the results. Otherwise the buffer may
   // get filled and block before we read the results.

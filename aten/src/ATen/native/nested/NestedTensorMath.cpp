@@ -831,45 +831,33 @@ Tensor _nested_view_from_buffer(
     const Tensor& nested_sizes,
     const Tensor& nested_strides,
     const Tensor& storage_offsets) {
-  TORCH_INTERNAL_ASSERT(
-      !buffer.is_nested(),
-      "Can only a create Nested Tensor from a normal tensor buffer");
-  TORCH_INTERNAL_ASSERT(buffer.dim() == 1, "The input buffer must be flat");
-  TORCH_INTERNAL_ASSERT(nested_sizes.dim() == 2, "Expected the nested size tensor to be two dimensional.");
-  uint64_t num_elements_nested_size = at::prod(nested_sizes, 1).sum().item<int64_t>();
-  uint64_t buffer_storage_size = buffer.storage().nbytes()/buffer.dtype().itemsize();
-  TORCH_INTERNAL_ASSERT(
-      buffer_storage_size == num_elements_nested_size,
-      "The number of elements in the buffer must equal the nested tensor size but buffer size: ",
-      buffer_storage_size,
-      " and nested tensor size: ",
-      num_elements_nested_size,
-      ".");
+  // TODO: Make this more granular?
+  if (!nested_sizes.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    TORCH_INTERNAL_ASSERT(
+        !buffer.is_nested(),
+        "Can only a create Nested Tensor from a normal tensor buffer");
+    TORCH_INTERNAL_ASSERT(buffer.dim() == 1, "The input buffer must be flat");
+    TORCH_INTERNAL_ASSERT(nested_sizes.dim() == 2, "Expected the nested size tensor to be two dimensional.");
+    uint64_t num_elements_nested_size = at::prod(nested_sizes, 1).sum().item<int64_t>();
+    uint64_t buffer_storage_size = buffer.storage().nbytes()/buffer.dtype().itemsize();
+    TORCH_INTERNAL_ASSERT(
+        buffer_storage_size == num_elements_nested_size,
+        "The number of elements in the buffer must equal the nested tensor size but buffer size: ",
+        buffer_storage_size,
+        " and nested tensor size: ",
+        num_elements_nested_size,
+        ".");
 
-  TORCH_INTERNAL_ASSERT(nested_strides.dim() == 2, "Expected the nested stride tensor to be two dimensional.");
-  TORCH_INTERNAL_ASSERT(nested_sizes.size(0) == nested_strides.size(0), "Expected the first dimension of nested size and nested stride tensor to be equal.");
-  TORCH_INTERNAL_ASSERT(nested_strides.size(0) == storage_offsets.size(0), "Expected the first dimension of nested stride tensor to equal the length of offsets.");
+    TORCH_INTERNAL_ASSERT(nested_strides.dim() == 2, "Expected the nested stride tensor to be two dimensional.");
+    TORCH_INTERNAL_ASSERT(nested_sizes.size(0) == nested_strides.size(0), "Expected the first dimension of nested size and nested stride tensor to be equal.");
+    TORCH_INTERNAL_ASSERT(nested_strides.size(0) == storage_offsets.size(0), "Expected the first dimension of nested stride tensor to equal the length of offsets.");
+  }
   return at::detail::make_tensor<NestedTensorImpl>(
     c10::TensorImpl::VIEW,
     buffer,
     nested_sizes,
     nested_strides,
     storage_offsets);
-}
-
-Tensor _nested_from_buffer_unchecked(
-    const Tensor& buffer,
-    const Tensor& nested_sizes,
-    const Tensor& nested_strides,
-    const Tensor& storage_offsets,
-    const int64_t dim) {
-  return at::detail::make_tensor<NestedTensorImpl>(
-    buffer,
-    nested_sizes,
-    nested_strides,
-    storage_offsets,
-    /*validate_metadata=*/ false,
-    dim);
 }
 
 // See Note [Special size rule for nested tensor]
