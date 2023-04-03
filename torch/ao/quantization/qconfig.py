@@ -253,9 +253,25 @@ def get_default_qconfig(backend='x86', version=0):
         else:
             # won't reach
             qconfig = default_qconfig
+    elif version == 1:
+        if backend == 'fbgemm':
+            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
+                              weight=default_per_channel_weight_observer)
+        elif backend == 'qnnpack':
+            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
+                              weight=default_per_channel_weight_observer)
+        elif backend == 'onednn':
+            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
+                              weight=default_per_channel_weight_observer)
+        elif backend == 'x86':
+            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
+                              weight=default_per_channel_weight_observer)
+        else:
+            # won't reach
+            qconfig = default_qconfig
     else:
         raise AssertionError("Version number: " + str(version) +
-                             " in get_default_qconfig is not supported. Version number must be 0")
+                             " in get_default_qconfig is not supported. Version number must be 0 or 1")
 
     return qconfig
 
@@ -375,10 +391,36 @@ def get_default_qat_qconfig(backend='x86', version=1):
                               weight=default_fused_per_channel_wt_fake_quant)
         else:
             qconfig = default_qat_qconfig_v2
+    # Use per channel quant for QNNPACK
+    elif version == 2:
+        if backend == 'fbgemm':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=True),
+                              weight=default_fused_per_channel_wt_fake_quant)
+        elif backend == 'qnnpack':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=False),
+                              weight=default_fused_per_channel_wt_fake_quant)
+        elif backend == 'onednn':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255),
+                              weight=default_fused_per_channel_wt_fake_quant)
+        elif backend == 'x86':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=True),
+                              weight=default_fused_per_channel_wt_fake_quant)
+        else:
+            qconfig = default_qat_qconfig_v2
     else:
         raise AssertionError("Version number: " + str(version) +
-                             "in get_default_qat_qconfig is not supported. Version number must be 0 or 1")
-
+                             "in get_default_qat_qconfig is not supported. Version number must be 0 or 1 or 2")
     return qconfig
 
 """
