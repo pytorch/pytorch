@@ -19,10 +19,8 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
 from torch.onnx._internal.exporter import ExportOptions, ExportOutput
-from torch.onnx._internal.exporters import (
-    DynamoOptimizeExporter,
-    FXSymbolicTraceExporter,
-)
+from torch.onnx._internal.exporters.dynamo_optimize import DynamoOptimizeExporter
+from torch.onnx._internal.exporters.fx_symbolic import FXSymbolicTraceExporter
 from torch.testing._internal import common_utils
 from torch.types import Number
 from torch.utils import _pytree as pytree

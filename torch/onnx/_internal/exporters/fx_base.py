@@ -1,15 +1,18 @@
 import abc
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 import torch._ops
+
+import torch.onnx
+import torch.onnx._internal.exporter
+import torch.onnx._internal.fx.function_dispatcher as function_dispatcher
+import torch.onnx._internal.fx.passes as passes
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.exporter import Exporter, ExportOutput
-from torch.onnx._internal.fx import function_dispatcher, passes
 
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
 
 
-class FXGraphModuleExporter(Exporter, abc.ABC):
+class FXGraphModuleExporter(torch.onnx._internal.exporter.Exporter, abc.ABC):
     @property
     def decomposition_table(self) -> Mapping[torch._ops.OpOverload, Callable]:
         return function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE
@@ -18,8 +21,8 @@ class FXGraphModuleExporter(Exporter, abc.ABC):
     def export_fx_to_onnx(
         self,
         fx_module: torch.fx.GraphModule,
-        *fx_module_args,
-    ) -> ExportOutput:
+        fx_module_args: Sequence[Any],
+    ) -> torch.onnx.ExportOutput:
         # Apply decomposition table to the input graph.
         decomposed_module = passes.Decompose(
             fx_module,
@@ -38,4 +41,4 @@ class FXGraphModuleExporter(Exporter, abc.ABC):
             )
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(self.options.opset_version)
-        return ExportOutput(onnx_model)
+        return torch.onnx.ExportOutput(onnx_model)

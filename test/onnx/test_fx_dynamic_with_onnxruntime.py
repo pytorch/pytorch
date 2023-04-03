@@ -150,6 +150,8 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "typing.Union[float, int, str, bytes, typing.Sequence[float],"
         " typing.Sequence[int], torch.Tensor], as [None, None]:"
     )
+    # When the skip reason above is addressed, annotate this test with
+    # @skipIfNoTorchVision
     def test_shufflenet_v2_dynamic_axes(self):
         import torchvision
 

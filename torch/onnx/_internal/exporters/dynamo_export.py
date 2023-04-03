@@ -1,12 +1,14 @@
 import copy
 
 import torch._dynamo
-from torch.onnx._internal.exporter import ExportOutput
-from torch.onnx._internal.exporters.fx_base import FXGraphModuleExporter
+import torch.onnx
+import torch.onnx._internal.exporters.fx_base
 
 
-class DynamoExportExporter(FXGraphModuleExporter):
-    def export(self) -> ExportOutput:
+class DynamoExportExporter(
+    torch.onnx._internal.exporters.fx_base.FXGraphModuleExporter
+):
+    def export(self) -> torch.onnx.ExportOutput:
         # args will be converted to symbolic tensor. Let's copy to avoid side effects.
         args = copy.deepcopy(self.model_args)
         # Translate callable to FX graph.
@@ -22,4 +24,4 @@ class DynamoExportExporter(FXGraphModuleExporter):
         #
         # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
         # to _export.
-        return self.export_fx_to_onnx(graph_module, *args)
+        return self.export_fx_to_onnx(graph_module, args)

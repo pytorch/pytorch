@@ -2,12 +2,14 @@ import copy
 from typing import Optional
 
 import torch._dynamo
-from torch.onnx._internal.exporter import ExportOutput
-from torch.onnx._internal.exporters.fx_base import FXGraphModuleExporter
+import torch.onnx
+import torch.onnx._internal.exporters.fx_base
 
 
-class DynamoOptimizeExporter(FXGraphModuleExporter):
-    def export(self) -> ExportOutput:
+class DynamoOptimizeExporter(
+    torch.onnx._internal.exporters.fx_base.FXGraphModuleExporter
+):
+    def export(self) -> torch.onnx.ExportOutput:
         # We hope the input kwargs will be mapped to bound.args after binding.
         # If not, we will raise an error.
         bound = self.model_signature.bind(*self.model_args, **self.model_kwargs)
@@ -44,5 +46,5 @@ class DynamoOptimizeExporter(FXGraphModuleExporter):
         assert compiler.captured_graph
         # Export FX graph to ONNX ModelProto.
         return self.export_fx_to_onnx(
-            compiler.captured_graph, *(arg for arg in bound_args if arg is not None)
+            compiler.captured_graph, tuple(arg for arg in bound_args if arg is not None)
         )

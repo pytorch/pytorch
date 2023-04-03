@@ -104,9 +104,13 @@ class ResolvedExportOptions:
         if self.dynamic_shapes and self.op_level_debug:
             raise RuntimeError(
                 "Both ExportOptions.op_level_debug and ExportOptions.dynamic_shapes "
-                + "are True but these options are mutually execusive. Please set only "
+                + "are True but these options are mutually exclusive. Please set only "
                 + "one of them to True.",
             )
+
+        for key in dir(options):
+            if not key.startswith("_"):  # skip private attributes
+                assert hasattr(self, key), f"Unresolved option '{key}'"
 
 
 @runtime_checkable
@@ -338,7 +342,7 @@ def dynamo_export(
 
     _assert_dependencies(resolved_export_options)
 
-    from torch.onnx._internal.exporters import DynamoOptimizeExporter
+    from torch.onnx._internal.exporters.dynamo_optimize import DynamoOptimizeExporter
 
     return DynamoOptimizeExporter(
         options=resolved_export_options,
