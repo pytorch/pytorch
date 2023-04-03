@@ -2121,12 +2121,11 @@ class CppKernelProxy(CppKernel):
             sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
             for sub_block in sub_blocks:
                 _sub_graph: torch.fx.Graph = sub_block.graph
-                _sub_graph.print_tabular()
                 changed = propagation(_sub_graph)
                 while changed:
                     changed = propagation(_sub_graph)
 
-        for _node in nodes:    
+        for _node in nodes:
             assert isinstance(_node, SchedulerNode)
             node: SchedulerNode = _node
             if isinstance(node._body, ir.LoopBody):
