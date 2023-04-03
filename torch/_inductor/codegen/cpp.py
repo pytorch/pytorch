@@ -1058,15 +1058,17 @@ class CppKernel(Kernel):
 
             def gen_loop(loop: LoopLevel, in_reduction=False):
                 with contextlib.ExitStack() as stack:
-                    code.writelines(loop.lines())
-                    stack.enter_context(code.indent())
-                    # generate inner loops or loop body
-                    if loop.inner:
-                        gen_loops(loop.inner, loop.is_reduction())
-                    else:
-                        kernels = loop.get_kernels()
-                        assert len(kernels) == 1
-                        gen_kernel(kernels[0])
+                    loop_lines = loop.lines()
+                    if loop_lines is not None:
+                        code.writelines(loop_lines)
+                        stack.enter_context(code.indent())
+                        # generate inner loops or loop body
+                        if loop.inner:
+                            gen_loops(loop.inner, loop.is_reduction())
+                        else:
+                            kernels = loop.get_kernels()
+                            assert len(kernels) == 1
+                            gen_kernel(kernels[0])
 
             stack.enter_context(code.indent())
             if loop_nest.root:
@@ -2615,6 +2617,10 @@ class LoopLevel:
         offset_str = f"{INDEX_TYPE} {self.var}={cexpr_index(self.offset)}"
         size_str = f"{self.var}<{cexpr_index(self.size)}"
         steps_str = f"{self.var}+={cexpr_index(self.steps)}"
+        if cexpr_index(self.offset) == cexpr_index(self.size):
+            # Do not generate loops when the condition doesn't hold, like:
+            # for(long i0=4096; i0<4096; i0+=1)
+            return None
         line2 = f"for({offset_str}; {size_str}; {steps_str})"
         if self.collapsed or not line1:
             return [line2]
