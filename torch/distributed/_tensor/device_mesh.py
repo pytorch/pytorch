@@ -12,6 +12,7 @@ from torch.distributed.distributed_c10d import (
     all_to_all,
     Backend,
     broadcast,
+    broadcast_object_list,
     get_backend,
     get_global_rank,
     get_rank,
@@ -152,6 +153,11 @@ class DeviceMesh(object):
                 # automatically set the current cuda device base on num of gpu devices available in each host
                 # NOTE: This device selection would only work for homogenous hardware.
                 torch.cuda.set_device(get_rank() % torch.cuda.device_count())
+            # to perform DTensor random ops, we need to ensure all ranks in mesh is initialized with the same
+            # random seed. The seed to use will be the current seed on rank 0.
+            object_list = [torch.cuda.initial_seed()]
+            broadcast_object_list(object_list)
+            torch.cuda.manual_seed(int(object_list[0]))
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"

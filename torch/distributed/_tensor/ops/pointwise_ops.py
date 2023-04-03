@@ -9,7 +9,7 @@ from torch.distributed._tensor.ops.common_rules import (
     pointwise_rule,
 )
 from torch.distributed._tensor.ops.utils import register_prop_rule
-from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Replicate
+from torch.distributed._tensor.placement_types import DTensorSpec
 
 
 aten = torch.ops.aten
@@ -382,18 +382,10 @@ def _register_non_deterministic_op(op):
     def non_deterministic_rule(op_schema: OpSchema) -> OutputSharding:
         self_spec = cast(DTensorSpec, op_schema.args_schema[0])
 
-        # TODO: We are specializing non_deterministic_rule now because
-        # replicate does not support this op yet. We should remove
-        # this rule once we support non-deterministic op for replicate.
-        replicate_or_partial = False
-        for placement in self_spec.placements:
-            if isinstance(placement, (Replicate, _Partial)):
-                replicate_or_partial = True
-                break
-
-        if replicate_or_partial:
+        # TODO: we will support native_dropout in future
+        if op == aten.native_dropout.default:
             return OutputSharding(
-                None, failed_reason=f"{op} with replication is not supported yet!"
+                None, failed_reason=f"{op} is not supported yet!"
             )
         else:
             return OutputSharding(self_spec)
