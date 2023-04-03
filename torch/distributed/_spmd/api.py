@@ -324,7 +324,7 @@ DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
 }
 
 
-def _lint(gm: fx.GraphModule) -> fx.GraphModule:
+def _dedup_collectives(gm: fx.GraphModule) -> fx.GraphModule:
     # deduplicate collectives
     node_to_node: Dict[fx.Node, fx.Node] = {}
     args_to_node: Dict[Tuple[Any, ...], fx.Node] = {}
@@ -446,16 +446,18 @@ def _compile(
         gm, args, kwargs, named_states, params_and_buffers
     )
 
-    # 5. dedup comm operators. The duplication could come from DTensor args
-    # redistribution. Suppose one operator produces Partial gradient tensor,
-    # then every optimizer operation using that Partial gradient tensor would
-    # trigger an allreduce. This is becuase DTensor only has local information
-    # on individual tensor/operator, which is not sufficient to detect
-    # duplications. This situation can also happen when inserting FSDP allgather
-    # if a parameter is used multiple times.
+    # 5. dedup comm operators.
+    # The duplication could come from DTensor args and kwargs redistribution.
+    # Suppose one operator produces a Partial gradient tensor and model
+    # parameters are replicated. In this case, every optimizer operation using
+    # that Partial gradient tensor would trigger an allreduce. This is becuase
+    # DTensor only has local information on individual tensor/operator, which is
+    # not sufficient to detect duplications in the graph. This situation can
+    # also happen when inserting FSDP allgather if a parameter is used multiple
+    # times in the forward method.
     # TODO(@mrshenli): @yifuwang has a suggestion of conducting expansion and
     # dedup at tracer-level to avoid multiple graph passes.
-    gm = _lint(gm)
+    gm = _dedup_collectives(gm)
 
     # 6. Replace previously inserted dummy ones with real graphs.
     if module_override:
