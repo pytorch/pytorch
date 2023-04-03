@@ -1319,7 +1319,7 @@ void CudaCodeGen::CompileToNVRTC(
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
-      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // (since older driver doesn't necessarily recognize PTX emitted by new
       // toolkit);
       // Meanwhile, for forward compatibility (future device with
       // `compile_to_sass==false`), since SASS are not necessarily compatible,

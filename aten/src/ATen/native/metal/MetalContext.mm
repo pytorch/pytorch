@@ -53,9 +53,12 @@ using namespace at::native::metal;
           isOperatingSystemAtLeastVersion:supportedVer]) {
     return false;
   }
+C10_CLANG_DIAGNOSTIC_PUSH()
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-declarations")
   if (![_device supportsFeatureSet:MTLFeatureSet_macOS_GPUFamily1_v3]) {
     return false;
   }
+C10_CLANG_DIAGNOSTIC_POP()
 #else
   return false;
 #endif
@@ -136,7 +139,7 @@ using namespace at::native::metal;
 - (id<MTLBuffer>)emptyMTLBuffer:(int64_t) size {
     TORCH_CHECK(_device);
     id<MTLBuffer> buffer = [_device newBufferWithLength:size
-                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+                      options:MTLResourceCPUCacheModeWriteCombined];
     return buffer;
 }
 

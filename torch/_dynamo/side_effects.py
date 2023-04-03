@@ -303,7 +303,13 @@ class SideEffects:
                 if isinstance(var.mutable_local, AttributeMutationNew):
                     var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif isinstance(var.mutable_local, AttributeMutationNew):
-                cg.load_import_from(utils.__name__, "object_new")
+                if "__call_nn_module_init" in self.store_attr_mutations.get(
+                    var.mutable_local, {}
+                ):
+                    assert isinstance(var, variables.UnspecializedNNModuleVariable)
+                    cg.load_import_from(utils.__name__, "nn_module_new")
+                else:
+                    cg.load_import_from(utils.__name__, "object_new")
                 cg(var.mutable_local.cls_source)
                 cg.extend_output(create_call_function(1, True))
                 cg.add_cache(var)
@@ -325,7 +331,7 @@ class SideEffects:
                     [
                         cg.create_load_const(None),
                         cg.create_load_const(None),
-                        create_instruction("BUILD_SLICE", 2),
+                        create_instruction("BUILD_SLICE", arg=2),
                     ]
                 )
                 suffixes.append([create_instruction("STORE_SUBSCR")])
@@ -334,19 +340,17 @@ class SideEffects:
                 cg.tx.output.update_co_names("update")
 
                 cg(var.mutable_local.source)
-                cg.extend_output([create_instruction("LOAD_METHOD", "update")])
+                cg.extend_output([create_instruction("LOAD_METHOD", argval="update")])
                 cg(var, allow_cache=False)
 
                 cg(var.mutable_local.source)
-                cg.extend_output([create_instruction("LOAD_METHOD", "clear")])
+                cg.extend_output([create_instruction("LOAD_METHOD", argval="clear")])
 
                 suffixes.append(
-                    create_call_method(0)  # clear
-                    + [
+                    [
+                        *create_call_method(0),  # clear
                         create_instruction("POP_TOP"),
-                    ]
-                    + create_call_method(1)  # update
-                    + [
+                        *create_call_method(1),  # update
                         create_instruction("POP_TOP"),
                     ]
                 )
@@ -357,12 +361,16 @@ class SideEffects:
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
-                        suffixes.append([create_instruction("STORE_GLOBAL", name)])
+                        suffixes.append(
+                            [create_instruction("STORE_GLOBAL", argval=name)]
+                        )
+                    elif name == "__call_nn_module_init":
+                        pass  # handled in codegen_save_tempvars
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
                         cg(var.mutable_local.source)
-                        suffixes.append([create_instruction("STORE_ATTR", name)])
+                        suffixes.append([create_instruction("STORE_ATTR", argval=name)])
             else:
                 raise AssertionError(type(var))
 
