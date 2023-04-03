@@ -10,17 +10,19 @@ from typing import Dict, List
 import torch.nn
 
 from .. import variables
+from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     get_custom_getattr,
     is_namedtuple_cls,
+    istype,
     namedtuple_fields,
     object_has_getattribute,
 )
 from .base import MutableLocal, VariableTracker
-from .misc import NullContextVariable
+from .ctx_manager import NullContextVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -262,6 +264,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
+        elif istype(self.value, types.MethodType):
+            func = self.value.__func__
+            obj = self.value.__self__
+            if (
+                func is torch.utils._contextlib._DecoratorContextManager.clone
+                and is_allowed(obj.__class__)
+                and not (args or kwargs)
+            ):
+                return variables.TorchVariable(obj.__class__).call_function(
+                    tx, args, kwargs
+                )
 
         return super().call_function(tx, args, kwargs)
 

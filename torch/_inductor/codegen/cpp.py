@@ -200,8 +200,16 @@ class CppPrinter(ExprPrinter):
             return f"{expr.p}"
         return f"{expr.p}.0/{expr.q}.0"
 
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"std::ceil({self._print(expr.args[0])})"
+
 
 cexpr = CppPrinter().doprint
+
+
+def cexpr_index(index):
+    return f"static_cast<{INDEX_TYPE}>({cexpr(index)})"
 
 
 @dataclasses.dataclass
@@ -909,7 +917,7 @@ class CppKernel(Kernel):
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
-        line = f"{var}[{cexpr(index)}]"
+        line = f"{var}[{cexpr_index(index)}]"
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
         return self.cse.generate(self.loads, line)
@@ -919,12 +927,12 @@ class CppKernel(Kernel):
         var = self.args.output(name)
         index = self.rename_indexing(index)
         if mode is None:
-            line = f"{var}[{cexpr(index)}] = {value};"
+            line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
-                line = f"{var}[{cexpr(index)}] += {value};"
+                line = f"{var}[{cexpr_index(index)}] += {value};"
             else:
-                line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
+                line = f"atomic_add(&{var}[{cexpr_index(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
@@ -965,7 +973,9 @@ class CppKernel(Kernel):
             var = self.args.output(name)
             member_name = ".index" if argmax_or_argmin else ""
             self.reduction_suffix.writeline(
-                DeferredLine(name, f"{var}[{cexpr(index)}] = {tmpvar}{member_name};")
+                DeferredLine(
+                    name, f"{var}[{cexpr_index(index)}] = {tmpvar}{member_name};"
+                )
             )
         self.cse.store_cache[name] = tmpvar
 
@@ -1139,7 +1149,9 @@ class CppVecKernel(CppKernel):
         is_broadcast = expanded_index == new_index
 
         var_expr = (
-            f"{var}[{cexpr(index)}]" if is_broadcast else f"{var} + {cexpr(new_index)}"
+            f"{var}[{cexpr_index(index)}]"
+            if is_broadcast
+            else f"{var} + {cexpr_index(new_index)}"
         )
 
         if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
@@ -1178,14 +1190,14 @@ class CppVecKernel(CppKernel):
         assert new_index != expanded_index
         if V.graph.get_dtype(name) in [torch.bfloat16]:
             if opt_ctx.is_store_fp32_as_bf16:
-                line = f"store_float_as_bf16({var} + {cexpr(new_index)}, {value});"
+                line = (
+                    f"store_float_as_bf16({var} + {cexpr_index(new_index)}, {value});"
+                )
             else:
                 assert opt_ctx.is_bf16_mem_copy
-                line = (
-                    f"{value}.store({var} + {cexpr(new_index)}, {self.tiling_factor});"
-                )
+                line = f"{value}.store({var} + {cexpr_index(new_index)}, {self.tiling_factor});"
         else:
-            line = f"{value}.store({var} + {cexpr(new_index)});"
+            line = f"{value}.store({var} + {cexpr_index(new_index)});"
         self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
@@ -1302,9 +1314,9 @@ class CppTile2DKernel(CppVecKernel):
             new_index, factor, itervar_idx=self.outer_tiling_idx
         )
 
-        src = f"{var} + {cexpr(new_index)}"
+        src = f"{var} + {cexpr_index(new_index)}"
         dst = "__place_holder__"
-        ld_src = f"{cexpr(self.stride_at(self.itervars[-1], index))}"
+        ld_src = f"{cexpr_index(self.stride_at(self.itervars[-1], index))}"
         ld_dst = f"{factor}"
         if is_store:
             src, dst = dst, src
@@ -1343,7 +1355,7 @@ class CppTile2DKernel(CppVecKernel):
                 name, var, expanded_index, is_store=False
             )
             # vector load inside the kernel inner loop
-            line = f"at::vec::Vectorized<float>::loadu({tile_var} + {cexpr(inner * self.tiling_factor)})"
+            line = f"at::vec::Vectorized<float>::loadu({tile_var} + {cexpr_index(inner * self.tiling_factor)})"
             return self.cse.generate(self.loads, line)
         else:
             new_index = self.scale_index_with_offset(
@@ -1368,7 +1380,7 @@ class CppTile2DKernel(CppVecKernel):
                 name, var, expanded_index, is_store=True
             )
             # vector store inside the kernel inner loop
-            line = f"{value}.store({tile_var} + {cexpr(inner * self.tiling_factor)});"
+            line = f"{value}.store({tile_var} + {cexpr_index(inner * self.tiling_factor)});"
             self.stores.writeline(DeferredLine(name, line))
         else:
             new_index = self.scale_index_with_offset(
@@ -2600,7 +2612,10 @@ class LoopLevel:
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
-        line2 = f"for({INDEX_TYPE} {self.var}={cexpr(self.offset)}; {self.var}<{cexpr(self.size)}; {self.var}+={cexpr(self.steps)})"
+        offset_str = f"{INDEX_TYPE} {self.var}={cexpr_index(self.offset)}"
+        size_str = f"{self.var}<{cexpr_index(self.size)}"
+        steps_str = f"{self.var}+={cexpr_index(self.steps)}"
+        line2 = f"for({offset_str}; {size_str}; {steps_str})"
         if self.collapsed or not line1:
             return [line2]
         return [line1, line2]
