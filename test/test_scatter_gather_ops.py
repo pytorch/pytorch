@@ -164,8 +164,10 @@ class TestScatterGather(TestCase):
 
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter_(self, device, dtype):
-        self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
-                                is_scalar=False, reduction=None)
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
+                                        is_scalar=False, reduction=None)
 
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter__scalar(self, device, dtype):
@@ -207,9 +209,11 @@ class TestScatterGather(TestCase):
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     def test_scatter_reduce_sum(self, device, dtype):
         for include_self in (True, False):
-            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
-                                    is_scalar=False, reduction='sum', unique_indices=False,
-                                    include_self=include_self)
+            for deterministic in [False, True]:
+                with DeterministicGuard(deterministic):
+                    self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                            is_scalar=False, reduction='sum', unique_indices=False,
+                                            include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
@@ -223,9 +227,11 @@ class TestScatterGather(TestCase):
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_mean(self, device, dtype):
         for include_self in (True, False):
-            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
-                                    is_scalar=False, reduction='mean', unique_indices=False,
-                                    include_self=include_self)
+            for deterministic in [False, True]:
+                with DeterministicGuard(deterministic):
+                    self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                            is_scalar=False, reduction='mean', unique_indices=False,
+                                            include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
