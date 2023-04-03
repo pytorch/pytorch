@@ -2514,6 +2514,24 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    def test_adaptive_avg_pool2d_low_prec(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+            def forward(self, x):
+                x = self.avgpool(x)
+                return x
+
+        mod = Model()
+        for dtype in [torch.half, torch.bfloat16]:
+            x = torch.randn(4, 3, 7, 7).to(dtype=dtype)
+            opt_mod = torch.compile(mod)
+            res = opt_mod(x)
+            expected = mod(x)
+            self.assertTrue(torch.allclose(res, expected))
+
     def test_max_pool2d1(self):
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
@@ -7217,6 +7235,72 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(real_out, compiled_out)
             torch._dynamo.reset()
 
+        @torch._dynamo.config.patch(dynamic_shapes=True)
+        def test_negative_arange_dynamic_shapes(self):
+            # Repro from alibi relative encodings
+            def sign(x):
+                return (x > 0) - (x < 0)
+
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    nheads = 16
+                    start = math.log2(0.5)
+                    end = math.log2(1 / (2**8))
+
+                    self.register_buffer(
+                        "scales",
+                        2
+                        ** torch.arange(
+                            start,
+                            end + 1e-6 * sign(end - start),
+                            (end - start) / (nheads - 1),
+                        ).view(1, nheads, 1, 1),
+                    )
+                    self.emb = nn.Embedding(1024, 256)
+                    self.dec_layer = nn.TransformerDecoderLayer(
+                        256, 16, 512, batch_first=True, norm_first=True
+                    )
+                    self.head = nn.Linear(256, 1024)
+
+                def forward(self, enc_out: torch.Tensor, dec_in: torch.Tensor):
+                    padmask = dec_in == 0
+                    dec_mask = padmask.unsqueeze(-1) == padmask.unsqueeze(-2)
+                    dec_mask = dec_mask.to(dtype=torch.float32)
+                    dec_mask = dec_mask.tril(diagonal=0).cuda()
+
+                    q_pos = torch.arange(
+                        dec_in.size(1), dtype=torch.long, device="cuda"
+                    )
+                    k_pos = torch.arange(
+                        dec_in.size(1), dtype=torch.long, device="cuda"
+                    )
+                    rel_pos = k_pos[None, :] - q_pos[:, None]
+                    values = rel_pos.abs().neg().unsqueeze(0).unsqueeze(0)
+                    dec_bias = values * self.scales
+                    dec_bias.tril_(diagonal=0)
+
+                    dec_mask = dec_mask + dec_bias[0]
+                    out = self.emb(dec_in)
+                    out = self.dec_layer(out, enc_out, tgt_mask=dec_mask)
+                    return self.head(out)
+
+            mod = Repro().cuda()
+            opt_mod = torch._dynamo.optimize("inductor", dynamic=True)(mod)
+            mod.eval()
+            opt_mod.eval()
+
+            enc_out = torch.rand(1, 512, 256).cuda()
+            dec_inputs = [
+                torch.randint(0, 512, (1, i + 1), dtype=torch.long).cuda()
+                for i in range(8)
+            ]
+
+            for dec_inp in dec_inputs:
+                assert same_two_models(
+                    mod, opt_mod, [enc_out, dec_inp], only_fwd=True
+                ), "Inductor with dynamic shapes failed"
+
         @config.patch({"triton.cudagraphs": True, "size_asserts": False})
         def test_expanded_inputs_cudagraphs_no_size_asserts(self):
             @torch._dynamo.optimize("inductor")
@@ -7469,6 +7553,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             ref = torch.compile(fn, fullgraph=True)(*args)
             assert same(ref, correct)
+
+        @requires_cuda()
+        def test_deterministic_algorithms(self):
+            N = 10000
+
+            @torch.compile
+            def fn(idx, values):
+                x = torch.zeros(1, device="cuda")
+                x[idx] += values
+                return x
+
+            idx = torch.zeros(N, dtype=torch.int64, device="cuda")
+            values = torch.randn(N, device="cuda")
+
+            r0 = fn(idx, values)
+            with DeterministicGuard(True):
+                r1 = fn(idx, values)
+                for _ in range(10):
+                    rn = fn(idx, values)
+                    self.assertEqual(r1, rn, atol=0, rtol=0)
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_heuristics import CachingAutotuner
