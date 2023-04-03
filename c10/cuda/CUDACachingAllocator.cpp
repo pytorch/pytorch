@@ -227,6 +227,7 @@ struct Block {
         stream_uses(),
         size(size),
         requested_size(0) {}
+
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
   }
@@ -268,6 +269,96 @@ struct SegmentRange {
 };
 
 #ifdef EXPANDABLE_SEGMENTS_SUPPORTED
+
+/*
+Note [Expandable Segments]
+
+Rationale
+
+For large (>2MB) allocations, the allocator calls cudaMalloc to get allocations
+that are the same size as what the user requests. In the future, parts of these
+allocations can be reused for other requests if they are free. This works well
+when the program makes many requests of exactly the same size or of sizes that
+even multiples of that size. Many deep learning models follow this behavior.
+However, one common exception is when the batch size changes slightly from one
+iteration to the next, e.g. in batched inference. When the program runs
+initially with batch size N, it will make allocations appropriate for that size.
+If in the future, it runs at size N - 1, the existing allocations will still be
+big enough. However, if it runs at size N + 1, then it will have to make new
+allocations that are slightly larger. Not all the tensors are the same size.
+Some might be (N + 1)*A and others (N + 1)*A*B where A and B are some non-batch
+dimensions in the model. Because the allocator reuses existing allocations when
+they are big enough, some number of (N + 1)*A allocations will actually fit in
+the already existing N*B*A segments, though not perfectly. As the model runs it
+will partially fill up all of these segments leaving unusable free slices of
+memory at the end of these segments. The allocator at some point will need to
+cudaMalloc a new (N + 1)*A*B segment. If there is not enough memory, there is
+now no way to recover the slices of memory that are free at the end of existing
+segments. With models 50+ layers deep, this pattern might repeat 50+ times
+created many slivers.
+
+Approach
+
+Expandable segments allows the allocator to create a segment initially and then
+expand its size later when more memory is needed. Instead of making one segment
+per allocation, it tries to make one segment (per stream) that grows as
+necessary. Now when the N + 1 case runs, the allocations will tile nicely into
+the one large segment until it fills up. Then more memory is requested and
+appended to the end of the segment. This process does not create as many slivers
+of unusable memory, so it is more likely to succeed at finding this memory.
+
+Implementation
+
+The expandable_segments:True option is used to enable/disable this behavior. We
+use cuda's low-level memory APIs, which are similar to mmap, to extend the
+memory segments. These APIs separate the allocation of physical memory
+(cuMemCreate) from the allocation of virtual address space (cuMemAddressReserve)
+and the associate between them cuMemMap/cuMemSetAccess.
+
+When we allocate a new segment, we allocate enough address space to map
+basically the entire physical memory of the GPU (there is 256TiB of address
+space), but we only map enough physical memory to handle the current amount of
+memory needed by the program. As more is requested, we add more physical memory
+to the segment. This can work at the granularity of GPU pages which are 2MiB
+currently.
+
+If we end up out of memory, we can unmap all the memory in our segmenet
+corresponding to empty physical pages, and return it to CUDA for use at another
+address in the segment or in a segment for a different stream.
+
+A current limitation of CUDA's API is that physical memory cannot be split up
+after it is mapped, and the cost to map/unmap memory is proportional the number
+of physical memory chunks that were allocated (mapping 10 separately allocated
+2MiB pages takes 10x time compared to mapping one 20MiB physical allocation of
+10 pages).  So we use 2MiB pages for our small pool and 20MiB pages for our
+large pool. Initially allocation using expandable_blocks will be slower than
+cudaMalloc, though still in the milliseconds range for mapping the entire
+memory.
+
+When mapping new memory to expand the segment, we look for the lowest address at
+which we can fit a new allocation by adding new pages. Normally this will be at
+the end of the block. But if have previously unmapped blocks earlier in the
+segment during an OOM, it will first try to fill in those gaps to keep the
+segment as a single block.
+
+Allocation of blocks in the segment uses the same best-fit heuristics of the
+rest of the allocator.
+
+Expandable blocks can be enabled/disabled throughout the run of a program. When
+disabled, the allocator will not put new allocations in an expandable block.
+
+Limitations
+
+* Slightly slower initial memory allocation speed.
+* IPC of cuda tensors (e.g. for multiprocess dataloaders) is not supported.
+However, it is possible to temporarily disable (expandable_segments:False) the
+bevhavior for allocator tensors that need to be used cross-process.
+* CUDA runtime APIs related to sharing memory across process
+(cudaDeviceEnablePeerAccess) do not work for memory allocated with cuMemMap.
+Instead these mapping have to be done manually. The allocator now has an
+`enablePeerAccess` method to do this.
+*/
+
 struct ExpandableSegment {
   ExpandableSegment(
       int device,
@@ -277,59 +368,54 @@ struct ExpandableSegment {
       : device_(device),
         stream_(stream),
         max_handles_(0),
-        kSegmentSize(size),
+        segment_size_(size),
         peers_(peers) {
     cudaDeviceProp prop;
     C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
     max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
-    C10_CUDA_DRIVER_CHECK(
-        cuMemAddressReserve(&ptr_, kSegmentSize * max_handles_, 0ULL, 0, 0ULL));
+    C10_CUDA_DRIVER_CHECK(cuMemAddressReserve(
+        &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
   }
-  // begin must be aligned to a kSegmentSize
+  // begin must be aligned to segment_size_.
   // returns the actual range mapped, which may be
-  // greater than requested if size is not aligned to kSegmentSize
-  // offset return will always beg range.offset
-  // size of 0 indicates OOM
+  // greater than requested if size is not aligned to segment_size_.
+  // return size of 0 indicates OOM
   SegmentRange map(SegmentRange range) {
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
-    TORCH_INTERNAL_ASSERT(ptr() + begin * kSegmentSize == range.ptr);
+    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
     if (begin == end) {
       return rangeFromHandles(begin, end);
     }
-
-    while (end > handles_present_.size()) {
-      handles_present_.push_back(false);
-      handles_value_.push_back(0);
+    while (end > handles_.size()) {
+      handles_.push_back(c10::nullopt);
     }
     for (auto i : c10::irange(begin, end)) {
-      TORCH_INTERNAL_ASSERT(!handles_present_.at(i));
+      TORCH_INTERNAL_ASSERT(!handles_.at(i));
       CUmemGenericAllocationHandle handle;
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
       prop.location.id = device_;
-      auto status = cuMemCreate(&handle, kSegmentSize, &prop, 0);
+      auto status = cuMemCreate(&handle, segment_size_, &prop, 0);
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(begin, i)) {
-          auto handle = handles_value_.at(j);
-          handles_value_.at(j) = 0;
-          handles_present_.at(j) = false;
+          auto handle = handles_.at(j).value();
+          handles_.at(j) = c10::nullopt;
           C10_CUDA_DRIVER_CHECK(cuMemRelease(handle));
         }
         trimHandles();
         return rangeFromHandles(begin, begin);
       }
       C10_CUDA_DRIVER_CHECK(status);
-      handles_value_.at(i) = handle;
-      handles_present_.at(i) = true;
+      handles_.at(i) = handle;
     }
     for (auto i : c10::irange(begin, end)) {
       C10_CUDA_DRIVER_CHECK(cuMemMap(
-          ptr_ + i * kSegmentSize,
-          kSegmentSize,
+          ptr_ + i * segment_size_,
+          segment_size_,
           0,
-          handles_value_.at(i),
+          handles_.at(i).value(),
           0ULL));
     }
 
@@ -340,9 +426,9 @@ struct ExpandableSegment {
     return rangeFromHandles(begin, end);
   }
 
-  // unmaps all the completely empty kSegmentSize segments between
+  // unmaps all the completely empty segment_size_ segments between
   // [begin, begin + size), returns the offset where the range begin,
-  // and the actual size unmapped (multipke of kSegmentSize)
+  // and the actual size unmapped (multipke of segment_size_)
   SegmentRange unmap(SegmentRange range) {
     auto begin = segmentRight(range.ptr);
     auto end = segmentLeft(range.ptr + range.size);
@@ -357,7 +443,7 @@ struct ExpandableSegment {
     return (char*)ptr_;
   }
   size_t size() const {
-    return max_handles_ * kSegmentSize;
+    return max_handles_ * segment_size_;
   }
 
   void addPeer(int device) {
@@ -369,7 +455,7 @@ struct ExpandableSegment {
   ~ExpandableSegment() {
     forEachAllocatedRange(
         [&](size_t begin, size_t end) { unmapHandles(begin, end); });
-    C10_CUDA_DRIVER_CHECK(cuMemAddressFree(ptr_, kSegmentSize * max_handles_));
+    C10_CUDA_DRIVER_CHECK(cuMemAddressFree(ptr_, segment_size_ * max_handles_));
   }
 
  private:
@@ -379,7 +465,7 @@ struct ExpandableSegment {
     desc.location.id = device;
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
     C10_CUDA_DRIVER_CHECK(cuMemSetAccess(
-        ptr_ + begin * kSegmentSize, (end - begin) * kSegmentSize, &desc, 1));
+        ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
   }
 
   void unmapHandles(size_t begin, size_t end) {
@@ -392,39 +478,36 @@ struct ExpandableSegment {
     // Locking order must be GIL -> Allocator Lock
     C10_CUDA_CHECK(cudaStreamSynchronize(stream_));
     for (auto i : c10::irange(begin, end)) {
-      TORCH_INTERNAL_ASSERT(handles_present_.at(i));
-      CUmemGenericAllocationHandle h = handles_value_.at(i);
-      handles_value_.at(i) = 0;
-      handles_present_.at(i) = false;
-      C10_CUDA_DRIVER_CHECK(cuMemUnmap(ptr_ + kSegmentSize * i, kSegmentSize));
+      CUmemGenericAllocationHandle h = handles_.at(i).value();
+      handles_.at(i) = c10::nullopt;
+      C10_CUDA_DRIVER_CHECK(
+          cuMemUnmap(ptr_ + segment_size_ * i, segment_size_));
       C10_CUDA_DRIVER_CHECK(cuMemRelease(h));
     }
     trimHandles();
   }
   void trimHandles() {
-    while (!handles_present_.empty() && !handles_present_.back()) {
-      handles_present_.pop_back();
-      handles_value_.pop_back();
+    while (!handles_.empty() && !handles_.back()) {
+      handles_.pop_back();
     }
   }
   void forEachAllocatedRange(std::function<void(size_t, size_t)> fn) {
     auto start = 0;
-    for (auto i : c10::irange(handles_value_.size())) {
-      if (handles_present_.at(i) && (i == 0 || !handles_present_.at(i - 1))) {
+    for (auto i : c10::irange(handles_.size())) {
+      if (handles_.at(i) && (i == 0 || !handles_.at(i - 1))) {
         start = i;
       }
-      if (handles_present_.at(i) &&
-          (i + 1 == handles_present_.size() || !handles_present_.at(i + 1))) {
+      if (handles_.at(i) && (i + 1 == handles_.size() || !handles_.at(i + 1))) {
         fn(start, i + 1);
       }
     }
   }
   size_t numSegments(size_t size) {
-    return (size + kSegmentSize - 1) / kSegmentSize;
+    return (size + segment_size_ - 1) / segment_size_;
   }
   size_t segmentLeft(char* p) {
     auto size = p - ptr();
-    return size / kSegmentSize;
+    return size / segment_size_;
   }
   size_t segmentRight(char* p) {
     auto size = p - ptr();
@@ -432,15 +515,14 @@ struct ExpandableSegment {
   }
   SegmentRange rangeFromHandles(size_t begin, size_t end) {
     return SegmentRange(
-        ptr() + kSegmentSize * begin, kSegmentSize * (end - begin));
+        ptr() + segment_size_ * begin, segment_size_ * (end - begin));
   }
   int device_;
   cudaStream_t stream_;
   CUdeviceptr ptr_;
   size_t max_handles_;
-  size_t kSegmentSize;
-  std::vector<bool> handles_present_;
-  std::vector<CUmemGenericAllocationHandle> handles_value_;
+  size_t segment_size_;
+  std::vector<c10::optional<CUmemGenericAllocationHandle>> handles_;
   std::vector<int> peers_;
 };
 #else
@@ -1069,7 +1151,7 @@ class DeviceCachingAllocator {
       cuda_events;
 
   // record used memory.
-  int64_t total_allocated_memory = 0;
+  size_t total_allocated_memory = 0;
 
   size_t allowed_memory_maximum = 0;
 
@@ -1812,6 +1894,8 @@ class DeviceCachingAllocator {
     const auto all_blocks = get_all_blocks();
 
     for (const Block* const head_block : all_blocks) {
+      // For expandable segments, we report one segment for each continguous
+      // mapped range of memory
       if (head_block->prev && head_block->prev->mapped) {
         continue;
       }
@@ -2152,6 +2236,10 @@ class DeviceCachingAllocator {
       size_t size,
       const std::shared_ptr<GatheredContext>& ctx) {
     Block* candidate = find_expandable_block(device, stream, pool, size);
+    // Candidate is now a list free/unmapped blocks with at least size room:
+    // unmapped -> null
+    // unmapped -> free -> *
+    // free -> unmapped -> *
 
     if (!candidate->mapped &&
         !map_block(candidate, std::min(candidate->size, size), ctx)) {
@@ -2160,6 +2248,8 @@ class DeviceCachingAllocator {
     TORCH_INTERNAL_ASSERT(candidate->mapped);
 
     while (candidate->size < size) {
+      // invariant: free -> unmapped -> *
+      // map_block will map some of unmapped and merge with free
       auto remaining = size - candidate->size;
       auto new_candidate = candidate->next;
       if (!map_block(
@@ -2422,7 +2512,7 @@ class DeviceCachingAllocator {
         CachingAllocatorConfig::garbage_collection_threshold() *
         allowed_memory_maximum);
     // No need to trigger GC yet
-    if (total_allocated_memory <= (int64_t)gc_threshold) {
+    if (total_allocated_memory <= gc_threshold) {
       return;
     }
     const auto target_size = total_allocated_memory - gc_threshold;
