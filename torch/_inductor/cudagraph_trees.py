@@ -749,16 +749,15 @@ class CUDAGraphNode:
             ]
             check_memory_pool(self.cuda_graphs_pool, memory)
 
-        with preserve_rng_state():
-            with torch.cuda.device(
-                self.device
-            ), clear_cublas_manager(), torch.cuda.graph(
-                self.graph, stream=self.stream, pool=self.cuda_graphs_pool
-            ):
-                static_outputs = model(inputs)
+        with preserve_rng_state(), torch.cuda.device(
+            self.device
+        ), clear_cublas_manager(), torch.cuda.graph(
+            self.graph, stream=self.stream, pool=self.cuda_graphs_pool
+        ):
+            static_outputs = model(inputs)
 
-            # running model should reclaim memory
-            assert len(inputs) == 0
+        # running model should reclaim memory
+        assert len(inputs) == 0
 
         if not isinstance(static_outputs, (list, tuple)):
             static_outputs = (static_outputs,)
@@ -767,7 +766,9 @@ class CUDAGraphNode:
 
         return static_outputs
 
-    def _add_first_outputs(self, outputs, static_input_persistent_storage_ptrs):
+    def _add_first_outputs(
+        self, outputs, static_input_persistent_storage_ptrs: Set[int]
+    ):
         "Add the outputs from the first invocation of the node and set up metadata"
 
         # getting liveness before we have added the outputs to path, so the length
