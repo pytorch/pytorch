@@ -76,7 +76,7 @@ if HAS_CPU:
     copy_tests(
         DynamicShapesCppWrapperTemplate,
         DynamicShapesCppWrapperCpuTests,
-        "cpu_cpp_wrapper",
+        "cpp_wrapper",
     )
 
 
