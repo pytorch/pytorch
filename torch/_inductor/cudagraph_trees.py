@@ -260,7 +260,6 @@ def get_manager(
 
 
 def cudagraphify_impl(model, inputs, *args, **kwargs):
-    del inputs
     fn = None
 
     def deferred_cudagraphify(second_inputs):
@@ -268,7 +267,8 @@ def cudagraphify_impl(model, inputs, *args, **kwargs):
         if fn is not None:
             return fn(second_inputs)
 
-        fn, out = cudagraphify(model, second_inputs, *args, **kwargs)
+        assert inputs is second_inputs
+        fn, out = cudagraphify(model, inputs, *args, **kwargs)
         return out
 
     return deferred_cudagraphify
@@ -674,8 +674,6 @@ class CUDAGraphNode:
 
         storage_cache = {}
 
-        refs = []
-
         if self.recording_outputs is None:
             assert len(self.static_input_data_ptrs) == len(new_inputs)
             # NB: this ranges over non-static inputs too
@@ -684,9 +682,6 @@ class CUDAGraphNode:
                     continue
                 if data_ptr is not None:
                     # static input, e.g., parameter
-                    if data_ptr != new_inputs[idx].data_ptr():
-                        assert False
-                        breakpoint()
                     assert data_ptr == new_inputs[idx].data_ptr()
                 else:
                     # non-static input, need to copy it into CUDA graph
@@ -779,19 +774,14 @@ class CUDAGraphNode:
 
         delta = self._get_different_indices(prev_liveness, curr_liveness)
         self.expected_dead_indices_after_graph = delta
-        live_blocks = get_blocks(self.cuda_graphs_pool)
 
         assert len(self.outputs_weakrefs) == 0
-        for _, o in enumerate(outputs):
-            is_alias = (o is not None
+        for i, o in enumerate(outputs):
+            self.output_is_alias_of_persistent_static_inputs.append(
+                o is not None
                 and o.untyped_storage().data_ptr()
                 in static_input_persistent_storage_ptrs
             )
-            self.output_is_alias_of_persistent_static_inputs.append(
-                is_alias
-            )
-            if o is not None and o.untyped_storage().data_ptr() in live_blocks:
-                assert not is_alias
 
         if self.stack_traces is None:
             self.stack_traces = [None for _ in range(len(outputs))]
@@ -815,15 +805,7 @@ class CUDAGraphNode:
 
         self.debug_check_invariants_after_invocation()
         if config.triton.fast_cudagraph_asserts:
-            out = check_memory_pool(
-                self.cuda_graphs_pool, list(self.path_live_weakrefs()), throw=False
-            )
-            if out:
-                live_path_dps = {t.data_ptr() for t in self.path_live_weakrefs()}
-                print(out)
-                print(static_input_persistent_storage_ptrs)
-                breakpoint()
-                check_memory_pool(self.cuda_graphs_pool, list(self.path_live_weakrefs()), throw=True)
+            check_memory_pool(self.cuda_graphs_pool, list(self.path_live_weakrefs()))
 
     def _add_replayed_outputs(self, outputs):
         self.outputs_weakrefs.clear()
@@ -853,7 +835,6 @@ class CUDAGraphNode:
 
     def _is_cuda_graph_recorded_tensor(self, t: torch.Tensor):
         "Is this tensor an output of a node in this path"
-        dead_stor_weak_ref = None
         for output_refs in self.path_weakrefs:
             for storage_weak_ref in output_refs:
                 if storage_weak_ref is None:
@@ -862,14 +843,7 @@ class CUDAGraphNode:
                 # memory is never released.
                 data_ptr = storage_weak_ref.data_ptr()
                 if t.untyped_storage().data_ptr() == data_ptr:
-                    if not storage_weak_ref():
-                        dead_stor_weak_ref = data_ptr
-                    else:
-                        return True
-
-        if dead_stor_weak_ref:
-            print(f"Dead stor weak ref {dead_stor_weak_ref}")
-            return True
+                    return True
 
         return False
 
@@ -891,6 +865,7 @@ class CUDAGraphNode:
     ) -> List[PathOutputIndex]:
         "Find indices where the two lists differ."
         dead_indices = []
+        assert len(prev) <= len(curr)
         for i, (outputs1, outputs2) in enumerate(zip(prev, curr)):
             assert len(outputs1) == len(outputs2)
             for j, (output1, output2) in enumerate(zip(outputs1, outputs2)):
@@ -938,25 +913,24 @@ class CUDAGraphNode:
             self.recorded_liveness_before_graph, self.expected_dead_indices_after_graph
         )
 
-    def storage_refs_dead_since_invocation(self) -> List[StorageWeakRefWrapper]:
+    def data_ptrs_dead_since_invocation(self) -> List[int]:
         """
         Since this node was invoked, return data ptrs of all tensor outputs that have died
         in the current executing tree path.
         """
         curr_liveness = self._get_liveness(self.path_weakrefs)
-        different_indices = self._get_different_indices(
-            self.recorded_liveness_after_graph, curr_liveness
-        )
-        breakpoint()
-        different_indices = self._get_different_indices(
+        _get_different_indices = self._get_different_indices(
             self.recorded_liveness_after_graph, curr_liveness
         )
 
-        dead_wrappers = []
-        for depth, output_index in different_indices:
-            dead_wrappers.append(self.path_weakrefs[depth][output_index])
+        path = list(self._path_from_root)
+        ptrs_to_deallocate = []
+        for depth, output_index in _get_different_indices:
+            ptrs_to_deallocate.append(
+                path[depth].outputs_metadata[output_index]["data_ptr"]
+            )
 
-        return dead_wrappers
+        return ptrs_to_deallocate
 
     def path_live_weakrefs(self) -> Generator[StorageWeakRefWrapper]:
         for i, j in self.live_indices_after_graph:
@@ -1087,21 +1061,7 @@ def get_cudagraph_segments(pool_id):
     return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
 
 
-def get_blocks(pool_id, live_only=True):
-    blocks = []
-
-    for segment in get_cudagraph_segments(pool_id):
-        addr = segment["address"]
-        for block in segment["blocks"]:
-            if block["state"] == "active_allocated" or not live_only:
-                blocks.append(addr)
-
-            addr += block["size"]
-
-    return blocks
-
-
-def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper], throw=True):
+def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
     assert all([isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs])
     gc.collect()
 
@@ -1120,9 +1080,6 @@ def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper], 
                     unique_storages.remove(addr)
 
             addr += block["size"]
-
-    if unique_storages and not throw:
-        return unique_storages
 
     check(
         len(unique_storages) == 0,
@@ -1261,10 +1218,10 @@ class CUDAGraphTreeManager:
         self.running_forwards_with_pending_backwards = False
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
-        mode = self.id_to_mode[function_id]
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
+        mode = self.id_to_mode[function_id]
         if mode == CompilationMode.FORWARD:
             self.running_forwards_with_pending_backwards = True
         elif mode == CompilationMode.BACKWARD:
@@ -1340,11 +1297,9 @@ class CUDAGraphTreeManager:
 
     def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
         torch.cuda.synchronize()
-        mode = self.id_to_mode[function_id]
-        id = self.new_graph_id()
         node = CUDAGraphNode(
             self.ids_to_funcs[function_id],
-            id,
+            self.new_graph_id(),
             self.current_node,
             new_inputs,
             self.cuda_graphs_thread_pool,
@@ -1352,7 +1307,6 @@ class CUDAGraphTreeManager:
             self.ids_to_stack_traces[function_id],
             self.stream,
         )
-        print(f"Recording function id {function_id} graph {id} {mode}")
         if self.current_node is None:
             self.roots[function_id].append(node)
         else:
@@ -1364,19 +1318,12 @@ class CUDAGraphTreeManager:
         return node.run(new_inputs)
 
     def execute_node(self, node: CUDAGraphNode, new_inputs) -> List[Optional[Tensor]]:
-        mode = self.id_to_mode[node.wrapped_function.id]
-        print(
-            f"EXECUTING function id, {node.wrapped_function.id}, graph id {node.id}, {mode}"
-        )
         self.current_node = node
         self.path_state = ExecutionState.EXECUTION
         self.update_generation()
         return node.run(new_inputs)
 
     def run_eager(self, new_inputs, function_id: FunctionID):
-        mode = self.id_to_mode[function_id]
-        print(f"WARMING UP function id {function_id} {mode}")
-
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
         node = CUDAWarmupNode(
@@ -1420,7 +1367,7 @@ class CUDAGraphTreeManager:
 
         # container needs to set clean up when fn dies
         get_container(self.device_index).add_strong_reference(fn)
-        return fn, fn(inputs)
+        return fn
 
     @property
     def in_recording(self):
@@ -1504,14 +1451,6 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
         deleted = set()
-
-        to_delete = set()
-        for t, _ in self.current_node.path_live_weakrefs_and_stacktraces():
-            if t():
-                to_delete.add(t.data_ptr())
-
-        print(f"ABT TO DELETE {to_delete}")
-
         for t, stack_trace in self.current_node.path_live_weakrefs_and_stacktraces():
             if t() and t.data_ptr() not in deleted:
                 deleted.add(t.data_ptr())
@@ -1542,84 +1481,23 @@ class CUDAGraphTreeManager:
         device = self.current_node.device
         assert state is not None and device is not None
 
-        torch.cuda.synchronize()
-
         # currently we deallocate on instead of allowing stale recordings
         stale_storages = []
         live_storages_wrappers = list(self.current_node.path_live_weakrefs())
 
         live_storages_weak_refs = [t() for t in live_storages_wrappers]
-
-
-        # NB: deduplicate aliased outputs
-        dead_refs = self.current_node.storage_refs_dead_since_invocation()
-
-        # live_pointers = [
-        #     t
-        #     for t in live_storages_wrappers
-        #     if t() and t.data_ptr() not in ptrs_to_deallocate
-        # ]
-
-        print("CHECKPOINTING POOL")
+        ptrs_to_deallocate = self.current_node.data_ptrs_dead_since_invocation()
         torch._C._cuda_setCheckpointPoolState(
             device, state, stale_storages, live_storages_weak_refs
         )
-        all_dp = {t.data_ptr() for t in live_storages_wrappers}
 
-        bad_references = []
-        for i, ref in live_storages_wrappers:
-            if not ref():
-                continue
-            if not torch._C._has_Standard_Deleter(ref()):
-                bad_references.append(ref)
-
-        breakpoint()
-        print("hello")
-
-
-        # deleted = set()
-        # dead_wrappers = [t for t in live_storages_wrappers if t.data_ptr() in ptrs_to_deallocate]
-        # breakpoint()
-        # for wrapper in dead_wrappers:
-        #     if wrapper in deleted or wrapper.data_ptr() in deleted:
-        #         continue
-        #     torch._C._free_And_Remove_DeleterFn(wrapper())
-
-        #     deleted.add(wrapper)
-        #     deleted.add(wrapper.data_ptr())
-
-        live_ptrs = {t.data_ptr() for t in live_storages_wrappers}
-        deleted = set()
-        for ptr in set(dead_refs):
-            if ptr.data_ptr() in deleted:
-                continue
-            if ptr in live_ptrs:
-                breakpoint()
-            # torch._C._free_And_Remove_DeleterFn(t())
-            torch._C._cuda_cudaCachingAllocator_raw_delete(ptr.data_ptr())
-            deleted.add(ptr)
+        # NB: deduplicate aliased outputs
+        for ptr in set(ptrs_to_deallocate):
+            torch._C._cuda_cudaCachingAllocator_raw_delete(ptr)
 
         # Now the live blocks should be exactly equal to the live storages in private pool
         if config.triton.fast_cudagraph_asserts:
-            live_wrappers = [
-                t
-                for t in live_storages_wrappers
-            ]
-            dead_wrappers = [
-                t
-                for t in live_storages_wrappers
-                if t() and t.data_ptr() in ptrs_to_deallocate
-            ]
-            print(ptrs_to_deallocate)
-            check_memory_pool(self.cuda_graphs_thread_pool, live_wrappers)
-            for dead_wrapper in dead_wrappers:
-                dead_wrapper.ref = None
-            check_memory_pool(
-                self.cuda_graphs_thread_pool,
-                list(self.current_node.path_live_weakrefs()),
-            )
-            # breakpoint()
-            # print(dead_wrappers)
+            check_memory_pool(self.cuda_graphs_thread_pool, live_storages_wrappers)
 
     def live_cudagraph_pool_storages_in_curr_execution(
         self,
