@@ -300,6 +300,7 @@ def _unshard(
     handles: List[FlatParamHandle],
     unshard_stream: torch.cuda.Stream,
     pre_unshard_stream: torch.cuda.Stream,
+    is_prefetch: bool,
 ) -> None:
     """
     Unshards the handles in ``handles``. If the handles are in
@@ -324,7 +325,7 @@ def _unshard(
             event.synchronize()
     with torch.cuda.stream(unshard_stream):
         for handle in handles:
-            handle.unshard()
+            handle.unshard(is_prefetch)
             handle.post_unshard()
 
 
@@ -428,8 +429,10 @@ def _pre_forward_unshard(
     """Unshards parameters in the pre-forward."""
     if not handles:
         return
-    _unshard(state, handles, state._streams["unshard"], state._streams["pre_unshard"])
     handles_key = tuple(handles)
+    _unshard(
+        state, handles, state._streams["unshard"], state._streams["pre_unshard"], False
+    )
     state._needs_pre_forward_unshard[handles_key] = False
     torch.cuda.current_stream().wait_stream(state._streams["unshard"])
     _prefetch_handles(state, handles_key)
@@ -625,15 +628,13 @@ def _pre_backward_hook(
             handle._training_state = HandleTrainingState.BACKWARD_PRE
 
         if state._needs_pre_backward_unshard[_handles_key]:
-            # If the handles have been prefetched, then there is no need to
-            # call `_unshard()` again
-            if not state._handles_prefetched.get(_handles_key, False):
-                _unshard(
-                    state,
-                    _handles,
-                    state._streams["unshard"],
-                    state._streams["pre_unshard"],
-                )
+            _unshard(
+                state,
+                _handles,
+                state._streams["unshard"],
+                state._streams["pre_unshard"],
+                False,
+            )
             torch.cuda.current_stream().wait_stream(state._streams["unshard"])
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
@@ -1006,7 +1007,11 @@ def _prefetch_handles(
         # Prefetch the next set of handles without synchronizing to allow
         # the sync to happen as late as possible to maximize overlap
         _unshard(
-            state, handles_key, state._streams["unshard"], state._streams["pre_unshard"]
+            state,
+            handles_key,
+            state._streams["unshard"],
+            state._streams["pre_unshard"],
+            True,
         )
         state._handles_prefetched[handles_key] = True
 

@@ -195,7 +195,7 @@ def _unshard_fsdp_state_params(
     # No need to call `wait_stream()` since we unshard in the computation
     # stream directly
     computation_stream = torch.cuda.current_stream()
-    _unshard(state, handles, computation_stream, computation_stream)
+    _unshard(state, handles, computation_stream, computation_stream, False)
     if with_grads:
         _unshard_grads(handles)
 
