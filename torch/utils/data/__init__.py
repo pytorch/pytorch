@@ -27,8 +27,6 @@ from torch.utils.data.dataloader import (
     DataLoader,
     _DatasetKind,
     get_worker_info,
-    default_collate,
-    default_convert,
 )
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.datapipes._decorator import (
@@ -39,6 +37,13 @@ from torch.utils.data.datapipes._decorator import (
     runtime_validation,
     runtime_validation_disabled,
 )
+from torch.utils.data._utils.collate import (
+    default_collate,
+    default_convert,
+    default_collate_fn_map,
+    register_default_collate_for,
+)
+
 
 __all__ = ['BatchSampler',
            'ChainDataset',
@@ -62,6 +67,8 @@ __all__ = ['BatchSampler',
            'argument_validation',
            'default_collate',
            'default_convert',
+           'default_collate_fn_map',
+           'register_default_collate_for',
            'functional_datapipe',
            'get_worker_info',
            'guaranteed_datapipes_determinism',

@@ -12,6 +12,7 @@ import contextlib
 import re
 import torch
 
+from functools import wraps
 from typing import Callable, Dict, Optional, Tuple, Type, Union
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
@@ -199,6 +200,39 @@ default_collate_fn_map[float] = collate_float_fn
 default_collate_fn_map[int] = collate_int_fn
 default_collate_fn_map[str] = collate_str_fn
 default_collate_fn_map[bytes] = collate_str_fn
+
+
+def register_default_collate_for(name: str, collate_fn: Optional[Callable] = None) -> Callable:
+    r"""
+    Register a new collate_fn.
+
+    Args:
+        collate_fn: The collate_fn to register.
+        name: The name of the collate_fn.
+
+    Returns:
+        collate_fn: The registered collate_fn.
+
+    Examples:
+        >>> @register_default_collate_for(xxx)
+        ... def collate_xxx_fn(batch: Tuple[PNTensor], collate_fn_map: Optional[Mapping] = None):
+        ...     batch = ...
+        ...     return batch
+        >>> register_default_collate_for(xxx, collate_xxx_fn)
+
+    """
+
+    # register()
+    if collate_fn is not None:
+        default_collate_fn_map[name] = collate_fn
+
+    # @register()
+    @wraps(register_default_collate_for)
+    def register(name, collate_fn):
+        default_collate_fn_map[name] = collate_fn
+        return collate_fn
+
+    return lambda x: register(name, x)
 
 
 def default_collate(batch):
