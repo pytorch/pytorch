@@ -80,6 +80,7 @@ class PackedConv2d(nn.Conv2d):
     def forward(self, input):
         return self._conv_forward(input, self.weight, self.bias)
 
+
 class PackedLinearFP32(nn.Linear):
     def __init__(self, linear: nn.Module, input_size: list):
         super().__init__(
@@ -134,40 +135,6 @@ class PackedLinearBF16(nn.Linear):
             input,
             self.packed_weight,
             self.bias,
-        )
-        return y
-
-
-class LinearBinary(nn.Linear):
-    def __init__(
-        self,
-        linear: nn.Module,
-        binary_op_name: str,
-        input_size: list,
-    ):
-        super().__init__(
-            linear.in_features,
-            linear.out_features,
-            linear.bias is not None,
-            linear.weight.device,
-            linear.weight.dtype,
-        )
-        self._update_module_params(linear, binary_op_name, input_size)
-
-    def _update_module_params(self, linear, binary_op_name, input_size):
-        self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.attr = binary_op_name
-        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1])
-        self.packed_weight = torch.nn.Parameter(
-            torch.ops.mkldnn._reorder_linear_weight(
-                self.weight.to_mkldnn(), self.batch_size
-            ),
-            requires_grad=self.weight.requires_grad,
-        )
-
-    def forward(self, input, other):
-        y = torch.ops.mkldnn._linear_pointwise(
-            input, other, self.packed_weight, self.bias, self.attr
         )
         return y
 
