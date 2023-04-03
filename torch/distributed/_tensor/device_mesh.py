@@ -1,38 +1,41 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
-from typing import List, Optional, Union, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, Union
 
 import torch
+import torch.distributed._functional_collectives as funcol
+
+import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import (
-    Backend,
-    GroupMember,
-    ProcessGroup,
-    ReduceOp,
-    Work,
     _get_default_group,
     all_gather,
     all_to_all,
+    Backend,
     broadcast,
+    broadcast_object_list,
     get_backend,
     get_global_rank,
     get_rank,
     get_world_size,
+    GroupMember,
     init_process_group,
     is_initialized,
     new_group,
+    ProcessGroup,
     reduce_scatter,
+    ReduceOp,
     scatter,
+    Work,
 )
-
-import torch.distributed.distributed_c10d as c10d
-import torch.distributed._functional_collectives as funcol
 
 # only import numpy typing when type checking
 if TYPE_CHECKING:
     try:
         from numpy.typing import ArrayLike
     except ImportError:
-        warnings.warn("DeviceMesh requires numpy >= 1.21 to be installed for type checking")
+        warnings.warn(
+            "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
+        )
 
 
 _global_device_mesh: Optional["DeviceMesh"] = None
@@ -103,7 +106,6 @@ class DeviceMesh(object):
         mesh: Union[torch.Tensor, "ArrayLike"],
         *,
         _init_process_groups: bool = True,
-        _sync_seed: bool = True,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
@@ -135,18 +137,27 @@ class DeviceMesh(object):
         world_backend = get_backend()
         if self.device_type == "cpu":
             cpu_backends = ["gloo", "threaded"]
-            assert world_backend in cpu_backends, f"Default PG backend: {world_backend} not supporting CPU!"
+            assert (
+                world_backend in cpu_backends
+            ), f"Default PG backend: {world_backend} not supporting CPU!"
         elif self.device_type == "cuda":
             cuda_backends = ["nccl", "gloo", "threaded"]
             if world_backend == "gloo":
                 warnings.warn(
                     "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
                 )
-            assert world_backend in cuda_backends, f"Default PG backend: {world_backend} not supporting CUDA!"
+            assert (
+                world_backend in cuda_backends
+            ), f"Default PG backend: {world_backend} not supporting CUDA!"
             if not default_initialized:
                 # automatically set the current cuda device base on num of gpu devices available in each host
                 # NOTE: This device selection would only work for homogenous hardware.
                 torch.cuda.set_device(get_rank() % torch.cuda.device_count())
+            # to perform DTensor random ops, we need to ensure all ranks in mesh is initialized with the same
+            # random seed. The seed to use will be the current seed on rank 0.
+            object_list = [torch.cuda.initial_seed()]
+            broadcast_object_list(object_list)
+            torch.cuda.manual_seed(int(object_list[0]))
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"
@@ -390,7 +401,14 @@ class DeviceMesh(object):
         """
         dim_group = self._dim_groups[mesh_dim]
         op_name: str = op.name  # type: ignore[attr-defined]
-        return funcol.all_reduce(tensor, reduceOp=op_name, group=(self, mesh_dim,))
+        return funcol.all_reduce(
+            tensor,
+            reduceOp=op_name,
+            group=(
+                self,
+                mesh_dim,
+            ),
+        )
 
     def reduce_scatter(
         self,
@@ -449,7 +467,9 @@ class DeviceMesh(object):
                 memory_format=torch.contiguous_format
             )
             dim_group = self._dim_groups[mesh_dim]
-            fut = c10d.all_reduce(flat_tensor, op=op, group=dim_group, async_op=async_op)
+            fut = c10d.all_reduce(
+                flat_tensor, op=op, group=dim_group, async_op=async_op
+            )
 
             # scatter the tensor
             output_offset = offset_list[my_coordinate[mesh_dim]]
