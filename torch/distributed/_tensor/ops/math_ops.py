@@ -36,6 +36,9 @@ def default_reduction_rule(op_schema: OpSchema) -> OutputSharding:
     [
         aten.sum.default,
         aten.sum.dim_IntList,
+        aten.mean.default,
+        aten.mean.dim,
+        aten.mean.out
     ]
 )
 def sum_rule(op_schema: OpSchema) -> OutputSharding:
@@ -75,21 +78,6 @@ def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
     ):
         raise RuntimeError("Cannot run _softmax_backward_data on sharding dimension!")
     return pointwise_rule(op_schema)
-
-
-@register_prop_rule([aten.mean.default, aten.mean.dim, aten.mean.out])
-def mean_rule(op_schema: OpSchema) -> OutputSharding:
-    args_schema = op_schema.args_schema
-    input_spec = cast(DTensorSpec, args_schema[0])
-    dims = None
-    # if length of args > 1, we check args to find dims
-    if len(args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], input_spec.ndim)
-
-    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
-    return reduction_rule(
-        op_schema, dims=dims, keep_dim=keep_dim, reduction_linear=False
-    )
 
 
 @register_prop_rule(

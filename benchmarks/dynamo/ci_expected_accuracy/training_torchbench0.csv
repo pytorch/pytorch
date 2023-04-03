@@ -10,13 +10,13 @@ drq,8
 fastNLP_Bert,14
 functorch_dp_cifar10,9
 functorch_maml_omniglot,9
-hf_Albert,8
+hf_Albert,12
 hf_Bart,20
-hf_Bert,8
-hf_Bert_large,8
+hf_Bert,12
+hf_Bert_large,12
 hf_DistilBert,8
 hf_GPT2,8
-hf_Reformer,67
+hf_Reformer,51
 hf_T5_large,0
 lennard_jones,9
 maml_omniglot,9

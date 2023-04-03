@@ -4406,9 +4406,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, y)
 
         if torch._dynamo.config.dynamic_shapes:
-            self.assertEqual(len(all_guards), 17)
-        else:
             self.assertEqual(len(all_guards), 13)
+        else:
+            self.assertEqual(len(all_guards), 9)
         for guard in all_guards:
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
