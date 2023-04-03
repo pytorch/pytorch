@@ -269,6 +269,12 @@ def parse_args():
         help="Do not write a comment to github",
     )
     parser.add_argument(
+        "--no-detect-regressions",
+        action="store_true",
+        default=False,
+        help="Do not compare to previous runs for regressions or metric graphs.",
+    )
+    parser.add_argument(
         "--update-dashboard-test",
         action="store_true",
         default=False,
@@ -1338,7 +1344,7 @@ class DashboardUpdater:
             "gh_warnings.txt",
             "gh_regression.txt",
             "gh_metric_regression.txt",
-            "gh_training.txt",
+            "gh_training.txt" if self.args.training else "gh_inference.txt",
             "gh_graphs.txt",
             "gh_build_summary.txt",
         ]
@@ -1380,14 +1386,15 @@ class DashboardUpdater:
 
     def update(self):
         self.upload_graphs()
-        SummaryStatDiffer(self.args).generate_comment()
-        RegressionDetector(self.args).generate_comment()
-        try:
-            RegressionTracker(self.args).diff()
-        except Exception as e:
-            logging.exception(e)
-            with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
-                gh_fh.write("")
+        if not self.args.no_detect_regressions:
+            SummaryStatDiffer(self.args).generate_comment()
+            RegressionDetector(self.args).generate_comment()
+            try:
+                RegressionTracker(self.args).diff()
+            except Exception as e:
+                logging.exception(e)
+                with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
+                    gh_fh.write("")
 
         comment = self.gen_comment()
         print(comment)
