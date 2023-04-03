@@ -44,7 +44,8 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
     bool storageHasDeleter = storage.data_ptr().get_context() != nullptr;
     if (!storageHasDeleter) {
       std::vector<char> storageData(
-          static_cast<char*>(storage.data()), static_cast<char*>(storage.data()) + storage.nbytes());
+          static_cast<char*>(storage.data()),
+          static_cast<char*>(storage.data()) + storage.nbytes());
 
       tensorpipe::CpuBuffer buffer;
       buffer.ptr = storageData.data();
