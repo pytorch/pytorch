@@ -204,6 +204,9 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
+    @unittest.skip(
+        "ORT flaky segfault: https://github.com/microsoft/onnx-script/issues/523"
+    )
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x):
