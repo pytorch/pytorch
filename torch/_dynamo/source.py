@@ -105,7 +105,8 @@ class GeneratorStateSource(Source):
         raise NotImplementedError()
 
     def name(self):
-        return rename_implicit(f"generator_state_{self.device}_{self.initial_seed}")
+        name = f"generator_state_{self.device}_{self.initial_seed}"
+        return f"L[{name}]"
 
 
 @dataclasses.dataclass
