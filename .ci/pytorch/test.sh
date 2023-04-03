@@ -384,7 +384,6 @@ test_dynamo_benchmark() {
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
-    # Performance test training only
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
     # Check inference with --float32
