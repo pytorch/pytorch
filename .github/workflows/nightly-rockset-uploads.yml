@@ -12,36 +12,14 @@ concurrency:
 
 jobs:
 
-  upload-contribution-stats:
+  upload-stats-to-rockset:
     runs-on: [self-hosted, linux.2xlarge]
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-
-      - run: |
-          pip3 install requests==2.26
-          pip3 install rockset==1.0.3
-          pip3 install boto3==1.19.12
-
-      - name: Upload external contribution stats
-        uses: nick-fields/retry@v2.8.2
-        env:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          timeout_minutes: 10
-          max_attempts: 5
-          retry_wait_seconds: 90
-          command: |
-            echo "Uploading external contribution stats for" "$(date -d yesterday '+%Y-%m-%d')"
-            python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d yesterday '+%Y-%m-%d')"
-
-  upload-testing-stats-aggregates:
-    runs-on: [self-hosted, linux.2xlarge]
-    steps:
-      - name: Checkout PyTorch
-        fetch-depth: 1
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+          fetch-depth: 1
+          submodules: false
 
       - run: |
           pip3 install requests==2.26
@@ -60,3 +38,5 @@ jobs:
           command: |
             echo "Uploading testing aggregate data" "$(date -d yesterday '+%Y-%m-%d')"
             python3 -m tools.stats.upload_test_stat_aggregates --date "$(date -d yesterday '+%Y-%m-%d')"
+            echo "Uploading external contribution stats for" "$(date -d yesterday '+%Y-%m-%d')"
+            python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d yesterday '+%Y-%m-%d')"
