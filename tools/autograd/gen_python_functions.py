@@ -157,6 +157,8 @@ _SKIP_PYTHON_BINDINGS = [
     "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
     "_nested_view_from_buffer_copy",
     "_nested_view_from_buffer_copy_out",
+    "nbytes",
+    "itemsize",
 ]
 
 SKIP_PYTHON_BINDINGS = [
