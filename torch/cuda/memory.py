@@ -2,13 +2,17 @@ import collections
 import contextlib
 import ctypes
 import warnings
-from typing import Any, Dict, Union, Tuple
+import pickle
+import sys
+import os
+
+from typing import Any, Dict, Union, Tuple, Optional
 
 import torch
 from . import is_initialized, _get_device_index, _lazy_init, _get_nvml_device_index
 from ._utils import _dummy_type
 
-from ._memory_viz import segments as _segments, memory as _memory
+from ._memory_viz import segments as _segments, memory as _memory, segment_plot, trace_plot
 
 from torch.types import Device
 from torch import _C
@@ -617,32 +621,95 @@ def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
     device = _get_device_index(device)
     return torch.cuda.cudart().cudaMemGetInfo(device)
 
-def _record_memory_history(enabled: bool, record_context=True,
-                           trace_alloc_max_entries=1,
-                           trace_alloc_record_context=False, device: Union[Device, int] = None,
-                           record_context_cpp=False):
-    """Enables recording of Python stack traces to be associated with memory
+def _record_memory_history_legacy(enabled: bool, record_context=True,
+                                  trace_alloc_max_entries=1,
+                                  trace_alloc_record_context=False, device: Union[Device, int] = None,
+                                  record_context_cpp=False):
+
+    with torch.cuda.device(device):
+        _C._cuda_recordMemoryHistory(enabled, record_context, record_context_cpp,
+                                     trace_alloc_max_entries, trace_alloc_record_context)
+
+def _record_memory_history(enabled="all", *args, **kwargs):
+    """Enables recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
-    :func:`torch.memory_snapshot`.
+    :func:`torch.cuda.memory._snapshot()`.
+
+    In addition too keeping stack traces with each current allocation and free,
+    this will also enable recording of a history of all alloc/free events.
+
+    Use :func:`torch.cuda.memory._snapshot()` to retrieve this information,
+    and the tools in `_memory_viz.py` to visualize snapshots.
 
     The Python trace collection is fast (2us per trace), so you may consider
     enabling this on production jobs if you anticipate ever having to debug
     memory issues.
 
-    .. warning:
-        The :attr:`_enable_expensive_cpp` arguments lets you enable also
-        collecting C++ stack traces.  This collection is VERY SLOW and should
-        only be used if you are debugging framework problems on a minified
-        example.  In principle, it should be possible to implement fast C++
-        stack trace collection; file an issue with us if you need it.
+    C++ trace collection is also fast (~50ns/frame), which for many typical programs
+    works out to ~2us per trace, but can vary depending on stack depth.
+
+    Args:
+        enabled (Optional[str], optional):
+            None - disable recording memory history.
+            "state" - keep information for currenly allocated memory.
+            "all" - additionally keep a history of all alloc/free calls
+            Defaults to "all".
+        context (Optional[str], optional):
+            None - Do not record any tracebacks.
+            "state" - Record tracebacks for currently allocated memory.
+            "all" - additionally keep tracebacks for alloc/free calls
+             Defaults to "all".
+        stacks (str, optional):
+            "python" - include Python, TorchScript, and inductor frames in tracebacks
+            "all" - additionally include C++ frames
+            Defaults to "all".
+        max_entries (int, optional): Keep a maximum of `max_entries`
+            alloc/free events in the recorded history recorded.
+            Defaults to sys.maxsize.
+
+        device (Union[Device, int], optional): Which CUDA device to enable recording.
+            Defaults to the current device.
     """
+    if isinstance(enabled, bool):
+        return _record_memory_history_legacy(enabled, *args, **kwargs)
+    else:
+        return _record_memory_history_impl(enabled, *args, **kwargs)
+
+def _record_memory_history_impl(enabled: Optional[str] = "all",
+                                context: Optional[str] = "all",
+                                stacks: str = "all",
+                                max_entries: int = sys.maxsize,
+                                device: Union[Device, int] = None):
+    if enabled not in ["state", "all", None]:
+        raise TypeError("expected state to be 'state', 'all', or None")
+    if context not in ["state", "all", None]:
+        raise TypeError("expected context to be 'state', 'all', or None")
+    if stacks not in ["python", "all"]:
+        raise TypeError("expected stacks to be 'python', or 'all'")
+
+    enabled_ = enabled is not None
+    record_context = context is not None
+    trace_alloc_max_entries = max_entries if enabled == "all" else 1
+    trace_alloc_record_context = context == "all"
+    record_context_cpp = stacks == "all"
     with torch.cuda.device(device):
-        _C._cuda_recordMemoryHistory(enabled, record_context, record_context_cpp,
+        _C._cuda_recordMemoryHistory(enabled_, record_context, record_context_cpp,
                                      trace_alloc_max_entries, trace_alloc_record_context)
 
 def _snapshot(device: Union[Device, int] = None):
     with torch.cuda.device(device):
         return _C._cuda_memorySnapshot()
+
+def _dump_snapshot(filename='snapshot_dump', device: Union[Device, int] = None):
+    os.makedirs(filename, exist_ok=True)
+    s = _snapshot(device)
+    with open(f'{filename}/snapshot.pickle', 'wb') as f:
+        pickle.dump(s, f)
+    with open(f'{filename}/trace_plot.html', 'w') as f:
+        f.write(trace_plot(s))
+    with open(f'{filename}/segment_plot.html', 'w') as f:
+        f.write(segment_plot(s))
+
 
 def _save_segment_usage(filename='output.svg', snapshot=None):
     if snapshot is None:

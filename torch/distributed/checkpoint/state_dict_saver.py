@@ -65,7 +65,7 @@ def save_state_dict(
         >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
         >>> torch.distributed.checkpoint.save_state_dict(
         >>>     state_dict=model_state_dict,
-        >>>     storage_writer=fs_stroage_writer,
+        >>>     storage_writer=fs_storage_writer,
         >>> )
 
     .. note::
