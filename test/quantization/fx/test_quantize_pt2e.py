@@ -195,6 +195,49 @@ class TestQuantizePT2E(QuantizationTestCase):
             code_after_recompile = m.code
             self.assertTrue(code_before_recompile == code_after_recompile, error_msg)
 
+    @xfailIfPython311
+    def test_transposed_conv_bn_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_trans = torch.nn.ConvTranspose2d(10, 20, 3)
+                # channels for batchnorm is the same as the out_channels for convtranspose
+                self.bn = torch.nn.BatchNorm2d(20)
+
+            def forward(self, x):
+                return self.bn(self.conv_trans(x))
+
+        with override_quantized_engine("qnnpack"):
+            m = M().eval()
+            example_inputs = (torch.randn(10, 10, 10, 10),)
+            # program capture
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="real",
+            )
+
+            node_occurrence = {
+                ns.call_function(torch.ops.aten.convolution.default): 1,
+                ns.call_function(torch.ops.aten._native_batch_norm_legit_no_training.default): 1,
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+            qconfig = get_default_qconfig("qnnpack")
+            qconfig_mapping = QConfigMapping().set_global(qconfig)
+            backend_config = get_qnnpack_pt2e_backend_config()
+            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            # make sure it runs
+            m(*example_inputs)
+
+            # make sure bn is fused into conv
+            node_occurrence = {
+                ns.call_function(torch.ops.aten.convolution.default): 1,
+                ns.call_function(torch.ops.aten._native_batch_norm_legit_no_training.default): 0,
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
 @skipIfNoQNNPACK
 class TestQuantizePT2EX86Inductor(QuantizationTestCase):
     @skipIfNoX86
