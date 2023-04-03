@@ -325,7 +325,7 @@ class SideEffects:
                     [
                         cg.create_load_const(None),
                         cg.create_load_const(None),
-                        create_instruction("BUILD_SLICE", 2),
+                        create_instruction("BUILD_SLICE", arg=2),
                     ]
                 )
                 suffixes.append([create_instruction("STORE_SUBSCR")])
