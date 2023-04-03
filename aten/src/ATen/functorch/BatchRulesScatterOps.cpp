@@ -350,14 +350,12 @@ namespace {
   // /aten/src/ATen/native/TensorAdvancedIndexing.cpp#L294-L312
   VmapDimVector compute_indexed_shape(const Tensor &src, TensorList indices_list)
   {
-    int64_t dims_before = 0, dims_after = 0, dims_indexed = 0;
+    int64_t dims_before = 0, dims_indexed = 0;
     IntArrayRef replacement_shape;
     for (const auto dim : c10::irange(indices_list.size())) {
       if (!indices_list[dim].defined()) {
         if (dims_indexed == 0) {
           dims_before++;
-        } else {
-          dims_after++;
         }
       } else {
         dims_indexed++;
@@ -833,48 +831,12 @@ std::tuple<Tensor,optional<int64_t>> gather_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> gather_backward_batch_rule(
-    const Tensor& grad, optional<int64_t> grad_bdim,
-    const Tensor& self, optional<int64_t> self_bdim,
-    int64_t dim,
-    const Tensor& index, optional<int64_t> index_bdim,
-    bool sparse_grad) {
-  auto batch_size = get_bdim_size3(grad, grad_bdim, self, self_bdim, index, index_bdim);
-  auto grad_ = moveBatchDimToFront(grad, grad_bdim);
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto index_ = moveBatchDimToFront(index, index_bdim);
-
-  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
-  auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
-  auto grad_logical_rank = rankWithoutBatchDim(grad, grad_bdim);
-
-  if (grad_logical_rank == 0) {
-    grad_ = grad_.unsqueeze(-1);
-  }
-  if (self_logical_rank == 0) {
-    self_ = self_.unsqueeze(-1);
-  }
-  if (index_logical_rank == 0) {
-    index_ = index_.unsqueeze(-1);
-  }
-  grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), batch_size);
-  self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
-  index_ = ensure_has_bdim(index_, index_bdim.has_value(), batch_size);
-
-  auto physical_dim = getPhysicalDim(self_, /*has_batch_dim*/true, dim);
-  auto result = at::gather_backward(grad_, self_, physical_dim, index_, sparse_grad);
-  // result should has same rank as self
-  if (self_logical_rank == 0) {
-    result = result.squeeze(-1);
-  }
-  return std::make_tuple(result, 0);
-}
-
 namespace {
 Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t dim) {
   if (index.dim() == 0) {
     return index.expand(self_size);
   }
+  dim = maybe_wrap_dim(dim, self_size.size());
 
   // setup new_index_shape as [BS, 1, ..., idx_size, ..., 1]
   // to reshape index_
@@ -1231,7 +1193,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(index_add, index_add_batch_rule);
   VMAP_SUPPORT(diagonal_scatter, diagonal_scatter_batch_rule);
   VMAP_SUPPORT(gather, gather_batch_rule);
-  VMAP_SUPPORT(gather_backward, gather_backward_batch_rule);
   VMAP_SUPPORT2(scatter, value, scatter_value_batch_rule);
   VMAP_SUPPORT2(scatter, src, scatter_src_batch_rule);
   VMAP_SUPPORT(scatter_add, scatter_add_batch_rule);

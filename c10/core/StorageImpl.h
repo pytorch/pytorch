@@ -3,6 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/SymInt.h>
+#include <c10/core/impl/PyObjectSlot.h>
 
 #include <c10/util/intrusive_ptr.h>
 
@@ -67,10 +68,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
             allocator,
             resizable) {}
 
-  StorageImpl& operator=(StorageImpl&& other) = default;
+  StorageImpl& operator=(StorageImpl&& other) = delete;
   StorageImpl& operator=(const StorageImpl&) = delete;
   StorageImpl() = delete;
-  StorageImpl(StorageImpl&& other) = default;
+  StorageImpl(StorageImpl&& other) = delete;
   StorageImpl(const StorageImpl&) = delete;
   ~StorageImpl() override = default;
 
@@ -81,12 +82,12 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   template <typename T>
-  inline T* data() const {
-    return unsafe_data<T>();
+  inline T* unsafe_data() const {
+    return static_cast<T*>(data_ptr_.get());
   }
 
   template <typename T>
-  inline T* unsafe_data() const {
+  inline T* mutable_unsafe_data() {
     return static_cast<T*>(this->data_ptr_.get());
   }
 
@@ -119,7 +120,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return resizable_;
   };
 
-  at::DataPtr& data_ptr() {
+  at::DataPtr& mutable_data_ptr() {
     return data_ptr_;
   };
 
@@ -138,12 +139,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_ = std::move(data_ptr);
   }
 
-  // TODO: Return const ptr eventually if possible
-  void* data() {
+  const void* data() const {
     return data_ptr_.get();
   }
 
-  void* data() const {
+  void* mutable_data() {
     return data_ptr_.get();
   }
 
@@ -222,5 +222,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // local to process cuda memory allocation
   bool received_cuda_;
   Allocator* allocator_;
+  impl::PyObjectSlot pyobj_slot_;
 };
 } // namespace c10

@@ -84,7 +84,7 @@ def _require_initialized(func):
     return wrapper
 
 
-class AllGatherStates(object):
+class AllGatherStates:
     def __init__(self):
         # Each `gathered_objects` is an empty dict at beginning.
         # The leader worker is elected as the first worker in a sorted worker
@@ -102,7 +102,7 @@ class AllGatherStates(object):
 
 
 # States used by `def _all_gather()`.
-# `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
+# `_ALL_WORKER_NAMES` is initialized on initializing RPC layer.
 _ALL_WORKER_NAMES: Set[Any] = set()
 _all_gather_dict_lock = threading.RLock()
 _all_gather_sequence_id: Dict[str, int] = {}
@@ -425,7 +425,7 @@ def get_worker_info(worker_name=None):
 def _to_worker_info(to):
     if isinstance(to, WorkerInfo):
         return to
-    elif isinstance(to, str) or isinstance(to, int):
+    elif isinstance(to, (str, int)):
         return get_worker_info(to)
     else:
         raise ValueError("Cannot get WorkerInfo from name {}".format(to))

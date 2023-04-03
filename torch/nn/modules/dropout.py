@@ -11,7 +11,7 @@ class _DropoutNd(Module):
     inplace: bool
 
     def __init__(self, p: float = 0.5, inplace: bool = False) -> None:
-        super(_DropoutNd, self).__init__()
+        super().__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))

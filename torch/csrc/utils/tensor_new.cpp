@@ -33,19 +33,14 @@
 #include <stdexcept>
 #include <vector>
 
-using at::Backend;
 using at::Device;
 using at::IntArrayRef;
-using at::kCPU;
-using at::kCUDA;
 using at::kInt;
 using at::kLong;
-using at::Scalar;
 using at::ScalarType;
 using at::Storage;
 using at::Tensor;
 using at::TensorOptions;
-using at::Type;
 using c10::optional;
 
 namespace torch {
@@ -64,7 +59,7 @@ TensorOptions build_options(
   return options;
 }
 
-void maybe_initialize_cuda(const Device device) {
+void maybe_initialize_cuda(const Device& device) {
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
@@ -103,7 +98,7 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
     if (length < 0)
       throw python_error();
     if (is_storage) {
-      length /= elementSize(scalar_type);
+      length /= static_cast<int64_t>(elementSize(scalar_type));
     }
     sizes.push_back(length);
     if (sizes.size() > MAX_DIMS) {
@@ -205,11 +200,11 @@ void recursive_store(
     IntArrayRef strides,
     int64_t dim,
     ScalarType scalarType,
-    int elementSize,
+    size_t elementSize,
     PyObject* obj) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(data != nullptr);
 
-  int64_t ndim = sizes.size();
+  int64_t ndim = static_cast<int64_t>(sizes.size());
   bool is_symfloat = torch::is_symfloat(obj);
   bool is_symint = torch::is_symint(obj);
   if (dim == ndim) {
@@ -374,7 +369,7 @@ Tensor internal_new_from_data(
       at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
       if (isStorage(data)) {
-        ScalarType storage_scalar_type;
+        ScalarType storage_scalar_type{ScalarType::Undefined};
         bool is_typed_storage = false;
         Storage storage =
             createStorageGetType(data, storage_scalar_type, is_typed_storage);
@@ -437,6 +432,7 @@ Tensor internal_new_from_data(
   // to dispatch to it.
   // TODO: arguably it should have an autograd implementation that noops
   at::AutoDispatchBelowADInplaceOrView guard;
+
   return at::lift_fresh(tensor);
 }
 
@@ -492,6 +488,7 @@ void check_base_legacy_new(
         c10::DispatchKey::HPU,
         c10::DispatchKey::MPS,
         c10::DispatchKey::Meta,
+        c10::DispatchKey::PrivateUse1,
     });
     TORCH_CHECK(
         expected_key_set.has(dispatch_key),
@@ -558,13 +555,29 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
+    if (ctor_or_new == CtorOrNew::CTOR) {
+      TORCH_WARN_ONCE(
+          "torch.sparse.SparseTensor() is deprecated."
+          "  Please use torch.sparse_coo_tensor((0,), dtype=).");
+    }
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     return at::empty({0}, build_options(options, scalar_type, deviceOptional));
   } else if (r.idx == 1) {
+    if (ctor_or_new == CtorOrNew::CTOR) {
+      TORCH_WARN_ONCE(
+          "torch.sparse.SparseTensor(cdata=x._cdata) is deprecated."
+          "  Please use torch.sparse_coo_tensor(x._indices(), x._values(), x.shape).");
+    }
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
+    if (ctor_or_new == CtorOrNew::CTOR) {
+      TORCH_WARN_ONCE(
+          "torch.sparse.SparseTensor(indices, values, *, device=) is deprecated."
+          "  Please use torch.sparse_coo_tensor(indices, values, dtype=, device=).");
+    }
     // Note: this signature doesn't have a dtype, even though it has a device;
     // it probably shouldn't have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(2);
@@ -572,6 +585,11 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
+    if (ctor_or_new == CtorOrNew::CTOR) {
+      TORCH_WARN_ONCE(
+          "torch.sparse.SparseTensor(indices, values, shape, *, device=) is deprecated."
+          "  Please use torch.sparse_coo_tensor(indices, values, shape, dtype=, device=).");
+    }
     // Note: this signature doesn't have a dtype, even though it has a device;
     // it probably shouldn't have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(3);
@@ -588,13 +606,18 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
       // unless the sequences is a torch.Size
       if (ctor_or_new == CtorOrNew::CTOR) {
         throw TypeError(
-            "torch.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
+            "torch.sparse.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
             "or construct a strided tensor and convert it to sparse via to_sparse.");
       } else {
         throw TypeError(
             "SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
             "or construct a strided tensor and convert it to sparse via to_sparse.");
       }
+    }
+    if (ctor_or_new == CtorOrNew::CTOR) {
+      TORCH_WARN_ONCE(
+          "torch.sparse.SparseTensor(shape, *, device=) is deprecated."
+          "  Please use torch.sparse_coo_tensor(shape, dtype=, device=).");
     }
     return new_with_sizes(
         options, scalar_type, r.deviceOptional(1), r.symintlist(0));
@@ -608,9 +631,9 @@ c10::TensorOptions typeIdWithDefault(
     int64_t device_idx,
     c10::DispatchKey dispatch_key) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
-  if (!r.isNone(device_idx)) {
+  if (!r.isNone(static_cast<int>(device_idx))) {
     // TODO: This line doesn't seem to be exercised at all in tests
-    options = options.device(r.device(device_idx).type());
+    options = options.device(r.device(static_cast<int>(device_idx)).type());
   }
   return options;
 }
@@ -655,7 +678,7 @@ Tensor legacy_tensor_generic_ctor_new(
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
-    at::ScalarType storage_scalar_type;
+    at::ScalarType storage_scalar_type{at::ScalarType::Undefined};
     bool is_typed_storage = false;
     at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
     if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
@@ -669,6 +692,7 @@ Tensor legacy_tensor_generic_ctor_new(
     }
     return new_with_storage(options, scalar_type, storage);
   } else if (r.idx == 2) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
@@ -786,9 +810,8 @@ Tensor indexing_tensor_from_data(
 
 class CheckSparseTensorInvariantsContext {
  public:
-  CheckSparseTensorInvariantsContext() {
-    state = at::globalContext().checkSparseTensorInvariants();
-  }
+  CheckSparseTensorInvariantsContext()
+      : state{at::globalContext().checkSparseTensorInvariants()} {}
   ~CheckSparseTensorInvariantsContext() {
     at::globalContext().setCheckSparseTensorInvariants(state);
   }
@@ -1612,7 +1635,10 @@ Tensor asarray(
       THPObjectPtr ptr;
       auto arr = obj;
 
-      if (is_numpy_scalar) {
+      // PyArray_CheckScalar is true for both scalars and 0-dim arrays, per
+      // https://numpy.org/devdocs/reference/c-api/array.html#c.PyArray_CheckScalar
+      // But for 0-dim arrays no `PyArray_FromScalar` call is needed
+      if (is_numpy_scalar && !is_numpy_array) {
         TORCH_CHECK(
             !force_alias,
             "can't alias NumPy scalars. ",

@@ -1,7 +1,8 @@
 - name: ONNX exporter
   patterns:
-  - .jenkins/caffe2/*
-  - .jenkins/onnx/*
+  - .ci/caffe2/*
+  - .ci/onnx/*
+  - .ci/docker/common/install_onnx.sh
   - aten/src/ATen/core/interned_strings.h
   - docs/source/onnx.rst
   - docs/source/onnx*
@@ -52,7 +53,7 @@
   patterns:
   - .github/**
   - .circleci/**
-  - .jenkins/**
+  - .ci/**
   - scripts/**
   - tools/**
   approved_by:
@@ -83,8 +84,8 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-bionic-py3_7-clang8-xla / build
-  - pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)
+  - pull / linux-bionic-py3_8-clang8-xla / build
+  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.4xlarge)
 
 - name: Documentation
   patterns:
@@ -191,6 +192,7 @@
   - alband
   - malfet
   - razarmehr
+  - DenisVieriu97
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -242,6 +244,8 @@
   - fegin
   - kumpera
   - yhcharles
+  - kiukchung
+  - d4l3k
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -312,6 +316,7 @@
   - aten/src/ATen/autocast_mode.*
   - torch/csrc/jit/passes/autocast.cpp
   - test/test_autocast.py
+  - torch/testing/_internal/autocast_test_lists.py
   approved_by:
   - leslie-fang-intel
   - jgong5
@@ -345,6 +350,30 @@
   approved_by:
   - alanwaketan
   - JackCaoG
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: functorch
+  patterns:
+  - functorch/**
+  - test/functorch/**
+  - torch/_C/__init__.pyi.in
+  - torch/__init__.py
+  - torch/csrc/functorch/**
+  - torch/_functorch/**
+  - torch/func/**
+  - aten/src/ATen/functorch/**
+  - docs/source/func**
+  - '**vmap**'
+  - '**functorch**'
+  - '**pytree**'
+  approved_by:
+  - kshiteej12345
+  - srossross
+  - chillee
+  - zou3519
   mandatory_checks_name:
   - EasyCLA
   - Lint

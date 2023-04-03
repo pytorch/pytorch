@@ -44,7 +44,7 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
 
     TORCH_API void init2(
       at::Tensor serialized_model_tensor,
-      std::vector<at::Tensor> parameter_buffers,
+      const std::vector<at::Tensor>& parameter_buffers,
       int64_t compilation_preference,
       bool relax_f32_to_f16
     );

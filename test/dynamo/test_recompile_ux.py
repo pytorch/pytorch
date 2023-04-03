@@ -18,9 +18,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._exit_stack.enter_context(
-            unittest.mock.patch.object(
-                torch._dynamo.config, "cache_size_limit", cls.cache_limit
-            )
+            torch._dynamo.config.patch("cache_size_limit", cls.cache_limit)
         )
 
     def test_drop_cache_on_skip(self):
@@ -83,9 +81,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 
         expected_recompiles = 2
         compile_counter = torch._dynamo.testing.CompileCounter()
-        with unittest.mock.patch.object(
-            torch._dynamo.config, "cache_size_limit", expected_recompiles
-        ):
+        with torch._dynamo.config.patch("cache_size_limit", expected_recompiles):
             with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
                 for _ in range(10):
                     bsz = torch.randint(low=0, high=1000, size=())
@@ -117,7 +113,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         c = torch.rand(3, 4, 5, device="cuda")
         compile_counter = torch._dynamo.testing.CompileCounter()
 
-        with unittest.mock.patch.object(torch._dynamo.config, "cache_size_limit", 2):
+        with torch._dynamo.config.patch("cache_size_limit", 2):
             opt_func = torch._dynamo.optimize(compile_counter)(func)
             opt_func(a, b, c)  # warmup
             self.assertEqual(compile_counter.frame_count, 1)

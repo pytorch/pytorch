@@ -76,17 +76,15 @@ TORCH_API extern mutexType currentStateStackEntryMutex;
 
 // This class is used to implement a stack of ``State``s.
 // It has 2 members.
-// One is `prevPtr`, a shared_ptr poiniting to previous elememnt in the
+// One is `prevPtr`, a shared_ptr pointing to previous element in the
 // stack.
 // The other is ``statePtr``, a shared_ptr pointing to ``State``.
 class StateStackEntry {
  public:
   StateStackEntry(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::shared_ptr<StateStackEntry> prevPtr,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::shared_ptr<State> statePtr)
-      : prevPtr_(prevPtr), statePtr_(statePtr) {}
+      : prevPtr_(std::move(prevPtr)), statePtr_(std::move(statePtr)) {}
 
   static void pushRange(std::shared_ptr<State> profilerProcessGlobalStatePtr);
   static std::shared_ptr<State> popRange();

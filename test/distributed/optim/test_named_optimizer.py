@@ -28,7 +28,7 @@ def _run_model_training(model_optim_lists):
 
 class TestDummyModel(torch.nn.Module):
     def __init__(self):
-        super(TestDummyModel, self).__init__()
+        super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
@@ -391,3 +391,37 @@ class NamedOptimizerTest(unittest.TestCase):
         err_msg = "some parameters are not in the module"
         with self.assertRaisesRegex(ValueError, err_msg):
             named_optim.add_param_group({"params": [torch.ones(8, 1)], "lr": 1e-5})
+
+    def test_init_state(self):
+        m = TestDummyModel()
+        named_optim = _NamedOptimizer(
+            m.named_parameters(),
+            torch.optim.SGD,
+            [
+                {"params": m.net1.parameters()},
+                {"params": m.net3.parameters(), "lr": 1e-3},
+            ],
+            lr=1e-2,
+            momentum=0.9,
+        )
+        named_sd = named_optim.state_dict()
+        self.assertTrue(m.net1[0].weight.grad is None)
+        self.assertTrue(len(named_sd["state"]) == 0)
+        named_optim.init_state()
+        named_sd = named_optim.state_dict()
+        self.assertTrue(m.net1[0].weight.grad is not None)
+        self.assertTrue("momentum_buffer" in named_sd["state"]["net1.0.weight"])
+        self.assertFalse(
+            torch.all(named_sd["state"]["net1.0.weight"]["momentum_buffer"]).item()
+        )
+        self.assertFalse(
+            torch.all(named_sd["state"]["net1.0.bias"]["momentum_buffer"]).item()
+        )
+        self.assertTrue(m.net3.bias.grad is not None)
+        self.assertTrue("momentum_buffer" in named_sd["state"]["net3.bias"])
+        self.assertFalse(
+            torch.all(named_sd["state"]["net3.bias"]["momentum_buffer"]).item()
+        )
+        self.assertFalse(
+            torch.all(named_sd["state"]["net3.weight"]["momentum_buffer"]).item()
+        )

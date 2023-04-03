@@ -95,8 +95,8 @@ class TestModelNumericsEager(QuantizationTestCase):
                 torch.manual_seed(67)
                 calib_data = torch.rand(2048, 3, 15, 15, dtype=torch.float32)
                 eval_data = torch.rand(10, 3, 15, 15, dtype=torch.float32)
-                qconfigset = set([torch.ao.quantization.default_weight_only_qconfig,
-                                  torch.ao.quantization.default_activation_only_qconfig])
+                qconfigset = {torch.ao.quantization.default_weight_only_qconfig,
+                              torch.ao.quantization.default_activation_only_qconfig}
                 SQNRTarget = [35, 45]
                 for idx, qconfig in enumerate(qconfigset):
                     my_model = ModelMultipleOpsNoAvgPool().to(torch.float32)

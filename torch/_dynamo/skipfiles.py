@@ -130,13 +130,11 @@ FILENAME_ALLOWLIST = {
 }
 
 # Include optimizer code for tracing
-FILENAME_ALLOWLIST |= set(
-    [
-        inspect.getfile(obj)
-        for obj in torch.optim.__dict__.values()
-        if inspect.isclass(obj)
-    ]
-)
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.optim.__dict__.values()
+    if inspect.isclass(obj)
+}
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 if HAS_PRIMS_REFS:
@@ -162,7 +160,10 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    module_spec = importlib.util.find_spec(import_name)
+    try:
+        module_spec = importlib.util.find_spec(import_name)
+    except Exception:
+        return
     if not module_spec:
         return
     origin = module_spec.origin
@@ -200,6 +201,7 @@ for _name in (
     "tensorflow",
     "tensorrt",
     "torch2trt",
+    "torchrec.distributed",
     "tqdm",
     "tree",
     "tvm",
@@ -220,7 +222,9 @@ def is_torch_inline_allowed(filename):
 
 @functools.lru_cache(None)
 def dynamo_dir():
-    return _module_dir(importlib.import_module(config.dynamo_import))
+    import torch._dynamo
+
+    return _module_dir(torch._dynamo)
 
 
 def is_torch(filename):

@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_utils import (
     IS_ARM64,
+    IS_JETSON,
     parametrize,
     run_tests,
     TEST_WITH_ROCM,
@@ -114,7 +115,8 @@ class TestMatmulCuda(TestCase):
         self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
 
     @onlyCUDA
-    @skipIfRocmVersionLessThan((5, 2))
+    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
+    @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
               [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))

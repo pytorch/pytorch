@@ -2,6 +2,7 @@
 
 import types
 from copy import deepcopy
+from typing import Tuple
 from unittest.mock import patch
 
 import torch
@@ -144,6 +145,21 @@ class UnsupportedModuleCall(torch.nn.Module):
 
     def forward(self, x):
         return 1 + self.mod(x * 1.5)
+
+
+class ModuleWithStaticForward(torch.nn.Module):
+    @staticmethod
+    def forward(x):
+        return x * torch.sigmoid(x)
+
+
+class ModuleCallModuleWithStaticForward(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mod = ModuleWithStaticForward()
+
+    def forward(self, x):
+        return self.mod(x)
 
 
 class ModuleStaticMethodCall(torch.nn.Module):
@@ -321,6 +337,20 @@ class Children(torch.nn.Module):
 
     def forward(self, x):
         for block in self.children():
+            x = block(x)
+        return x
+
+
+class NamedChildren(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = torch.nn.Linear(10, 10)
+        self.l2 = torch.nn.ReLU()
+        self.l3 = torch.nn.Linear(10, 10)
+        self.l4 = torch.nn.ReLU()
+
+    def forward(self, x):
+        for _, block in self.named_children():
             x = block(x)
         return x
 
@@ -589,9 +619,6 @@ class SelfMutatingModule(torch.nn.Module):
 
 
 class ModuleAttributePrecedenceBase(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def linear(self, x):
         return x * 2.0
 
@@ -669,6 +696,22 @@ class ModuleForwardHasGraphBreak(torch.nn.Module):
         return x * self.scale
 
 
+class ModuleGuardNameIsValid(torch.nn.ModuleDict):
+    # Guard names should be valid python identifier as we use eval() to get
+    # corresponding guard value. Some guard names come from source(module path)
+    # where special symbols are valid. But they are not valid python identifier,
+    # we should identify these pattern and rewrite them with getattr.
+    def __init__(self):
+        super().__init__()
+        for i in range(2):
+            self.add_module("l@yer-%d" % (i + 1), BasicModule())
+
+    def forward(self, x):
+        for _, layer in self.items():
+            x = layer(x)
+        return x
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -696,6 +739,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_submodules2 = make_test(SubmoduleExample())
     test_modulemethod1 = make_test(ModuleMethodCall())
     test_modulemethod2 = make_test(ModuleMethodCall())
+    test_module_call_module_with_static_forward = make_test(
+        ModuleCallModuleWithStaticForward()
+    )
     test_module_static_method = make_test(ModuleStaticMethodCall())
     test_fnmember = make_test(FnMember())
     test_fnmembercmp1 = make_test(FnMemberCmp(F.relu))
@@ -718,6 +764,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
+    test_named_children = make_test(NamedChildren())
     test_densenet = make_test(DenseNetBlocks())
     test_parameters1 = make_test(ParametersModule1())
     test_parameters2 = make_test(ParametersModule2())
@@ -730,6 +777,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
+    test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
@@ -814,7 +862,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
 
         try:
-
             x = torch.randn(1).as_subclass(TensorProxy)
             cnt = torch._dynamo.testing.CompileCounter()
             out1 = foo(x)
@@ -829,7 +876,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_with_closure(self):
         def run():
-
             counter = 0
 
             def foo(x):
@@ -983,7 +1029,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
             def __init__(self):
-                super(ModuleSpecialFwd, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=20, kernel_size=(5, 5)
                 )
@@ -1064,7 +1110,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager")(mod)
 
         # Check parameteres and buffers
-        for (p1, p2) in zip(mod.parameters(), opt_mod.parameters()):
+        for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
 
     def test_recursion(self):
@@ -1148,6 +1194,166 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 torch.zeros(1),
             )
         )
+
+    def test_hooks_outer(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return 2 * x + 1
+
+        m = TestModule()
+
+        def forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 1
+
+        handle = m.register_forward_hook(forward_hook)
+        inp = torch.tensor(1.0, requires_grad=True)
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        compiled_m = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn, backend="eager"
+        )(m)
+
+        self.assertEqual(compiled_m(inp), m(inp))
+        self.assertEqual(compiled_m(inp).item(), 7)
+        self.assertTrue(failure_reason is None)
+
+        # what if we remove our hook? we should recompile?
+        handle.remove()
+        self.assertEqual(compiled_m(inp), m(inp))
+        self.assertEqual(compiled_m(inp).item(), 3)
+        # self.assertTrue(failure_reason == "hook")
+
+        """
+        Summary:
+          - removing a hook doesn't fail a guard, becuase we weren't compiling the hook
+            (at least into the same graph) as forward in the first place! We do correctly
+            omit calling the removed hook, but since this hook is a post forward hook,
+            the 'RETURN' from forward is breaking the graph.
+
+            Why is 'forward' the entrypoint to an InstructionTranslator, after I changed
+            the eval_frame entrypoint to Module.__call__?
+        """
+
+    def test_hooks_inner(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return 2 * x + 1
+
+        m = TestModule()
+
+        def forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 1
+
+        handle = m.register_forward_hook(forward_hook)
+
+        def outer_func(tensor):
+            x = tensor * 2 + 1
+            y = m(x)
+            return y
+
+        inp = torch.tensor(1.0, requires_grad=True)
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_func = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn,
+            backend=cc,
+        )(outer_func)
+
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+
+        # We are compiling 1 big graph for all 3 functions including the hook.
+        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.op_count, 6)
+
+        # If we remove the hook, we should recompile
+        handle.remove()
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 7)
+        self.assertTrue("forward_hooks.keys" in failure_reason)
+        self.assertEqual(cc.frame_count, 1 + 1)
+        self.assertEqual(cc.op_count, 6 + 4)
+
+        # what if instead of removing, we alter our hook?
+        torch._dynamo.reset()
+        m = TestModule()
+        handle = m.register_forward_hook(forward_hook)
+        failure_reason = None
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+
+        def new_forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 2
+
+        m._forward_hooks[handle.id] = new_forward_hook
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 16)
+        self.assertTrue("check_obj_id(m._forward_hooks" in failure_reason)
+
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
+    def test_hooks_skip_guards(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return 2 * x + 1
+
+        m = TestModule()
+
+        def forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 1
+
+        handle = m.register_forward_hook(forward_hook)
+
+        def outer_func(tensor):
+            x = tensor * 2 + 1
+            y = m(x)
+            return y
+
+        inp = torch.tensor(1.0, requires_grad=True)
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_func = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn,
+            backend=cc,
+        )(outer_func)
+
+        m = TestModule()
+        handle = m.register_forward_hook(forward_hook)
+        failure_reason = None
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.op_count, 6)
+
+        # if we remove the hook, dynamo shouldn't notice
+        handle.remove()
+        self.assertNotEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+        self.assertEqual(cc.frame_count, 1)
 
 
 if __name__ == "__main__":

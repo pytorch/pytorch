@@ -21,7 +21,7 @@ from torch.fx import (
 from torch.fx.graph import (
     Graph,
 )
-from torch.nn.intrinsic import _FusedModule
+from torch.ao.nn.intrinsic import _FusedModule
 
 from ..utils import (
     _parent_name,

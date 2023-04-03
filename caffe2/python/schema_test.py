@@ -82,7 +82,7 @@ class TestDB(unittest.TestCase):
 
     def testNormalizeField(self):
         s = schema.Struct(('field1', np.int32), ('field2', str))
-        self.assertEquals(
+        self.assertEqual(
             s,
             schema.Struct(
                 ('field1', schema.Scalar(dtype=np.int32)),
@@ -97,11 +97,11 @@ class TestDB(unittest.TestCase):
             ('field_1', schema.Scalar(dtype=np.str)),
             ('field_2', schema.Scalar(dtype=np.float32))
         )
-        self.assertEquals(s, s2)
-        self.assertEquals(s[0], schema.Scalar(dtype=np.int32))
-        self.assertEquals(s[1], schema.Scalar(dtype=np.str))
-        self.assertEquals(s[2], schema.Scalar(dtype=np.float32))
-        self.assertEquals(
+        self.assertEqual(s, s2)
+        self.assertEqual(s[0], schema.Scalar(dtype=np.int32))
+        self.assertEqual(s[1], schema.Scalar(dtype=np.str))
+        self.assertEqual(s[2], schema.Scalar(dtype=np.float32))
+        self.assertEqual(
             s[2, 0],
             schema.Struct(
                 ('field_2', schema.Scalar(dtype=np.float32)),
@@ -110,19 +110,19 @@ class TestDB(unittest.TestCase):
         )
         # test iterator behavior
         for i, (v1, v2) in enumerate(zip(s, s2)):
-            self.assertEquals(v1, v2)
-            self.assertEquals(s[i], v1)
-            self.assertEquals(s2[i], v1)
+            self.assertEqual(v1, v2)
+            self.assertEqual(s[i], v1)
+            self.assertEqual(s2[i], v1)
 
     def testRawTuple(self):
         s = schema.RawTuple(2)
-        self.assertEquals(
+        self.assertEqual(
             s, schema.Struct(
                 ('field_0', schema.Scalar()), ('field_1', schema.Scalar())
             )
         )
-        self.assertEquals(s[0], schema.Scalar())
-        self.assertEquals(s[1], schema.Scalar())
+        self.assertEqual(s[0], schema.Scalar())
+        self.assertEqual(s[1], schema.Scalar())
 
     def testStructIndexing(self):
         s = schema.Struct(
@@ -130,10 +130,10 @@ class TestDB(unittest.TestCase):
             ('field2', schema.List(schema.Scalar(dtype=str))),
             ('field3', schema.Struct()),
         )
-        self.assertEquals(s['field2'], s.field2)
-        self.assertEquals(s['field2'], schema.List(schema.Scalar(dtype=str)))
-        self.assertEquals(s['field3'], schema.Struct())
-        self.assertEquals(
+        self.assertEqual(s['field2'], s.field2)
+        self.assertEqual(s['field2'], schema.List(schema.Scalar(dtype=str)))
+        self.assertEqual(s['field3'], schema.Struct())
+        self.assertEqual(
             s['field2', 'field1'],
             schema.Struct(
                 ('field2', schema.List(schema.Scalar(dtype=str))),
@@ -147,8 +147,8 @@ class TestDB(unittest.TestCase):
             ('field1', schema.Scalar(dtype=np.int32)),
             ('field2', a)
         )
-        self.assertEquals(s['field2:lengths'], a.lengths)
-        self.assertEquals(s['field2:values'], a.items)
+        self.assertEqual(s['field2:lengths'], a.lengths)
+        self.assertEqual(s['field2:values'], a.items)
         with self.assertRaises(KeyError):
             s['fields2:items:non_existent']
         with self.assertRaises(KeyError):
@@ -160,9 +160,9 @@ class TestDB(unittest.TestCase):
             ('field1', schema.Scalar(dtype=np.int32)),
             ('field2', a)
         )
-        self.assertEquals(s['field2:lengths'], a.lengths)
-        self.assertEquals(s['field2:values'], a.items)
-        self.assertEquals(s['field2:_evicted_values'], a._evicted_values)
+        self.assertEqual(s['field2:lengths'], a.lengths)
+        self.assertEqual(s['field2:values'], a.items)
+        self.assertEqual(s['field2:_evicted_values'], a._evicted_values)
         with self.assertRaises(KeyError):
             s['fields2:items:non_existent']
         with self.assertRaises(KeyError):
@@ -177,8 +177,8 @@ class TestDB(unittest.TestCase):
             ('field1', schema.Scalar(dtype=np.int32)),
             ('field2', a)
         )
-        self.assertEquals(s['field2:values:keys'], a.keys)
-        self.assertEquals(s['field2:values:values'], a.values)
+        self.assertEqual(s['field2:values:keys'], a.keys)
+        self.assertEqual(s['field2:values:values'], a.values)
         with self.assertRaises(KeyError):
             s['fields2:keys:non_existent']
 
