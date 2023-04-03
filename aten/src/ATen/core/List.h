@@ -24,7 +24,7 @@ namespace detail {
 struct ListImpl final : public c10::intrusive_ptr_target {
   using list_type = std::vector<IValue>;
 
-  explicit ListImpl(list_type list_, TypePtr elementType_);
+  explicit TORCH_API ListImpl(list_type list_, TypePtr elementType_);
 
   list_type list;
 
