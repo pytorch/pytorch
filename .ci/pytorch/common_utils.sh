@@ -217,10 +217,6 @@ function checkout_install_torchbench() {
   popd
 }
 
-function test_functorch() {
-  python test/run_test.py --functorch --verbose
-}
-
 function print_sccache_stats() {
   echo 'PyTorch Build Statistics'
   sccache --show-stats

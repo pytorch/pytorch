@@ -185,7 +185,7 @@ std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
              std::make_pair(".zero_point", IValue(_asym_zero_point)),
              std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
 
-// quantization parrameters for ops with range -1 to 1
+// quantization parameters for ops with range -1 to 1
 // for example: aten/src/ATen/native/quantized/cpu/qtanh.cpp
 std::tuple<c10::QScheme, QParamVector> _per_tensor_sym_qparam = std::make_tuple(
     c10::kPerTensorAffine,

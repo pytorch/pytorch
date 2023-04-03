@@ -6279,7 +6279,7 @@ class DistributedTest:
                 self._model_step_with_zero_grad(model_DDP)
 
                 # Verify DDP logging data is sampled as expected
-                # If it has ran more than 10 iteratons and this is
+                # If it has ran more than 10 iterations and this is
                 # the sampled iteration for measuring run time stats,
                 # the run time stats for this idx-th iteration will not
                 # be zeros.
@@ -7128,7 +7128,7 @@ class DistributedTest:
             rank = self.rank
             sync_interval = test_case.sync_interval
             torch.cuda.set_device(rank)
-            # Ensure all outsanding GPU work is comlete so this test runs independently.
+            # Ensure all outstanding GPU work is completed so this test runs independently.
             dist.barrier()
             # Bucket_cap_mb is intentionally low to test allreduce scheduling when
             # there are many buckets.
@@ -8314,7 +8314,7 @@ class DistributedTest:
                     dist.get_backend(group_to_use) == dist.Backend.NCCL
                     and not is_detail_dbg_mode
                 ):
-                    expected_err = "Caught collective operation timeout"
+                    expected_err = "caught collective operation timeout"
                     ctx = self.assertRaisesRegex(RuntimeError, expected_err)
                 else:
                     expected_err = None
@@ -8683,7 +8683,7 @@ class DistributedTest:
             # Kick off some allreduce work on all ranks
             for _ in range(10):
                 dist.all_reduce(torch.cat(tensors))
-            # Run monitored barrier and ensure it passees
+            # Run monitored barrier and ensure it passes
             timeout = timedelta(seconds=2)
             dist.monitored_barrier(timeout=timeout)
             # Check monitored_barrier success with wait_all_ranks=True
@@ -8767,7 +8767,7 @@ class DistributedTest:
                 if dist.get_debug_level() == dist.DebugLevel.DETAIL:
                     err_regex = "Timed out waiting"
                 else:
-                    err_regex = "Caught collective operation timeout"
+                    err_regex = "caught collective operation timeout"
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     nccl_pg.allreduce(tensors).wait(timedelta(seconds=0.1))
             else:

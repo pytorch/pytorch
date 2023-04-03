@@ -37,7 +37,7 @@ inplace_buffers = True
 benchmark_harness = True
 
 # fuse pointwise into templates
-epilogue_fusion = False
+epilogue_fusion = True
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
@@ -60,6 +60,9 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
+# We will disable creating subprocess for autotuning if this is False
+autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
 # smaller threshold
@@ -75,9 +78,6 @@ fallback_random = False
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
-# do bench to decide best layout, currently only for aten.conv
-tune_layout = False
-
 # fuse even in cases without common reads
 aggressive_fusion = False
 
@@ -87,7 +87,12 @@ max_fusion_size = 64
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
+# Add extra comments to output code (causes compile cache misses)
 comment_origin = False
+
+# Convert 1x1 convs into matmuls
+conv_1x1_as_mm = False
+
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -97,7 +102,8 @@ def is_fbcode():
 
 
 # warnings intended for PyTorch developers, disable for point releases
-developer_warnings = is_fbcode() or "+" in torch.__version__
+is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
+developer_warnings = is_fbcode() or is_nightly_or_source
 
 
 def decide_compile_threads():
@@ -151,6 +157,8 @@ _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
+disable_cpp_codegen = is_fbcode()
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -187,9 +195,13 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = False
+    cudagraph_trees = not is_fbcode()
 
-    debug_cudagraph_trees = True
+    # assertions not on the fast path, steady state
+    fast_cudagraph_asserts = True
+
+    # assertions on the fast path
+    slow_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
@@ -218,7 +230,7 @@ class triton:
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
     # whether they should be unique.
-    unique_kernel_names = False
+    unique_kernel_names = os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES") == "1"
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
@@ -230,7 +242,7 @@ class triton:
     # use alternate codegen for smaller reductions
     persistent_reductions = True
 
-    # theses are not enforced, but they are used by asserts in triton_ops/autotune.py
+    # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
 

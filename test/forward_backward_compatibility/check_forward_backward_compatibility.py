@@ -354,6 +354,9 @@ ALLOW_LIST = [
      datetime.date(9999, 1, 1)),
     ("aten::_int_mm.out", datetime.date(2023, 4, 1)),
     ("aten::_int_mm", datetime.date(2023, 4, 1)),
+    ("aten::_nested_view_from_buffer_copy.out", datetime.date(2023, 5, 1)),
+    ("aten::_nested_view_from_buffer_copy", datetime.date(2023, 5, 1)),
+    ("aten::_nested_view_from_buffer", datetime.date(2023, 5, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [

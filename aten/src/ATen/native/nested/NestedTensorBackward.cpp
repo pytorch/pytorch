@@ -57,7 +57,7 @@ std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
 
   if (output_mask[0]) {
     auto grad_input_buffer = at::mm(reshaped_grad, weight).view({-1});
-    auto grad_input_nt_size = nt_input->get_nested_size_tensor().clone();
+    auto grad_input_nt_size = nt_input->get_nested_sizes().clone();
     grad_input = wrap_buffer(grad_input_buffer, grad_input_nt_size);
   }
   if (output_mask[1]) {
@@ -88,10 +88,10 @@ Tensor nested_softmax_backward(
 
   //  Get the info about the output
   const Tensor &output_buffer = output_ptr->get_buffer(),
-               &output_sizemat = output_ptr->get_nested_size_tensor();
+               &output_sizemat = output_ptr->get_nested_sizes();
 
   //  Get the info about the grad
-  const Tensor &grad_sizemat = grad_ptr->get_nested_size_tensor();
+  const Tensor &grad_sizemat = grad_ptr->get_nested_sizes();
 
   TORCH_INTERNAL_ASSERT(output_sizemat.equal(grad_sizemat));
   Tensor grad_output =
@@ -123,8 +123,8 @@ Tensor _nested_sum_backward_cpu(
   auto nt_grad = get_nested_tensor_impl(grad);
   const Tensor& grad_buffer = nt_grad->get_buffer();
   const Tensor& self_buffer = nt_self->get_buffer();
-  auto grad_sizes = nt_grad->get_nested_size_tensor();
-  auto self_sizes = nt_self->get_nested_size_tensor();
+  auto grad_sizes = nt_grad->get_nested_sizes();
+  auto self_sizes = nt_self->get_nested_sizes();
   int64_t ntensors = nt_self->size(0);
   const Tensor& self_grad_buffer = self_buffer.new_empty(self_buffer.sizes());
 
@@ -165,7 +165,7 @@ Tensor _nested_select_backward_symint(
   c10::SymInt index) {
   auto nt_self = get_nested_tensor_impl(nested_self);
   const Tensor& self_buffer = nt_self->get_buffer();
-  const auto self_sizes = nt_self->get_nested_size_tensor();
+  const auto self_sizes = nt_self->get_nested_sizes();
   const Tensor& self_grad_buffer = self_buffer.new_zeros(self_buffer.sizes());
 
   auto nt_grad = wrap_buffer(self_grad_buffer, self_sizes);
@@ -205,7 +205,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   auto* nt_impl_input = get_nested_tensor_impl(input);
   const auto& weight = *weight_opt;
   const auto& bias = *bias_opt;
-  const auto& sizes = nt_impl_input->get_nested_size_tensor();
+  const auto& sizes = nt_impl_input->get_nested_sizes();
   auto M_N = _check_nested_layer_norm_inputs(
       *nt_impl_input, normalized_shape, weight, bias);
   auto M = M_N.first;

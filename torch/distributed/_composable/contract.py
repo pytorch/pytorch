@@ -11,7 +11,7 @@ from torch.distributed._composable_state import _State
 # properties.
 # TODO: since all composable distributed features can share the same slot.
 class _StateKey(str):
-    # Make _StateKey as str to satify the assumption that object.__dict__.keys()
+    # Make _StateKey as str to satisfy the assumption that object.__dict__.keys()
     # are strings.
     def __new__(cls, string="__composable_api_state_key"):
         return super().__new__(cls, f"{string}_{str(uuid.uuid4())}")

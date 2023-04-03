@@ -77,6 +77,7 @@ try:
 # Quantization for PyTorch 2.0 Export path
     from quantization.fx.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
     from quantization.fx.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
+    from quantization.fx.test_quantize_pt2e import TestQuantizePT2EX86Inductor  # noqa: F401
 except ImportError:
     # In FBCode we separate FX out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_fx`

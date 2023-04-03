@@ -16,7 +16,7 @@ from torch._guards import GuardsCheckpointState
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
-from ..source import GetItemSource, NNModuleSource
+from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -29,8 +29,8 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import VariableTracker
+from .ctx_manager import AutocastModeVariable, NullContextVariable
 from .lists import ListVariable, TupleVariable
-from .misc import AutocastModeVariable, NullContextVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
@@ -172,6 +172,8 @@ class TorchVariable(VariableTracker):
     def python_type(self):
         if isinstance(self.value, (torch.Tensor, torch.nn.Module)):
             return type(self.value)
+        if type(self.value) is type:
+            return type
         return super().python_type()
 
     def as_python_constant(self):
@@ -189,6 +191,7 @@ class TorchVariable(VariableTracker):
             ConstantVariable,
             CUDAStreamContextVariable,
             CUDAStreamVariable,
+            DeterministicAlgorithmsVariable,
             GradModeVariable,
             SymNodeVariable,
             TensorVariable,
@@ -275,6 +278,15 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
                 GradModeVariable._guards_singleton
             )
+        elif self.value is torch.use_deterministic_algorithms and len(args) == 1:
+            return DeterministicAlgorithmsVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
+        elif self.value is torch.are_deterministic_algorithms_enabled:
+            assert not (args or kwargs)
+            return ConstantVariable(
+                torch.are_deterministic_algorithms_enabled(), **options
+            ).add_guards(DeterministicAlgorithmsVariable._guards_singleton)
         elif self.value is torch.cuda.stream:
             log.warning(
                 "torch.cuda.stream() not fully supported, streams may be ignored"
@@ -384,6 +396,9 @@ class TorchVariable(VariableTracker):
                     *proxy_args_kwargs(args, kwargs),
                 ),
                 example_value=self.value(),
+                source=GeneratorStateSource(
+                    self.value.__self__.device.type, self.value.__self__.initial_seed()
+                ),
                 **options,
             )
         if (
@@ -773,7 +788,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
-class TorchPyOperator(VariableTracker):
+class TorchHigherOrderOperator(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -1022,7 +1037,7 @@ class TorchPyOperator(VariableTracker):
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
         else:
-            unimplemented(f"PyOperator {self.value.__name__}")
+            unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
         # Store the invocation as a call
         return wrap_fx_proxy(
