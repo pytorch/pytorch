@@ -67,7 +67,7 @@ struct C10_API Storage {
 
   template <typename T>
   T* unsafe_data() const {
-    return storage_impl_->mutable_unsafe_data<T>();
+    return storage_impl_->unsafe_data<T>();
   }
 
   // TODO: remove later

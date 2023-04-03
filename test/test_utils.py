@@ -785,19 +785,19 @@ class DummyXPUModule:
         return True
 
     @staticmethod
-    def is_autocast_enabled():
+    def is_autocast_foo_enabled():
         return True
 
     @staticmethod
-    def get_autocast_dtype():
+    def get_autocast_foo_dtype():
         return torch.float16
 
     @staticmethod
-    def set_autocast_enabled(enable):
+    def set_autocast_foo_enabled(enable):
         pass
 
     @staticmethod
-    def set_autocast_dtype(dtype):
+    def set_autocast_foo_dtype(dtype):
         pass
 
     @staticmethod

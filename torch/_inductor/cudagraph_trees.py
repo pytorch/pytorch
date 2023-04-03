@@ -250,6 +250,14 @@ def get_container(device_index: int):
         return container_dict[device_index]
 
 
+def get_manager(
+    device_index: int, create_if_none_exists=True
+) -> Optional[CUDAGraphTreeManager]:
+    if create_if_none_exists:
+        return get_container(device_index).get_tree_manager()
+    return get_container(device_index).tree_manager
+
+
 def cudagraphify_impl(
     model,
     inputs,
@@ -1148,16 +1156,32 @@ class CUDAGraphTreeManager:
 
         self.id_to_mode: Dict[int, CompilationMode] = {}
 
-        # forwards that have been invoked without invocation of their corresponding backwards
-        self.forwards_with_pending_backwards: int = 0
+        # Typically we run a series of forwards then a series of backwards/
+        # When we have invoked forwards backwards we do not want to ignore outputs of a previous
+        # generation, even if torch.compile has been invoked again.
+        # In some occassions, a backward corresponding to a forward will not be invoked
+        # so we cannot wait for all backwards of pending forwards to complete.
+        # calling the backward will not usually trigger another torch.compile
+        # invocation, so we are unlikely to increment generation between multiple backward
+        # calls.
+        self.running_forwards_with_pending_backwards = False
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
+        out = self._run(new_inputs, function_id)
+
+        # The forwards are only pending following invocation, not before
         mode = self.id_to_mode[function_id]
         if mode == CompilationMode.FORWARD:
-            self.forwards_with_pending_backwards += 1
+            self.running_forwards_with_pending_backwards = True
         elif mode == CompilationMode.BACKWARD:
-            self.forwards_with_pending_backwards -= 1
+            self.running_forwards_with_pending_backwards = False
 
+        return out
+
+    def set_to_running_backward(self):
+        self.running_forwards_with_pending_backwards = False
+
+    def _run(self, new_inputs: List[Tensor], function_id: FunctionID):
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
@@ -1321,9 +1345,8 @@ class CUDAGraphTreeManager:
         return GenerationTracker.generation
 
     def can_start_new_generation(self) -> bool:
-        if self.forwards_with_pending_backwards != 0:
+        if self.running_forwards_with_pending_backwards:
             return False
-
         return self.current_gen != self.get_curr_generation()
 
     def try_end_curr_recording(self) -> None:
@@ -1376,9 +1399,10 @@ class CUDAGraphTreeManager:
     def dealloc_current_path_weakrefs(self):
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
+        deleted = set()
         for t, stack_trace in self.current_node.path_live_weakrefs_and_stacktraces():
-            # TODO: dont need to test t(), but would need to deduplicate storages
-            if t():
+            if t() and t.data_ptr() not in deleted:
+                deleted.add(t.data_ptr())
                 torch._C._free_And_Remove_DeleterFn(t())
                 stack_trace = (
                     stack_trace.strip()
@@ -1416,7 +1440,8 @@ class CUDAGraphTreeManager:
             device, state, stale_storages, live_storages_weak_refs
         )
 
-        for ptr in ptrs_to_deallocate:
+        # NB: deduplicate aliased outputs
+        for ptr in set(ptrs_to_deallocate):
             torch._C._cuda_cudaCachingAllocator_raw_delete(ptr)
 
         # Now the live blocks should be exactly equal to the live storages in private pool
