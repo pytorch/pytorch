@@ -62,13 +62,11 @@ def gen_autograd(
     template_path = os.path.join(autograd_dir, "templates")
 
     native_funcs = parse_native_yaml(native_functions_path, tags_path).native_functions
-    fns = list(
-        sorted(
-            filter(
-                operator_selector.is_native_function_selected_for_training, native_funcs
-            ),
-            key=lambda f: cpp.name(f.func),
-        )
+    fns = sorted(
+        filter(
+            operator_selector.is_native_function_selected_for_training, native_funcs
+        ),
+        key=lambda f: cpp.name(f.func),
     )
     fns_with_diff_infos: List[
         NativeFunctionWithDifferentiabilityInfo

@@ -8,7 +8,6 @@
 #include <exception>
 #include <ostream>
 #include <string>
-#include <tuple>
 #include <vector>
 
 namespace c10 {

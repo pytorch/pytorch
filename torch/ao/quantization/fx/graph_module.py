@@ -30,7 +30,7 @@ class FusedGraphModule(GraphModule):
 class ObservedGraphModule(GraphModule):
 
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
-        self.preserved_attr_names = set([
+        self.preserved_attr_names = {
             '_activation_post_process_map',
             '_activation_post_process_indexes',
             '_patterns',
@@ -40,7 +40,7 @@ class ObservedGraphModule(GraphModule):
             '_node_name_to_scope',
             '_qconfig_mapping',
             '_is_qat',
-            '_observed_node_names']).union(preserved_attr_names)
+            '_observed_node_names'}.union(preserved_attr_names)
         preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if hasattr(root, attr)}
         super().__init__(root, graph)
         for attr in preserved_attrs:
@@ -55,13 +55,18 @@ class ObservedGraphModule(GraphModule):
         return ObservedGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))
 
 def _is_observed_module(module: Any) -> bool:
-    return isinstance(module, ObservedGraphModule)
+    return hasattr(module, "meta") and "_observed_graph_module_attrs" in module.meta
+
+def _get_observed_graph_module_attr(model: Union[torch.nn.Module, GraphModule], attr_name: str) -> Any:
+    if hasattr(model, "meta") and "_observed_graph_module_attrs" in model.meta:  # type: ignore[operator, index]
+        return getattr(model.meta["_observed_graph_module_attrs"], attr_name)  # type: ignore[index]
+    return None
 
 class ObservedStandaloneGraphModule(ObservedGraphModule):
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
-        preserved_attr_names = preserved_attr_names.union(set([
+        preserved_attr_names = preserved_attr_names.union({
             "_standalone_module_input_quantized_idxs",
-            "_standalone_module_output_quantized_idxs"]))
+            "_standalone_module_output_quantized_idxs"})
         super().__init__(root, graph, preserved_attr_names)
 
     def __deepcopy__(self, memo):
@@ -70,7 +75,7 @@ class ObservedStandaloneGraphModule(ObservedGraphModule):
         return ObservedStandaloneGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))
 
 def _is_observed_standalone_module(module: Any) -> bool:
-    return isinstance(module, ObservedStandaloneGraphModule)
+    return _is_observed_module(module) and module.meta["_observed_graph_module_attrs"].is_observed_standalone_module
 
 def _save_packed_weight(self, destination, prefix, keep_vars):
     for attr_name in dir(self):

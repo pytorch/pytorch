@@ -22,11 +22,10 @@ void check_single_result(
 namespace torch {
 namespace autograd {
 
-// NOLINTNEXTLINE(modernize-pass-by-value)
 CppFunctionTensorPreHook::CppFunctionTensorPreHook(
-    const std::shared_ptr<hooks_list>& hooks,
+    std::shared_ptr<hooks_list> hooks,
     int value_idx)
-    : hooks_(hooks), value_idx_(value_idx) {}
+    : hooks_(std::move(hooks)), value_idx_(value_idx) {}
 
 variable_list CppFunctionTensorPreHook::operator()(
     const variable_list& values) {

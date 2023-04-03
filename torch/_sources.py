@@ -93,9 +93,7 @@ class SourceContext(SourceRangeFactory):
         uses_true_division=True,
         funcname=None,
     ):
-        super(SourceContext, self).__init__(
-            source, filename, file_lineno, leading_whitespace_len
-        )
+        super().__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
         self.filename = filename
         self.funcname = funcname

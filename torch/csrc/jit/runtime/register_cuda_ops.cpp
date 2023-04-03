@@ -101,7 +101,8 @@ RegisterOperators const reg({
           c10::cuda::set_device(static_cast<c10::DeviceIndex>(idx));
           push(stack, static_cast<int>(prev_idx));
         },
-        aliasAnalysisFromSchema()),
+        // cuda::set_device has side effects.
+        c10::AliasAnalysisKind::CONSERVATIVE),
     Operator(
         "cuda::_set_device(int64_t val) -> ()",
         [](Stack& stack) {

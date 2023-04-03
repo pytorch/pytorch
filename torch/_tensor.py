@@ -97,11 +97,10 @@ class Tensor(torch._C._TensorBase):
             # Update the test in test_serialization if you remove 'meta' from here
             if (
                 self.is_sparse
-                or self.device.type
-                in ["lazy", "xla", "mps", "ort", "meta", "hpu", "ipu"]
+                or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
-                    and self.device.type == "privateuseone"
+                    and self.device.type == torch._C._get_privateuse1_backend_name()
                 )
                 or (type(self) is not Tensor and self.data_ptr() == 0)
             ):
@@ -256,8 +255,9 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "ort", "hpu"] or (
-            not torch._C._has_storage(self) and self.device.type == "privateuseone"
+        if self.device.type in ["xla", "ort"] or (
+            not torch._C._has_storage(self)
+            and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
@@ -1120,7 +1120,7 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.refine_names, (self,), self, *names)
         names = resolve_ellipsis(names, self.names, "refine_names")
-        return super(Tensor, self).refine_names(names)
+        return super().refine_names(names)
 
     def align_to(self, *names):
         r"""Permutes the dimensions of the :attr:`self` tensor to match the order
@@ -1162,8 +1162,8 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.align_to, (self,), self, *names)
         ellipsis_idx = single_ellipsis_index(names, "align_to")
         if ellipsis_idx is None:
-            return super(Tensor, self).align_to(names)
-        return super(Tensor, self).align_to(
+            return super().align_to(names)
+        return super().align_to(
             [name for name in names if not is_ellipsis(name)], ellipsis_idx
         )
 
@@ -1185,9 +1185,9 @@ class Tensor(torch._C._TensorBase):
             isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list))
         ):
             names, sizes = unzip_namedshape(sizes)
-            return super(Tensor, self).unflatten(dim, sizes, names)
+            return super().unflatten(dim, sizes, names)
         else:
-            return super(Tensor, self).unflatten(dim, sizes)
+            return super().unflatten(dim, sizes)
 
     def rename_(self, *names, **rename_map):
         """In-place version of :meth:`~Tensor.rename`."""
@@ -1267,9 +1267,9 @@ class Tensor(torch._C._TensorBase):
 
         # See Note [rename_ / rename API]
         if inplace:
-            return super(Tensor, self).rename_(names)
+            return super().rename_(names)
         else:
-            return super(Tensor, self).rename(names)
+            return super().rename(names)
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -1363,6 +1363,8 @@ class Tensor(torch._C._TensorBase):
             device_type = DLDeviceType.kDLGPU
         elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
+        elif self.device.type == "xpu":
+            device_type = DLDeviceType.kDLOneAPI
         else:
             raise ValueError(
                 "Unknown device type {} for Dlpack".format(torch_device_type)

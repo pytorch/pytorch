@@ -32,9 +32,7 @@ class Weibull(TransformedDistribution):
         base_dist = Exponential(torch.ones_like(self.scale), validate_args=validate_args)
         transforms = [PowerTransform(exponent=self.concentration_reciprocal),
                       AffineTransform(loc=0, scale=self.scale)]
-        super(Weibull, self).__init__(base_dist,
-                                      transforms,
-                                      validate_args=validate_args)
+        super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Weibull, _instance)

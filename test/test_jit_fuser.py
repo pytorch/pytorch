@@ -27,7 +27,7 @@ if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
 
 
 def strip_profiling_nodes(nodes):
-    profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
+    profiling_opcodes = {'prim::BailoutTemplate', 'prim::BailOut'}
     return [n for n in nodes if n.kind() not in profiling_opcodes]
 
 
@@ -75,7 +75,7 @@ class TestFuser(JitTestCase):
             shell_env = os.environ.copy()
             shell_env['TMP'] = dname
             cmd = [sys.executable, os.path.basename(__file__), type(self).__name__ + '.test_abs_cpu']
-            legacy_jit_flag = '--jit_executor=legacy'
+            legacy_jit_flag = '--jit-executor=legacy'
             for v in sys.argv:
                 if v == legacy_jit_flag:
                     cmd.append(legacy_jit_flag)
@@ -512,7 +512,7 @@ class TestFuser(JitTestCase):
     def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):
             def __init__(self, norm_module):
-                super(ResLike, self).__init__()
+                super().__init__()
                 self.nm = norm_module
 
             @torch.jit.script_method
@@ -823,7 +823,7 @@ class TestFuser(JitTestCase):
             __constants__ = ['d']
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.d = torch.device('cuda')
 
             @torch.jit.script_method

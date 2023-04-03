@@ -3,7 +3,6 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <vector>
 

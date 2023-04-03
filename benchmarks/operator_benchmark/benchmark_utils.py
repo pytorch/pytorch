@@ -185,7 +185,7 @@ def attr_probs(**probs):
     return probs
 
 
-class RandomSample(object):
+class RandomSample:
 
     def __init__(self, configs):
         self.saved_cum_distribution = {}

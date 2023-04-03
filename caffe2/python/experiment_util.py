@@ -23,7 +23,7 @@ an external log destination.
 '''
 
 
-class ExternalLogger(object):
+class ExternalLogger:
     __metaclass__ = abc.ABCMeta
 
     @abc.abstractmethod

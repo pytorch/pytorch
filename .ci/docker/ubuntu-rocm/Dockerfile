@@ -31,8 +31,8 @@ ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
-RUN bash ./install_conda.sh && rm install_conda.sh
-RUN rm /opt/conda/requirements-ci.txt
+COPY ./common/common_utils.sh common_utils.sh
+RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION

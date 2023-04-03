@@ -6,6 +6,7 @@ import random
 from contextlib import contextmanager
 from functools import partial
 from typing import Callable, Optional, Tuple, Union
+import sympy
 
 import torch
 from torch import SymInt
@@ -126,7 +127,6 @@ class DebugInterpreter(fx.Interpreter):
         super().run(*args)
 
     def run_node(self, n):
-        import sympy
 
         def subst_symint(ni):
             if not isinstance(ni, SymInt):

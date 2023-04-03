@@ -220,7 +220,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
                     # 4. we set the storage (and sizes/strides/offset) of the wrapper
                     #    tensor results to be that of the tensors that alias the input
                     result = func(*args, **kwargs)
-                    if isinstance(result, tuple) or isinstance(result, list):
+                    if isinstance(result, (tuple, list)):
                         for a, b in zip(rs, result):
                             a.set_(b)
                     else:
@@ -507,7 +507,7 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
         if isinstance(t, torch.Tensor) and t.requires_grad:
             return torch.randn_like(t)
         elif is_tensorlist(t):
-            return list(torch.randn_like(e) if e.requires_grad else None for e in t)
+            return [torch.randn_like(e) if e.requires_grad else None for e in t]
         return None
 
     tangent_args = tuple(maybe_tangent(arg) for arg in args)

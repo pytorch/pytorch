@@ -95,6 +95,26 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
+# This function is bazel specific because of the bug
+# in the bazel that requires some special paths massaging
+# as a workaround. See
+# https://github.com/bazelbuild/bazel/issues/10167
+function install_sccache_nvcc_for_bazel() {
+  sudo mv /usr/local/cuda/bin/nvcc /usr/local/cuda/bin/nvcc-real
+
+  # Write the `/usr/local/cuda/bin/nvcc`
+  cat << EOF | sudo tee /usr/local/cuda/bin/nvcc
+#!/bin/sh
+if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
+  exec sccache /usr/local/cuda/bin/nvcc "\$@"
+else
+  exec external/local_cuda/cuda/bin/nvcc-real "\$@"
+fi
+EOF
+
+  sudo chmod +x /usr/local/cuda/bin/nvcc
+}
+
 function install_monkeytype {
   # Install MonkeyType
   pip_install MonkeyType
@@ -103,6 +123,19 @@ function install_monkeytype {
 
 function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
+}
+
+function install_torchaudio() {
+  local commit
+  commit=$(get_pinned_commit audio)
+  if [[ "$1" == "cuda" ]]; then
+    # TODO: This is better to be passed as a parameter from _linux-test workflow
+    # so that it can be consistent with what is set in build
+    TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
+  else
+    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
+  fi
+
 }
 
 function install_torchtext() {
@@ -129,36 +162,9 @@ function clone_pytorch_xla() {
   fi
 }
 
-function install_filelock() {
-  pip_install filelock
-}
-
-function install_triton() {
-  local commit
-  if [[ "${TEST_CONFIG}" == *rocm* ]]; then
-    echo "skipping triton due to rocm"
-  else
-    commit=$(get_pinned_commit triton)
-    pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
-    pip_install --user jinja2
-  fi
-}
-
-function setup_torchdeploy_deps(){
-  conda install -y -n "py_${ANACONDA_PYTHON_VERSION}" "libpython-static=${ANACONDA_PYTHON_VERSION}"
-  local CC
-  local CXX
-  CC="$(which gcc)"
-  CXX="$(which g++)"
-  export CC
-  export CXX
-  pip install --upgrade pip
-}
-
 function checkout_install_torchdeploy() {
   local commit
   commit=$(get_pinned_commit multipy)
-  setup_torchdeploy_deps
   pushd ..
   git clone --recurse-submodules https://github.com/pytorch/multipy.git
   pushd multipy
@@ -195,17 +201,20 @@ function install_timm() {
 }
 
 function checkout_install_torchbench() {
+  local commit
+  commit=$(get_pinned_commit torchbench)
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
-  git checkout no_torchaudio
-  # Occasionally the installation may fail on one model but it is ok to continue
-  # to install and test other models
-  python install.py --continue_on_fail
-  popd
-}
+  git checkout "$commit"
 
-function test_functorch() {
-  python test/run_test.py --functorch --verbose
+  if [ "$1" ]; then
+    python install.py --continue_on_fail models "$@"
+  else
+    # Occasionally the installation may fail on one model but it is ok to continue
+    # to install and test other models
+    python install.py --continue_on_fail
+  fi
+  popd
 }
 
 function print_sccache_stats() {

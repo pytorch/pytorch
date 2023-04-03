@@ -64,6 +64,7 @@ third_party/build/
 tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
+tools/fast_nvcc/wrap_nvcc.bat
 tools/fast_nvcc/tmp/
 torch.egg-info/
 torch/_C/__init__.pyi
@@ -132,11 +133,24 @@ torchgen/packaged/*
 .ipynb_checkpoints
 
 # Editor temporaries
+*.swa
+*.swb
+*.swc
+*.swd
+*.swe
+*.swf
+*.swg
+*.swh
+*.swi
+*.swj
+*.swk
+*.swl
+*.swm
 *.swn
 *.swo
 *.swp
-*.swm
 *~
+.~lock.*
 
 # macOS dir files
 .DS_Store
@@ -343,3 +357,4 @@ venv/
 
 # Log files
 *.log
+sweep/

@@ -134,13 +134,13 @@ class TestWorkspace(unittest.TestCase):
         """ feed (copy) data into tensor """
         val = np.array([[b"abc", b"def"], [b"ghi", b"jkl"]], dtype=np.object)
         tensor.feed(val)
-        self.assertEquals(tensor.data[0, 0], b"abc")
+        self.assertEqual(tensor.data[0, 0], b"abc")
         np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
 
         val = np.array([1.1, 10.2])
         tensor.feed(val)
         val[0] = 5.2
-        self.assertEquals(tensor.data[0], 1.1)
+        self.assertEqual(tensor.data[0], 1.1)
 
         """ fetch (copy) data from tensor """
         val = np.array([1.1, 1.2])
@@ -149,7 +149,7 @@ class TestWorkspace(unittest.TestCase):
         tensor.data[0] = 5.2
         val3 = tensor.fetch()
         np.testing.assert_array_equal(val, val2)
-        self.assertEquals(val3[0], 5.2)
+        self.assertEqual(val3[0], 5.2)
 
     def testFetchFeedBlob(self):
         self.assertEqual(
@@ -294,8 +294,8 @@ class TestWorkspace(unittest.TestCase):
         workspace.FeedBlob("s1", s1)
         workspace.FeedBlob("s2", s2)
         fetch1, fetch2 = workspace.FetchBlobs(["s1", "s2"])
-        self.assertEquals(s1, fetch1)
-        self.assertEquals(s2, fetch2)
+        self.assertEqual(s1, fetch1)
+        self.assertEqual(s2, fetch2)
 
     def testFetchFeedViaBlobDict(self):
         self.assertEqual(
@@ -768,7 +768,7 @@ class TestTransform(htu.HypothesisTestCase):
 
 class MyModule(torch.jit.ScriptModule):
     def __init__(self):
-        super(MyModule, self).__init__()
+        super().__init__()
         self.mult = torch.nn.Parameter(torch.tensor([[1, 2, 3, 4, 5.0]]))
 
     @torch.jit.script_method
