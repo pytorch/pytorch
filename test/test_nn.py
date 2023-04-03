@@ -6137,7 +6137,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     input_tensor_2d_y = torch.transpose(input_tensor_2d_x, 3, 2)
                     # The grid_tensor_2d_y is of shape
                     # [batch_size, 1, num_inqueries]
-                    grid_tensor_2d_y = torch.index_select(grid_tensor_2d_x, -1, torch.LongTensor([1, 0]))
+                    grid_tensor_2d_y = torch.index_select(
+                        grid_tensor_2d_x,
+                        -1,
+                        torch.tensor([1, 0], dtype=torch.int64, device=device)
+                    )
                     # The output_tensor_2d_y is of shape
                     # [batch_size, channel_size, 1, num_inqueries]
                     output_tensor_2d_y = F.grid_sample(
@@ -6179,7 +6183,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     input_tensor_3d_y = torch.transpose(input_tensor_3d_x, 4, 3)
                     # The grid_tensor_3d_y is of shape
                     # [batch_size, 1, 1, num_inqueries]
-                    grid_tensor_3d_y = torch.index_select(grid_tensor_3d_x, -1, torch.LongTensor([1, 0, 2]))
+                    grid_tensor_3d_y = torch.index_select(
+                        grid_tensor_3d_x,
+                        -1,
+                        torch.tensor([1, 0, 2], dtype=torch.int64, device=device)
+                    )
                     # The output_tensor_3d_y is of shape
                     # [batch_size, channel_size, 1, 1, num_inqueries]
                     output_tensor_3d_y = F.grid_sample(
@@ -6196,7 +6204,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     input_tensor_3d_z = torch.transpose(input_tensor_3d_x, 4, 2)
                     # The grid_tensor_3d_z is of shape
                     # [batch_size, 1, 1, num_inqueries]
-                    grid_tensor_3d_z = torch.index_select(grid_tensor_3d_x, -1, torch.LongTensor([1, 2, 0]))
+                    grid_tensor_3d_z = torch.index_select(
+                        grid_tensor_3d_x,
+                        -1,
+                        torch.tensor([1, 2, 0], dtype=torch.int64, device=device)
+                    )
                     # The output_tensor_3d_z is of shape
                     # [batch_size, channel_size, 1, 1, num_inqueries]
                     output_tensor_3d_z = F.grid_sample(
