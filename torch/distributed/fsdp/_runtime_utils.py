@@ -1015,7 +1015,8 @@ def _prefetch_handles(
         return
     handles_to_prefetch = _get_handles_to_prefetch(state, current_handles_key)
     for handles_key in handles_to_prefetch:
-        # Temporarily emulate the training state while calling `_unshard`
+        # Temporarily emulate the training state while calling `_unshard` to
+        # ensure the correct `as_params` for `_use_unsharded_views()`
         prev_training_states: List[HandleTrainingState] = []
         for handle in handles_key:
             prev_training_states.append(handle._training_state)
