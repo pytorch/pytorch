@@ -224,7 +224,8 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     auto listConstruct = node->input(0)->node();
     for (auto input : listConstruct->inputs())
       o.setInputValue(input);
-    return o.setOutput(dnnl_graph_, 0).setAttr(dnnl::graph::op::attr::axis, Operator::Int, 1);
+    return o.setOutput(dnnl_graph_, 0)
+        .setAttr(dnnl::graph::op::attr::axis, Operator::Int, 1);
   } else if (
       (nodeKind == Symbol::fromQualString("aten::max_pool2d")) ||
       (nodeKind == Symbol::fromQualString("aten::max_pool2d_with_indices"))) {
@@ -241,7 +242,8 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
         .setAttr(dnnl::graph::op::attr::pads_begin, Operator::Ints, 3)
         .setAttr(dnnl::graph::op::attr::pads_end, Operator::Ints, 3)
         .setAttr(dnnl::graph::op::attr::dilations, Operator::Ints, 4)
-        .setAttr(dnnl::graph::op::attr::rounding_type, std::string(rounding_type))
+        .setAttr(
+            dnnl::graph::op::attr::rounding_type, std::string(rounding_type))
         .setAttr(dnnl::graph::op::attr::data_format, std::string("NCX"));
   } else if (nodeKind == Symbol::fromQualString("aten::avg_pool2d")) {
     // TODO: do we need add checks for all Constants?
@@ -258,7 +260,8 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
         .setAttr(dnnl::graph::op::attr::pads_begin, Operator::Ints, 3)
         .setAttr(dnnl::graph::op::attr::pads_end, Operator::Ints, 3)
         .setAttr(dnnl::graph::op::attr::exclude_pad, !Operator::Bool(node, 5))
-        .setAttr(dnnl::graph::op::attr::rounding_type, std::string(rounding_type))
+        .setAttr(
+            dnnl::graph::op::attr::rounding_type, std::string(rounding_type))
         .setAttr(dnnl::graph::op::attr::data_format, std::string("NCX"));
   } else if (nodeKind == Symbol::fromQualString("aten::matmul")) {
     auto dim0 = getDimensions(node->namedInput("self")).value_or(-1);
@@ -289,7 +292,9 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
     return Operator(node, opkind::StaticTranspose)
         .setInput(0)
         .setOutput(dnnl_graph_, 0)
-        .setAttr(dnnl::graph::op::attr::order, toIValue(node->namedInput("dims"))->toIntVector());
+        .setAttr(
+            dnnl::graph::op::attr::order,
+            toIValue(node->namedInput("dims"))->toIntVector());
   } else if (nodeKind == Symbol::fromQualString("aten::contiguous")) {
     // Contiguous should only be mapped to oneDNN Graph if the destination
     // memory-layout is different than the source memory-format
