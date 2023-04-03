@@ -64,6 +64,11 @@ DTYPE_TO_ATEN = {
     torch.bfloat16: "at::ScalarType::BFloat16",
 }
 
+DEVICE_TO_ATEN = {
+    "cpu": "at::kCPU",
+    "cuda": "at::kCUDA",
+}
+
 INDEX_TYPE = "long"
 
 RTYPE_TO_CPP = {
