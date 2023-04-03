@@ -729,8 +729,7 @@ void all2all_single_equal_split(
     at::Tensor& output,
     int size,
     ncclComm_t _comm,
-    at::cuda::CUDAStream& stream,
-    bool comm_nonblocking) {
+    at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
@@ -782,8 +781,7 @@ void all2all_single_unequal_split(
     size_t size,
     c10::ScalarType _type,
     ncclComm_t _comm,
-    at::cuda::CUDAStream& stream,
-    bool comm_nonblocking) {
+    at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
@@ -833,8 +831,7 @@ void all2all(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     ncclComm_t _comm,
-    at::cuda::CUDAStream& stream,
-    bool comm_nonblocking) {
+    at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
@@ -881,8 +878,7 @@ void send(
     const at::Tensor& input,
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
-    int dst,
-    bool comm_nonblocking) {
+    int dst) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 7)
@@ -918,31 +914,30 @@ void recv(
     at::Tensor& output,
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
-    int src,
-    bool comm_nonblocking) {
+    int src) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 7)
   using namespace torch::cuda::nccl::detail;
-  if (!comm_nonblocking) {
-    NCCL_CHECK(ncclRecv(
-        output.data_ptr(),
-        output.numel(),
-        to_nccl_data_type(output),
-        src,
-        to_nccl_comm(comm),
-        stream.stream()));
-  } else {
-    NCCL_CHECK_NONBLOCKING(
-        ncclRecv(
-            output.data_ptr(),
-            output.numel(),
-            to_nccl_data_type(output),
-            src,
-            to_nccl_comm(comm),
-            stream.stream()),
-        comm);
-  }
+#ifndef NCCL_HAS_COMM_NONBLOCKING
+  NCCL_CHECK(ncclRecv(
+      output.data_ptr(),
+      output.numel(),
+      to_nccl_data_type(output),
+      src,
+      to_nccl_comm(comm),
+      stream.stream()));
+#else
+  NCCL_CHECK_NONBLOCKING(
+      ncclRecv(
+          output.data_ptr(),
+          output.numel(),
+          to_nccl_data_type(output),
+          src,
+          to_nccl_comm(comm),
+          stream.stream()),
+      comm);
+#endif
 #else
   AT_ERROR("Recv is only supported for NCCL lib version >= 2.7.0");
 #endif
@@ -956,8 +951,7 @@ void gather(
     std::vector<at::Tensor>& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
-    int32_t root,
-    bool comm_nonblocking) {
+    int32_t root) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
@@ -1006,8 +1000,7 @@ void scatter(
     at::Tensor& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
-    int32_t root,
-    bool comm_nonblocking) {
+    int32_t root) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
@@ -1022,24 +1015,15 @@ void scatter(
   NCCL_CHECK_NONBLOCKING(ncclCommCount(comm, &numranks), _comm);
   NCCL_CHECK_NONBLOCKING(ncclCommUserRank(comm, &cur_rank), _comm);
 #endif
-  if (!comm_nonblocking) {
-    NCCL_CHECK(ncclGroupStart());
-  } else {
-    ncclGroupStart();
-  }
+  NCCL_CHECK(ncclGroupStart());
   if (cur_rank == root) {
     for (const auto r : c10::irange(numranks)) {
       if (r != root) {
         size_t send_count = inputs[r].numel();
         auto send_type = to_nccl_data_type(inputs[r]);
         const auto* sendbuff = reinterpret_cast<char*>(inputs[r].data_ptr());
-        if (!comm_nonblocking) {
-          NCCL_CHECK(
-              ncclSend(sendbuff, send_count, send_type, r, comm, stream));
-        } else {
-          NCCL_CHECK(
-              ncclSend(sendbuff, send_count, send_type, r, comm, stream));
-        }
+        NCCL_CHECK(
+            ncclSend(sendbuff, send_count, send_type, r, comm, stream));
       } else {
         // on its own rank, simply copy it to the output
         outputs.copy_(inputs[r]);
@@ -1049,18 +1033,13 @@ void scatter(
     size_t recv_count = outputs.numel();
     auto recv_type = to_nccl_data_type(outputs);
     auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
-    if (!comm_nonblocking) {
-      NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
-    } else {
-      ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream);
-    }
+    NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
   }
-  if (!comm_nonblocking) {
-    NCCL_CHECK(ncclGroupEnd());
-  } else {
-    NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), _comm);
-  }
-
+#ifndef NCCL_HAS_COMM_NONBLOCKING
+  NCCL_CHECK(ncclGroupEnd());
+#else
+  NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), _comm);
+#endif
 #else
   AT_ERROR("scatter is only supported for NCCL lib version >= 2.7.0");
 #endif
