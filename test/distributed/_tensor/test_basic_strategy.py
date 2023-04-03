@@ -17,58 +17,58 @@ class TestEinsumDims(TestCase):
         input_dims, output_dim = EinsumDims.parse_equation(equation)
         edims = EinsumDims.parse_dims(input_dims, output_dim)
 
-        self.assertEqual(len(edims.batch_dims), 3)
-        self.assertEqual(len(edims.contracting_dims), 0)
-        self.assertEqual(len(edims.lhs_free_dims), 0)
-        self.assertEqual(len(edims.rhs_free_dims), 0)
+        self.assertEqual(edims.batch_dims, ["a", "b", "c"])
+        self.assertEqual(edims.contracting_dims, [])
+        self.assertEqual(edims.lhs_free_dims, [])
+        self.assertEqual(edims.rhs_free_dims, [])
 
     def test_mm_dims(self):
         equation = "mk,kn->mn"
         input_dims, output_dim = EinsumDims.parse_equation(equation)
         edims = EinsumDims.parse_dims(input_dims, output_dim)
 
-        self.assertEqual(len(edims.batch_dims), 0)
-        self.assertEqual(len(edims.contracting_dims), 1)
-        self.assertEqual(len(edims.lhs_free_dims), 1)
-        self.assertEqual(len(edims.rhs_free_dims), 1)
+        self.assertEqual(edims.batch_dims, [])
+        self.assertEqual(edims.contracting_dims, ["k"])
+        self.assertEqual(edims.lhs_free_dims, ["m"])
+        self.assertEqual(edims.rhs_free_dims, ["n"])
 
     def test_bmm_dims(self):
         equation = "bmk,bkn->bmn"
         input_dims, output_dim = EinsumDims.parse_equation(equation)
         edims = EinsumDims.parse_dims(input_dims, output_dim)
 
-        self.assertEqual(len(edims.batch_dims), 1)
-        self.assertEqual(len(edims.contracting_dims), 1)
-        self.assertEqual(len(edims.lhs_free_dims), 1)
-        self.assertEqual(len(edims.rhs_free_dims), 1)
+        self.assertEqual(edims.batch_dims, ["b"])
+        self.assertEqual(edims.contracting_dims, ["k"])
+        self.assertEqual(edims.lhs_free_dims, ["m"])
+        self.assertEqual(edims.rhs_free_dims, ["n"])
 
         equation = "bcmk,bckn->bcmn"
         input_dims, output_dim = EinsumDims.parse_equation(equation)
         edims = EinsumDims.parse_dims(input_dims, output_dim)
 
-        self.assertEqual(len(edims.batch_dims), 2)
-        self.assertEqual(len(edims.contracting_dims), 1)
-        self.assertEqual(len(edims.lhs_free_dims), 1)
-        self.assertEqual(len(edims.rhs_free_dims), 1)
+        self.assertEqual(edims.batch_dims, ["b", "c"])
+        self.assertEqual(edims.contracting_dims, ["k"])
+        self.assertEqual(edims.lhs_free_dims, ["m"])
+        self.assertEqual(edims.rhs_free_dims, ["n"])
 
     def test_free_dims(self):
         equation = "abc,ab->abc"
         input_dims, output_dim = EinsumDims.parse_equation(equation)
         edims = EinsumDims.parse_dims(input_dims, output_dim)
 
-        self.assertEqual(len(edims.batch_dims), 2)
-        self.assertEqual(len(edims.contracting_dims), 0)
-        self.assertEqual(len(edims.lhs_free_dims), 1)
-        self.assertEqual(len(edims.rhs_free_dims), 0)
+        self.assertEqual(edims.batch_dims, ["a", "b"])
+        self.assertEqual(edims.contracting_dims, [])
+        self.assertEqual(edims.lhs_free_dims, ["c"])
+        self.assertEqual(edims.rhs_free_dims, [])
 
         equation = "abd,bf->abfd"
         input_dims, output_dim = EinsumDims.parse_equation(equation)
         edims = EinsumDims.parse_dims(input_dims, output_dim)
 
-        self.assertEqual(len(edims.batch_dims), 1)
-        self.assertEqual(len(edims.contracting_dims), 0)
-        self.assertEqual(len(edims.lhs_free_dims), 2)
-        self.assertEqual(len(edims.rhs_free_dims), 1)
+        self.assertEqual(edims.batch_dims, ["b"])
+        self.assertEqual(edims.contracting_dims, [])
+        self.assertEqual(edims.lhs_free_dims, ["a", "d"])
+        self.assertEqual(edims.rhs_free_dims, ["f"])
 
 
 class TestEinsumStrategies(DTensorOpTestBase):

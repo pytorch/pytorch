@@ -45,7 +45,7 @@ def _infer_dtensor_stride(
             for i in range(len(tensor_stride)):
                 if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
                     # rescale the stride by the shard size
-                    tensor_stride[i] = tensor_stride[i] * mesh.size(idx)
+                    tensor_stride[i] = tensor_stride[i] * cast(int, mesh.size(idx))
 
         elif not isinstance(placement, (Replicate, _Partial)):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
@@ -81,7 +81,7 @@ class _ViewAndRedistribute(torch.autograd.Function):
                 sharding_dim += self.dim()
 
             device_mesh = self.device_mesh
-            world_size = device_mesh.size(dim=0)
+            world_size = cast(int, device_mesh.size(dim=0))
             new_sharding_placement = [Shard(sharding_dim)]
 
             # Fix shape

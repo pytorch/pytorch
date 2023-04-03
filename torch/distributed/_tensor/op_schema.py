@@ -30,8 +30,8 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
 @dataclass
 class PlacementStrategy(object):
     """
-    A placement strategy describes an sharding placements of the tensor arguments that
-    an op accepts its corresponding output placements
+    A placement strategy describes an acceptable sharding placements of the output
+    and the tensor arguments of an operation.
     """
 
     output_spec: DTensorSpec

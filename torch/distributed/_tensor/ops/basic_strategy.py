@@ -48,6 +48,9 @@ class EinsumDims:
             for input_char in list(input_dim):
                 all_dim_chars.add(input_char)
 
+        # get a determinisitc order of all dim chars
+        all_dim_chars = sorted(all_dim_chars)
+
         # parse input and output dimensions
         lhs_free_dims, rhs_free_dims = [], []
         batch_dims, contracting_dims = [], []

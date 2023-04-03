@@ -187,7 +187,9 @@ def einop_rule(
                         local_shape = compute_local_shape(
                             global_shape, input_spec.mesh, input_spec.placements
                         )
-                        cost += prod(local_shape) * input_spec.mesh.size(mesh_dim)
+                        cost += prod(local_shape) * cast(
+                            int, input_spec.mesh.size(mesh_dim)
+                        )
                 costs.append(cost)
             d_to_keep_sharding = dims[costs.index(max(costs))]
             for d in dims:

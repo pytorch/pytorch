@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Dict, Union
+from typing import cast, Dict, Union
 
 import torch
 import torch.nn as nn
@@ -328,7 +328,7 @@ def _parallelize_multihead_attn(
             module.embed_dim,
             module.num_heads,
             device=torch.device(device_mesh.device_type),
-            tp_size=device_mesh.size(tp_mesh_dim),
+            tp_size=cast(int, device_mesh.size(tp_mesh_dim)),
             add_bias_kv=module.bias_k is not None,
         )
         tp_multi_head_attention.copy(module)
