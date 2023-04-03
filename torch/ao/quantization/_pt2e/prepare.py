@@ -20,10 +20,9 @@ def prepare(
         quantizer: Quantizer,
         is_qat: bool,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        example_inputs: Tuple[Any, ...]
 ) -> GraphModule:
     model = quantizer.annotate(model)
-    # TODO: validation
+    quantizer.validate(model)
 
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
@@ -58,7 +57,7 @@ def prepare(
                 model.graph,
                 None, # qhandler
                 PrepareCustomConfig(),
-                quantizer._backend_config
+                None, # backend_config
             )
 
             named_modules = dict(model.named_modules(remove_duplicate=False))
@@ -99,9 +98,7 @@ def prepare(
 
         elif node.op == "output":
             _maybe_insert_observers_before_graph_output(
-                node, output_quantized_idxs,
-                node_name_to_qconfig,
-                model, named_modules, model.graph)
+                node, model, named_modules, model.graph)
 
     model = GraphModule(model, model.graph)
 
