@@ -1069,6 +1069,11 @@ if(BUILD_PYTHON)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
+  if(NOT PYTHONLIBS_VERSION_STRING)
+    message(FATAL_ERROR
+      "Python development libraries could not be found.")
+  endif()
+
   if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -1283,7 +1288,7 @@ if(USE_ROCM)
     # host linker to link.
     list(APPEND HIP_CLANG_FLAGS -fno-gpu-rdc)
     foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
-      list(APPEND HIP_CLANG_FLAGS --amdgpu-target=${pytorch_rocm_arch})
+      list(APPEND HIP_CLANG_FLAGS --offload-arch=${pytorch_rocm_arch})
     endforeach()
 
     set(Caffe2_HIP_INCLUDE

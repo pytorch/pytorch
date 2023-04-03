@@ -10,7 +10,7 @@ from torch.distributed._tensor.placement_types import DTensorSpec
 ArgsType = Tuple[object, ...]
 KwargsType = Dict[str, object]
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
-# be the same set of possiblities.
+# be the same set of possibilities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
 

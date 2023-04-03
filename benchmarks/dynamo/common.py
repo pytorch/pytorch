@@ -72,13 +72,39 @@ CI_SKIP = collections.defaultdict(list)
 
 # Skips for dynamic=False
 
-CI_SKIP[CI("aot_eager", training=False)] = [
+# Here eager really means dynamo+eager
+CI_SKIP[CI("eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    "demucs",  # OOM
+    # TypeError: pad_center() takes 1 positional argument but 2 were given
+    "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
+    # Huggingface
+    "DebertaV2ForQuestionAnswering",  # OOM
+]
+
+CI_SKIP[CI("eager", training=True)] = [
+    *CI_SKIP[CI("eager", training=False)],
+    # TorchBench
+    "BERT_pytorch",  # accuracy
+    "Background_Matting",  # fp64_OOM
+    "hf_BigBird",  # fp64_OOM
+    "hf_T5_base",  # fp64_OOM
+    "vision_maskrcnn",  # eager_variation
+    # Huggingface
+    "XGLMForCausalLM",  # OOM
+    # TIMM
+    "cait_m36_384",  # fp64_OOM
+    "convit_base",  # fp64_OOM
+    "mobilenetv2_100",  # accuracy
+    "xcit_large_24_p8_224",  # fp64_OOM,
+]
+
+CI_SKIP[CI("aot_eager", training=False)] = [
+    *CI_SKIP[CI("eager", training=False)],
     # all dynamic shapes errors for detectron variants
+    "demucs",  # OOM
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
     "detectron2_fasterrcnn_r_101_fpn",
@@ -240,6 +266,7 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     # timm_models
     "convit_base",  # TypeError: Cannot convert symbols to int
     "pnasnet5large",  # CompilationError: math.ceil
+    "tf_efficientnet_b0",  # CompilationError: math.ceil
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -247,8 +274,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    # torchbench
-    "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
     # timm_models
     "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
@@ -565,8 +590,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     Writes to ./speedups.csv
     """
-    if args.dynamic_shapes:
-        return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
+    # if args.dynamic_shapes:
+    #     return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
 
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
@@ -575,13 +600,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     import contextlib
 
-    @contextlib.contextmanager
-    def maybe_profile(*args, **kwargs):
-        if kwargs.pop("enabled", True):
-            with torch.profiler.profile(*args, **kwargs) as p:
-                yield p
-        else:
-            yield
+    from torch._inductor.utils import maybe_profile
 
     @contextlib.contextmanager
     def maybe_mark_profile(*args, **kwargs):
@@ -600,7 +619,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
 
-    with maybe_profile(enabled=args.export_profiler_trace) as p:
+    with maybe_profile(args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
         for rep in range(args.repeat):
             inputs = (
@@ -1757,6 +1776,11 @@ def parse_args(args=None):
         help="Disables cudagraphs for Inductor",
     )
     parser.add_argument(
+        "--inductor-compile-mode",
+        default=None,
+        help="torch.compile mode argument for inductor runs.",
+    )
+    parser.add_argument(
         "--print-graph-breaks",
         action="store_true",
         help="Show a warning whenever graph break",
@@ -2135,10 +2159,24 @@ def run(runner, args, original_dir=None):
         output_filename = "overheads.csv"
     elif args.inductor:
         inductor_config.debug = args.verbose
+        if (
+            args.ci
+            and args.accuracy
+            and args.training
+            and args.only in {"dla102", "gernet_l"}
+        ):
+            # Log generated code for flaky tests, to check if there is any codegen difference
+            inductor_config.debug = True
+
         if args.threads:
             inductor_config.cpp.threads = args.threads
 
-        optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
+        optimize_ctx = functools.partial(
+            torch.compile,
+            backend="inductor",
+            fullgraph=args.nopython,
+            mode=args.inductor_compile_mode,
+        )
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.speedup_dynamo_ts:

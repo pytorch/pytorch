@@ -12,10 +12,8 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, load_test
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes
-)
-from torch.testing._creation import (
-    float_to_corresponding_complex_type_map
+    all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes,
+    float_to_corresponding_complex_type_map,
 )
 
 

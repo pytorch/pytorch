@@ -98,6 +98,11 @@ inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16* bf16_buf) {
   return res_vec;
 }
 
+inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16& bf16_buf) {
+  at::vec::Vectorized<float> res_vec(static_cast<float>(bf16_buf));
+  return res_vec;
+}
+
 inline void store_float_as_bf16(
     bfloat16* bf16_buf,
     at::vec::Vectorized<float> src_buf) {

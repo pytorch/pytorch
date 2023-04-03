@@ -17,6 +17,7 @@ import os
 import pstats
 import re
 import sys
+import textwrap
 import time
 import types
 import typing
@@ -47,7 +48,7 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
+troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
@@ -1077,43 +1078,57 @@ class CompileProfiler:
             [format_func_info(code), num_recompiles(code), recompile_reasons(code)]
             for code in gf
         ]
-        rpt = "Torchdynamo Profiler Report\n"
-        if "graph_break" in counters:
-            rpt += "\n"
-            rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
-            rpt += (
-                "You may gain additional insight by passing `nopython=True` to torch._dynamo.optimize, "
-                "to break on the first condition.\n"
-            )
-            graph_breaks = counters["graph_break"]
-            rpt += tabulate(
-                [[msg, graph_breaks[msg]] for msg in graph_breaks],
-                headers=["Graph Break Reason", "Count"],
-            )
 
-        if len(gf):
-            max_recompiles = max([num_recompiles(code) for code in gf])
-            rpt += "\n"
-            rpt += (
-                "These subgraphs were recompiled more than once due to guard failures."
-            )
-            rpt += (
-                "Guard failures indicate some condition assumed to be static by the tracer changed, "
-                "making it unsafe to reuse the compiled program."
-            )
-            rpt += tabulate(
-                summarized_gf,
-                headers=["Function", "Num Recompiles", "Recompile Reasons"],
-            )
-            rpt += "\n"
-            rpt += (
-                f"Set torch._dynamo.config.cache_size_limit to "
-                f"{max_recompiles} to avoid being cache limited.\n"
-            )
-        else:
-            rpt += "No cache-limited recompilations detected.\n"
+        def graph_break_report():
+            if "graph_break" in counters:
+                graph_breaks = counters["graph_break"]
+                return tabulate(
+                    [[msg, graph_breaks[msg]] for msg in graph_breaks],
+                    headers=["Graph Break Reason", "Count"],
+                )
 
-        return rpt
+        def recompilation_report():
+            if len(gf):
+                max_recompiles = max([num_recompiles(code) for code in gf])
+                recomp_table = tabulate(
+                    summarized_gf,
+                    headers=["Function", "Recompiles", "Recompile Reasons"],
+                )
+                return recomp_table + textwrap.dedent(
+                    f"""
+
+                    Set torch._dynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.
+                """
+                )
+
+        report = textwrap.dedent(
+            """
+            Torchdynamo Profiler Report
+            ===========================
+
+            Graph Breaks
+            ------------
+            Graph breaks happen when torchdynamo encounters code it can't safely trace.
+            If you want to find out why breaks are happening, check below for each break reason
+            You may gain additional insight by passing `fullgraph=True` to torch.compile,
+            to stop at the first break.
+
+        """
+        )
+        report += graph_break_report() or "No graph breaks detected."
+        report += textwrap.dedent(
+            """
+
+            Recompilation
+            -------------
+            These subgraphs were recompiled more than once due to guard failures
+            Guard failures indicate some condition assumed to be static by the tracer changed,
+            making it unsafe to reuse the compiled program.
+
+        """
+        )
+        report += recompilation_report() or "No recompilation detected.\n"
+        return report
 
 
 # return same dir unless user changes config between calls
@@ -1185,6 +1200,14 @@ def get_fake_value(node, tx):
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             unimplemented(f"dynamic shape operator: {cause.func}")
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
+        ):
+            unimplemented(
+                f"unsupported operator: {cause.func} (see "
+                "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
+                " for how to fix)"
+            )
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):

@@ -256,6 +256,53 @@ jobs:
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py
 
+  bc_linter:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check if user is in the dogfooding group
+        id: check_user
+        run: |
+          allowed_users=("albanD" "ezyang" "izaitsevfb")
+          pr_author="${{ github.event.pull_request.user.login }}"
+          allowed="false"
+          for user in "${allowed_users[@]}"; do
+            if [[ "$pr_author" == "$user" ]]; then
+              allowed="true"
+              break
+            fi
+          done
+          echo "allowed=${allowed}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout PyTorch
+        if: steps.check_user.outputs.allowed == 'true'
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: -1
+          submodules: false
+          quiet-checkout: true
+          path: pytorch
+
+      - name: Checkout pytorch/test-infra repository
+        if: steps.check_user.outputs.allowed == 'true'
+        uses: actions/checkout@v3
+        with:
+          repository: pytorch/test-infra
+          path: test-infra
+
+      - name: Build and run BC-linter
+        if: steps.check_user.outputs.allowed == 'true'
+        working-directory: pytorch
+        run: |
+          set -eux
+          ../test-infra/tools/stronghold/bin/build-check-api-compatibility
+
+          # Run the BC-linter script
+          ../test-infra/tools/stronghold/bin/check-api-compatibility \
+              --base-commit=${{ github.event.pull_request.base.sha }} \
+              --head-commit=${{ github.event.pull_request.head.sha }}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

@@ -69,7 +69,7 @@ CONST_WORKER_KEEPALIVE_TTL = 10
 # TTL for the ephemeral run_id-specific directory. All rendezvous state data
 # for a specific run_id (job instance) is contained within directory.
 # Its only role is to clean-up rendezvous data from old runs (for the case when
-# etcd server is persistent), and has no affect on correctnes, but should be
+# etcd server is persistent), and has no affect on correctness, but should be
 # larger than any timeouts that a worker process is expected to survive:
 CONST_RUNID_SUBROOT_TTL = 7200  # 2 hours
 
@@ -372,7 +372,7 @@ class EtcdRendezvous:
 
         # If this worker was first to reach num_min_workers requirement,
         # and rendezvous is still joinable (therefore it is elastic),
-        # then this worker will be repsonsible for waiting out the "last call"
+        # then this worker will be responsible for waiting out the "last call"
         # timeout and closing (i.e. transitioning to 'frozen') the rendezvous
         # afterwards.
         # As a safety against a potential failure of this worker (during the
@@ -398,7 +398,7 @@ class EtcdRendezvous:
 
     def confirm_phase(self, expected_version, this_rank):
         """
-        Once the rendezvous state trainsitions from 'joinable' to 'frozen',
+        Once the rendezvous state transitions from 'joinable' to 'frozen',
         we have every participant confirm their membership and setup per-member
         keep-alive TTL keys, and then wait for all other participants to confirm,
         which would then successfully conclude this rendezvous.
@@ -628,7 +628,7 @@ class EtcdRendezvous:
         active_version, state = self.get_rdzv_state()
         while True:
             if state["status"] == "final" and state["version"] == expected_version:
-                # Succcess. This rendezvous is final, and we accept it.
+                # Success. This rendezvous is final, and we accept it.
                 return active_version
 
             elif state["status"] == "frozen" and state["version"] == expected_version:
@@ -752,7 +752,7 @@ class EtcdRendezvous:
 
         1. state becomes <frozen, expected_version>
         2. timeout happens (reaching deadline), in which case
-           we try the tranisiton to <frozen, expected_version>
+           we try the transition to <frozen, expected_version>
 
         Exit with exception otherwise.
         """
@@ -761,7 +761,7 @@ class EtcdRendezvous:
         while True:
             if state["status"] == "frozen" and state["version"] == expected_version:
                 # Worker set became frozen before last-call timeout. This is possible
-                # when num_max_workers is reached before the tiemout.
+                # when num_max_workers is reached before the timeout.
                 return
 
             if state["status"] != "joinable" or state["version"] != expected_version:

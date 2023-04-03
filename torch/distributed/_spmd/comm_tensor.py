@@ -65,7 +65,7 @@ class CommTensor(torch.Tensor):
 
     In eager mode, it will record whether the inplace collective communication
     has been launched using this Tensor and remember the corresponding work
-    handle. If yes, it will expliclty call wait() in the ``__torch_dispatch__``
+    handle. If yes, it will explicitly call wait() in the ``__torch_dispatch__``
     function before subsequent operations consuming the value of the Tensor.
 
     In tracing mode, ``CommTensor`` inserts two node into the graph using the
@@ -155,11 +155,11 @@ class CommTensor(torch.Tensor):
                     if tracer is not None:
                         # insert a node to the traced graph.
                         proxy_res = tracer.create_proxy(  # type: ignore[union-attr]
-                            'call_function',
+                            "call_function",
                             _wait_comm,
                             (get_proxy_slot(e._tensor, tracer).proxy,),
                             {},
-                            name="wait_comm"
+                            name="wait_comm",
                         )
                         # HACK: update the proxy for the inplace output
                         set_proxy_slot(e._tensor, tracer, proxy_res)
@@ -198,7 +198,7 @@ class CommTensor(torch.Tensor):
                     tree_map_only(
                         torch.Tensor,
                         fetch_tensor_proxy(tracer),
-                        (unwrapped_args, unwrapped_kwargs)
+                        (unwrapped_args, unwrapped_kwargs),
                     ),
                 )
 
@@ -208,11 +208,11 @@ class CommTensor(torch.Tensor):
                 # insert a node that wraps the output tuple into
                 # _CommResult(tensor, work)
                 comm_result_proxy = tracer.create_proxy(  # type: ignore[union-attr]
-                    'call_function',
+                    "call_function",
                     _wrap_comm_result,
-                    (proxy_res, ),
+                    (proxy_res,),
                     {},
-                    name="comm_result"
+                    name="comm_result",
                 )
 
                 with no_dispatch():
@@ -221,7 +221,9 @@ class CommTensor(torch.Tensor):
 
                 # wrap output with the proxy of _CommResult, so that subsequent
                 # ops and link to it.
-                track_tensor_tree(out, comm_result_proxy, constant=None, tracer=tracer)
+                track_tensor_tree(
+                    out, comm_result_proxy, constant=None, tracer=tracer
+                )
 
                 # N.B.: we still need to remember the work handle here, and wait
                 # for it later to make sure the execution during tracing is
