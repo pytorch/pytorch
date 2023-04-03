@@ -266,16 +266,15 @@ class NNModuleVariable(VariableTracker):
                 else:
                     fn = mod.__call__
                     fn_source = AttrSource(self.source, "__call__")
+                options["source"] = fn_source
                 if istype(fn, types.MethodType):
-                    fn = fn.__func__
-                    fn_source = AttrSource(fn_source, "__func__")
-                    args = [self] + args
+                    var = variables.UserMethodVariable(fn, self, **options)
                 else:
                     assert istype(fn, types.FunctionType)
+                    var = variables.UserFunctionVariable(fn, **options)
 
-                options["source"] = fn_source
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, **options),
+                    var,
                     args,
                     kwargs,
                 )
