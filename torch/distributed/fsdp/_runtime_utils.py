@@ -428,8 +428,13 @@ def _pre_forward_unshard(
     """Unshards parameters in the pre-forward."""
     if not handles:
         return
-    _unshard(state, handles, state._streams["unshard"], state._streams["pre_unshard"])
     handles_key = tuple(handles)
+    # If the handles have been prefetched, then there is no need to call
+    # `_unshard()` again
+    if not state._handles_prefetched.get(handles_key, False):
+        _unshard(
+            state, handles, state._streams["unshard"], state._streams["pre_unshard"]
+        )
     state._needs_pre_forward_unshard[handles_key] = False
     torch.cuda.current_stream().wait_stream(state._streams["unshard"])
     _prefetch_handles(state, handles_key)
