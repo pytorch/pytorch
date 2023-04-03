@@ -774,6 +774,12 @@ tuple_iterator_len = tuple_iterator.__length_hint__
 object_new = object.__new__
 
 
+def nn_module_new(cls):
+    obj = object_new(cls)
+    torch.nn.Module.__init__(obj)
+    return obj
+
+
 def product(it):
     return functools.reduce(operator.mul, it, 1)
 
@@ -1185,14 +1191,16 @@ def get_fake_value(node, tx):
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
 
-        if not is_lazy_module(nnmodule):
-            nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
+            nnmodule._infer_parameters(nnmodule, args)
 
-    if op == "call_module" and is_lazy_module(nnmodule):
-        assert nnmodule is not None
-        # In the case of a lazy module, we want to run
-        # the pre-hooks which initialize it
-        nnmodule(*args, **kwargs)
+        # no matter it's lazy module or not, we should copy to fake mode.
+        nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+
     try:
         with tx.fake_mode, enable_python_dispatcher():
             return wrap_fake_exception(

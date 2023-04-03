@@ -1,7 +1,7 @@
 import itertools
 from dataclasses import dataclass
 
-from typing import List, Tuple
+from typing import cast, List, Tuple
 
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import PlacementStrategy, StrategyList
@@ -43,13 +43,13 @@ class EinsumDims:
         Parse the dims and extract the contracting, batch, and free dimensions
         for the left and right hand sides.
         """
-        all_dim_chars = set()
+        dim_char_set = set()
         for input_dim in input_dims:
             for input_char in list(input_dim):
-                all_dim_chars.add(input_char)
+                dim_char_set.add(input_char)
 
         # get a determinisitc order of all dim chars
-        all_dim_chars = sorted(all_dim_chars)
+        all_dim_chars = sorted(dim_char_set)
 
         # parse input and output dimensions
         lhs_free_dims, rhs_free_dims = [], []
@@ -102,7 +102,8 @@ def gen_einsum_strategies(
 
     # generate strategies for each mesh dim
     for mesh_dim in range(mesh.ndim):
-        if mesh.size(mesh_dim) <= 1:
+        mesh_dim_size = cast(int, mesh.size(mesh_dim))
+        if mesh_dim_size <= 1:
             # no strategy for mesh dim with size 1
             # TODO: maybe see if submesh needs this and we want to fully replicate
             continue

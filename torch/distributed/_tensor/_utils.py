@@ -1,4 +1,4 @@
-from typing import Sequence, Tuple
+from typing import cast, Sequence, Tuple
 
 from torch._prims_common import ShapeType
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -19,7 +19,7 @@ def compute_local_shape(
         local_shape = list(global_shape)  # start with global shape
         ndim = len(global_shape)
         for idx, placement in enumerate(placements):
-            mesh_dim_size = mesh.size(idx)
+            mesh_dim_size = cast(int, mesh.size(idx))
             my_coordinate = mesh.get_coordinate()
             assert my_coordinate is not None, "Rank not part of mesh!"
             if isinstance(placement, Shard):
