@@ -45,7 +45,6 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
-    "test_cpp_wrapper_dynamic_shapes": TestFailure(("cpu",)),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
 }
 
