@@ -499,14 +499,15 @@ class C10_API TypeMeta final {
   // initialized" static constexpr size_t MaxTypeIndex = 32;
   //
 #if defined C10_MOBILE
-// The reason for this to be 32 and not UINT8_MAX is that the array
+// The reason for this not to be UINT8_MAX is that the array
 // initialization takes space which is proportional to the size of the array.
 // The compiler seems to add code (or data padding) to initialize the array with
-// empty elements. In practice, this array doesn't hold more than 18 elements
-// (on mobile), so 32 should be plenty for now. Please see
+// empty elements. Please see
 // https://github.com/pytorch/pytorch/pull/51881 for details.
 //
-#define MaxTypeIndex 32
+#define MaxTypeIndex                                                           \
+  (NumScalarTypes + 15 /* number of CAFFE_DEFINE_KNOWN_TYPE in typeid.cpp */ + \
+   1 /* 1 more for caffe2 tensor */)
 #else
 #define MaxTypeIndex UINT8_MAX
 #endif
@@ -653,26 +654,11 @@ inline std::ostream& operator<<(
 #define CAFFE_DEFINE_KNOWN_TYPE(T, ident)                                 \
   template uint16_t TypeMeta::addTypeMetaData<T>();                       \
   namespace detail {                                                      \
-  const uint16_t ident##_metadata_index = TypeMeta::addTypeMetaData<T>(); \
+  EXPORT_IF_NOT_GCC const uint16_t ident##_metadata_index = TypeMeta::addTypeMetaData<T>(); \
   } // namespace detail
 
 // Unlike CAFFE_KNOWN_TYPE, CAFFE_DECLARE_KNOWN_TYPE avoids a function
 // call to access _typeMetaData in the common case.
-#ifdef __CUDACC__
-// nvcc needs its own specialization that doesn't use
-// C10_ALWAYS_INLINE so that it doesn't need to see a definition for
-// _addTypeMeta. See NOTE [ TypeIdentifier::Get nvcc/clang discrepancy
-// ].
-#define CAFFE_DECLARE_KNOWN_TYPE(T, ident)                                  \
-  extern template uint16_t TypeMeta::addTypeMetaData<T>();                  \
-  namespace detail {                                                        \
-  extern const uint16_t ident##_metadata_index;                             \
-  } /* namespace detail */                                                  \
-  template <>                                                               \
-  EXPORT_IF_NOT_GCC inline uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
-    return detail::ident##_metadata_index;                                  \
-  }
-#else
 #define CAFFE_DECLARE_KNOWN_TYPE(T, ident)                 \
   extern template uint16_t TypeMeta::addTypeMetaData<T>(); \
   namespace detail {                                       \
@@ -683,7 +669,6 @@ inline std::ostream& operator<<(
   TypeMeta::_typeMetaData<T>() noexcept {                  \
     return detail::ident##_metadata_index;                 \
   }
-#endif
 
 #define CAFFE_KNOWN_TYPE_NOEXPORT(T)                    \
   template <>                                           \
