@@ -15,6 +15,7 @@
 #else
 #include <ATen/ops/pad.h>
 #include <ATen/ops/permute.h>
+#include <ATen/ops/quantize_per_tensor.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -556,7 +557,7 @@ vTensor pack_biases(
       quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
-  if (quantized) {
+  if (quantized && bias->scalar_type() != c10::kFloat) {
     v_bias.set_is_quantized();
     v_bias.set_scale(bias_rearranged.q_scale());
     v_bias.set_zero_point(bias_rearranged.q_zero_point());
@@ -1000,6 +1001,28 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
       output_max));
 }
 
+c10::intrusive_ptr<Conv2dPackedContext> convert_qconv2d_context(
+    const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_params,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  std::tuple<Tensor, c10::optional<Tensor>> wb = packed_params->unpack();
+  Tensor weight = std::get<0>(wb);
+  c10::optional<Tensor> bias = std::get<1>(wb);
+
+  return c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
+      weight,
+      bias,
+      packed_params->stride().vec(),
+      packed_params->padding().vec(),
+      packed_params->dilation().vec(),
+      /* transposed = */ false,
+      /* quantized = */ true,
+      /* output_padding_arg = */ {0},
+      packed_params->groups(),
+      output_min,
+      output_max));
+}
+
 Tensor run_conv2d_context_impl(
     const Tensor& input_arg,
     const c10::intrusive_ptr<Conv2dPackedContext>& conv_context,
@@ -1012,11 +1035,22 @@ Tensor run_conv2d_context_impl(
   const vTensor& v_input = convert(input_arg);
 
   // Extract everything from the PackedContext
-  const vTensor& v_weight = convert(
-      conv_context->get_val(Conv2dPackedContext::Packed::Weight).toTensor());
+  const Tensor weight =
+      conv_context->get_val(Conv2dPackedContext::Packed::Weight).toTensor();
+  const vTensor& v_weight = convert(weight);
 
-  const vTensor& v_bias = convert(
-      conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor());
+  const auto quantized =
+      conv_context->get_val(Conv2dPackedContext::Packed::isQuantized).toBool();
+
+  Tensor bias =
+      conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor();
+  if (quantized && bias.scalar_type() == c10::kFloat) {
+    bias = at::quantize_per_tensor(
+        bias, v_weight.get_scale() * v_input.get_scale(), 0, c10::kQInt32);
+    conv_context->set_val(Conv2dPackedContext::Packed::Bias, bias);
+  }
+
+  const vTensor& v_bias = convert(bias);
 
   const auto overlay_region =
       conv_context->get_val(Conv2dPackedContext::Packed::OverlayRegion)
@@ -1035,8 +1069,6 @@ Tensor run_conv2d_context_impl(
 
   const auto transposed =
       conv_context->get_val(Conv2dPackedContext::Packed::isTransposed).toBool();
-  const auto quantized =
-      conv_context->get_val(Conv2dPackedContext::Packed::isQuantized).toBool();
 
   const float output_min = safe_downcast<float>(
       conv_context->get_val(Conv2dPackedContext::Packed::OutputMin).toDouble());
