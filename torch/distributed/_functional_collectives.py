@@ -305,7 +305,7 @@ def reduce_scatter_tensor(
 ):
     """
     Reduces the tensor data across all machines in such a way that all get
-    the final result, then scatter the results to correponding ranks.
+    the final result, then scatter the results to corresponding ranks.
 
     Note that it currently only supports scatter_dim = 0.
 

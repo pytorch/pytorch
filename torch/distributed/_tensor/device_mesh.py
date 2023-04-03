@@ -150,7 +150,7 @@ class DeviceMesh(object):
             ), f"Default PG backend: {world_backend} not supporting CUDA!"
             if not default_initialized:
                 # automatically set the current cuda device base on num of gpu devices available in each host
-                # NOTE: This device selection would only work for homogenous hardware.
+                # NOTE: This device selection would only work for homogeneous hardware.
                 torch.cuda.set_device(get_rank() % torch.cuda.device_count())
         else:
             raise RuntimeError(
