@@ -616,12 +616,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         # TODO mlazos: only support __call__ for lazy modules
         # until we can support a larger swath of python
-        if is_lazy_module(self.value):
-            fn = self.value_type.__call__
-            source = AttrSource(AttrSource(self.source, "__class__"), "__call__")
+        if is_lazy_module(self.value) and self.source:
+            name = "__call__"
         else:
-            fn = self.value_type.forward
-            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
+            name = "forward"
+
+        fn = getattr(self.value_type, name)
+        if self.source:
+            source = AttrSource(AttrSource(self.source, "__class__"), name)
+        else:
+            source = None
 
         return variables.UserFunctionVariable(
             fn, source=source, **options
