@@ -52,6 +52,7 @@ def bitwise_reduce(tensors, op):
 
 _reduce_ops = {
     ReduceOp.SUM: partial(binop_reduce, op=torch.sum),
+    ReduceOp.AVG: partial(binop_reduce, op=torch.mean),
     ReduceOp.PRODUCT: partial(binop_reduce, op=torch.prod),
     ReduceOp.MIN: partial(binop_reduce, op=torch.min),
     ReduceOp.MAX: partial(binop_reduce, op=torch.max),
