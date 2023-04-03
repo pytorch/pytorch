@@ -77,7 +77,7 @@ def may_get_constant_buffer_dtype(constant_buffer):
     if constant_buffer.is_integer:
         return torch.int64
     elif constant_buffer.is_float:
-        return torch.float64
+        return torch.float32
     else:
         return None
 

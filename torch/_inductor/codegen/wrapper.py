@@ -726,10 +726,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         output_is_tensor = dict()
         for idx, x in enumerate(V.graph.graph_outputs):
-            # TODO: cases other than ShapeAsConstantBuffer but also scalar value?
             if isinstance(x, ShapeAsConstantBuffer):
-                # TODO: is this check needed?
-                assert x.shape.is_integer, "Expect ShapeAsConstantBuffer to be integer"
                 output_is_tensor[idx] = False
             else:
                 output_is_tensor[idx] = True
@@ -781,6 +778,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         with self.wrapper_call.indent():
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
+                    # unwrap input tensor back to scalar
                     if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
                         from ..graph import may_get_constant_buffer_dtype
                         from .cpp import DTYPE_TO_CPP
@@ -880,7 +878,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
         )
 
-        # Unwrap tensor back to scalar
+        # unwrap output tensor back to python scalar
         if all(x for x in self.output_is_tensor.values()):
             # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
             return_str = "return f(args_tensor)"
