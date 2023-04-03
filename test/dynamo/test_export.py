@@ -2296,6 +2296,112 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f, torch.randn(5, 6), aten_graph=True, tracing_mode="symbolic"
             )
 
+    def test_pattern_matcher(self):
+        class Pattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.relu(x)
+                return x
+
+        pattern_graph = torch.fx.symbolic_trace(Pattern()).graph
+        from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
+
+        print("Pattern Graph:")
+        print(pattern_graph)
+        subgraph_matcher = SubgraphMatcher(pattern_graph, match_flattened_modules=True)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+                self.linear2 = torch.nn.Linear(3, 5)
+
+            def forward(self, x):
+                # x = self.linear1(x)
+                x = self.linear1(x)
+                x = self.relu(x)
+                x = x * x
+                # x = self.linear2(x)
+                return x
+
+        inputs = (torch.randn(3, 3),)
+        gm, _ = torch._dynamo.export(
+            M(), *inputs, aten_graph=True
+        )
+
+        print("Exported Graph")
+        print(gm.graph)
+        for n in gm.graph.nodes:
+            print(n, n.meta.get("nn_module_stack", None))
+
+        matches = subgraph_matcher.match(gm.graph)
+        self.assertTrue(len(matches), 1)
+        breakpoint()
+        
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+                self.linear2 = torch.nn.Linear(3, 5)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear1(x)
+                x = self.relu(x)
+                x = x * x
+                x = self.linear2(x)
+                return x
+
+        inputs = (torch.randn(3, 3),)
+        gm, _ = torch._dynamo.export(
+            M(), *inputs, aten_graph=True
+        )
+
+        print("Exported Graph")
+        print(gm.graph)
+        for n in gm.graph.nodes:
+            print(n, n.meta.get("nn_module_stack", None))
+
+        matches = subgraph_matcher.match(gm.graph)
+        self.assertTrue(len(matches), 1)
+        breakpoint()
+        
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+                self.linear2 = torch.nn.Linear(3, 5)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear1(x)
+                x = self.relu(x)
+                x = x * x
+                x = self.linear2(x)
+                x = self.relu(x)
+                return x
+
+        inputs = (torch.randn(3, 3),)
+        gm, _ = torch._dynamo.export(
+            M(), *inputs, aten_graph=True
+        )
+
+        print("Exported Graph")
+        print(gm.graph)
+        for n in gm.graph.nodes:
+            print(n, n.meta.get("nn_module_stack", None))
+
+        matches = subgraph_matcher.match(gm.graph)
+        self.assertTrue(len(matches), 2)
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

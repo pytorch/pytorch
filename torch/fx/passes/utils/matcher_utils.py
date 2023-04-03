@@ -5,7 +5,7 @@ import torch
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
-from typing import Dict, List, Set, Any, Union, Tuple
+from typing import Dict, List, Set, Any, Union, Tuple, Type
 import logging
 import os
 
@@ -34,7 +34,7 @@ class InternalMatch():
     # Nodes from which the match was found
     anchors: List[Node]
     # Maps nodes in the pattern subgraph to nodes in the larger graph
-    nodes_map: Dict[Node, Node] = field(default_factory=dict)
+    nodes_map: Dict[Node, Union[Node, List[Node]]] = field(default_factory=dict)
 
     # nodes in target graph that are matched placeholder in pattern
     placeholder_nodes: List[Node] = field(default_factory=list)
@@ -53,7 +53,8 @@ class SubgraphMatcher:
                  match_output: bool = False,
                  match_placeholder: bool = False,
                  remove_overlapping_matches: bool = True,
-                 ignore_literals: bool = False) -> None:
+                 ignore_literals: bool = False,
+                 match_flattened_modules: bool = False) -> None:
         """
         Args:
             pattern: the targeted matching pattern, represented in fx.Graph.
@@ -72,6 +73,7 @@ class SubgraphMatcher:
         self.match_placeholder = match_placeholder
         self.remove_overlapping_matches = remove_overlapping_matches
         self.ignore_literals = ignore_literals
+        self.match_flattened_modules = match_flattened_modules
 
         if len(pattern.nodes) == 0:
             raise ValueError("SubgraphMatcher cannot be initialized with an empty pattern")
@@ -112,10 +114,18 @@ class SubgraphMatcher:
             raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
         return False
 
-    def _nodes_are_equal(self, pn: Node, gn: Node) -> bool:
+    def _nodes_are_equal(self, pn: Node, gn: Node, get_anchor: bool = False) -> bool:
         # if exact match for placeholder is not required, then use placeholder as a wildcard
         if not self.match_placeholder and pn.op == "placeholder":
             return True
+
+        if self.match_flattened_modules and pn.op == "call_module":
+            assert len(pn.args) == 1
+            module_type = type(self.pattern.owning_module.get_submodule(pn.target))
+
+            for module_nodes in self.module_partitions[module_type].values():
+                if gn == module_nodes[-1]:
+                    return True
 
         if pn.op == gn.op:
             if pn.op == "placeholder" or pn.op == "output":
@@ -130,7 +140,15 @@ class SubgraphMatcher:
         # that are part of `pattern`
 
         # Placeholders can be used by other nodes in the graphs
-        lookup: Dict[Node, Node] = {gn : pn for pn, gn in nodes_map.items() if pn.op != "placeholder"}
+        lookup: Dict[Node, Node] = {}
+        for pn, gn in nodes_map.items():
+            if pn.op == "placeholder":
+                continue
+            if isinstance(gn, list):
+                for n in gn:
+                    lookup[n] = pn
+            else:
+                lookup[gn] = pn
 
         for gn, pn in lookup.items():
             # nodes returned by output are allowed to be used in other areas of the graph
@@ -151,15 +169,22 @@ class SubgraphMatcher:
         for match in matches:
             found_overlap = False
             for pn, gn in match.nodes_map.items():
-                if pn.op not in {"placeholder", "output"} and gn in nodes_matched:
-                    found_overlap = True
-                    break
+                if pn.op not in {"placeholder", "output"}:
+                    if isinstance(gn, list):
+                        found_overlap = any(n in nodes_matched for n in gn)
+                    else:
+                        found_overlap = gn in nodes_matched
+                    if found_overlap:
+                        break
 
             if not found_overlap:
                 non_overlapping_matches.append(match)
                 for pn, gn in match.nodes_map.items():
                     if pn.op not in {"placeholder", "output"}:
-                        nodes_matched.add(gn)
+                        if isinstance(gn, list):
+                            nodes_matched.update(gn)
+                        else:
+                            nodes_matched.add(gn)
         return non_overlapping_matches
 
     def _match_literals(self, pn: Any, gn: Any, match: InternalMatch) -> bool:
@@ -210,6 +235,27 @@ class SubgraphMatcher:
         # Recursively traverse upwards to check if `pn` is a true
         # match for `gn`
         match_found = True
+    
+        if pn.op == "call_module" and self.match_flattened_modules:
+            gn_args = set()
+            module_type = type(self.pattern.owning_module.get_submodule(pn.target))
+            modules_of_type = self.module_partitions[module_type]
+
+            nn_module_stack = gn.meta["nn_module_stack"]
+            unique_module_name, (fqn, gn_module_type) = nn_module_stack.popitem()
+            nn_module_stack[unique_module_name] = (fqn, gn_module_type)
+            assert gn_module_type == module_type 
+
+            gn_module_nodes = modules_of_type[unique_module_name]
+            logger.info(f"  Skipping over nodes {gn_module_nodes} as they are part " + 
+            f"of the same {module_type} module.")
+            for n in reversed(gn_module_nodes):
+                if n.op == "call_function":
+                    gn_args.update(n.args)
+                gn_args.discard(n)
+            match.nodes_map[pn] = gn_module_nodes
+        else:
+            gn_args = gn.args
 
         def _match_args(args1: Union[List, Tuple], args2: Union[List, Tuple]) -> bool:
             if len(args1) != len(args2):
@@ -229,7 +275,7 @@ class SubgraphMatcher:
 
             return True
 
-        match_found = match_found and _match_args(pn.args, gn.args)
+        match_found = match_found and _match_args(pn.args, gn_args)
 
         pn_kwargs, gn_kwargs = [], []
         if pn.kwargs.keys() == gn.kwargs.keys():
@@ -247,6 +293,22 @@ class SubgraphMatcher:
             return False
 
         return True
+
+    def get_module_partitions(self, graph: Graph): 
+        modules: Dict[Type[Any], Dict[str, List[torch.fx.Node]]] = {}
+
+        for node in graph.nodes:
+            if (nn_module_stack := node.meta.get("nn_module_stack", None)) is None:
+                continue
+        
+            unique_module_name, (fqn, module_type) = nn_module_stack.popitem()
+            nn_module_stack[unique_module_name] = (fqn, module_type)
+
+            diff_modules = modules.setdefault(module_type, {})
+            partition = diff_modules.setdefault(unique_module_name, [])
+            partition.append(node)
+
+        return modules
 
     def match(self, graph: Graph) -> List[InternalMatch]:
         """
@@ -286,11 +348,14 @@ class SubgraphMatcher:
         """
         from torch.fx.passes.utils.fuser_utils import validate_partition
 
+        if self.match_flattened_modules:
+            self.module_partitions = self.get_module_partitions(graph)
+
         # find candidate nodes to match with pattern anchors
         match_candidates: Dict[Node, List[Node]] = defaultdict(list)
         for pattern_anchor in self.pattern_anchors:
             for node in graph.nodes:
-                if self._nodes_are_equal(pattern_anchor, node):
+                if self._nodes_are_equal(pattern_anchor, node, get_anchor=True):
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
 
@@ -301,7 +366,13 @@ class SubgraphMatcher:
         def backtracking(anchor_index, match):
             if anchor_index == len(match_candidates_list):
                 match.placeholder_nodes = [match.nodes_map[pn] for pn in self.pattern_placeholder_nodes]
-                match.returning_nodes = [match.nodes_map[pn] for pn in self.pattern_returning_nodes]
+                match.returning_nodes = []
+                for pn in self.pattern_returning_nodes:
+                    ret_nodes = match.nodes_map[pn]
+                    if isinstance(ret_nodes, list):
+                        match.returning_nodes.append(ret_nodes[-1])
+                    else:
+                        match.returning_nodes.append(ret_nodes)
                 matches.append(match)
 
                 logger.info(f"Found a match: {match}\n")
@@ -337,8 +408,15 @@ class SubgraphMatcher:
         # filter out the matches that that forms a cycle if the subgraph is fused
         valid_matches = []
         for match in matches:
-            matched_compute_nodes = \
-                [gn for pn, gn in match.nodes_map.items() if pn.op not in {"placeholder", "output"}]
+            matched_compute_nodes = []
+            for pn, gn in match.nodes_map.items():
+                if pn.op in {"placeholder", "output"}:
+                    continue
+                if isinstance(gn, list):
+                    matched_compute_nodes.extend(gn)
+                else:
+                    matched_compute_nodes.append(gn)
+
             if validate_partition(matched_compute_nodes):
                 valid_matches.append(match)
         if len(valid_matches) != len(matches):
