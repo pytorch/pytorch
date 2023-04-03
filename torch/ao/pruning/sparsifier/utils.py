@@ -14,7 +14,7 @@ __all__ = [
 ]
 
 
-def module_contains_param(module, parametrization):
+def module_contains_param(module: nn.Module, parametrization: nn.Module) -> bool:
     if is_parametrized(module):
         # see if any of the module tensors have a parametriztion attached that matches the one passed in
         return any(
@@ -26,7 +26,7 @@ def module_contains_param(module, parametrization):
     return False
 
 
-def swap_module(mod, mapping):
+def swap_module(mod: nn.Module, mapping: Dict[nn.Module, nn.Module]) -> nn.Module:
     r"""Swaps the module if it has a quantized counterpart and it has an
     `observer` attached.
     Args:
