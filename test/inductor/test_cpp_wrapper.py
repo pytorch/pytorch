@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import itertools
 import sys
 import unittest
 
@@ -44,29 +45,31 @@ def make_test_case(name, dynamic_shapes, device="cpu"):
     setattr(TestCppWrapper, test_name, fn)
 
 
-for name in [
-    "test_as_strided",  # buffer reuse
-    "test_bitwise",  # int32
-    "test_bmm1",
-    "test_bmm2",
-    "test_cat",  # alias
-    "test_int_div",
-    "test_linear1",
-    "test_linear2",
-    "test_lowmem_dropout1",  # None as output
-    "test_mm_views",
-    "test_profiler_mark_wrapper_call",
-    "test_reduction1",  # Reduction
-    "test_relu",  # multiple inputs
-    "test_scalar_input",
-    "test_silu",  # single input, single output
-    "test_sum_dtype",  # float64
-    "test_sum_int",  # bool, int64, int8, uint8
-    "test_transpose",  # multiple outputs, buffer clear
-]:
-    make_test_case(name, dynamic_shapes=False)
+for name, dynamic_shapes in itertools.product(
+    [
+        "test_as_strided",  # buffer reuse
+        "test_bitwise",  # int32
+        "test_bmm1",
+        "test_bmm2",
+        "test_cat",  # alias
+        "test_int_div",
+        "test_linear1",
+        "test_linear2",
+        "test_lowmem_dropout1",  # None as output
+        "test_mm_views",
+        "test_profiler_mark_wrapper_call",
+        "test_reduction1",  # Reduction
+        "test_relu",  # multiple inputs
+        "test_scalar_input",
+        "test_silu",  # single input, single output
+        "test_sum_dtype",  # float64
+        "test_sum_int",  # bool, int64, int8, uint8
+        "test_transpose",  # multiple outputs, buffer clear
+    ],
+    [False, True],
+):
     # TODO: leverage test_inductor_dynamic_shapes.py
-    make_test_case(name, dynamic_shapes=True)
+    make_test_case(name, dynamic_shapes=dynamic_shapes)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
