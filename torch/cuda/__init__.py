@@ -603,7 +603,7 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
         for idx, uuid in enumerate(uuids):
             if not uuid.startswith(candidate):
                 continue
-            # Ambigous candidate
+            # Ambiguous candidate
             if best_match != -1:
                 return -1
             best_match = idx

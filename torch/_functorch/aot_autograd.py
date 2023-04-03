@@ -28,12 +28,11 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from . import config
 from .partitioners import default_partition
-from torch._guards import TracingContext, DuplicateInputs
+from torch._guards import TracingContext, DuplicateInputs, Source
 
 log = logging.getLogger(__name__)
-aot_forward_log = getArtifactLogger(__name__, "aot_forward_graph")
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
-aot_backward_log = getArtifactLogger(__name__, "aot_backward_graph")
+aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 MutationType = Enum(
     "MutationType", ("none", "metadata_only", "data", "data_and_metadata")
@@ -59,6 +58,8 @@ OutputType = Enum(
         # Instructs the runtime code to regenerate the current output from
         # a base tensor, user_outputs[base_idx]
         "alias_of_intermediate_base_is_user_output",
+        # See Note [Intermediate Bases Optimization]
+        "unsafe_view_alias",
     )
 )
 
@@ -97,15 +98,17 @@ KNOWN_TYPES = tuple(
 
 @contextmanager
 def preserve_rng_state():
-    rng_state = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+    with torch.utils._python_dispatch._disable_current_modes():
+        rng_state = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
     finally:
-        torch.random.set_rng_state(rng_state)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng_state)
+        with torch.utils._python_dispatch._disable_current_modes():
+            torch.random.set_rng_state(rng_state)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
 
 
 # Set up hooks so that during backward the fx's stack_trace is properly set
@@ -468,7 +471,7 @@ class ViewAndMutationMeta:
         aliased_out_indices = [
             i
             for i, m in enumerate(self.output_info)
-            if m.output_type != OutputType.non_alias
+            if m.output_type not in [OutputType.non_alias, OutputType.unsafe_view_alias]
         ]
 
         self.mutated_inp_indices = mutated_inp_indices
@@ -482,7 +485,7 @@ class ViewAndMutationMeta:
         self.aliased_out_indices = aliased_out_indices
         self.num_outputs = len(self.output_info)
         self.num_outputs_non_aliased = len(
-            [x for x in self.output_info if x.output_type == OutputType.non_alias]
+            [x for x in self.output_info if x.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]]
         )
         self.num_outputs_aliased_to_inputs = len(
             [
@@ -736,6 +739,13 @@ def run_functionalized_fw_and_collect_metadata(
         # (This is also a dict because we need to know that output's index, so we can regenerate
         # the alias from it).
         out_tensor_ids = {id(o): i for i, o in enumerate(flat_f_outs)}
+
+        # Keep track of which outputs alias other outputs
+        out_tensor_alias_counts = collections.defaultdict(int)
+        for o in flat_f_outs:
+            if isinstance(o, torch.Tensor):
+                out_tensor_alias_counts[StorageWeakRef(o.untyped_storage())] += 1
+
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
         intermediate_bases: List[torch.Tensor] = []
@@ -760,30 +770,46 @@ def run_functionalized_fw_and_collect_metadata(
                 and o.requires_grad
                 and o._base.requires_grad
             ):
-                # First, check if o's ._base is an existing output
-                maybe_existing_out_idx = out_tensor_ids.get(id(o._base), None)
-                if maybe_existing_out_idx is not None:
-                    # Special case where the output is an alias of a graph intermediate, but that intermediate
-                    # is itself also a user output.
-                    output_type = OutputType.alias_of_intermediate_base_is_user_output
-                    base_idx = maybe_existing_out_idx
+                if out_tensor_alias_counts[StorageWeakRef(o.untyped_storage())] == 1:
+                    # Note [Intermediate Bases Optimization]
+                    # Normally if we have an output that aliases an intermediate,
+                    # we need to add the extra "intermediate base" logic further down
+                    # to prevent autograd from yelling at us if the user later tries to
+                    # mutate that output.
+                    # However, the common case here is if we have an output that aliases an intermediate,
+                    # but doesn't alias any other outputs.
+                    # In that case, autograd shouldn't have to worry about the aliasing at all
+                    # (if that output is mutated, there are no other live aliases for autograd to worry about).
+                    # The "intermediate bases" can hurt inductor perf by forcing more variables to become outputs.
+                    # So as an optimization, we won't do intermediate base handling in this case.
+                    # Instead, we'll hide the aliasing from autograd using aten._unsafe_view().
+                    output_type = OutputType.unsafe_view_alias
+                    base_idx = None
                 else:
-                    # Next, check if o's ._base is an intermediate base that we already returned
-                    maybe_existing_base_output_idx = intermediate_base_tensor_id_to_output_idx.get(
-                        id(o._base), None
-                    )
-                    if maybe_existing_base_output_idx is not None:
-                        output_type = OutputType.alias_of_intermediate
-                        base_idx = maybe_existing_base_output_idx
+                    # First, check if o's ._base is an existing output
+                    maybe_existing_out_idx = out_tensor_ids.get(id(o._base), None)
+                    if maybe_existing_out_idx is not None:
+                        # Special case where the output is an alias of a graph intermediate, but that intermediate
+                        # is itself also a user output.
+                        output_type = OutputType.alias_of_intermediate_base_is_user_output
+                        base_idx = maybe_existing_out_idx
                     else:
-                        # Otherwise, take o._base and explicitly return it as an output in the compiled graph
-                        new_out_idx = len(intermediate_bases)
-                        base_idx = new_out_idx
-                        # Indicate to the logic later on (when we trace the joint)
-                        # that this particular output should get it's ._base appended to the forward graph outputs
-                        output_type = OutputType.alias_of_intermediate_save_as_output
-                        intermediate_base_tensor_id_to_output_idx[id(o._base)] = new_out_idx
-                        intermediate_bases.append(o._base)
+                        # Next, check if o's ._base is an intermediate base that we already returned
+                        maybe_existing_base_output_idx = intermediate_base_tensor_id_to_output_idx.get(
+                            id(o._base), None
+                        )
+                        if maybe_existing_base_output_idx is not None:
+                            output_type = OutputType.alias_of_intermediate
+                            base_idx = maybe_existing_base_output_idx
+                        else:
+                            # Otherwise, take o._base and explicitly return it as an output in the compiled graph
+                            new_out_idx = len(intermediate_bases)
+                            base_idx = new_out_idx
+                            # Indicate to the logic later on (when we trace the joint)
+                            # that this particular output should get it's ._base appended to the forward graph outputs
+                            output_type = OutputType.alias_of_intermediate_save_as_output
+                            intermediate_base_tensor_id_to_output_idx[id(o._base)] = new_out_idx
+                            intermediate_bases.append(o._base)
             else:
                 output_type = OutputType.non_alias
                 base_idx = None
@@ -816,7 +842,7 @@ def run_functionalized_fw_and_collect_metadata(
         f_output_tangents = [
             o
             for o, info in zip(flat_f_outs, output_info)
-            if info.output_type == OutputType.non_alias and issubclass(info.raw_type, torch.Tensor)
+            if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias] and issubclass(info.raw_type, torch.Tensor)
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
@@ -833,6 +859,23 @@ def run_functionalized_fw_and_collect_metadata(
         return metadata
 
     return inner
+
+@dataclasses.dataclass
+class AOTConfig:
+    """
+    Configuration for AOTDispatcher
+    """
+
+    fw_compiler: Callable
+    bw_compiler: Callable
+    partition_fn: Callable
+    decompositions: Dict[Callable, Callable]
+    num_params_buffers: int
+    aot_id: int
+    keep_inference_input_mutations: bool
+    dynamic_shapes: bool = False
+    aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
+    inference_compiler: Optional[Callable] = None
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
@@ -863,181 +906,170 @@ def maybe_to_fresh_input(idx, t, meta):
             return t.view(t.shape)
     return t
 
-# This function takes in a forward fn, runs it, and (optionally) runs autograd to compute the joint.
-# When maybe_tangents is None, we only run the forward. Otherwise we run the "joint" forward + backward.
-# Preconditions:
-# - fn corresponds to the flattened user fw function, with duplicate inputs removed
-# - functionalization is turned on (and inputs are wrapped in functional tensors)
-# - Synthetic bases have been *removed* (we've taken views on them corresponding to the user argument views).
-# - primals_after_cloning are what we run our forward function on. It is identical to primals_before_cloning,
-#   except that every input we know will be mutated in the forward has been cloned.
-#   We run our forward on primals_after_cloning (potentially mutating some inputs), and then compute our gradients
-#   w.r.t. primals_before_cloning (so we properly capture the mutation in our gradient computation).
-# Importantly, due functionalization + some autograd.Function constraints, this function can return EXTRA outputs
-# compared to what the original user forward returns.
-#
-# If we are only running the forward (and not computing the joint):
-# - Our function will return (updated_inputs, fw_outs)
-#
-# If we are running the forward + backward (computing the joint):
-# - Our function will return (updated_inputs, fw_outs, intermediate_bases), (gradients)
-#
-# Finally, if keep_input_mutations is set, then we will explicitly *not* return updated inputs, for any inputs
-# that experienced data-only mutations.
-# Instead, we are relying on the logic in create_forward_or_joint_functionalized to manually perform the input mutations,
-# keeping them directly in the traced graph.
-def forward_or_joint(
+# This function returns a new function that returns mutated inputs as outputs.
+# if keep_data_input_mutations is set, then we assume that data-only mutations
+# will be left in the graph, and we only return metadata-mutated inputs as outputs.
+def fn_input_mutations_to_outputs(
     fn: Callable,
-    primals_before_cloning: List[Any],
-    primals_after_cloning: List[Any],
-    maybe_tangents: Optional[List[Any]],
     meta: ViewAndMutationMeta,
-    keep_input_mutations: bool,
+    keep_data_input_mutations: bool,
 ) -> Any:
-    outs = fn(*primals_after_cloning)
-    assert len(meta.output_info) == len(outs)
-
-    # The compiled fw will return mutated input tensors, *including* metadata-only mutation.
-    # However, if keep_input_mutations is set, the compiled fw only needs to return metadata-mutated inputs.
-    # (because data-only input mutations are handled directly in the compiled graph)
-    if keep_input_mutations:
+    def inner_fn(*args):
+        outs = fn(*args)
+        assert len(meta.output_info) == len(outs)
+        # The compiled fw will return mutated input tensors, *including* metadata-only mutation.
+        # However, if keep_data_input_mutations is set, the compiled fw only needs to return metadata-mutated inputs.
+        # (because data-only input mutations are handled directly in the compiled graph)
         mutated_inputs_to_return = [
             x
-            for (i, x) in enumerate(primals_after_cloning)
-            if meta.input_info[i].mutates_metadata
+            for (i, x) in enumerate(args)
+            if meta.input_info[i].mutates_metadata or (meta.input_info[i].mutates_data and not keep_data_input_mutations)
         ]
-    else:
-        mutated_inputs_to_return = [
-            x
-            for (i, x) in enumerate(primals_after_cloning)
-            if meta.input_info[i].mutates_data or meta.input_info[i].mutates_metadata
-        ]
-
-    # Case 1: We are just tracing the forward; not the joint forward + backward.
-    if maybe_tangents is None:
         return *mutated_inputs_to_return, *outs
-    else:
-        tangents = maybe_tangents
+    return inner_fn
 
-    # Case 2: We are tracing the joint forward backward.
-    # This also requires us to:
-    # - update the graph to return intermediate bases
-    # - Figure out what grad_outputs to pass into the backward
-    # - (this includes intermediate bases in the forward, and forward inputs that had data mutations)
-    # - actually call autograd.grad to trace the backward.
-    intermediate_bases = []
-    for o, info in zip(outs, meta.output_info):
-        if info.output_type == OutputType.alias_of_intermediate_save_as_output:
-            intermediate_bases.append(o._base)
-
-    assert meta.num_intermediate_bases == len(intermediate_bases)
-
-    # Pass any (non-aliased) outputs in as tangents, since they'll be returned as outputs in the fw
-    # For outputs that are aliases of intermediates, we will have returned the output's _base as an output in the graph instead,
-    # which we *should* send to grad()
-    outputs_for_grad = [
-        x
-        for (i, x) in enumerate(outs)
-        if meta.output_info[i].output_type == OutputType.non_alias
-        # Also, only tensor outputs should participate in the backward
-        # (in particular, Symint outputs in the forward graph shouldn't get tangents)
-        and issubclass(meta.output_info[i].raw_type, torch.Tensor)
-    ]
-    # Pass any (non-aliased) mutated inputs in as tangents, since they'll be returned as outputs in the fw
-    # Important: the traced joint fw/bw will return updated inputs with data mutations,
-    # but *not* with metadata mutations.
-    # Instead, we shunt the updated metadata around externally
-    # and update the input's metadata outside of the autograd.Function
-    mutated_inputs_for_grad = [
-        x
-        for (i, x) in enumerate(primals_after_cloning)
-        if meta.input_info[i].mutates_data
-    ]
-    # The tensors that we include in the backward graph are:
-    # - inputs that recieve *data* mutations (not metadata-only; those are recomputed later)
-    # - outputs that are not aliased (aliased outputs are recomputed later)
-    # - intermediate ._base tensors of aliased outputs (we use those later to recompute the aliased outputs)
-    fw_outs_to_grad = mutated_inputs_for_grad + outputs_for_grad + intermediate_bases
-    assert len(tangents) == len(fw_outs_to_grad)
-
-    # the compiled forward should return (mutated_inputs, user_outs, intermediate_bases)
-    fw_outs_to_return = *mutated_inputs_to_return, *outs, *intermediate_bases
-
-    # Take care to grab and sync the updated inputs from primals_after_cloning (the inputs we actually mutate!)
-    # and not primals_before_cloning (the preserved inputs, pre-mutation, that we pass to grad())
-    for i, arg in enumerate(primals_after_cloning):
-        if not isinstance(arg, Tensor):
-            continue
-        torch._sync(arg)
-
-    # Get the inputs that need gradients
-    grad_primals = []
-    inputs_needs_grads = []
-    # Note that we're not using primals_before_cloning here,
-    # being carefully not to pass any mutated inputs into autograd.grad()
-    for p in primals_before_cloning:
-        is_grad_tensor = isinstance(p, Tensor) and p.requires_grad
-        inputs_needs_grads.append(is_grad_tensor)
-        if is_grad_tensor:
-            grad_primals.append(p)
-
-    # Get the outputs that need gradients
-    needed_outs = []
-    needed_tangents = []
-    for out, tangent in zip(fw_outs_to_grad, tangents):
-        if isinstance(out, Tensor) and out.requires_grad:
-            # A bit sketchy, but fixes e.g. test_aot_autograd_exhaustive_matmul_cpu_float32
-            # The issue is that we are sensitive to decomps that don't accurately maintain
-            # their output's _base.shape compared to eager mode, and this helps mitigate a bit.
-            needed_outs.append(
-                out if out.shape == tangent.shape else out.view(tangent.shape)
-            )
-            needed_tangents.append(tangent)
-
-    setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
-
-    backward_out = []
-    # Call the backwards pass
-    if grad_primals:
-        with fx_traceback.preserve_node_meta():
-            backward_out = torch.autograd.grad(
-                needed_outs,
-                grad_primals,
-                grad_outputs=needed_tangents,
-                allow_unused=True,
-            )
-    backward_out_iter = iter(backward_out)
-    return fw_outs_to_return, [
-        next(backward_out_iter) if i else None for i in inputs_needs_grads
-    ]
-
-# This function adds extra clone() calls on any inputs in the forward that get mutated.
-# It *only* does this if we plan on performing autograd on fn.
-# The idea here is that when computing grdients w.r.t. inputs, we need to compute our gradients
-# w.r.t. the inputs *before* they were mutated!
-# Preconditions:
-# - fn corresponds to the flattened user fw function, with duplicate inputs removed
-# - primals **includes** synthetic bases. Importantly, if a synthetic base is mutated,
-#   we need to clone it *before* taking views off of it (if we clone the views they won't be views anymore)
-# - functionalization is turned on (and inputs are wrapped in functional tensors)
-def flat_fn_no_input_mutations(
+# This function takes in a fn with external aliasing and mutation,
+# and returns a new fn with no external aliasing and mutation,
+# as needed for autograd.
+# The main transformations are:
+# - Return mutated inputs as extra outputs
+# - Clone mutated inputs that require gradients,
+#   because autograd will require us to pass the pre-mutated inputs into autograd.grad
+# - Return intermediate bases of outputs as additional outputs,
+#   needed to appease autograd.Function
+# The new function returns:
+# (1) The updated outputs
+# (2) A boolean mask of len(new_fn_outputs),
+#     that can be used to tell autograd.grad which outputs should get tangents
+#     if we trace the backward.
+def fn_prepped_for_autograd(
     fn: Callable,
-    primals: List[Any],
-    maybe_tangents: Optional[List[Any]],
     meta: ViewAndMutationMeta,
-    keep_input_mutations: bool
-):
-    # When tracing the joint fwd + bwd, making sure to clone any inputs that are mutated first.
-    # We need to ensure that the inputs we pass to autograd.grad() are the *original*
-    # inputs, and not their mutated values.
-    if maybe_tangents is not None:
-        primals_after_cloning = [
-            maybe_to_fresh_input(i, t, meta) for i, t in enumerate(primals)
+) -> Any:
+    def inner_fn(*args):
+        args_maybe_cloned = [
+            maybe_to_fresh_input(i, t, meta) for i, t in enumerate(args)
         ]
-    else:
-        primals_after_cloning = primals
-    outs = forward_or_joint(fn, primals, primals_after_cloning, maybe_tangents, meta, keep_input_mutations)
-    return outs
+
+        outs = fn(*args_maybe_cloned)
+        assert isinstance(outs, (tuple, list))
+        outs = list(outs)
+        assert len(meta.output_info) == len(outs)
+
+        mutated_inputs_to_return = [
+            x
+            for (i, x) in enumerate(args_maybe_cloned)
+            if meta.input_info[i].mutates_metadata or meta.input_info[i].mutates_data
+        ]
+
+        intermediate_bases = []
+        for i, (o, info) in enumerate(zip(outs, meta.output_info)):
+            if info.output_type == OutputType.alias_of_intermediate_save_as_output:
+                intermediate_bases.append(o._base)
+            elif info.output_type == OutputType.unsafe_view_alias:
+                # See Note [Intermediate Bases Optimization]
+                outs[i] = torch.ops.aten._unsafe_view.default(o, o.shape)
+
+        assert meta.num_intermediate_bases == len(intermediate_bases)
+
+        # the compiled forward should return (mutated_inputs, user_outs, intermediate_bases)
+        fw_outs_to_return = *mutated_inputs_to_return, *outs, *intermediate_bases
+
+        # Also return a boolean mask specifying which outputs to this function will be used as tangents
+        mutated_inputs_grad_mask = [
+            meta.input_info[meta.mutated_inp_indices[i]].mutates_data
+            for (i, x) in enumerate(mutated_inputs_to_return)
+        ]
+
+        # Pass any (non-aliased) outputs in as tangents, since they'll be returned as outputs in the fw
+        # For outputs that are aliases of intermediates, we will have returned the output's _base as an output in the graph instead,
+        # which we *should* send to grad()
+        output_grad_mask = [
+            meta.output_info[i].output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]
+            # Also, only tensor outputs should participate in the backward
+            # (in particular, Symint outputs in the forward graph shouldn't get tangents)
+            and issubclass(meta.output_info[i].raw_type, torch.Tensor)
+            for (i, x) in enumerate(outs)
+        ]
+
+        intermediate_base_grad_mask = [True for _ in range(len(intermediate_bases))]
+
+        out_grad_mask = mutated_inputs_grad_mask + output_grad_mask + intermediate_base_grad_mask
+        assert len(out_grad_mask) == len(fw_outs_to_return)
+
+        # Take care to grab and sync the updated inputs from primals_after_cloning (the inputs we actually mutate!)
+        # and not primals (the preserved inputs, pre-mutation, that we pass to grad())
+        # This is annoying: our joint function needs to be aware of functionalization
+        # (syncing mutated inputs before calling autograd.grad())
+        # In theory, we could make the autograd engine do this automatically, although that probably isn't any cleaner.
+        for i, arg in enumerate(args_maybe_cloned):
+            if not isinstance(arg, Tensor):
+                continue
+            torch._sync(arg)
+
+        return fw_outs_to_return, out_grad_mask
+    return inner_fn
+
+# Given a fn, computes the joint.
+# NOTE: fn is expects the following behavior:
+# (1) fn() needs to return a tuple of (outs, mask),
+#     where `mask` tells us which outputs are meant to have tangents.
+#     we don't know this info automatically, because we don't actually want to blindly
+#     compute tangents for every output that requires grad.
+#     Specifically, outputs that alias inputs won't participate in the backward and get tangents.
+# (2) fn() cannot mutate any inputs that require gradient.
+#     otherwise, when we compute autograd.grad(), we will not take those input mutations into account
+#     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
+def create_joint(
+    fn: Callable,
+) -> Any:
+    def inner_fn(primals: List[Any], tangents: List[Any]):
+        outs, tangent_mask = fn(*primals)
+        assert len(tangent_mask) == len(outs)
+        outs_to_grad = [o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent]
+        assert len(outs_to_grad) == len(tangents)
+
+        # Get the inputs that need gradients
+        grad_primals = []
+        inputs_needs_grads = []
+        # Note that we're not using primals here,
+        # being carefully not to pass any mutated inputs into autograd.grad()
+        for p in primals:
+            is_grad_tensor = isinstance(p, Tensor) and p.requires_grad
+            inputs_needs_grads.append(is_grad_tensor)
+            if is_grad_tensor:
+                grad_primals.append(p)
+
+        # Get the outputs that need gradients
+        needed_outs = []
+        needed_tangents = []
+        for out, tangent in zip(outs_to_grad, tangents):
+            if isinstance(out, Tensor) and out.requires_grad:
+                # A bit sketchy, but fixes e.g. test_aot_autograd_exhaustive_matmul_cpu_float32
+                # The issue is that we are sensitive to decomps that don't accurately maintain
+                # their output's _base.shape compared to eager mode, and this helps mitigate a bit.
+                needed_outs.append(
+                    out if out.shape == tangent.shape else out.view(tangent.shape)
+                )
+                needed_tangents.append(tangent)
+
+        setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
+
+        backward_out = []
+        # Call the backwards pass
+        if grad_primals:
+            with fx_traceback.preserve_node_meta():
+                backward_out = torch.autograd.grad(
+                    needed_outs,
+                    grad_primals,
+                    grad_outputs=needed_tangents,
+                    allow_unused=True,
+                )
+        backward_out_iter = iter(backward_out)
+        return outs, [
+            next(backward_out_iter) if i else None for i in inputs_needs_grads
+        ]
+    return inner_fn
 
 # This creates the final function that we want to trace using make_fx(),
 # in both aot_dispatch_autograd and aot_dispatch_base.
@@ -1050,29 +1082,25 @@ def flat_fn_no_input_mutations(
 # The function returned has signature that is either:
 # (1) "traced_fn(primals: List[Any])" if trace_joint is False
 # (2) "traced_fn(primals: List[Any], tangents: List[Any])" if trace_joint is True
-def create_forward_or_joint_functionalized(
+def create_functionalized_graph(
     fn,
+    args,
     *,
     meta: ViewAndMutationMeta,
+    aot_config: AOTConfig,
     trace_joint: bool,
-    keep_input_mutations: bool
 ):
-
-    def functionalized_f_helper(primals, maybe_tangents=None):
-        # Convention: this function is used to trace both the joint, and just the forward (for inference).
-        # When trace_joint is set, tangents should be passed in.
-        assert (maybe_tangents is not None) == trace_joint
+    def functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
-        f_primals = pytree.tree_map(to_fun, primals)
-        f_tangents = None if maybe_tangents is None else pytree.tree_map(to_fun, maybe_tangents)
+        f_args = pytree.tree_map(to_fun, args)
         torch._enable_functionalization(reapply_views=True)
         try:
             # Run the joint
-            f_outs = flat_fn_no_input_mutations(fn, f_primals, f_tangents, meta, keep_input_mutations)
+            f_outs = fn(*f_args)
         finally:
             torch._disable_functionalization()
 
-        if keep_input_mutations:
+        if aot_config.keep_inference_input_mutations and not trace_joint:
             # Note: This is a bit annoying. There's a layering issue here, where:
             # (1) functionalization needs to operate on **synthetic base** inputs, before unpacking them into the "real" inputs.
             # (2) For keep_input_mutations, we support tracing a call to copy_() directly on mutated inputs.
@@ -1097,8 +1125,7 @@ def create_forward_or_joint_functionalized(
             # we will materialize an "updated" synthetic base, and copy it back to the synthetic input base.
             # This allows us to factor aot autograd much more nicely, since only one area of the code needs to worry
             # about synthetic bases.
-            assert len(meta.input_info) == len(f_primals)
-            for i, (inpt_old, inpt_f) in enumerate(zip(primals, f_primals)):
+            for i, (inpt_old, inpt_f) in enumerate(zip(args, f_args)):
                 if not isinstance(inpt_f, torch.Tensor):
                     continue
                 torch._sync(inpt_f)
@@ -1113,18 +1140,16 @@ def create_forward_or_joint_functionalized(
 
         return pytree.tree_map(from_fun, f_outs)
 
-    # the joint needs have args named "primals" and "tangents",
-    # which are hardcoded into the partitioning logic.
-    def traced_joint(primals, tangents):
+    # Kinda annoying, but needed to make sure that the fx graph we trace out has "primals"
+    # and "tangents" as its input names (which are special-cased by the partitioner)
+    def joint_helper(primals, tangents):
         return functionalized_f_helper(primals, tangents)
 
-    def traced_forward(*primals):
-        return functionalized_f_helper(primals)
+    def fwd_helper(*args):
+        return functionalized_f_helper(*args)
 
-    if trace_joint:
-        return traced_joint
-    else:
-        return traced_forward
+    with enable_python_dispatcher():
+        return make_fx(joint_helper if trace_joint else fwd_helper, decomposition_table=aot_config.decompositions)(*args)
 
 
 def normalize_as_list(x):
@@ -1224,21 +1249,6 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             del guard
     return out
 
-@dataclasses.dataclass
-class AOTConfig:
-    """
-    Configuration for AOTDispatcher
-    """
-
-    fw_compiler: Callable
-    bw_compiler: Callable
-    partition_fn: Callable
-    decompositions: Dict[Callable, Callable]
-    num_params_buffers: int
-    aot_id: int
-    keep_inference_input_mutations: bool
-    dynamic_shapes: bool = False
-
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
@@ -1247,30 +1257,39 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     # While cases that it does need to handle include:
     # - input mutations (including when inputs are aliases of each other)
     # - input metadata mutations
-    trace_fn = create_forward_or_joint_functionalized(
+    keep_mutations = aot_config.keep_inference_input_mutations
+    fn_to_trace = fn_input_mutations_to_outputs(
         flat_fn,
+        fw_metadata,
+        keep_data_input_mutations=aot_config.keep_inference_input_mutations,
+    )
+    fw_module = create_functionalized_graph(
+        fn_to_trace,
+        flat_args,
         meta=fw_metadata,
+        aot_config=aot_config,
         trace_joint=False,
-        keep_input_mutations=aot_config.keep_inference_input_mutations
     )
 
-    with enable_python_dispatcher():
-        fw_module = make_fx(trace_fn, aot_config.decompositions)(*flat_args)
+    # As long as we opted to remove input mutations, then
+    # there should be *NO* mutating ops in the graph at this point.
+    copy_count = assert_functional_graph(fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)
 
-    if not aot_config.keep_inference_input_mutations:
-        # As long as we opted to remove input mutations, then
-        # there should be *NO* mutating ops in the graph at this point.
-        assert_functional_graph(fw_module.graph)
-        fw_module.graph.eliminate_dead_code()
-        fw_module.recompile()
+    fw_module.graph.eliminate_dead_code()
+    fw_module.recompile()
 
-    aot_forward_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
+    copy_count2 = assert_functional_graph(fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)
+
+    assert copy_count == copy_count2
+
+    aot_graphs_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
 
     with context(), track_graph_compiling(aot_config, "inference"):
-        compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
+        compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
+        compiled_fw = compiler(fw_module, flat_args)
 
     compiled_fn = create_runtime_wrapper(
         compiled_fw,
@@ -1282,11 +1301,27 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     return compiled_fn
 
 
-def assert_functional_graph(fx_g: torch.fx.Graph):
+# Returns the number of detected copy_
+def assert_functional_graph(fx_g: torch.fx.Graph, *, allow_input_mutations: bool = False) -> int:
+    placeholders = set()
+    copy_count = 0
+    # NB: It would also be nice to verify that the mutations all happen at the
+    # end, but we also do some administrative views after mutations so this
+    # isn't actually true.  (TODO: Could this cause problems for Inductor?)
     for n in fx_g.nodes:
+        if n.op == "placeholder":
+            placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            assert not n.target._schema.is_mutable, \
-                f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+            if n.target is aten.copy_.default and allow_input_mutations:
+                suffix = True
+                # Can only copy_ into an input, and can only do so once
+                assert n.args[0] in placeholders
+                placeholders.remove(n.args[0])
+                copy_count += 1
+            else:
+                assert not n.target._schema.is_mutable, \
+                    f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+    return copy_count
 
 
 @contextmanager
@@ -1859,22 +1894,15 @@ def aot_wrapper_dedupe(
     updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask)
 
     tracing_context = TracingContext.get()
-    if tracing_context:
+    if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
         for dupe_arg_pos, kept_pos in add_dupe_map.items():
-            dupe_arg_dict = flat_args[dupe_arg_pos].__dict__
-            kept_arg_dict = flat_args[kept_pos].__dict__
-            if 'graph_arg_pos' in dupe_arg_dict and 'graph_arg_pos' in kept_arg_dict:
-                d_positions = dupe_arg_dict['graph_arg_pos']
-                k_positions = kept_arg_dict['graph_arg_pos']
-                assert(d_positions == k_positions)
-                if len(d_positions) > 1:
-                    for i in range(1, len(d_positions)):
-                        pos = d_positions[i]
-                        pre_pos = d_positions[i - 1]
-                        tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(pre_pos, pos))
+            if dupe_arg_pos != kept_pos:
+                dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[dupe_arg_pos]
+                kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[kept_pos]
+                tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_arg_source, dupe_arg_source))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
@@ -2190,7 +2218,7 @@ def create_runtime_wrapper(
             for i, (o, info) in enumerate(zip(
                 fw_outs_no_intermediate_bases, runtime_metadata.output_info
             )):
-                if info.output_type == OutputType.non_alias:
+                if info.output_type == OutputType.non_alias or info.output_type == OutputType.unsafe_view_alias:
                     fw_outs_including_aliases.append(o)
                     continue
                 if trace_joint:
@@ -2241,26 +2269,23 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     )
 
     assert len(fw_metadata.requires_grad_info) == fw_metadata.num_mutated_inputs + fw_metadata.num_outputs
-
-    joint_forward_backward = create_forward_or_joint_functionalized(
-        flat_fn,
-        meta=fw_metadata,
-        trace_joint=True,
-        # For now in the autograd case, we NEVER keep input mutations (we could eventually fix this for slightly better perf
-        # in some cases, but it's annoying to fix the partitioner)
-        keep_input_mutations=False,
-    )
-
     joint_inputs = (flat_args, traced_tangents)
-
     disable_amp = torch._C._is_any_autocast_enabled()
 
+    fn_prepared_for_autograd = fn_prepped_for_autograd(
+        flat_fn,
+        fw_metadata,
+    )
+    joint_fn_to_trace = create_joint(fn_prepared_for_autograd)
+
     if config.use_functionalize:
-        with enable_python_dispatcher():
-            flattened_joints, _ = pytree.tree_flatten(joint_inputs)
-            fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
-                *joint_inputs
-            )
+        fx_g = create_functionalized_graph(
+            joint_fn_to_trace,
+            joint_inputs,
+            meta=fw_metadata,
+            aot_config=aot_config,
+            trace_joint=True,
+        )
 
         # There should be *NO* mutating ops in the graph at this point.
         assert_functional_graph(fx_g.graph)
@@ -2295,8 +2320,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             ]
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
-        aot_forward_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
-        aot_backward_log.info(format_graph_code(f"====== Backward graph {aot_config.aot_id} ======\n", bw_module))
+        aot_graphs_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
+        aot_graphs_log.info(format_graph_code(f"====== Backward graph {aot_config.aot_id} ======\n", bw_module))
 
         with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(
@@ -2353,7 +2378,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
                 )
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
+                ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
                     [
@@ -2365,7 +2390,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             else:
                 tensors_saved_for_backwards = fw_outs[num_forward_returns:]
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
+                ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 ctx.symints = []
 
             raw_returns = fw_outs[0:num_forward_returns]
@@ -2454,7 +2479,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 out_tangents_filtered = [
                     x
                     for x, info in zip(out_tangents, out_info)
-                    if info.output_type == OutputType.non_alias and issubclass(info.raw_type, torch.Tensor)
+                    if (info.output_type == OutputType.non_alias or info.output_type == OutputType.unsafe_view_alias)
+                    and issubclass(info.raw_type, torch.Tensor)
                 ]
                 # intermediate bases always require gradients, and always participate in the backward graph.
                 flat_bw_args = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
@@ -2496,7 +2522,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                                 aot_config.bw_compiler, None, None,
                                 aot_config.decompositions, 0, aot_config.aot_id,
                                 aot_config.keep_inference_input_mutations,
-                                aot_config.dynamic_shapes
+                                aot_config.dynamic_shapes,
+                                inference_compiler=None,
+                                aot_autograd_arg_pos_to_source=None,
                             )
                         )
                     else:
@@ -2649,12 +2677,17 @@ def create_aot_dispatcher_function(
                     if shape_env is not None:
                         from torch._dynamo.source import ConstantSource
                         if isinstance(x, int):
-                            return shape_env.create_symintnode(shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")), hint=x)
+                            return shape_env.create_symintnode(
+                                shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
+                                hint=x
+                            )
                     if not isinstance(x, torch.Tensor):
                         return x
                     if isinstance(x, FakeTensor):
                         assert x.fake_mode is fake_mode
                         return x
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
                     if (
                         idx < aot_config.num_params_buffers
                         and config.static_weight_shapes
@@ -2734,6 +2767,7 @@ def aot_function(
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
     keep_inference_input_mutations: bool = False,
+    inference_compiler: Optional[Callable] = None,
     *,
     # Whether or not to trace with dynamic shapes
     dynamic=False,
@@ -2749,9 +2783,6 @@ def aot_function(
     function can be used to perform optimizations such as recomputation. One can
     set `decompositions` dictionary to decompose the operators into a sequence
     of core or simpler operators supported by the backend compilers.
-
-    :func:`aot_function` uses a compilation cache, based on input tensor
-    properties, to detect when there is a need of recompilation.
 
     .. warning::
         This API is experimental and likely to change.
@@ -2771,7 +2802,11 @@ def aot_function(
             backward graphs.
         decompositions (Dict): A dictionary to define the decomposition of
             larger Aten ops into simpler or core Aten ops.
-
+        inference_compiler (Optional[Callable]): A Python function that accepts an
+            Fx graph with Aten ops and input args, and returns a Callable that
+            semantically is equivalent to the input Fx graph. inference_compiler is invoked
+            if no autograd is needed. Default: None
+            (when None, it defaults to the :attr:`fw_compiler`)
     Returns:
         Returns a ``Callable`` that retains the eager behavior of the original
         :attr:`fn`, but with forward and backward graph compiled via
@@ -2795,15 +2830,19 @@ def aot_function(
 
     if bw_compiler is None:
         bw_compiler = fw_compiler
+    if inference_compiler is None:
+        inference_compiler = fw_compiler
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
+        inference_compiler=fw_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic,
+        aot_autograd_arg_pos_to_source=None,
     )
     cached_res = None
 
@@ -2921,6 +2960,7 @@ def aot_module_simplified(
     hasher_type=None,
     static_argnums=None,
     keep_inference_input_mutations=False,
+    inference_compiler: Optional[Callable] = None,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -2986,10 +3026,39 @@ def aot_module_simplified(
     assert static_argnums is None
     if bw_compiler is None:
         bw_compiler = fw_compiler
+    if inference_compiler is None:
+        inference_compiler = fw_compiler
 
     full_args = []
+    # First, the params
     full_args.extend(params_flat)
+
+    aot_autograd_arg_pos_to_source = None
+    # Then, the params 1:1 mapped sources, if relevant.
+    if hasattr(mod, "_param_name_to_source"):
+        aot_autograd_arg_pos_to_source = []
+        # We now know this came from dynamo, and (1) we care about guards,
+        # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
+        # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
+        for name in params.keys():
+            assert name in mod._param_name_to_source, f"{name} not found."
+            aot_autograd_arg_pos_to_source.append(mod._param_name_to_source[name])
+
+    # Next, the input args
     full_args.extend(args)
+
+    if hasattr(mod, "graph"):
+        # Non dynamo entrypoints can get to here...
+        for i, node in enumerate(mod.graph.nodes):
+            if node.op == "placeholder":
+                if hasattr(node, "_dynamo_source"):
+                    # ... but not here!
+                    if aot_autograd_arg_pos_to_source is None:
+                        aot_autograd_arg_pos_to_source = []
+                    aot_autograd_arg_pos_to_source.append(node._dynamo_source)
+
+    if aot_autograd_arg_pos_to_source is not None:
+        assert len(full_args) == len(aot_autograd_arg_pos_to_source)
 
     dynamic_shapes = False
     for x in full_args:
@@ -3000,12 +3069,14 @@ def aot_module_simplified(
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
+        inference_compiler=inference_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
         num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
-        dynamic_shapes=dynamic_shapes
+        dynamic_shapes=dynamic_shapes,
+        aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source
     )
 
     compiled_fn = create_aot_dispatcher_function(

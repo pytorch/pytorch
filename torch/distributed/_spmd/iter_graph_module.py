@@ -8,6 +8,7 @@ import torch.nn as nn
 from torch import fx
 from torch.fx.graph import PythonCode
 from torch.fx.node import Argument
+from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_map
 
 
@@ -415,7 +416,9 @@ class IterGraph(fx.Graph):
             actual_replace_with = self._lookup_node(replace_with, graph)
             assert actual_node is not None
             ret = actual_node.replace_all_uses_with(
-                actual_replace_with, delete_user_cb, propagate_meta=propagate_meta
+                actual_replace_with,
+                delete_user_cb,
+                propagate_meta=propagate_meta,
             )
         return ret
 
@@ -453,9 +456,13 @@ class IterGraph(fx.Graph):
         for node in reversed(self.nodes):
             if node.name.startswith("output"):
                 output_node = node
-            elif node.name.startswith("_fused_adam_",):
+            elif node.name.startswith(
+                "_fused_adam_",
+            ):
                 optim_node = node
-            elif node.name.startswith("_foreach_add_",):
+            elif node.name.startswith(
+                "_foreach_add_",
+            ):
                 step_node = node
                 self.node_add_user(optim_node, output_node)
                 self.node_add_user(step_node, optim_node)
@@ -464,9 +471,13 @@ class IterGraph(fx.Graph):
         for i, node in enumerate(reversed(self.nodes)):
             if node.name.startswith("output"):
                 output_node = node
-            elif node.name.startswith("_fused_adam_",):
+            elif node.name.startswith(
+                "_fused_adam_",
+            ):
                 optim_node = node
-            elif node.name.startswith("_foreach_add_",):
+            elif node.name.startswith(
+                "_foreach_add_",
+            ):
                 step_node = node
                 self.node_add_user(step_node, optim_node)
                 self.node_remove_user(optim_node, output_node)
@@ -546,23 +557,29 @@ class IterGraphModule(nn.Module):
             # No cross-iteration optimization is done. Simply call the
             # GraphModule.
             output = gm(*args, **kwargs)
-        logger.info(f"The output information: size={len(output)}, type={type(output)}")
+        logger.debug(f"The output information: size={len(output)}, type={type(output)}")
         return output
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         self._iter += 1
         if self._iter == 1:
-            self.print_all_graphs()
-            logger.warning("Using the setup graph")
+            logger.info("Using the setup graph")
             gm = self.setup_gm
+            profiler_string = "## IterGraphModule: Setup Graph ##"
         elif self._iter == self._max_iters:
-            logger.warning("Using the cleanup graph")
+            logger.info("Using the cleanup graph")
             gm = self.cleanup_gm
+            profiler_string = "## IterGraphModule: Cleanup Graph ##"
         else:
-            logger.warning("Using the main graph")
             gm = self.main_gm
+            if self._iter == 2:
+                logger.info("Using the main graph")
+                profiler_string = "## IterGraphModule -- Maybe Compiling ##"
+            else:
+                profiler_string = "## IterGraphModule ##"
 
-        return self._run(gm, *args, **kwargs)
+        with record_function(profiler_string):
+            return self._run(gm, *args, **kwargs)
 
     @property
     def graph(self) -> IterGraph:

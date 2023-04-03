@@ -1144,6 +1144,8 @@ class Scheduler:
             device.type != "cuda" or device.index is not None
         ), f"{device} should have been normalized in lowering"
         V.graph.device_types.add(device.type)
+        V.graph.add_device_idx(device.index)
+
         if device.type == "cpu":
             from .codegen.cpp import CppScheduling
 

@@ -1,11 +1,9 @@
 # Owner(s): ["module: inductor"]
-import logging
 import math
 import unittest
 
 import torch
 
-import torch._dynamo.config as dynamo_config
 from torch._dynamo.test_case import run_tests, TestCase
 
 from torch._inductor import config
@@ -16,6 +14,7 @@ def dummy_fn(x):
     return torch.sigmoid(x + math.pi) / 10.0
 
 
+@unittest.skipIf(torch.backends.mps.is_available(), "default to aot_eager")
 class TestInductorConfig(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -86,14 +85,6 @@ class TestInductorConfig(TestCase):
             with config.patch("cpp.threads", 8999):
                 self.assertEqual(config.cpp.threads, 8999)
             self.assertEqual(config.cpp.threads, 9000)
-
-    def test_log_level_property(self):
-        old = dynamo_config.log_level
-        try:
-            dynamo_config.log_level = logging.CRITICAL
-            self.assertEqual(logging.getLogger("torch._dynamo").level, logging.CRITICAL)
-        finally:
-            dynamo_config.log_level = old
 
     @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
     def test_compile_api(self):
@@ -185,6 +176,12 @@ class TestInductorConfig(TestCase):
         self.assertEqual(max_autotune_opts["epilogue_fusion"], True)
         self.assertEqual(max_autotune_opts["max_autotune"], True)
         self.assertEqual(max_autotune_opts["triton.cudagraphs"], True)
+
+    def test_invalid_backend(self):
+        self.assertRaises(
+            torch._dynamo.exc.InvalidBackend,
+            lambda: torch.compile(dummy_fn, backend="does_not_exist")(torch.randn(10)),
+        )
 
 
 if __name__ == "__main__":
