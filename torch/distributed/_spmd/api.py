@@ -8,6 +8,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    List,
     Optional,
     Sequence,
     Set,
@@ -323,10 +324,10 @@ DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
 }
 
 
-def _lint(gm: fx.GraphModule) -> fx.Graph:
+def _lint(gm: fx.GraphModule) -> fx.GraphModule:
     # deduplicate collectives
     node_to_node: Dict[fx.Node, fx.Node] = {}
-    args_to_node: Dict[Tuple[Callable, Tuple[Any, ...]], fx.Node] = {}
+    args_to_node: Dict[Tuple[Any, ...], fx.Node] = {}
 
     nodes_to_erase: List[fx.Node] = []
 
