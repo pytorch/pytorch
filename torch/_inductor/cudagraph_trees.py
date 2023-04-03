@@ -1378,8 +1378,8 @@ class CUDAGraphTreeManager:
         # but that adds some complications.
         deleted = set()
         for t, stack_trace in self.current_node.path_live_weakrefs_and_stacktraces():
-            if t() and t() not in deleted:
-                deleted.add(t())
+            if t() and t.data_ptr() not in deleted:
+                deleted.add(t.data_ptr())
                 torch._C._free_And_Remove_DeleterFn(t())
                 stack_trace = (
                     stack_trace.strip()
