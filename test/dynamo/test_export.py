@@ -2296,6 +2296,22 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f, torch.randn(5, 6), aten_graph=True, tracing_mode="symbolic"
             )
 
+    def test_shallow_list_copy(self):
+        def foo(x):
+            # Copy works
+            y = x.copy()
+            x[0] = x[1]
+            # Correct transferance of mutable_local
+            y.append(torch.tensor([0.5, 0.5]))
+            return x[0] * x[1], y[0] * y[1], y[2]
+
+        inps = [torch.tensor([1.0, 1.0]), torch.tensor([2.0, 2.0])]
+
+        real = foo(inps)
+        graph, guards = torch._dynamo.export(foo, inps)
+        exported = graph(inps)
+        self.assertTrue(torch._dynamo.utils.same(real, exported))
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
