@@ -213,8 +213,8 @@ void initializeKineto() {
 
 bool kinetoProfilerIsRegistered() {
   // Why not call libkineto::api().isProfilerRegistered()?
-  // This is a workaround for cases where direct calls fail builds (e.g.
-  // Windows)
+  // This is a workaround for cases where direct calls result in failing builds
+  // (e.g. Windows)
 #ifdef USE_KINETO
   return libkineto::api().isProfilerRegistered();
 #else
