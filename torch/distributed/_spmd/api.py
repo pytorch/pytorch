@@ -154,7 +154,7 @@ def _dtensor_expand(
         if isinstance(a, torch.Tensor):
             inps.append(a)
             schemas.append(shard_schema)
-        elif isinstance(a, nn.Module) or isinstance(a, torch.optim.Optimizer):
+        elif isinstance(a, (nn.Module, torch.optim.Optimizer)):
             # nn.Module or optimizer placeholder is captured by make_fx but
             # never used in the graph
             inps.append(torch.empty(0))
