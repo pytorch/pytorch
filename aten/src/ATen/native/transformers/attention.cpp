@@ -179,7 +179,7 @@ Tensor transform0213_gemm_nt_bias(
     const Tensor& query) {
   if (query.is_nested()) {
     at::Tensor nested_a = _nested_from_padded(
-        a, get_nested_tensor_impl(query)->get_nested_size_tensor(), true);
+        a, get_nested_tensor_impl(query)->get_nested_sizes(), true);
     return NestedTensor_times_Tensor_plus_Tensor_addmm(
         c, nested_a, b.t(), 1, 1);
   } else {
@@ -377,7 +377,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
       "expected `qkv_weight` second dim to be embed_Dim");
   TORCH_CHECK(
       qkv_bias.dim() == 1,
-      "expected 2-D `qkv_bias`, got ",
+      "expected 1-D `qkv_bias`, got ",
       qkv_bias.dim(),
       "-D tensor");
   TORCH_CHECK(
@@ -387,7 +387,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
 
 #ifndef NDEBUG
   const auto B = query.is_nested()
-      ? get_nested_tensor_impl(query)->get_nested_size_tensor().size(0)
+      ? get_nested_tensor_impl(query)->get_nested_sizes().size(0)
       : query.sizes()[0];
   auto T = query.is_nested() ? 0 : query.sizes()[1];
   const auto dim_per_head = D / num_head;
@@ -482,7 +482,6 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
   }
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
-
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
@@ -748,7 +747,7 @@ Tensor triton_multi_head_attention(
 
 #ifndef NDEBUG
   const auto B = query.is_nested()
-      ? get_nested_tensor_impl(query)->get_nested_size_tensor().size(0)
+      ? get_nested_tensor_impl(query)->get_nested_sizes().size(0)
       : query.sizes()[0];
   auto T = query.is_nested() ? 0 : query.sizes()[1];
   const auto dim_per_head = D / num_head;

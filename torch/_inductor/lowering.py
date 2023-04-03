@@ -21,6 +21,7 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
+from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
@@ -81,6 +82,7 @@ add_needs_realized_inputs(
         aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
+        aten._int_mm,
     ]
 )
 
@@ -120,6 +122,8 @@ def decode_dtype(dtype: int):
 def is_integer_type(x):
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    elif isinstance(x, sympy.Symbol):
+        return x.is_integer is True
     else:
         return isinstance(x, int)
 
@@ -143,7 +147,7 @@ def decode_device(device):
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
-        if isinstance(inp, Number):
+        if isinstance(inp, (Number, sympy.Symbol)):
             return inp
         else:
             assert hasattr(inp, "get_dtype")
@@ -290,11 +294,18 @@ def broadcast_symbolic_shapes(a, b):
 def promote_constants(inputs, override_return_dtype=None):
     if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
-    if all(isinstance(x, (int, float)) for x in inputs):
+    if all(isinstance(x, (int, float, sympy.Symbol)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
             *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
         )
-        return [ir.Constant(x, dtype, decode_device(None)) for x in inputs]
+
+        def const_func(x):
+            if isinstance(x, sympy.Symbol):
+                return ir.IndexingConstant(x, dtype, decode_device(None))
+            else:
+                return ir.Constant(x, dtype, decode_device(None))
+
+        return [const_func(x) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView)))
     out = []
     for x in inputs:
@@ -1017,8 +1028,9 @@ def register_onednn_fusion_ops():
 register_onednn_fusion_ops()
 
 
-def fallback_handler(kernel):
-    fallbacks.add(kernel)
+def fallback_handler(kernel, add_to_fallback_set=True):
+    if add_to_fallback_set:
+        fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
         return pytree.tree_map(
@@ -1026,6 +1038,38 @@ def fallback_handler(kernel):
         )
 
     return handler
+
+
+def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
+    if t.dtype in (torch.complex32, torch.complex64, torch.complex128):
+        return True
+    return t.is_cpu and config.disable_cpp_codegen
+
+
+def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
+    def check_skip_condition(node, is_output):
+        if not isinstance(node, torch.fx.Node):
+            return False
+
+        if "val" not in node.meta:
+            return False
+
+        for meta in tree_flatten(node.meta["val"])[0]:
+            if not isinstance(meta, torch._subclasses.FakeTensor):
+                continue
+
+            if is_output:
+                if unsupported_output_tensor(meta):
+                    return True
+
+        return False
+
+    # only skip codegen if there is a cpu output, not input
+    for arg in tree_flatten((node.args, node.kwargs))[0]:
+        if check_skip_condition(arg, is_output=(False or not allow_cpu_inputs)):
+            return True
+
+    return check_skip_condition(node, is_output=True)
 
 
 def make_fallback(kernel, layout_constraint=None, warn=True):
@@ -1058,9 +1102,9 @@ def native_dropout(x, p, train):
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
 def bernoulli_(x, *args):
-    assert (
-        config.fallback_random
-    ), "this should be handled in decomps unless config.fallback_random"
+    assert config.fallback_random or x.get_device() == torch.device(
+        "cpu"
+    ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
     V.graph.realize_users_of(x.get_name())
     ir.InplaceBernoulliFallback(x, *args)
@@ -1069,9 +1113,9 @@ def bernoulli_(x, *args):
 
 @register_lowering(aten.bernoulli.p, type_promotion_kind=None)
 def bernoulli_p(x, *args):
-    assert (
-        config.fallback_random
-    ), "this should be handled in decomps unless config.fallback_random"
+    assert config.fallback_random or x.get_device() == torch.device(
+        "cpu"
+    ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     return bernoulli_(clone(x), *args)
 
 
@@ -1239,10 +1283,16 @@ make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten.cumsum, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
+make_fallback(aten._flash_attention_forward)
+make_fallback(aten._flash_attention_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
+make_fallback(aten._scaled_dot_product_efficient_attention.default)
+make_fallback(aten._scaled_dot_product_efficient_attention_backward.default)
+make_fallback(aten._scaled_dot_product_flash_attention)
+make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -1261,7 +1311,7 @@ make_fallback(aten._adaptive_avg_pool3d)
 make_fallback(aten.adaptive_max_pool2d)
 make_fallback(aten.adaptive_max_pool3d)
 make_fallback(aten.addbmm)
-make_fallback(aten.addmv)
+make_fallback(aten.addmv, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
@@ -1400,68 +1450,6 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
-
-
-add_layout_constraint(aten.convolution, constrain_to_fx_strides)
-
-
-@register_lowering(aten.convolution)
-def convolution(
-    x: TensorBox,
-    weight: TensorBox,
-    bias: TensorBox,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
-    transposed: bool,
-    output_padding: List[int],
-    groups: int,
-):
-    is_cpu = all(
-        input.get_device().type == "cpu"
-        for input in (x, weight, bias)
-        if input is not None
-    )
-    result = TensorBox.create(
-        ir.Convolution.create(
-            x,
-            weight,
-            bias if is_cpu else None,  # For cpu path, bias can always be fused
-            stride,
-            padding,
-            dilation,
-            transposed,
-            output_padding,
-            groups,
-        )
-    )
-    if not is_cpu and bias is not None:
-        kernel_dims = len(weight.get_size()) - 2
-        out_chan = result.get_size()[-1 - kernel_dims]
-        bias = view(bias, [out_chan] + kernel_dims * [1])
-        result = add(result, bias)
-    return result
-
-
-@register_lowering(aten._convolution)
-def _convolution(
-    x,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    transposed,
-    output_padding,
-    groups,
-    benchmark,
-    deterministic,
-    cudnn_enabled,
-    allow_tf32,
-):
-    return convolution(
-        x, weight, bias, stride, padding, dilation, transposed, output_padding, groups
-    )
 
 
 @register_lowering(aten.clone)
@@ -2050,7 +2038,14 @@ def index_put_(self, indices, values, accumulate=False):
         and len(indices) == 1
         and indices[0].get_dtype() in {torch.bool, torch.uint8}
     ):
-        return index_put_as_masked_fill(self, indices, values, accumulate)
+        mask = indices[0]
+        for _ in range(len(mask.get_size()), len(self.get_size())):
+            mask = unsqueeze(mask, -1)
+        return index_put_as_masked_fill(self, [mask], values, accumulate)
+
+    # Fallback in torch deterministic mode
+    if torch.are_deterministic_algorithms_enabled():
+        return index_put_fallback(self, indices, values, accumulate)
 
     # Fallback if there is a boolean index
     for index in indices:
@@ -2511,6 +2506,8 @@ def reflection_pad2d_backward(grad_output, x, padding):
         def index_range_condition(index_range):
             i, lb, ub = index_range
             i = ops.index_expr(i, torch.int32)
+            lb = ops.index_expr(lb, torch.int64)
+            ub = ops.index_expr(ub, torch.int64)
             return ops.and_(ops.ge(i, lb), ops.le(i, ub))
 
         def accumulate(out_x, out_y, index_range1, index_range2=None):
@@ -2598,10 +2595,19 @@ def constant_pad_nd(x, padding, fill_value=0):
     bounds = list(reversed(list(zip(padding[::2], padding[1::2]))))
     n = len(sizes) - len(bounds)
 
+    # if padding is a complicated expression, hoist it
+    bounds_precomp = []
+    for l, h in bounds:
+        l_precomp = (
+            V.graph.sizevars.lookup_precomputed_size(l)
+            if isinstance(l, sympy.Expr) and l.free_symbols
+            else l
+        )
+        bounds_precomp.append((l_precomp, h))
+
     output_size = list(sizes[:n])
     mask_sizes = []
     for (low, high), size in zip(bounds, sizes[n:]):
-        size = V.graph.sizevars.guard_static_shape(size)
         mask_sizes.append(size)
         output_size.append(sympy.expand(size + low + high))
     assert len(output_size) == len(sizes)
@@ -2619,7 +2625,7 @@ def constant_pad_nd(x, padding, fill_value=0):
 
     def offset_fn(index):
         new_index = list(index[:n])
-        for idx, (low, high) in zip(index[n:], bounds):
+        for idx, (low, high) in zip(index[n:], bounds_precomp):
             new_index.append(idx - low)
         assert len(new_index) == len(index)
         return mask(new_index)

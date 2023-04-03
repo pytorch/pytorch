@@ -335,6 +335,9 @@ static PyObject* _custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback);
+static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
+                                        PyFrameObject *frame, int throw_flag) = NULL;
+
 #if PY_VERSION_HEX >= 0x03090000
 static PyObject* custom_eval_frame_shim(
     PyThreadState* tstate,
@@ -357,7 +360,12 @@ inline static PyObject* eval_frame_default(
   if (tstate == NULL) {
     tstate = PyThreadState_GET();
   }
-  return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
+  if (previous_eval_frame) {
+    return previous_eval_frame(tstate, frame, throw_flag);
+  }
+  else {
+    return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
+  }
 #else
   return _PyEval_EvalFrameDefault(frame, throw_flag);
 #endif
@@ -367,8 +375,10 @@ inline static void enable_eval_frame_shim(PyThreadState* tstate) {
 #if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       &custom_eval_frame_shim) {
-    _PyInterpreterState_SetEvalFrameFunc(
-        tstate->interp, &custom_eval_frame_shim);
+    DEBUG_CHECK(previous_eval_frame == NULL);
+    previous_eval_frame = _PyInterpreterState_GetEvalFrameFunc(tstate->interp);
+    _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                         &custom_eval_frame_shim);
   }
 #else
   if (tstate->interp->eval_frame != &custom_eval_frame_shim) {
@@ -381,9 +391,11 @@ inline static void enable_eval_frame_shim(PyThreadState* tstate) {
 inline static void enable_eval_frame_default(PyThreadState* tstate) {
 #if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
-      &_PyEval_EvalFrameDefault) {
-    _PyInterpreterState_SetEvalFrameFunc(
-        tstate->interp, &_PyEval_EvalFrameDefault);
+      previous_eval_frame) {
+    DEBUG_CHECK(previous_eval_frame != NULL);
+    _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                         previous_eval_frame);
+    previous_eval_frame = NULL;
   }
 #else
   if (tstate->interp->eval_frame != &_PyEval_EvalFrameDefault) {
@@ -455,23 +467,23 @@ inline static void set_extra(PyCodeObject* code, CacheEntry* extra) {
   _PyCode_SetExtra((PyObject*)code, extra_index, extra);
 }
 
-#ifdef TORCHDYNAMO_DEBUG
 inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
   DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
   return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
-#endif
 
 static PyObject* call_guard_fail_hook(
     PyObject* hook,
     CacheEntry* e,
+    size_t index,
     PyObject* f_locals) {
   // call debugging logic when a guard fails
   PyObject* args = PyTuple_Pack(
-      4,
+      5,
       e->check_fn,
       e->code,
       f_locals,
+      PyLong_FromSize_t(index),
       (e->next == NULL ? Py_True : Py_False));
   if (args == NULL) return NULL;
   PyObject* result = PyObject_CallObject(hook, args);
@@ -502,7 +514,7 @@ static void call_profiler_end_hook(PyObject* record) {
 
 // Return value: borrowed reference
 // Is either Py_None or a PyCodeObject
-static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev) {
+static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev, size_t index) {
   if (e == NULL) {
     // NB: intentionally not using Py_RETURN_NONE, to return borrowed ref
     return Py_None;
@@ -523,7 +535,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     if (guard_error_hook != NULL) {
       PyObject *type, *value, *traceback;
       PyErr_Fetch(&type, &value, &traceback);
-      PyObject* r = call_guard_fail_hook(guard_error_hook, e, f_locals);
+      PyObject* r = call_guard_fail_hook(guard_error_hook, e, index, f_locals);
       if (r == NULL) {
         return NULL;
       }
@@ -546,13 +558,13 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     return (PyObject*)e->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
-    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, f_locals);
+    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, index, f_locals);
     if (r == NULL) {
       return NULL;
     }
     Py_DECREF(r);
   }
-  return lookup(e->next, frame, e);
+  return lookup(e->next, frame, e, index + 1);
 }
 
 static long cache_size(CacheEntry* e) {
@@ -578,27 +590,71 @@ inline static PyObject* eval_custom_code(
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
+  #if IS_PYTHON_3_11_PLUS
+  DEBUG_CHECK(ncells == frame->f_code->co_ncellvars);
+  DEBUG_CHECK(nfrees == frame->f_code->co_nfreevars);
+  #else
   DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
+  #endif
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
   PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
   #if IS_PYTHON_3_11_PLUS
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
+  Py_XINCREF(frame->f_func->func_closure);
+  shadow->f_func->func_closure = frame->f_func->func_closure;
   #else
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
   #endif
   if (shadow == NULL) {
+    Py_DECREF(shadow_obj);
     return NULL;
   }
 
   #if IS_PYTHON_3_11_PLUS
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
+
+  // copy from old fastlocals to new fastlocals:
+  // for i, name in enumerate(localsplusnames_new):
+  //   name_to_idx[name] = i
+  // for i, name in enumerate(localsplusnames_old):
+  //   fastlocals_new[name_to_idx[name]] = fastlocals_old[i]
+  PyObject* name_to_idx = PyDict_New();
+  if (name_to_idx == NULL) {
+    DEBUG_TRACE0("unable to create localsplus name dict");
+    Py_DECREF(shadow_obj);
+    return NULL;
+  }
+
+  for (Py_ssize_t i = 0; i < code->co_nlocalsplus; i++) {
+    PyObject *name = PyTuple_GET_ITEM(code->co_localsplusnames, i);
+    PyObject *idx = PyLong_FromSsize_t(i);
+    if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
+      Py_DECREF(shadow_obj);
+      Py_DECREF(name_to_idx);
+      return NULL;
+    }
+  }
+
+  for (Py_ssize_t i = 0; i < frame->f_code->co_nlocalsplus; i++) {
+    PyObject *name = PyTuple_GET_ITEM(frame->f_code->co_localsplusnames, i);
+    PyObject *idx = PyDict_GetItem(name_to_idx, name);
+    Py_ssize_t new_i = PyLong_AsSsize_t(idx);
+    if (name == NULL || idx == NULL || (new_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
+      Py_DECREF(shadow_obj);
+      Py_DECREF(name_to_idx);
+      return NULL;
+    }
+    Py_XINCREF(fastlocals_old[i]);
+    fastlocals_new[new_i] = fastlocals_old[i];
+  }
+
+  Py_DECREF(name_to_idx);
   #else
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
-  #endif
 
   for (Py_ssize_t i = 0; i < nlocals_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
@@ -609,6 +665,7 @@ inline static PyObject* eval_custom_code(
     Py_XINCREF(fastlocals_old[nlocals_old + i]);
     fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
+  #endif
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
   Py_DECREF(shadow_obj);
@@ -638,14 +695,22 @@ static PyObject* _custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback) {
+  #if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
-      "begin %s %s %i %i %i %i",
+      "begin %s %s %i %i",
+      name(frame),
+      PyUnicode_AsUTF8(frame->f_code->co_filename),
+      frame->f_code->co_firstlineno,
+      _PyInterpreterFrame_LASTI(frame));
+  #else
+  DEBUG_TRACE(
+      "begin %s %s %i %i %i",
       name(frame),
       PyUnicode_AsUTF8(frame->f_code->co_filename),
       frame->f_lineno,
       frame->f_lasti,
-      frame->f_iblock,
-      frame->f_executing);
+      frame->f_iblock);
+  #endif
 
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==
@@ -691,7 +756,7 @@ static PyObject* _custom_eval_frame(
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", name(frame));
     PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
-    PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+    PyObject* maybe_cached_code = lookup(extra, frame, NULL, 0);
     call_profiler_end_hook(hook_record);
     Py_XDECREF(hook_record);
 
@@ -717,7 +782,7 @@ static PyObject* _custom_eval_frame(
   eval_frame_callback_set(Py_None);
 
   PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
-  PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+  PyObject* maybe_cached_code = lookup(extra, frame, NULL, 0);
   call_profiler_end_hook(hook_record);
   Py_XDECREF(hook_record);
   if (maybe_cached_code == NULL) {

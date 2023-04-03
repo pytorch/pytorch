@@ -20,7 +20,7 @@
 #include <ATen/ops/empty_like_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 
@@ -274,5 +274,5 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   return output;
 }
 
-} // namespace native
-} // namespace at
+
+} // namespace at::native
