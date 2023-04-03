@@ -1344,8 +1344,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             backend=cc,
         )(outer_func)
 
-        # m = TestModule()
-        # handle = m.register_forward_hook(forward_hook)
         failure_reason = None
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
