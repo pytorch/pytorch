@@ -118,7 +118,9 @@ class Override(ABC):
 
     @abstractmethod
     def transform(
-        self, gm: fx.GraphModule, schema_map: Dict[str, Schema]
+        self, gm: fx.GraphModule,
+        schema_map: Dict[str, Schema],
+        flat_state: List[torch.Tensor],
     ) -> fx.GraphModule:
         r"""
         Given a DTensor-expanded graph and shardig schema for every node,
@@ -130,6 +132,11 @@ class Override(ABC):
             gm (:class:`fx.Graph`): a DTensor-expanded graph.
             schema_map (Dict[str, :class:`Schema`]): a dictionary maps from node
                 name to DTensor schema.
+            flat_state (List[str, :class:`Tensor`]): a reference to the list of
+                flattened state. The elements in ``flat_state`` map to the first
+                ``len(flat_state)`` placeholders in the graph. The transformation
+                can add state to or remove state from ``flat_state`` as long as
+                it keeps ``flat_state`` and the placeholders consistent.
 
         Returns:
             The :class:`fx.Graph` after transformation.
