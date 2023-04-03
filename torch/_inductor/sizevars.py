@@ -397,7 +397,7 @@ class SizeVarAllocator:
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         strides = tuple(
-            map(lambda x: abs(x), self.stride_hints(index, vars))
+            map(abs, self.stride_hints(index, vars))
         )  # lambda to placate mypy
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
