@@ -97,6 +97,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         training=torch.onnx.TrainingMode.EVAL,
         remained_onnx_input_idx=None,
         verbose=False,
+        functionalization=False,
     ):
         def _run_test(m, remained_onnx_input_idx, flatten=True, ignore_none=True):
             return run_model_test(
@@ -117,6 +118,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 flatten=flatten,
                 ignore_none=ignore_none,
                 verbose=verbose,
+                functionalization=functionalization,
             )
 
         if isinstance(remained_onnx_input_idx, dict):

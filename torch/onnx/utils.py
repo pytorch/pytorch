@@ -204,6 +204,7 @@ def export(
     keep_initializers_as_inputs: Optional[bool] = None,
     custom_opsets: Optional[Mapping[str, int]] = None,
     export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]] = False,
+    functionalization: bool = False,
 ) -> None:
     r"""Exports a model into ONNX format.
 
@@ -519,6 +520,7 @@ def export(
         keep_initializers_as_inputs=keep_initializers_as_inputs,
         custom_opsets=custom_opsets,
         export_modules_as_functions=export_modules_as_functions,
+        functionalization=functionalization,
     )
 
 
@@ -1079,6 +1081,15 @@ def _pre_trace_quant_model(model, args):
 
 
 @_beartype.beartype
+def _functionalize(model, *args):
+    # Delayed import to avoid circular dependency
+    import torch.func
+    from torch.fx.experimental import proxy_tensor
+
+    return proxy_tensor.make_fx(torch.func.functionalize(model))(*args)
+
+
+@_beartype.beartype
 def _model_to_graph(
     model,
     args,
@@ -1091,6 +1102,7 @@ def _model_to_graph(
     fixed_batch_size=False,
     training=_C_onnx.TrainingMode.EVAL,
     dynamic_axes=None,
+    functionalization: bool = False,
 ) -> Tuple[
     _C.Graph,
     Dict[str, torch.Tensor],
@@ -1119,6 +1131,8 @@ def _model_to_graph(
     if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args,)
 
+    if functionalization:
+        model = _functionalize(model, *args)
     model = _pre_trace_quant_model(model, args)
     graph, params, torch_out, module = _create_jit_graph(model, args)
     params_dict = _get_named_param_dict(graph, params)
@@ -1241,6 +1255,7 @@ def export_to_pretty_string(
     add_node_names=True,
     do_constant_folding=True,
     dynamic_axes=None,
+    functionalization: bool = False,
 ):
     r"""
     Similar to :func:`export`, but returns a text representation of the ONNX
@@ -1286,6 +1301,7 @@ def export_to_pretty_string(
             val_do_constant_folding,
             training=training,
             dynamic_axes=dynamic_axes,
+            functionalization=functionalization,
         )
 
         return graph._pretty_print_onnx(  # type: ignore[attr-defined]
@@ -1482,6 +1498,7 @@ def _export(
     add_node_names=True,
     onnx_shape_inference=True,
     export_modules_as_functions=False,
+    functionalization: bool = False,
 ):
     assert GLOBALS.in_onnx_export is False
 
@@ -1574,6 +1591,7 @@ def _export(
                 fixed_batch_size=fixed_batch_size,
                 training=training,
                 dynamic_axes=dynamic_axes,
+                functionalization=functionalization,
             )
 
             # TODO: Don't allocate a in-memory string for the protobuf

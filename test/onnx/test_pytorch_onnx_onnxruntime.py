@@ -6193,6 +6193,16 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_mutation(self):
+        class MutationModel(torch.nn.Module):
+            def forward(self, x):
+                x.view(3, 2, -1).add_(2.0)
+                return x
+
+        x = torch.randn(12)
+        self.run_test(MutationModel(), x, functionalization=True)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_zero(self):
         class Zero_(torch.nn.Module):
             def forward(self, x):

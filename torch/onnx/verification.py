@@ -826,6 +826,7 @@ def verify(
     fixed_batch_size: bool = False,
     use_external_data: bool = False,
     additional_test_inputs: Optional[Sequence[_InputArgsType]] = None,
+    functionalization: bool = False,
     options: Optional[VerificationOptions] = None,
 ):
     """Verify model export to ONNX against original PyTorch model.
@@ -885,6 +886,7 @@ def verify(
             fixed_batch_size=fixed_batch_size,
             training=training,
             verbose=verbose,
+            functionalization=functionalization,
         )
 
         _compare_onnx_pytorch_model(
