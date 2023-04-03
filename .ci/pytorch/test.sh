@@ -386,7 +386,7 @@ test_dynamo_benchmark() {
     test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training "$@"
   else
     # Check inference with --float32
-    test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --float32 "$@"
+    test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
     if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
       # Check training with --amp
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
