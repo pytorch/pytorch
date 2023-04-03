@@ -1041,6 +1041,8 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 
 
 def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
+    if t.dtype in (torch.complex32, torch.complex64, torch.complex128):
+        return True
     return t.is_cpu and config.disable_cpp_codegen
 
 
@@ -2040,6 +2042,10 @@ def index_put_(self, indices, values, accumulate=False):
         for _ in range(len(mask.get_size()), len(self.get_size())):
             mask = unsqueeze(mask, -1)
         return index_put_as_masked_fill(self, [mask], values, accumulate)
+
+    # Fallback in torch deterministic mode
+    if torch.are_deterministic_algorithms_enabled():
+        return index_put_fallback(self, indices, values, accumulate)
 
     # Fallback if there is a boolean index
     for index in indices:
