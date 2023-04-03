@@ -46,7 +46,7 @@ def bmm_flop(a_shape, b_shape, out=None) -> int:
     flop = b * m * n * 2 * k
     return flop
 
-def baddbmm_flop(self_shape, a_shape, b_shape, out=None) -> int:
+def baddbmm_flop(self_shape, a_shape, b_shape, out=None, **kwargs) -> int:
     """
     Count flops for the baddbmm operation.
     """
