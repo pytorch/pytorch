@@ -1,7 +1,7 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/anaconda
 {
-  "name": "Anaconda (Python 3)",
+  "name": "PyTorch",
   "build": {
     "context": "..",
     "dockerfile": "Dockerfile"
@@ -14,7 +14,7 @@
   // "forwardPorts": [],
 
   // Use 'postCreateCommand' to run commands after the container is created.
-  // "postCreateCommand": "python --version",
+  "postCreateCommand": "bash scripts/install-dev-tools.sh",
 
   // Configure tool-specific properties.
   // "customizations": {},
