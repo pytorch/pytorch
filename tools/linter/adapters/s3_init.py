@@ -144,7 +144,7 @@ def download(
         logging.critical(f"Downloaded binary {name} failed its hash check")
         return False
 
-    # Ensure that exeuctable bits are set
+    # Ensure that executable bits are set
     mode = os.stat(binary_path).st_mode
     mode |= stat.S_IXUSR
     os.chmod(binary_path, mode)
