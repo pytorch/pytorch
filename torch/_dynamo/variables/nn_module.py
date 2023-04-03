@@ -199,7 +199,6 @@ class NNModuleVariable(VariableTracker):
 
         @contextmanager
         def record_nn_module_stack():
-            # breakpoint()
             fully_qualified_name = self.source.name()
             try:
                 tx.nn_module_stack[self.module_key] = (fully_qualified_name, type(mod))
@@ -208,7 +207,6 @@ class NNModuleVariable(VariableTracker):
                 del tx.nn_module_stack[self.module_key]
 
         with record_nn_module_stack():
-            # breakpoint()
             is_lazy = is_lazy_module(mod)
             if (
                 isinstance(mod, torch.nn.Sequential)

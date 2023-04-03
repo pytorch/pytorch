@@ -114,12 +114,15 @@ class SubgraphMatcher:
             raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
         return False
 
-    def _nodes_are_equal(self, pn: Node, gn: Node, get_anchor: bool = False) -> bool:
+    def _nodes_are_equal(self, pn: Node, gn: Node) -> bool:
         # if exact match for placeholder is not required, then use placeholder as a wildcard
         if not self.match_placeholder and pn.op == "placeholder":
             return True
 
-        if self.match_flattened_modules and pn.op == "call_module":
+        if pn.op == "call_module" and self.match_flattened_modules:
+            # Check if gn is the last node of a flattened module that has the
+            # same type as the given pn call_module node's target
+
             assert len(pn.args) == 1
             module_type = type(self.pattern.owning_module.get_submodule(pn.target))
 
@@ -135,7 +138,7 @@ class SubgraphMatcher:
             return pn.target == gn.target
         return False
 
-    def _is_contained(self, nodes_map: Dict[Node, Node]) -> bool:
+    def _is_contained(self, nodes_map: Dict[Node, Union[Node, List[Node]]]) -> bool:
         # `lookup` represents all the nodes in `original_graph`
         # that are part of `pattern`
 
@@ -237,23 +240,25 @@ class SubgraphMatcher:
         match_found = True
     
         if pn.op == "call_module" and self.match_flattened_modules:
+            # Skip over all the nodes that are in the flattened module and find
+            # all the arguments to the flattened module
             gn_args = set()
-            module_type = type(self.pattern.owning_module.get_submodule(pn.target))
-            modules_of_type = self.module_partitions[module_type]
 
             nn_module_stack = gn.meta["nn_module_stack"]
-            unique_module_name, (fqn, gn_module_type) = nn_module_stack.popitem()
-            nn_module_stack[unique_module_name] = (fqn, gn_module_type)
-            assert gn_module_type == module_type 
+            module_call, (fqn, module_type) = nn_module_stack.popitem()
+            nn_module_stack[module_call] = (fqn, module_type)
 
-            gn_module_nodes = modules_of_type[unique_module_name]
+            gn_module_nodes = self.module_partitions[module_type][module_call]
             logger.info(f"  Skipping over nodes {gn_module_nodes} as they are part " + 
             f"of the same {module_type} module.")
+            match.nodes_map[pn] = gn_module_nodes
+
             for n in reversed(gn_module_nodes):
                 if n.op == "call_function":
                     gn_args.update(n.args)
                 gn_args.discard(n)
-            match.nodes_map[pn] = gn_module_nodes
+
+            gn_args = list(gn_args)
         else:
             gn_args = gn.args
 
@@ -294,21 +299,25 @@ class SubgraphMatcher:
 
         return True
 
-    def get_module_partitions(self, graph: Graph): 
+    def get_module_partitions(self, graph: Graph) -> None: 
+        # Dictionary mapping type of module (ex.
+        # torch.nn.modules.linear.Linear) to another dictionary mapping each
+        # unique call of a module (ex. self_linear1 or self_linear1_1) to a list
+        # of nodes that are in this module call
         modules: Dict[Type[Any], Dict[str, List[torch.fx.Node]]] = {}
 
         for node in graph.nodes:
             if (nn_module_stack := node.meta.get("nn_module_stack", None)) is None:
                 continue
         
-            unique_module_name, (fqn, module_type) = nn_module_stack.popitem()
-            nn_module_stack[unique_module_name] = (fqn, module_type)
+            module_call, (fqn, module_type) = nn_module_stack.popitem()
+            nn_module_stack[module_call] = (fqn, module_type)
 
             diff_modules = modules.setdefault(module_type, {})
-            partition = diff_modules.setdefault(unique_module_name, [])
+            partition = diff_modules.setdefault(module_call, [])
             partition.append(node)
 
-        return modules
+        self.module_partitions = modules
 
     def match(self, graph: Graph) -> List[InternalMatch]:
         """
@@ -349,13 +358,13 @@ class SubgraphMatcher:
         from torch.fx.passes.utils.fuser_utils import validate_partition
 
         if self.match_flattened_modules:
-            self.module_partitions = self.get_module_partitions(graph)
+            self.get_module_partitions(graph)
 
         # find candidate nodes to match with pattern anchors
         match_candidates: Dict[Node, List[Node]] = defaultdict(list)
         for pattern_anchor in self.pattern_anchors:
             for node in graph.nodes:
-                if self._nodes_are_equal(pattern_anchor, node, get_anchor=True):
+                if self._nodes_are_equal(pattern_anchor, node):
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
 
@@ -370,6 +379,9 @@ class SubgraphMatcher:
                 for pn in self.pattern_returning_nodes:
                     ret_nodes = match.nodes_map[pn]
                     if isinstance(ret_nodes, list):
+                        # This is assuming that the module only returns one
+                        # thing (or the last node in the flattened module nodes
+                        # is the return value)
                         match.returning_nodes.append(ret_nodes[-1])
                     else:
                         match.returning_nodes.append(ret_nodes)

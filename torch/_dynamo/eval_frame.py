@@ -768,11 +768,6 @@ def export(
                 r.node.meta["val"] = self.current_node.meta["val"]
             return r
         
-    # print(graph.graph)
-    # for n in graph.graph.nodes:
-    #     print(n, n.meta.get("nn_module_stack", None), n.meta.get("source_fn", None))
-    # breakpoint()
-
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
