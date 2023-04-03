@@ -157,6 +157,8 @@ _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
+disable_cpp_codegen = is_fbcode()
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -228,7 +230,7 @@ class triton:
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
     # whether they should be unique.
-    unique_kernel_names = False
+    unique_kernel_names = os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES") == "1"
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)

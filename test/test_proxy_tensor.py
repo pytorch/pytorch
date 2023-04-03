@@ -40,7 +40,7 @@ def strip_end(s, suffix):
 def show_guards(gm):
     names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
     return "\n".join(
-        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True)
+        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True, constraint_inputs=None)
     )
 
 
@@ -286,6 +286,16 @@ def forward(self, a_1):
         self.assertFalse(is_any_sum(traced))
         self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
         self.assertTrue(is_any_digamma(traced))
+
+    # See https://github.com/pytorch/pytorch/issues/97541
+    def test_empty_like_doesnt_burn_in_defaults(self):
+        def f(x):
+            return torch.empty_like(x)
+        out = make_fx(f)(torch.randn(3))
+        self.assertExpectedInline(out.code.strip(), """\
+def forward(self, x_1):
+    empty_like = torch.ops.aten.empty_like.default(x_1, pin_memory = False);  x_1 = None
+    return empty_like""")
 
     def test_proxy_tensor_mode_with_decomp_table_preserves_proxy(self):
         def f(x):
@@ -1212,7 +1222,9 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         from torch._dynamo.source import LocalSource
         self.assertExpectedInline(
-            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")])),
+            str(fx_g.shape_env.produce_guards(
+                fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")],
+                constraint_inputs=[None, None])),
             """['a.size()[0] == 2*b.size()[0]', 'a.stride()[0] == 1', 'a.storage_offset() == 0', 'b.stride()[0] == 1', 'b.storage_offset() == 0', '2 <= b.size()[0]']"""  # noqa: B950
         )
 
