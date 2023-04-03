@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -60,7 +61,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
-from .ctx_manager import CUDAStreamVariable
+from .ctx_manager import CUDAStreamVariable, NullContextVariable
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -521,6 +522,14 @@ class VariableBuilder:
             return UserMethodVariable(
                 value.__func__,
                 self_obj,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif (
+            istype(value, contextlib.nullcontext)
+            and inspect.getattr_static(value, "enter_result", None) is None
+        ):
+            return NullContextVariable(
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
