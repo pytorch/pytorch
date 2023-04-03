@@ -1488,16 +1488,25 @@ class BenchmarkRunner:
 
         start_stats = get_dynamo_stats()
 
-        if self.args.accuracy:
-            status = self.check_accuracy(
-                name, model, example_inputs, optimize_ctx, experiment, tag
+        if self.args.profile:
+            use_cuda = "cuda" in self.args.devices
+            profiler = torch.autograd.profiler.profile(
+                use_cuda=use_cuda, use_kineto=True, record_shapes=True
             )
-            print(status)
-        elif self.args.performance:
-            status = self.run_performance_test(
-                name, model, example_inputs, optimize_ctx, experiment, tag
-            )
-            print(status)
+        else:
+            profiler = NullContext()
+
+        with profiler:
+            if self.args.accuracy:
+                status = self.check_accuracy(
+                    name, model, example_inputs, optimize_ctx, experiment, tag
+                )
+                print(status)
+            elif self.args.performance:
+                status = self.run_performance_test(
+                    name, model, example_inputs, optimize_ctx, experiment, tag
+                )
+                print(status)
         if self.args.timing:
             from torch._dynamo.utils import op_count, print_time_report
             from torch.utils._stats import simple_call_counter
@@ -1521,6 +1530,10 @@ class BenchmarkRunner:
                 f"{stats['graph_breaks']} graph breaks ({stats['unique_graph_breaks']} unique)"
             )
 
+        if self.args.profile:
+            # TODO(voz): DO NOT LAND WITHOUT - Allow callers to define a file for this to write to
+            # Allow callers to define sort key
+            print(profiler.key_averages().table(sort_by="cpu_time_total"))
         if self.args.stats:
             Stats.print_summary()
 
@@ -1818,6 +1831,7 @@ def parse_args(args=None):
         cause time measurement not accurate""",
     )
     parser.add_argument("--timing", action="store_true", help="Emits phase timing")
+    parser.add_argument("--profile", action="store_true", help="Emits profile")
 
     parser.add_argument(
         "--progress",
