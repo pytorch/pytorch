@@ -27,7 +27,7 @@ class MockSparseLinear(nn.Linear):
         """
         """
         linear = cls(mod.in_features,
-                      mod.out_features)
+                     mod.out_features)
         return linear
 
 

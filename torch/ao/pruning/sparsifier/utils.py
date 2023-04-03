@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Type
 from torch.nn.utils.parametrize import type_before_parametrizations, is_parametrized
 from itertools import chain
 
@@ -14,7 +14,7 @@ __all__ = [
 ]
 
 
-def module_contains_param(module: nn.Module, parametrization: nn.Module) -> bool:
+def module_contains_param(module: nn.Module, parametrization: Type[nn.Module]) -> bool:
     if is_parametrized(module):
         # see if any of the module tensors have a parametriztion attached that matches the one passed in
         return any(

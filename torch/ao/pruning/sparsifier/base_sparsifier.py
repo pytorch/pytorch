@@ -299,7 +299,11 @@ class BaseSparsifier(abc.ABC):
                 module.sparse_params = sparse_params
 
     def convert(
-            self, module: nn.Module, mapping: Optional[Dict[nn.Module, nn.Module]] = None, inplace: bool = False, parameterization: Type[nn.Module] = FakeSparsity
+        self,
+        module: nn.Module,
+        mapping: Optional[Dict[nn.Module, nn.Module]] = None,
+        inplace: bool = False,
+        parameterization: Type[nn.Module] = FakeSparsity,
     ):
         r"""Converts submodules in input module to a different module according to `mapping`
         by calling `from_dense` method on the target module class
