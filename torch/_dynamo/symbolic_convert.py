@@ -672,8 +672,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def STORE_FAST(self, inst):
         val = self.pop()
         if hasattr(val, "mutable_local") and val.mutable_local:
-            assert not hasattr(val.mutable_local, "source")
-            val.mutable_local.source = LocalSource(inst.argval)
+            if not hasattr(val.mutable_local, "source"):
+                val.mutable_local.source = LocalSource(inst.argval)
         self.symbolic_locals[inst.argval] = val
 
     def DELETE_FAST(self, inst):
