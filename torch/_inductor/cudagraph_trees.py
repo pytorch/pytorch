@@ -77,6 +77,7 @@ from torch.utils import _pytree as pytree
 
 StorageWeakRefPointer = int
 StorageDataPtr = int
+NBytes = int
 
 if torch.has_cuda:
     from torch._C import _cuda_CUDAAllocator_AllocatorState as AllocatorState
@@ -572,7 +573,7 @@ class CUDAGraphNode:
         # check that it is still alive, and we hash based on observed recording data ptr
         # and storage cdata.
         self.storage_cache: Dict[
-            Tuple[StorageDataPtr, StorageWeakRefPointer], StorageWeakRefWrapper
+            Tuple[StorageDataPtr, NBytes], StorageWeakRefWrapper
         ] = (parent.storage_cache if parent is not None else {})
 
         # we preserve a single reference to executed outputs that is then referenced
@@ -726,9 +727,7 @@ class CUDAGraphNode:
                 assert data_ptr == new_inputs[idx].data_ptr()
                 # TODO - shouldnt need to add this for persistent static inputs
                 # since we dont manage the lifetimes of their aliased outputs
-                self.add_to_storage_cache(
-                    new_inputs[idx].untyped_storage(), self.inputs_metadata[idx]
-                )
+                self.add_to_storage_cache(new_inputs[idx].untyped_storage())
             else:
                 # non-static input, need to copy it into CUDA graph
                 dst = self._reconstruct_from_tensor_metadata(self.inputs_metadata[idx])
@@ -1039,22 +1038,20 @@ class CUDAGraphNode:
         )
         return t
 
-    def add_to_storage_cache(
-        self, untyped_storage: UntypedStorage, metadata: Dict[str, Any]
-    ):
+    def add_to_storage_cache(self, untyped_storage: UntypedStorage):
         self.storage_cache[
-            (untyped_storage.data_ptr(), metadata["ref_cdata"])
+            (untyped_storage.data_ptr(), untyped_storage.nbytes())
         ] = StorageWeakRefWrapper(untyped_storage)
 
     def get_or_create_storage(self, metadata):
         storage_wrapper = self.storage_cache.get(
-            (metadata["data_ptr"], metadata["ref_cdata"]), None
+            (metadata["data_ptr"], metadata["nbytes"]), None
         )
         if storage_wrapper is None or not storage_wrapper():
             s = torch._C._construct_storage_from_data_pointer(
                 metadata["data_ptr"], metadata["device"], metadata["nbytes"]
             )
-            self.add_to_storage_cache(s, metadata)
+            self.add_to_storage_cache(s)
         else:
             s = torch.UntypedStorage._new_with_weak_ptr(storage_wrapper())
         return s
