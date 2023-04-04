@@ -1976,6 +1976,8 @@ class CommonTemplate:
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
+    @slow()
+    @unittest.skipIf(not has_bf16_support(), "requires bf16 support")
     def test_linear_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -2001,17 +2003,16 @@ class CommonTemplate:
 
         options = itertools.product(unary_list, [[2, 3, 10], [2, 10]], [True, False])
         dtype = torch.bfloat16
-        if has_bf16_support():
-            for eltwise_fn, input_shape, bias in options:
-                mod = M(eltwise_fn, input_shape[-1], 30, bias=bias).eval()
-                # only fuse for linear when the dtype is bf16
-                mod = mod.to(dtype)
-                v = torch.randn(input_shape).to(dtype)
-                with torch.no_grad():
-                    self.common(
-                        mod,
-                        (v,),
-                    )
+        for eltwise_fn, input_shape, bias in options:
+            mod = M(eltwise_fn, input_shape[-1], 30, bias=bias).eval()
+            # only fuse for linear when the dtype is bf16
+            mod = mod.to(dtype)
+            v = torch.randn(input_shape).to(dtype)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     def test_linear_binary(self):
         class M(torch.nn.Module):
@@ -3396,6 +3397,23 @@ class CommonTemplate:
             (
                 torch.randint(0, 2, (2, 20), dtype=torch.bool),
                 torch.randint(0, 2, (2, 20), dtype=torch.bool),
+            ),
+        )
+
+    def test_bitwise3(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/97968
+        def fn(x, y):
+            return (
+                torch.max(torch.bitwise_and(x, y), y),
+                torch.clamp_max(torch.bitwise_or(x, y), y),
+                torch.clamp_min(torch.bitwise_xor(x, y), y),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.rand([5, 10, 1]).to(torch.int8),
+                torch.rand([10, 1]).to(torch.int8),
             ),
         )
 
@@ -5771,6 +5789,24 @@ class CommonTemplate:
             return b * 0.8
 
         self.common(fn, ())
+
+    def test_getitem(self):
+        out_features = ["p3", "p4", "p5", "p6", "p7"]
+        in_feature = "p5"
+
+        def fn(a):
+            return a[out_features.index(in_feature)]
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = [
+                    torch.rand([1, 256, 100, 152]),
+                    torch.rand([1, 256, 50, 76]),
+                    torch.rand([1, 256, 25, 38]),
+                ]
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x), opt_fn(x))
 
 
 @dataclasses.dataclass
