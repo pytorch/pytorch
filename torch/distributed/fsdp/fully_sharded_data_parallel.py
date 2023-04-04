@@ -199,16 +199,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         accessing the original parameters between forward and backward may
         raise an illegal memory access.
 
-    .. warning::
-        For ``use_orig_params=True``, ``ShardingStrategy.SHARD_GRAD_OP``
-        exposes the unsharded parameters, not the sharded parameters, after
-        forward since it does not free the unsharded ones, unlike
-        ``ShardingStrategy.FULL_SHARD``. One caveat is that, since gradients
-        are always sharded or ``None``, ``ShardingStrategy.SHARD_GRAD_OP`` will
-        not expose the sharded gradients with the unsharded parameters after
-        forward. If you want to inspect the gradients, try
-        :meth:`summon_full_params` with ``with_grads=True``.
-
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.

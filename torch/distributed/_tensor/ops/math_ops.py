@@ -3,7 +3,6 @@ from typing import cast, Optional, Sequence
 
 import torch
 
-import torch.distributed.distributed_c10d as c10d
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import pointwise_rule, reduction_rule
 from torch.distributed._tensor.ops.utils import (
@@ -11,7 +10,7 @@ from torch.distributed._tensor.ops.utils import (
     normalize_dims,
     register_prop_rule,
 )
-from torch.distributed._tensor.placement_types import _Partial, DTensorSpec
+from torch.distributed._tensor.placement_types import DTensorSpec
 
 
 aten = torch.ops.aten
@@ -88,17 +87,9 @@ def mean_rule(op_schema: OpSchema) -> OutputSharding:
         dims = _infer_reduction_dims(args_schema[1], input_spec.ndim)
 
     keep_dim = len(args_schema) > 2 and bool(args_schema[2])
-    output_sharding = reduction_rule(
-        op_schema, dims=dims, keep_dim=keep_dim, reduction_linear=True
+    return reduction_rule(
+        op_schema, dims=dims, keep_dim=keep_dim, reduction_linear=False
     )
-    if output_sharding.output_spec is not None:
-        assert isinstance(output_sharding.output_spec, DTensorSpec)
-        for placement in output_sharding.output_spec.placements:
-            if placement.is_partial():
-                partial_placement = cast(_Partial, placement)
-                partial_placement.reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
-
-    return output_sharding
 
 
 @register_prop_rule(

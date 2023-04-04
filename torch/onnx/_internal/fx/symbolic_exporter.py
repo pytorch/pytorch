@@ -10,10 +10,10 @@ import onnx
 
 import torch
 import torch.fx
-import torch.onnx
-import torch.onnx._internal.fx.fx_exporter
-import torch.onnx._internal.fx.passes as passes
+
+from torch.onnx import _constants
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.fx import exporter, passes
 
 # Functions directly wrapped to produce torch.fx.Proxy so that symbolic
 # data can flow through those functions. Python functions (e.g., `torch.arange`)
@@ -58,13 +58,14 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
 
 @_beartype.beartype
 def _trace_into_fx_graph_via_fx_symbolic_trace(
-    signature: inspect.Signature,
     module: torch.nn.Module,
     *args,
     # kwargs are the keyword arguments to call "module"; that is,
     # module(*args, **kwargs) must run.
     **kwargs,
 ) -> Tuple["torch.fx.GraphModule", Tuple[Any, ...]]:
+    signature = inspect.signature(module.forward)
+
     # We hope the input kwargs will be mapped to bound.args after binding.
     # If not, we will raise an error.
     bound = signature.bind(*args, **kwargs)
@@ -164,56 +165,59 @@ def _module_expansion_symbolic_trace(
             setattr(torch, name, wrapped)
 
 
-class FXSymbolicTraceExportOutput(torch.onnx.ExportOutput):
-    def __init__(
-        self,
-        model_proto: onnx.ModelProto,
-        fx_graph_module: torch.fx.GraphModule,
-        bound_args: Tuple[Any, ...],
-        replaced_attrs: Tuple[torch.Tensor, ...],
-    ):
-        super().__init__(model_proto)
-        self.fx_graph_module = fx_graph_module
-        self.bound_args = bound_args
-        self.replaced_attrs = replaced_attrs
+@_beartype.beartype
+def export_without_parameters_and_buffers(
+    module: torch.nn.Module,
+    *args,
+    decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
+    use_binary_format: bool = True,
+    opset_version: int = _constants.ONNX_DEFAULT_OPSET,
+    op_level_debug: bool = False,
+    enable_dynamic_axes: bool = True,
+    # kwargs are the keyword arguments to call "module"; that is,
+    # module(*args, **kwargs) must run.
+    **kwargs,
+) -> Tuple[
+    Union[onnx.ModelProto, bytes],
+    torch.fx.GraphModule,
+    Tuple[Any, ...],
+    Tuple[torch.Tensor, ...],
+]:
+    graph_module, bound_args = _trace_into_fx_graph_via_fx_symbolic_trace(
+        module, *args, **kwargs
+    )
 
-
-class FXSymbolicTraceExporter(
-    torch.onnx._internal.fx.fx_exporter.FXGraphModuleExporter
-):
-    def export(self) -> FXSymbolicTraceExportOutput:
-        graph_module, bound_args = _trace_into_fx_graph_via_fx_symbolic_trace(
-            self.model_signature, self.model, *self.model_args, **self.model_kwargs
-        )
-
-        # Make sure all placeholder nodes are executed before get_attr nodes.
-        # Otherwise, inputs can interleave with initializers in the final ModeoProto.graph.input.
-        # Basically, we want
-        #  ModeoProto.graph.input =
-        #   [input_0, input_1, ..., input_n, weight_0, weight_1, ..., weight_m]
-        # and we don't want
-        #  ModeoProto.graph.input =
-        #   [input_0, weight_0, input_1, weight_1, ..., input_n, weight_0, weight_1, ..., weight_m]
-        graph_module = passes.MovePlaceholderToFront(graph_module).run()
-        # To save memory, move get_attr to input so that the generated model doesn't
-        # have weigh tensors. "replaced_attrs" are a tuple of replaced weight tensors.
-        replace_get_attr_with_placeholder_pass = passes.ReplaceGetAttrWithPlaceholder(
-            graph_module
-        )
-        graph_module = replace_get_attr_with_placeholder_pass.run()
-        replaced_attrs = replace_get_attr_with_placeholder_pass.replaced_attrs
-        # Move all newly created placeholder nodes to the front of the graph.
-        graph_module = passes.MovePlaceholderToFront(graph_module).run()
-        # Finalize the graph editing.
-        graph_module.recompile()
-
-        export_output = self.export_fx_to_onnx(
-            graph_module, bound_args + replaced_attrs
-        )
-
-        return FXSymbolicTraceExportOutput(
-            model_proto=export_output.model_proto,
-            fx_graph_module=graph_module,
-            bound_args=bound_args,
-            replaced_attrs=replaced_attrs,
-        )
+    # Make sure all placeholder nodes are executed before get_attr nodes.
+    # Otherwise, inputs can interleave with initializers in the final ModeoProto.graph.input.
+    # Basically, we want
+    #  ModeoProto.graph.input =
+    #   [input_0, input_1, ..., input_n, weight_0, weight_1, ..., weight_m]
+    # and we don't want
+    #  ModeoProto.graph.input =
+    #   [input_0, weight_0, input_1, weight_1, ..., input_n, weight_0, weight_1, ..., weight_m]
+    graph_module = passes.MovePlaceholderToFront(graph_module).run()
+    # To save memory, move get_attr to input so that the generated model doesn't
+    # have weigh tensors. "replaced_attrs" are a tuple of replaced weight tensors.
+    replace_get_attr_with_placeholder_pass = passes.ReplaceGetAttrWithPlaceholder(
+        graph_module
+    )
+    graph_module = replace_get_attr_with_placeholder_pass.run()
+    replaced_attrs = replace_get_attr_with_placeholder_pass.replaced_attrs
+    # Move all newly created placeholder nodes to the front of the graph.
+    graph_module = passes.MovePlaceholderToFront(graph_module).run()
+    # Finalize the graph editing.
+    graph_module.recompile()
+    return (
+        exporter._export(
+            graph_module,
+            (*bound_args, *replaced_attrs),
+            opset_version=opset_version,
+            decomposition_table=decomposition_table,
+            use_binary_format=use_binary_format,
+            op_level_debug=op_level_debug,
+            enable_dynamic_axes=enable_dynamic_axes,
+        ),
+        graph_module,
+        bound_args,
+        replaced_attrs,
+    )

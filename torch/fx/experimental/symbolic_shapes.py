@@ -47,7 +47,7 @@ from sympy.core.logic import fuzzy_and, fuzzy_or
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
-    "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
+    "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
     "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP",
 ]
@@ -127,24 +127,6 @@ def has_hint(a):
     if isinstance(a, SymTypes):
         return a.node.has_hint()
     return True
-
-def is_concrete_int(a: Union[int, SymInt]):
-    r""" Utility to check if underlying object
-    in SymInt is concrete value. Also returns
-    true if integer is passed in.
-
-    Args:
-        a (SymInt or int): Object to test if it int
-    """
-    assert isinstance(a, (SymInt, int))
-
-    if isinstance(a, int):
-        return True
-
-    if isinstance(a.node.expr, sympy.core.numbers.Integer):
-        return True
-
-    return False
 
 # Returns True if every size dim on the tensor has a hint
 # TODO: Should this include strides too?  For now it doesn't matter,
@@ -762,7 +744,7 @@ class FloorDiv(sympy.Function):
     def _sympystr(self, printer):
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
-        return f"({base}//{divisor})"
+        return f"{base}//{divisor}"
 
     # SymPy assumptions based on argument types.
     def _eval_is_real(self):
@@ -1934,12 +1916,12 @@ class ShapeEnv:
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
-        from torch._dynamo.source import LocalSource
+        from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        guards = self.produce_guards(placeholders, [LocalSource(a) for a in arg_names])
+        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names], constraint_inputs=None)
         if guards:
             code = " and ".join(guards)
-            return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
+            return eval(code, SYMPY_INTERP, dict(zip(arg_names, args)))
         return True
 
     def bind_symbols(self, placeholders, args):

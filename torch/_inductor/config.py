@@ -12,6 +12,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Name for generated .h and .so files
+aot_codegen_output_prefix = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -126,11 +129,13 @@ def decide_compile_threads():
 
 compile_threads = decide_compile_threads()
 
-# gemm autotuning global cache dir
+# autotuning global cache path
 if is_fbcode():
-    global_cache_dir = "fb/cache"
+    from libfb.py import parutil
+
+    global_cache_path = parutil.get_file_path("fb/global_cache", pkg=__package__)
 else:
-    global_cache_dir = None
+    global_cache_path = None
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this
@@ -190,7 +195,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = False
+    cudagraph_trees = not is_fbcode()
 
     # assertions not on the fast path, steady state
     fast_cudagraph_asserts = True
@@ -240,9 +245,6 @@ class triton:
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
-
-    # Store the generated cubin files for cpp wrapper code to load
-    store_cubin = False
 
 
 # create a directory containing lots of debug information
