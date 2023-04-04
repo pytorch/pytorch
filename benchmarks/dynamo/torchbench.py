@@ -63,16 +63,16 @@ DETECTRON2_MODELS = {
     "detectron2_fasterrcnn_r_50_c4",
     "detectron2_fasterrcnn_r_50_dc5",
     "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_maskrcnn",
     "detectron2_maskrcnn_r_101_c4",
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_fpn",
 }
 
 SKIP = {
-    # https://github.com/pytorch/torchdynamo/issues/101
-    "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
+    *DETECTRON2_MODELS,
 }
 
 SKIP_FOR_CUDA = {
@@ -93,7 +93,6 @@ SKIP_TRAIN = {
     # segfault: Internal Triton PTX codegen error
     "timm_efficientdet",
 }
-SKIP_TRAIN.update(DETECTRON2_MODELS)
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
@@ -105,7 +104,6 @@ ONLY_TRAINING_MODE = {
     "pytorch_struct",
     "yolov3",
 }
-ONLY_TRAINING_MODE.update(DETECTRON2_MODELS)
 
 # Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
 REQUIRE_HIGHER_TOLERANCE = {
