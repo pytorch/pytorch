@@ -4784,12 +4784,6 @@ class TestSparseAny(TestCase):
                         RuntimeError,
                         "crow_indices is supposed to be a vector, but got 2 dimensional tensor"):
                     result = op.op(t_inp, *t_args, **t_kwargs)
-            elif op.name == 'mul' and layout is torch.sparse_csr and t_inp.numel() == 0 and t_args[0].ndim > 0:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        "Only tensors with two sparse dimensions can be converted to the SparseCsr layout,"
-                        " got self with 3 sparse dimensions"):
-                    result = op.op(t_inp, *t_args, **t_kwargs)
             elif op.name == 'mul' and layout is torch.sparse_csc and t_args[0].ndim > 0:
                 with self.assertRaisesRegex(
                         RuntimeError,
