@@ -553,7 +553,7 @@ class TraceTrainStepTest(DTensorTestBase):
                         [
                             n
                             for n in gm.graph.nodes
-                            if n.target == torch.ops.aten.all_reduce.default
+                            if n.target == torch.ops.c10d_functional.all_reduce.default
                         ]
                     ),
                     1,
