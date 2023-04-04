@@ -20,7 +20,7 @@ def get_oncall_from_testfile(testfile: str) -> Union[List[str], None]:
         with open(path) as f:
             for line in f:
                 if line.startswith("# Owner(s): "):
-                    possible_lists = re.findall("\[.*\]", line)
+                    possible_lists = re.findall(r"\[.*\]", line)
                     if len(possible_lists) > 1:
                         raise Exception("More than one list found")
                     elif len(possible_lists) == 0:
