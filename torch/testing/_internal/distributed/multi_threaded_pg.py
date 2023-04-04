@@ -52,6 +52,7 @@ def bitwise_reduce(tensors, op):
 
 _reduce_ops = {
     ReduceOp.SUM: partial(binop_reduce, op=torch.sum),
+    ReduceOp.AVG: partial(binop_reduce, op=torch.mean),
     ReduceOp.PRODUCT: partial(binop_reduce, op=torch.prod),
     ReduceOp.MIN: partial(binop_reduce, op=torch.min),
     ReduceOp.MAX: partial(binop_reduce, op=torch.max),
@@ -69,13 +70,14 @@ class AllReduce:
         self.op = op.op
 
     def work(self, data):
-        tensors = []
-        for src_rank in range(0, len(data)):
-            tensors.append(data[src_rank][0])
-        res = _reduce_ops[self.op](tensors)
-        with torch.no_grad():
-            for src_rank in range(len(data)):
-                data[src_rank][0].copy_(res)
+        for i in range(len(data[0])):
+            tensors = []
+            for src_rank in range(0, len(data)):
+                tensors.append(data[src_rank][i])
+            res = _reduce_ops[self.op](tensors)
+            with torch.no_grad():
+                for src_rank in range(len(data)):
+                    data[src_rank][i].copy_(res)
 
 
 class AllGather:
@@ -272,11 +274,21 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
+    def allreduce_coalesced(self, tensor_list, opts=AllreduceOptions()):
+        coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
+        res = coll.join(self._rank, tensor_list)
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
+
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         coll = ProcessLocalGroup._start_coll(AllGather(), self)
         res = coll.join(self._rank, (output_tensors, input_tensor))
         ProcessLocalGroup._end_coll(coll, self)
         return res
+
+    def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+        tensor_list = list(torch.chunk(output_tensor, self._world_size))
+        return self.allgather([tensor_list], [input_tensor], opts)
 
     def broadcast(self, tensor_list, opts=BroadcastOptions()):
         coll = ProcessLocalGroup._start_coll(Broadcast(opts.rootRank), self)

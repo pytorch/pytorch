@@ -91,7 +91,7 @@ class _StorageBase:
         return str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], range(self.size())))
+        return iter((self[i] for i in range(self.size())))
 
     def __copy__(self):
         return self.clone()
@@ -725,7 +725,7 @@ class TypedStorage:
 
     def __iter__(self):
         _warn_typed_storage_removal()
-        return iter(map(lambda i: self[i], range(self.size())))
+        return iter((self[i] for i in range(self.size())))
 
     def __copy__(self):
         _warn_typed_storage_removal()

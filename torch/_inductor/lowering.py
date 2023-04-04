@@ -1041,6 +1041,8 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 
 
 def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
+    if t.dtype in (torch.complex32, torch.complex64, torch.complex128):
+        return True
     return t.is_cpu and config.disable_cpp_codegen
 
 
@@ -3890,6 +3892,11 @@ try:
         return TensorBox.create(
             ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
         )
+
+    @register_lowering(aten.all_reduce_coalesced)
+    def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
+        result = ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+        return list(map(TensorBox.create, result))
 
     @register_lowering(aten.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):

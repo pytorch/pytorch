@@ -263,6 +263,7 @@ header_template_rule(
     include = "aten/src",
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
+        "@AT_MKLDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
         "@AT_FFTW_ENABLED@": "0",
@@ -1285,7 +1286,6 @@ cc_library(
         ":caffe2_core_macros_h",
         "//c10:headers",
         "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:cc_proto",
     ],
 )
 
@@ -1644,6 +1644,7 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
+        "//caffe2/proto:torch_cc_proto",
         "@kineto",
     ] + if_cuda([
         ":torch_distributed_cuda",
