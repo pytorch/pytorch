@@ -1,6 +1,5 @@
 #include <c10/cuda/CUDADeviceAssertionHost.h>
 #include <c10/cuda/CUDAException.h>
-#include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -37,7 +36,7 @@ namespace {
 /// an infinite initialization loop for CUDAKernelLaunchRegistry
 int dsa_get_device_id() {
   int device = -1;
-  C10_CUDA_CHECK_WO_DSA(c10::cuda::GetDevice(&device));
+  C10_CUDA_CHECK_WO_DSA(cudaGetDevice(&device));
   return device;
 }
 
@@ -61,7 +60,7 @@ int dsa_get_device_compute_capability(const int device_num) {
 /// an infinite initialization loop for CUDAKernelLaunchRegistry
 int dsa_get_device_count() {
   int device_count = -1;
-  C10_CUDA_CHECK_WO_DSA(c10::cuda::GetDeviceCount(&device_count));
+  C10_CUDA_CHECK_WO_DSA(cudaGetDeviceCount(&device_count));
   return device_count;
 }
 

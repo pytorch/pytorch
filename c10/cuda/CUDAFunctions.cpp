@@ -238,24 +238,26 @@ cudaError_t MaybeSetDevice(int device) {
 
 int ExchangeDevice(int to_device) {
   int cur_device = -1;
-  C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
-  if (to_device == cur_device && targetDeviceIndex == -1) {
+  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  if (to_device == cur_device) {
+    targetDeviceIndex = -1;
     return cur_device;
   }
-  C10_CUDA_CHECK(cudaSetDevice(to_device));
   targetDeviceIndex = -1;
+  C10_CUDA_CHECK(cudaSetDevice(to_device));
   return cur_device;
 }
 
 int MaybeExchangeDevice(int to_device) {
   int cur_device = -1;
-  C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
-  if (to_device == cur_device && targetDeviceIndex == -1) {
+  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  if (to_device == cur_device) {
+    targetDeviceIndex = -1;
     return cur_device;
   }
   if (hasPrimaryContext(to_device)) {
-    C10_CUDA_CHECK(cudaSetDevice(to_device));
     targetDeviceIndex = -1;
+    C10_CUDA_CHECK(cudaSetDevice(to_device));
   } else {
     targetDeviceIndex = to_device;
   }

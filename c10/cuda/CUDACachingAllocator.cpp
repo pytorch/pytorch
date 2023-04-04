@@ -2240,7 +2240,7 @@ class DeviceCachingAllocator {
       cuda_events[stream].emplace_back(std::move(event), block);
     }
 
-    C10_CUDA_CHECK(c10::cuda::SetDevice(prev_device));
+    C10_CUDA_CHECK(c10::cuda::MaybeSetDevice(prev_device));
   }
 
   void insert_events_deferred_until_no_capture() {

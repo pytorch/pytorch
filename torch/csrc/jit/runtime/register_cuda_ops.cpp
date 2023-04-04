@@ -112,9 +112,8 @@ RegisterOperators const reg({
             push(stack, -1);
             return;
           }
-          auto prev_idx = c10::cuda::current_device();
-          c10::cuda::MaybeSetDevice(static_cast<int>(idx));
-          push(stack, static_cast<int>(prev_idx));
+          int prev_idx = c10::cuda::MaybeExchangeDevice(static_cast<int>(idx));
+          push(stack, prev_idx);
         },
         c10::AliasAnalysisKind::CONSERVATIVE),
     Operator(
