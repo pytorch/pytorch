@@ -6,6 +6,7 @@ from functools import partial, wraps
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     List,
     Optional,
@@ -13,7 +14,6 @@ from typing import (
     Tuple,
     Type,
     Union,
-    cast,
 )
 
 from functorch import make_fx
@@ -30,8 +30,8 @@ from torch.distributed._spmd.distribute import (
 )
 from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._tensor import DeviceMesh, Placement, Replicate, Shard
-from torch.nn.utils import stateless
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
+from torch.nn.utils import stateless
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
 
@@ -112,7 +112,8 @@ class Override(ABC):
 
     @abstractmethod
     def transform(
-        self, gm: fx.GraphModule,
+        self,
+        gm: fx.GraphModule,
         schema_map: Dict[str, Schema],
         flat_state: List[torch.Tensor],
     ) -> fx.GraphModule:
@@ -164,9 +165,9 @@ def _to_caller_flattened_graph_module(gm: torch.fx.GraphModule) -> torch.fx.Grap
     gm._graph._codegen = _PyTreeCodeGenOutputsOnly(
         pytree_info=_PyTreeInfo(
             # pyre-ignore[6]
-            orig_args=None,  # type: ignore
+            orig_args=None,  # type: ignore[arg-type]
             # pyre-ignore[6]
-            in_spec=None,  # type: ignore
+            in_spec=None,  # type: ignore[arg-type]
             # pyre-ignore[16]
             out_spec=gm._graph._codegen.pytree_info.out_spec,
         )
@@ -208,9 +209,7 @@ def _dtensor_expand(
             schemas.append(replicate_schema)
 
     for p in pytree.tree_flatten(params_and_buffers)[0]:
-        assert isinstance(
-            p, torch.Tensor
-        ), f"expecting Tensor but got {type(p)}"
+        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
         inps.append(p)
         schemas.append(replicate_schema)
 
@@ -219,10 +218,7 @@ def _dtensor_expand(
             inps.append(a)
             if id(a) in _placements_override:
                 schemas.append(
-                    Schema(
-                        mesh=mesh,
-                        placements=_placements_override[id(a)]
-                    )
+                    Schema(mesh=mesh, placements=_placements_override[id(a)])
                 )
             else:
                 schemas.append(shard_schema)
@@ -537,9 +533,7 @@ def compile(
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been
                 # captured in the graph.
-                output = compiled_obj.gm(
-                    *flat_inps
-                )[0]
+                output = compiled_obj.gm(*flat_inps)[0]
                 if first_iter and gm_transformation:
                     # TODO: SPMD should provid a default and configurable
                     # transformation.
