@@ -1,5 +1,5 @@
 import math
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 
 import torch
 import torch._prims_common as utils
@@ -15,9 +15,10 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
+    TensorLike,
 )
 
-from torch._prims_common.wrappers import out_wrapper
+from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch._refs import _broadcast_shapes
 
 from torch.utils._pytree import tree_map
@@ -88,7 +89,14 @@ def meta_randint(
 
 @register_meta(aten.randint.low)
 def meta_randint_low(
-    low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+    low,
+    high,
+    size,
+    *,
+    dtype=torch.long,
+    layout=None,
+    device=None,
+    pin_memory=None,
 ):
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
@@ -186,7 +194,8 @@ def meta_angle(self):
         result_dtype = corresponding_real_dtype(self.dtype)
     else:
         _, result_dtype = elementwise_dtypes(
-            self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+            self,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         )
     return torch.empty_like(self, dtype=result_dtype)
 
@@ -286,7 +295,10 @@ def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
 # NOTE: matching defaults in aten/src/ATen/native/native_functions.yaml
 @register_meta(aten._linalg_svd.default)
 def _linalg_svd_meta(
-    A: Tensor, full_matrices: bool = False, compute_uv: bool = True, driver: str = None
+    A: Tensor,
+    full_matrices: bool = False,
+    compute_uv: bool = True,
+    driver: str = None,
 ):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
@@ -332,7 +344,10 @@ def _linalg_det_meta(A):
 
 # From aten/src/ATen/native/ReflectionPad.cpp
 @register_meta(
-    [aten.reflection_pad2d_backward.default, aten.replication_pad2d_backward.default]
+    [
+        aten.reflection_pad2d_backward.default,
+        aten.replication_pad2d_backward.default,
+    ]
 )
 def meta_pad2d_backward(grad_output, self, padding):
     dim_w = 2
@@ -478,7 +493,10 @@ def meta_mm(a, b):
     check(b.dim() == 2, lambda: "b must be 2D")
     N, M1 = a.shape
     M2, P = b.shape
-    check(M1 == M2, lambda: "a and b must have same reduction dim")
+    check(
+        M1 == M2,
+        lambda: f"a and b must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
+    )
     return a.new_empty(N, P)
 
 
@@ -827,7 +845,10 @@ def meta_avg_pool2d(
     else:
         size = [nbatch, nInputPlane, outputHeight, outputWidth]
     return torch.empty(
-        size, dtype=input.dtype, device=input.device, memory_format=memory_format
+        size,
+        dtype=input.dtype,
+        device=input.device,
+        memory_format=memory_format,
     )
 
 
@@ -942,7 +963,10 @@ def meta_avg_pool2d_backward(
     )
 
     return torch.empty(
-        input_size, dtype=input.dtype, device=input.device, memory_format=mem_format
+        input_size,
+        dtype=input.dtype,
+        device=input.device,
+        memory_format=mem_format,
     )
 
 
@@ -957,7 +981,10 @@ def meta_adaptive_avg_pool2d(self, output_size):
     # need to set memory_format to preserve the memory format of the input
     # channel last input should have channel last output
     return torch.empty(
-        output_shape, dtype=self.dtype, device=self.device, memory_format=memory_format
+        output_shape,
+        dtype=self.dtype,
+        device=self.device,
+        memory_format=memory_format,
     )
 
 
@@ -1185,6 +1212,187 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
+@register_meta(
+    [
+        aten._foreach_neg_.default,
+        aten._foreach_reciprocal_.default,
+    ]
+)
+def meta__foreach_unaop_(self):
+    check(
+        isinstance(self, List),
+        lambda: f"Expect List[Tensor] but got {type(self)}",
+    )
+
+
+@register_meta(
+    [
+        aten._foreach_neg.default,
+        aten._foreach_reciprocal.default,
+        aten._foreach_sqrt.default,
+    ]
+)
+def meta__foreach_unaop(self):
+    check(
+        isinstance(self, List),
+        lambda: f"Expect List[Tensor] but got {type(self)}",
+    )
+    return [torch.empty_like(s) for s in self]
+
+
+def _check_foreach_binop_tensor_lists(self, other):
+    check(
+        isinstance(self, List) and isinstance(other, List),
+        lambda: (
+            "The first two arguments of must be List[Tensor], "
+            f"but got {type(self)} and {type(other)}."
+        ),
+    )
+    check(
+        len(self) > 0 and len(self) == len(other),
+        lambda: (
+            "self and other must be non-empty and match in length, "
+            f"but got {len(self)} and {len(other)}."
+        ),
+    )
+
+
+@register_meta([aten._foreach_add.List])
+def meta__foreach_add(self, other, alpha=1):
+    _check_foreach_binop_tensor_lists(self, other)
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta([aten._foreach_add_.List])
+def meta__foreach_add__list(self, other, alpha=1):
+    _check_foreach_binop_tensor_lists(self, other)
+
+
+@register_meta([aten._foreach_div_.List])
+def meta__foreach_binop__list(self, other):
+    _check_foreach_binop_tensor_lists(self, other)
+
+
+@register_meta(
+    [
+        aten._foreach_div.List,
+        aten._foreach_mul.List,
+    ]
+)
+def meta__foreach_binop_list(self, other):
+    _check_foreach_binop_tensor_lists(self, other)
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta(
+    [
+        aten._foreach_add_.Scalar,
+        aten._foreach_mul_.Scalar,
+        aten._foreach_sub_.Scalar,
+    ]
+)
+def meta__foreach_binop__scalar(self, scalar=1):
+    check(
+        isinstance(self, List),
+        lambda: f"The first argument of must be List[Tensor], but got {type(self)}.",
+    )
+
+
+@register_meta(
+    [
+        aten._foreach_add.Scalar,
+        aten._foreach_div.Scalar,
+        aten._foreach_mul.Scalar,
+        aten._foreach_sub.Scalar,
+    ]
+)
+def meta__foreach_binop_scalar(self, scalar=1):
+    check(
+        isinstance(self, List),
+        lambda: f"The first argument of must be List[Tensor], but got {type(self)}.",
+    )
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta(
+    [
+        aten._foreach_addcdiv_.Scalar,
+        aten._foreach_addcmul_.Scalar,
+    ]
+)
+def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
+    check(
+        all([isinstance(l, List) for l in [self, tensor1, tensor2]]),
+        lambda: (
+            "All arguments of _foreach_addc*_ must be List[Tensor], "
+            f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
+        ),
+    )
+    check(len(self) > 0, lambda: "input tensor list must not be empty.")
+    check(
+        len(self) == len(tensor1) and len(self) == len(tensor2),
+        lambda: "All input tensor lists must have the same length",
+    )
+
+
+@register_meta(
+    [
+        aten._foreach_addcdiv.Scalar,
+        aten._foreach_addcmul.Scalar,
+    ]
+)
+def meta__foreach_addcop_scalar(self, tensor1, tensor2, scalar=1):
+    check(
+        all([isinstance(l, List) for l in [self, tensor1, tensor2]]),
+        lambda: (
+            "All arguments must be List[Tensor], "
+            f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
+        ),
+    )
+    check(len(self) > 0, lambda: "input tensor list must not be empty.")
+    check(
+        len(self) == len(tensor1) and len(self) == len(tensor2),
+        lambda: "All input tensor lists must have the same length",
+    )
+
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta([aten._foreach_pow.ScalarAndTensor])
+def meta__foreach_pow_scalar_and_tensor(self, exponent):
+    check(
+        isinstance(exponent, List),
+        lambda: f"exponent must be a tensor list but got {type(exponent)}",
+    )
+    return [torch.empty_like(e) for e in exponent]
+
+
+@register_meta([aten._fused_adam_.default])
+def meta__fused_adam_(
+    self,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    max_exp_avg_sqs,
+    state_steps,
+    *,
+    lr,
+    beta1,
+    beta2,
+    weight_decay,
+    eps,
+    amsgrad,
+    maximize,
+    grad_scale=None,
+    found_inf=None,
+):
+    for l in [self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
+        check(
+            isinstance(self, List),
+            lambda: f"exponent must be a tensor list but got {type(self)}",
+        )
+
+
 @register_meta([aten._int_mm])
 @out_wrapper()
 def meta__int_mm(a, b):
@@ -1272,7 +1480,8 @@ def meta_embedding_bag(
     num_bags = offsets.size(0)
     if include_last_offset:
         check(
-            num_bags >= 1, lambda: "include_last_offset: numBags should be at least 1"
+            num_bags >= 1,
+            lambda: "include_last_offset: numBags should be at least 1",
         )
         num_bags -= 1
 
@@ -1714,9 +1923,20 @@ def max_pool2d_checks_and_compute_shape(
 
 @register_meta(aten.max_pool2d_with_indices_backward.default)
 def meta_max_pool2d_with_indices_backward(
-    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
+    grad_output,
+    self,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode,
+    indices,
 ):
-    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+    (
+        nInputPlane,
+        outputHeight,
+        outputWidth,
+    ) = max_pool2d_checks_and_compute_shape(
         self, kernel_size, stride, padding, dilation, ceil_mode
     )
 
@@ -1738,7 +1958,10 @@ def meta_max_pool2d_with_indices_backward(
 
     memory_format = utils.suggest_memory_format(self)
     return torch.empty(
-        self.shape, dtype=self.dtype, device=self.device, memory_format=memory_format
+        self.shape,
+        dtype=self.dtype,
+        device=self.device,
+        memory_format=memory_format,
     )
 
 
@@ -1746,7 +1969,11 @@ def meta_max_pool2d_with_indices_backward(
 def meta_max_pool2d_with_indices(
     input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
 ):
-    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+    (
+        nInputPlane,
+        outputHeight,
+        outputWidth,
+    ) = max_pool2d_checks_and_compute_shape(
         input, kernel_size, stride, padding, dilation, ceil_mode
     )
 
@@ -1758,10 +1985,16 @@ def meta_max_pool2d_with_indices(
         size = [nbatch, nInputPlane, outputHeight, outputWidth]
     return (
         torch.empty(
-            size, dtype=input.dtype, device=input.device, memory_format=memory_format
+            size,
+            dtype=input.dtype,
+            device=input.device,
+            memory_format=memory_format,
         ),
         torch.empty(
-            size, dtype=torch.int64, device=input.device, memory_format=memory_format
+            size,
+            dtype=torch.int64,
+            device=input.device,
+            memory_format=memory_format,
         ),
     )
 
@@ -1807,7 +2040,12 @@ def meta_like(self, *args, **kwargs):
 # zeros_like is special cased to work for sparse
 @register_meta(aten.zeros_like.default)
 def zeros_like(
-    self, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
+    self,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    memory_format=None,
 ):
     if layout == torch.sparse_coo:
         check(
@@ -1846,7 +2084,9 @@ def zeros_like(
 def meta_select(self, dim, index):
     ndim = self.dim()
     check(
-        ndim != 0, lambda: "select() cannot be applied to a 0-dim tensor.", IndexError
+        ndim != 0,
+        lambda: "select() cannot be applied to a 0-dim tensor.",
+        IndexError,
     )
 
     dim = dim if dim >= 0 else dim + ndim
@@ -2274,24 +2514,22 @@ def meta__scaled_dot_product_efficient_backward(
 
     grad_kv_needs_init = is_causal and N > M
 
-    if chunk_grad_outputs:
-        chunk = torch.empty((B, M, 3, nH, K), dtype=query.dtype, device=query.device)
-        grad_q = chunk.select(2, 0)
-        grad_k = chunk.select(2, 1)
-        grad_v = chunk.select(2, 2)
-    else:
-        grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
-        grad_k = (
-            torch.zeros(key.shape, dtype=key.dtype, device=key.device)
-            if grad_kv_needs_init
-            else torch.empty(key.shape, dtype=key.dtype, device=key.device)
-        )
-        grad_v = (
-            torch.zeros(value.shape, dtype=value.dtype, device=value.device)
-            if grad_kv_needs_init
-            else torch.empty(value.shape, dtype=value.dtype, device=value.device)
-        )
-    return grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2)
+    grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
+    grad_k = (
+        torch.zeros(key.shape, dtype=key.dtype, device=key.device)
+        if grad_kv_needs_init
+        else torch.empty(key.shape, dtype=key.dtype, device=key.device)
+    )
+    grad_v = (
+        torch.zeros(value.shape, dtype=value.dtype, device=value.device)
+        if grad_kv_needs_init
+        else torch.empty(value.shape, dtype=value.dtype, device=value.device)
+    )
+    return (
+        grad_q.transpose(1, 2),
+        grad_k.transpose(1, 2),
+        grad_v.transpose(1, 2),
+    )
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
@@ -2373,6 +2611,36 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     return output
 
 
+@register_meta(aten.upsample_nearest2d_backward.default)
+def upsample_nearest2d_backward(
+    grad_output: Tensor,
+    output_size: Sequence[Union[int, torch.types.SymInt]],
+    input_size: Sequence[Union[int, torch.types.SymInt]],
+    scales_h: float = None,
+    scales_w: float = None,
+):
+    full_output_size = upsample_common_check(
+        input_size, output_size, num_spatial_dims=2
+    )
+    check(
+        grad_output.ndim == 4,
+        lambda: f"Expected grad_output to be a tensor of dimension 4 but got: dimension {grad_output.ndim}",
+    )
+    for i in range(4):
+        check(
+            grad_output.size(i) == full_output_size[i],
+            lambda: (
+                f"Expected grad_output to have the same shape as output;"
+                f" output.size({i}) = {full_output_size[i]}"
+                f" but got grad_output.size({i}) = {grad_output.size(i)}"
+            ),
+        )
+
+    return grad_output.new_empty(input_size).to(
+        memory_format=utils.suggest_memory_format(grad_output)
+    )  # type: ignore[call-overload]
+
+
 @register_meta(aten.upsample_nearest3d.default)
 def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_w=None):
     check(
@@ -2387,9 +2655,31 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
     )
 
 
-@register_meta([aten.sort.default, aten.sort.stable])
-def meta_sort(self, stable=None, dim=-1, descending=False):
-    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+@register_meta(
+    [
+        aten.sort.default,
+        aten.sort.stable,
+        aten.sort.values,
+        aten.sort.values_stable,
+    ]
+)
+def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
+    v, i = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+    if values is not None and indices is not None:
+        assert isinstance(values, TensorLike)
+        assert isinstance(indices, TensorLike)
+        # Makes sure values and indices have the same strides. For cases where
+        # these have different shapes, like (5, 10, 5) and (0) in msort.
+        out_shape = v.shape
+        out_stride = v.stride()
+        values = _maybe_resize_out(values, out_shape)
+        indices = _maybe_resize_out(indices, out_shape)
+        values.as_strided_(out_shape, out_stride)
+        indices.as_strided_(out_shape, out_stride)
+        _safe_copy_out(copy_from=v, copy_to=values)  # type: ignore[arg-type]
+        _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
+        return values, indices
+    return v, i
 
 
 def rnn_cell_checkSizes(
@@ -2456,7 +2746,6 @@ def _cudnn_rnn(
     batch_sizes,
     dropout_state,
 ):
-
     is_input_packed = len(batch_sizes) != 0
     if is_input_packed:
         seq_length = len(batch_sizes)
@@ -2720,10 +3009,12 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
     check(found_inf.numel() == 1, lambda: "found_inf must be a 1-element tensor.")
     check(inv_scale.numel() == 1, lambda: "inv_scale must be a 1-element tensor.")
     check(
-        found_inf.dtype.is_floating_point, lambda: "found_inf must be a float tensor."
+        found_inf.dtype.is_floating_point,
+        lambda: "found_inf must be a float tensor.",
     )
     check(
-        inv_scale.dtype.is_floating_point, lambda: "inv_scale must be a float tensor."
+        inv_scale.dtype.is_floating_point,
+        lambda: "inv_scale must be a float tensor.",
     )
 
 
@@ -2743,7 +3034,6 @@ import torch._refs.special
 
 
 def activate_meta():
-
     activate_meta_table = {}
 
     # For a given op, we pick the most specific decomp function from

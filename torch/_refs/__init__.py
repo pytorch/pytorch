@@ -346,7 +346,7 @@ def _broadcast_shapes(*_shapes):
 def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     # Computes common shape
     common_shape = _broadcast_shapes(
-        *map(lambda t: t.shape if isinstance(t, TensorLike) else None, args)
+        *(t.shape if isinstance(t, TensorLike) else None for t in args)
     )
 
     def __maybe_broadcast(x, shape):
@@ -378,6 +378,7 @@ from torch._decomp import register_decomposition
 #
 
 infer_aten_op = object()
+
 
 # TODO: add type promotion support
 def _make_elementwise_unary_reference(
@@ -556,7 +557,6 @@ def exp2(a):
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
-
     assert isinstance(a, TensorLike)
     assert isinstance(value, Number)
 
@@ -1118,7 +1118,6 @@ def float_power(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
 ) -> Tensor:
-
     if isinstance(a, Number) and isinstance(b, Number):
         raise ValueError(
             "Receive two Number inputs to an elementwise binary operation!"
@@ -1167,6 +1166,7 @@ def float_power(
 #
 # For reference, see CPython's implementation:
 # https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
+
 
 # TODO: add docstring
 @_make_elementwise_binary_reference(
@@ -1800,6 +1800,7 @@ def clamp_max(
 #
 # Conditional references
 #
+
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
@@ -3582,7 +3583,15 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
     dims = tuple(d for d in dims if a.shape[d] == 1)
-    return prims.squeeze(a, dims) if dims else prims.view_of(a)
+    if len(dims) == 0:
+        return prims.view_of(a)
+    if len(dims) == 1:
+        return prims.squeeze(a, dims)
+    dims_list = list(dims)
+    dims_list = sorted(dims_list, reverse=True)
+    for i in dims_list:
+        a = squeeze(a, i)
+    return a
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
@@ -4092,7 +4101,6 @@ def new_empty(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
@@ -4243,7 +4251,7 @@ def new_ones(
 def new_full(
     a: TensorLikeType,
     size: ShapeType,
-    fill_value: Union[int, float, bool],
+    fill_value: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
@@ -4275,12 +4283,9 @@ def empty_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
-
-    strides: Tuple[int, ...]
 
     if memory_format != torch.preserve_format:
         return torch.empty(
@@ -4367,7 +4372,7 @@ def arange(
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64:
         # Uses floordiv to avoid ceil in inductor.
-        sgn = (xstep > 0) - (xstep < 0)
+        sgn = bool(xstep > 0) - bool(xstep < 0)
         length = (xend - xstart + xstep - sgn) // xstep
     else:
         length = math.ceil((end - start) / step)
@@ -4563,7 +4568,7 @@ def meshgrid(
     # This ref simultaneously handles two overloads (see stubs above)
     # The `indexing` argument is currently optional for torch.meshgrid, but we
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
-    if isinstance(tensors[0], list) or isinstance(tensors[0], tuple):
+    if isinstance(tensors[0], (list, tuple)):
         assert len(tensors) == 1
         tensors = tuple(tensors[0])
 

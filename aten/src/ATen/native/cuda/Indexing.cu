@@ -1192,6 +1192,8 @@ void index_select_out_cuda_impl(
 
   TORCH_CHECK(
       index.dim() <= 1, "Index is supposed to be an empty tensor or a vector");
+  TORCH_CHECK(
+      !(self.dim() == 0 && numIndices != 1), "index_select(): Index to scalar can have only 1 value, got ", numIndices, " value(s)");
   TORCH_CHECK(dim < selfDims, "Indexing dim is out of bounds");
 
   std::vector<int64_t> newSize = self.sizes().vec();

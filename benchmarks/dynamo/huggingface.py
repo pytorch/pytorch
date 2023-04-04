@@ -373,7 +373,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         model_name,
         batch_size=None,
     ):
-
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
@@ -513,7 +512,6 @@ def refresh_model_names_and_batch_sizes():
     lm_seen = set()
     family_seen = set()
     for cls_name in hf_fx._SUPPORTED_MODELS:
-
         if "For" not in cls_name:
             continue
 

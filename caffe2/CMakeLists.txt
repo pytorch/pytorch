@@ -656,6 +656,15 @@ if(USE_CUDA)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
 endif()
 
+if(USE_FLASH_ATTENTION AND NOT MSVC)
+  # Cutlass contains a sign-compare violation in its codebase to be fixed by https://github.com/NVIDIA/cutlass/pull/869
+  set_source_files_properties(
+    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/nested/cuda/NestedTensorMatmul.cu"
+    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/nested/cuda/NestedTensorTransformerFunctions.cu"
+    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/transformers/cuda/flash_attn/fmha_bwd_hdim128.cu"
+    PROPERTIES COMPILE_FLAGS "-Wno-sign-compare")
+endif()
+
 if(BUILD_ONEDNN_GRAPH)
   list(APPEND Caffe2_CPU_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/LlgaTensorImpl.cpp
@@ -705,6 +714,7 @@ if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/imethod.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/mps.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/_functions.cpp
@@ -810,9 +820,10 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
-if(HAS_WERROR_SIGN_COMPARE AND WERROR)
-  # target_compile_options(torch_cpu PRIVATE "-Werror=sign-compare")
-  set_property(SOURCE ${ATen_CORE_SRCS} ${ATen_CPU_SRCS} APPEND PROPERTY COMPILE_OPTIONS "-Werror=sign-compare")
+if(BUILD_CAFFE2 AND NOT MSVC)
+  # Caffe2 has too many signed-unsigned violation, but the framework is dead
+  # So no point in fixing those
+  target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
 endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
@@ -932,6 +943,9 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
   endif()
+  if(USE_FLASH_ATTENTION)
+    target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
+  endif()
   if(BUILD_LAZY_CUDA_LINALG)
     add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
     target_compile_definitions(torch_cuda_linalg PRIVATE USE_CUDA BUILD_LAZY_CUDA_LINALG)
@@ -951,10 +965,17 @@ elseif(USE_CUDA)
         torch_cuda
     )
     if($ENV{ATEN_STATIC_CUDA})
-      target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::cusolver_static
-          ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-      )
+      if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
+        target_link_libraries(torch_cuda_linalg PRIVATE
+            CUDA::cusolver_static
+            ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
+        )
+      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+        target_link_libraries(torch_cuda_linalg PRIVATE
+            CUDA::cusolver_static
+            ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+        )
+      endif()
     else()
       target_link_libraries(torch_cuda_linalg PRIVATE
           CUDA::cusolver
@@ -1572,10 +1593,6 @@ endif()
 
 if(BUILD_TENSOREXPR_BENCHMARK)
   add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
-endif()
-
-if(BUILD_NVFUSER_BENCHMARK)
-  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/nvfuser ${CMAKE_BINARY_DIR}/nvfuser_bench)
 endif()
 
 if(BUILD_CPP_BENCHMARKS)

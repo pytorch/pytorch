@@ -45,7 +45,6 @@ def parse_backend_yaml(
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
 ) -> ParsedExternalYaml:
-
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
         for f in concatMap(
@@ -532,7 +531,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
 def run(
     source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str] = None
 ) -> None:
-
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.absolute()
     template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")

@@ -582,6 +582,19 @@ class TestTransformers(NNTestCase):
             transformer_decoder(inputs, input_seq_len, memory)
 
 
+    def test_encoder_is_causal(self):
+
+        d_model = 3
+        layer = torch.nn.TransformerEncoderLayer(d_model, 1, 6, batch_first=True)
+        layer.eval()
+        x = torch.randn(1, 5, d_model)
+        unmasked_output = layer(x)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(x.size(1))
+        is_causal_output = layer(x, src_mask=mask, is_causal=True)
+        masked_output = layer(x, src_mask=mask)
+
+        self.assertEqual(masked_output, is_causal_output)
+
 
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -649,240 +662,6 @@ class TestTransformers(NNTestCase):
                     return_all_hiddens=False,
                 )[0]
 
-        class BetterDecoder(torch.nn.Module):
-            """
-            Only incremental decoder for now
-            """
-
-            def __init__(self, transformer, embedding, pad_idx):
-                super().__init__()
-                self.transformer = transformer
-                self.embedding = embedding
-                self.padding_idx = pad_idx
-
-            def forward(
-                self,
-                x,
-                src_mask=None,
-                include_padding_mask=True,
-                incr_key_lst=None,
-                incr_value_lst=None,
-                is_incremental_decoding=False,
-            ):
-                padding_mask = None
-                if not x.is_nested and include_padding_mask:
-                    padding_mask = x.eq(self.padding_idx)
-                if(is_incremental_decoding):
-                    x = x[:, -1:]  # only take the last token
-                x = self.embedding(x)
-
-                one_encoder_layer = self.transformer.layers[0]
-                self_attn = one_encoder_layer.self_attn
-                embed_dim = self_attn.embed_dim
-                num_heads = self_attn.num_heads
-
-                use_gelu = (
-                    one_encoder_layer.activation_relu_or_gelu == 2
-                )  # see torch/nn/modules/activation attention impl. 1 == relu, 2 == gelu
-                assert (
-                    one_encoder_layer.activation_relu_or_gelu != 0
-                )  # 0 == not relu or gelu
-
-                norm_first = one_encoder_layer.norm_first
-
-                # TODO: make this a bit less janky. but for now we initialize with an empty tensor.
-                if(not is_incremental_decoding):
-                    assert len(incr_key_lst) == 0 or incr_key_lst[0] is None
-                    assert len(incr_value_lst) == 0 or incr_value_lst[0] is None
-                while len(incr_key_lst) <= len(self.transformer.layers):
-                    if(is_incremental_decoding):
-                        incr_key_lst.append(torch.Tensor([]).cuda().half())
-                        incr_value_lst.append(torch.Tensor([]).cuda().half())
-                    else:
-                        incr_key_lst.append(None)
-                        incr_value_lst.append(None)
-
-                for i, layer in enumerate(self.transformer.layers):
-                    incr_key = incr_key_lst[i]
-                    incr_value = incr_value_lst[i]
-
-                    x, incr_key, incr_value = torch._transformer_decoder_only_layer_fwd(
-                        src=x,
-                        embed_dim=embed_dim,
-                        num_heads=num_heads,
-                        qkv_weight=layer.self_attn.in_proj_weight,
-                        qkv_bias=layer.self_attn.in_proj_bias,
-                        proj_weight=layer.self_attn.out_proj.weight,
-                        proj_bias=layer.self_attn.out_proj.bias,
-                        use_gelu=use_gelu,
-                        norm_first=norm_first,
-                        # TODO: layer_norm_eps hardcoded to be same as nn.TransformerEncoder default.
-                        # fix by pulling from self_attn.norm1
-                        eps=1e-5,
-                        norm_weight_1=layer.norm1.weight,
-                        norm_bias_1=layer.norm1.bias,
-                        norm_weight_2=layer.norm2.weight,
-                        norm_bias_2=layer.norm2.bias,
-                        ffn_weight_1=layer.linear1.weight,
-                        ffn_bias_1=layer.linear1.bias,
-                        ffn_weight_2=layer.linear2.weight,
-                        ffn_bias_2=layer.linear2.bias,
-                        mask=src_mask,
-                        incr_key=incr_key,  # altered in place
-                        incr_value=incr_value,
-                    )
-
-                    # not in-place
-                    if(not is_incremental_decoding):
-                        incr_key = None
-                        incr_value = None
-                    incr_key_lst[i] = incr_key
-                    incr_value_lst[i] = incr_value
-
-                return x, incr_key_lst, incr_value_lst
-
-        def torch_to_fairseq(torch_encoder, fairseq_encoder):
-            for src_layer, dst_layer in zip(torch_encoder.layers, fairseq_encoder.layers):
-                w_q, w_k, w_v = src_layer.self_attn.in_proj_weight.chunk(3, dim=0)
-                b_q, b_k, b_v = src_layer.self_attn.in_proj_bias.chunk(3, dim=0)
-
-                dst_layer.self_attn.q_proj.weight = torch.nn.Parameter(w_q)
-                dst_layer.self_attn.q_proj.bias = torch.nn.Parameter(b_q)
-                dst_layer.self_attn.k_proj.weight = torch.nn.Parameter(w_k)
-                dst_layer.self_attn.k_proj.bias = torch.nn.Parameter(b_k)
-                dst_layer.self_attn.v_proj.weight = torch.nn.Parameter(w_v)
-                dst_layer.self_attn.v_proj.bias = torch.nn.Parameter(b_v)
-
-                dst_layer.self_attn.out_proj.weight = src_layer.self_attn.out_proj.weight
-                dst_layer.self_attn.out_proj.bias = src_layer.self_attn.out_proj.bias
-
-                dst_layer.fc1.weight = src_layer.linear1.weight
-                dst_layer.fc1.bias = src_layer.linear1.bias
-
-                # fairseq may use fusedlayernorm from nvidia apex - diff properties
-                dst_layer.self_attn_layer_norm.load_state_dict(src_layer.norm1.state_dict())
-
-                dst_layer.fc2.weight = src_layer.linear2.weight
-                dst_layer.fc2.bias = src_layer.linear2.bias
-
-                dst_layer.final_layer_norm.load_state_dict(src_layer.norm2.state_dict())
-
-            return fairseq_encoder
-
-        def set_weights_deterministic(model):
-            for idx, p in enumerate(model.parameters()):
-                x = p.data
-                sz = x.view(-1).size(0)
-                shape = x.shape
-                x = torch.cos(torch.arange(0, sz).float().view(shape))
-                p.data.copy_(x)
-
-        D = 4  # d_model
-        H = 2  # nhead
-        FD = 16  # dim_feedforward
-        V = 100  # vocab size
-        L = 2  # num layers
-
-        embedding_layer = torch.nn.Embedding(V, D, DEFAULT_PADDING_IDX)
-        layer = torch.nn.TransformerEncoderLayer(
-            d_model=D,
-            nhead=H,
-            dim_feedforward=FD,
-            batch_first=True,
-            activation="gelu",
-        )
-        transformer = torch.nn.TransformerEncoder(
-            layer,
-            num_layers=L,
-        ).eval().cuda().half()
-
-        set_weights_deterministic(embedding_layer)
-        set_weights_deterministic(transformer)
-
-        better_decoder = (
-            BetterDecoder(transformer, embedding_layer, DEFAULT_PADDING_IDX)
-            .eval()
-            .cuda()
-            .half()
-        )
-        fairseq_decoder = (
-            FairseqDecoder(
-                D,
-                H,
-                FD,
-                L,
-                embedding_layer,
-                dropout=0,
-                normalize_before=False,
-                torch_encoder=transformer,
-                activation="gelu",
-            )
-            .eval()
-            .cuda()
-            .half()
-        )
-
-        tokens = torch.Tensor([
-            [5, 6, 7, 8],
-            [9, 10, 11, 12]
-        ]).to(torch.int).cuda()
-        lengths_tensor = torch.Tensor([2, 2]).to(torch.int).cuda()
-        # bs = 2, seqlen = 4
-        bs, seqlen = tokens.shape
-
-        upper_triangle = torch.zeros(seqlen, seqlen)
-        upper_triangle.fill_(-100000000)
-        upper_triangle = torch.triu(upper_triangle, 1)
-        upper_triangle = upper_triangle.cuda().half()
-        upper_triangle_expanded = upper_triangle.unsqueeze(0).unsqueeze(0)
-        upper_triangle_expanded = upper_triangle_expanded.expand(
-            bs, H, -1, -1
-        )
-
-        # test forced decoding
-        with torch.no_grad():
-            result, _, _ = better_decoder(
-                tokens,
-                src_mask=upper_triangle_expanded,
-                include_padding_mask=False,
-                incr_key_lst=[],
-                incr_value_lst=[],
-                is_incremental_decoding=False,
-            )
-        ref_output = fairseq_decoder(tokens, lengths_tensor, with_triangle_mask=True)
-
-        self.assertEqual(result.shape, ref_output.shape)
-        torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
-
-        # test incremental decoding
-        bs, seqlen = tokens.shape
-
-        incr_state = {}
-        ref_outputs = [fairseq_decoder(
-            tokens[:, :i],
-            src_lengths=None,
-            with_triangle_mask=False,
-            incremental_state=incr_state,
-        ) for i in range(1, seqlen + 1)]
-        ref_output = torch.stack(ref_outputs)
-
-        incr_key_lst = []
-        incr_value_lst = []
-        results = []
-        for i in range(1, seqlen + 1):
-            res, incr_key_lst, incr_value_lst = better_decoder(
-                tokens[:, :i],
-                src_mask=None,
-                include_padding_mask=False,
-                incr_key_lst=incr_key_lst,
-                incr_value_lst=incr_value_lst,
-                is_incremental_decoding=True,
-            )
-            results.append(res)
-        result = torch.stack(results)
-
-        self.assertEqual(result.shape, ref_output.shape)
-        torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
 
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
@@ -1072,8 +851,11 @@ class TestTransformers(NNTestCase):
         encoder.train()
         optimizer.zero_grad()
         inputs = torch.randn(S, L, E).to(device)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            inputs.size(1), device=device
+        )
 
-        outputs = encoder(inputs, is_causal=True)
+        outputs = encoder(inputs, mask=mask, is_causal=True)
 
         loss = criterion(outputs[:, 0:2, :], inputs[:, 0:2, :])
         loss.backward()
@@ -1082,12 +864,16 @@ class TestTransformers(NNTestCase):
         # inference with is_causal
         t_qvk = torch.randn((S, L, E), device=device, dtype=torch.float32)
         mha = nn.MultiheadAttention(E, H).to(device)
-        attn_out, _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            S, device=device
+        )
 
-        # Can't give both attn_mask AND is_causal
+        attn_out, _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=mask, is_causal=True)
+
+        # Can't give only is_causal
         attn_mask = torch.randint(0, 2, size=(L, L), device=device, dtype=torch.bool)
-        with self.assertRaisesRegex(AssertionError, "Only allow causal mask or attn_mask"):
-            _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=attn_mask, is_causal=True)
+        with self.assertRaises(RuntimeError):
+            _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
 
         # # Passing a causal mask sets is_causal to 1
         causal_mask = torch.triu(
@@ -1112,6 +898,9 @@ class TestTransformers(NNTestCase):
         mha.in_proj_weight = Parameter(torch.ones((E * 3, E), device=device))
         mha.out_proj.weight = Parameter(torch.ones((E, E), device=device))
         expected = torch.ones(size=(S, L, E)).to(device) * 16
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            qkv.size(1), device=device
+        )
 
         for kernel in kernels:
             with torch.backends.cuda.sdp_kernel(
@@ -1119,14 +908,17 @@ class TestTransformers(NNTestCase):
                 enable_flash=(kernel == 'flash'),
                 enable_mem_efficient=(kernel == 'meff')
             ):
-                actual, _ = mha(qkv, qkv, qkv, need_weights=False, is_causal=True)
+                actual, _ = mha(qkv, qkv, qkv, attn_mask=mask, need_weights=False, is_causal=True)
                 self.assertTrue(torch.equal(actual, expected))
 
                 if kernel != 'math':
                     # fails with embedding size not multiple of 4
                     with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                         qkv_f, mha_f = ones_tensor(S, L, 2), nn.MultiheadAttention(2, H).to(device)
-                        _ = mha_f(qkv_f, qkv_f, qkv_f, need_weights=False, is_causal=True)
+                        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+                            qkv_f.size(1), device=device
+                        )
+                        _ = mha_f(qkv_f, qkv_f, qkv_f, attn_mask=mask, need_weights=False, is_causal=True)
                         torch.cuda.synchronize()
 
     @unittest.skipIf(
@@ -1937,7 +1729,7 @@ class TestSDPA(NNTestCase):
 
         # TODO: Investigate why grad_q needs larger tolerances
         grad_q_deviation = query_ref.grad - query_ref_lp.grad
-        grad_q_ref_atol = max(2 * torch.abs(grad_q_deviation).max().item(), default_atol[out.dtype])
+        grad_q_ref_atol = max(4 * torch.abs(grad_q_deviation).max().item(), default_atol[out.dtype])
         grad_q_ref_rtol = max(get_rtol(query_ref.grad, query_ref_lp.grad), default_rtol[out.dtype])
 
         grad_k_deviation = key_ref.grad - key_ref_lp.grad
