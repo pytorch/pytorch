@@ -991,13 +991,6 @@ def skipIfCrossRef(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def expectedFailureIf(condition):
-    def decorator(fn):
-        if condition:
-            return unittest.expectedFailure(fn)
-        return fn
-    return decorator
-
 # Useful for "undoing" unittest.expectedFailure
 def expectedSuccess(test_item):
     test_item.__unittest_expecting_failure__ = False
@@ -2030,8 +2023,12 @@ class ObjectPair(UnittestPair):
 # behavior.  The year is 2021: this private class hierarchy hasn't changed since
 # 2010, seems low risk to inherit from.
 class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
+    def __init__(self, *args, **kwargs):
+        self.error_type = kwargs.pop('error_type', NotImplementedError)
+        super().__init__(*args, **kwargs)
+
     def __exit__(self, exc_type, exc_value, tb):
-        if exc_type is not None and issubclass(exc_type, NotImplementedError):
+        if exc_type is not None and issubclass(exc_type, self.error_type):
             self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
@@ -2097,6 +2094,12 @@ class TestCase(expecttest.TestCase):
     # the test, skip it instead.
     _ignore_not_implemented_error = False
 
+    # The specific type of NotImplementedError to possibly skip for, based on the
+    # previous flag. If _ignore_not_implemented_error=False, this has no effect.
+    # If it is True, skipping is applied for the error type specified by this property,
+    # which should be either NotImplementedError or a subclass of it.
+    _not_implemented_error_type = NotImplementedError
+
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
 
@@ -2115,7 +2118,9 @@ class TestCase(expecttest.TestCase):
                 self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
             if self._ignore_not_implemented_error:
-                self.wrap_with_policy(method_name, lambda: skip_exception_type(NotImplementedError))
+                self.wrap_with_policy(
+                    method_name, lambda: skip_exception_type(
+                        self.__class__._not_implemented_error_type))
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
@@ -3076,7 +3081,9 @@ class TestCase(expecttest.TestCase):
     def assertRaises(self, expected_exception, *args, **kwargs):
         if self._ignore_not_implemented_error:
             context: Optional[AssertRaisesContextIgnoreNotImplementedError] = \
-                AssertRaisesContextIgnoreNotImplementedError(expected_exception, self)  # type: ignore[call-arg]
+                AssertRaisesContextIgnoreNotImplementedError(
+                    expected_exception, self,
+                    error_type=self.__class__._not_implemented_error_type)  # type: ignore[call-arg]
             try:
                 return context.handle('assertRaises', args, kwargs)  # type: ignore[union-attr]
             finally:
@@ -3101,8 +3108,9 @@ class TestCase(expecttest.TestCase):
             expected_regex = ''
 
         if self._ignore_not_implemented_error:
-            context = AssertRaisesContextIgnoreNotImplementedError(  # type: ignore[call-arg]
-                expected_exception, self, expected_regex)
+            context = AssertRaisesContextIgnoreNotImplementedError(
+                expected_exception, self, expected_regex,
+                error_type=self.__class__._not_implemented_error_type)  # type: ignore[call-arg]
             return context.handle('assertRaisesRegex', args, kwargs)  # type: ignore[attr-defined]
         else:
             return super().assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)

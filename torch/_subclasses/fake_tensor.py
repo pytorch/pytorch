@@ -534,9 +534,13 @@ def index_put_(fake_mode, func, *args, **kwargs):
     return new_kwargs["input"]
 
 
+class _NestedTensorFakeNotImplementedError(Exception):
+    pass
+
+
 @register_op_impl(lambda fn: fn in _nested_constructors)
 def nested_constructor(fake_mode, func, *args, **kwargs):
-    raise RuntimeError(
+    raise _NestedTensorFakeNotImplementedError(
         "_nested_tensor_from_tensor_list() is not supported for fake tensors"
     )
 

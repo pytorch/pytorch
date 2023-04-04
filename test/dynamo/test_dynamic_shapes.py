@@ -96,9 +96,7 @@ unittest.expectedFailure(
 
 # Nested tensors are only expected to work within Dynamo when dynamic
 # shapes is enabled.
-expectedSuccess(
-    DynamicShapesMiscTests.test_nested_tensor_inputs_dynamic_shapes
-)
+expectedSuccess(DynamicShapesMiscTests.test_nested_tensor_inputs_dynamic_shapes)
 expectedSuccess(
     StaticDefaultDynamicShapesMiscTests.test_nested_tensor_inputs_dynamic_shapes_static_default
 )

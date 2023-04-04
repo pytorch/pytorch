@@ -217,6 +217,31 @@ class TensorPropertySource(Source):
 
 
 @dataclasses.dataclass
+class NestedTensorPropertySource(Source):
+    base: Source
+    prop: TensorProperty
+
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        if self.prop is TensorProperty.SIZE:
+            return f"{self.base.name()}._nested_tensor_size().size(0)"
+        elif self.prop is TensorProperty.STRIDE:
+            return f"{self.base.name()}._nested_tensor_strides().size(0)"
+        elif self.prop is TensorProperty.STORAGE_OFFSET:
+            return f"{self.base.name()}._nested_tensor_storage_offsets().size(0)"
+        else:
+            raise AssertionError(f"unhandled {self.prop}")
+
+
+@dataclasses.dataclass
 class NegateSource(Source):
     base: Source
 

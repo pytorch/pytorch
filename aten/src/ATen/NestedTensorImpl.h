@@ -96,9 +96,11 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
         c10::TensorImpl::VIEW, Storage(storage_), buffer_key_set_, data_type_);
     const auto buffer_size = get_buffer_size();
     if (C10_UNLIKELY(this->is_meta())) {
-      buffer_tensor_impl->set_sizes_and_strides({buffer_size}, {1}, c10::nullopt);
+      buffer_tensor_impl->set_sizes_and_strides(
+          {buffer_size}, {1}, c10::nullopt);
     } else {
-      buffer_tensor_impl->set_sizes_contiguous(C10_AS_INTARRAYREF_SLOW({buffer_size}));
+      buffer_tensor_impl->set_sizes_contiguous(
+          C10_AS_INTARRAYREF_SLOW({buffer_size}));
     }
     return Tensor(buffer_tensor_impl);
   }

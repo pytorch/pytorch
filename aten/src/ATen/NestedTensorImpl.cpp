@@ -17,13 +17,12 @@ inline void validate_nested_tensor_metadata(
     const at::Tensor& nested_sizes,
     const at::Tensor& nested_strides,
     const at::Tensor& offsets) {
-  // TODO: Make this more granular?
+  int64_t size_dim = nested_sizes.dim();
+  TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
+  TORCH_INTERNAL_ASSERT(nested_strides.dim() == size_dim);
   if (!nested_sizes.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
     TORCH_INTERNAL_ASSERT(nested_sizes.is_contiguous());
-    int64_t size_dim = nested_sizes.dim();
-    TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
     TORCH_INTERNAL_ASSERT(nested_strides.is_contiguous());
-    TORCH_INTERNAL_ASSERT(nested_strides.dim() == size_dim);
     TORCH_INTERNAL_ASSERT(nested_sizes.sizes() == nested_strides.sizes());
     TORCH_INTERNAL_ASSERT(
         (size_dim == 0 && offsets.size(0) == 0) ||

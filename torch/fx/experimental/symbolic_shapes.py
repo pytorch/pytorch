@@ -1718,7 +1718,8 @@ class ShapeEnv:
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        from torch._dynamo.source import TensorPropertySource, TensorProperty
+        from torch._dynamo.source import (
+            TensorPropertySource, TensorProperty, NestedTensorPropertySource)
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -1799,8 +1800,16 @@ class ShapeEnv:
                 track_symint(source, t)
                 continue
             assert isinstance(t, torch.Tensor)
-            # TODO: Track properly for nested
-            if not t.is_nested:
+            if t.is_nested:
+                assert all([c is None for c in constraint]), \
+                    "Dim constraints are not supported for nested tensors"
+                track_symint(NestedTensorPropertySource(source, TensorProperty.SIZE),
+                             t._nested_tensor_size().size(0))
+                track_symint(NestedTensorPropertySource(source, TensorProperty.STRIDE),
+                             t._nested_tensor_strides().size(0))
+                track_symint(NestedTensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+                             t._nested_tensor_storage_offsets().size(0))
+            else:
                 for i, ss in enumerate(t.size()):
                     property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
                     track_symint(property_source, ss, constraint[i])

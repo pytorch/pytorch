@@ -26,8 +26,8 @@ from torch.testing._internal.common_utils import (
     subtest,
     TestCase,
     TEST_WITH_CROSSREF,
-    expectedFailureIf
 )
+from torch._subclasses.fake_tensor import _NestedTensorFakeNotImplementedError
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -98,46 +98,6 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None):
         ts1.append(t1)
     return torch.nested.nested_tensor(ts1, device=device, dtype=dtype)
 
-def define_crossref_xfails():
-    # These all fail because they call _nested_tensor_from_tensor_list(), which
-    # isn't supported.
-    crossref_xfails = [
-        "TestNestedTensor.test_2d*",
-        "TestNestedTensor.test_3d*",
-        "TestNestedTensor.test_copy_",
-        "TestNestedTensor.test_default_nested_tensor",
-        "TestNestedTensor.test_dim",
-        "TestNestedTensor.test_fill_",
-        "TestNestedTensor.test_is_contiguous",
-        "TestNestedTensor.test_like_functions*",
-        "TestNestedTensor.test_nested_namespace",
-        "TestNestedTensor.test_nested_tensor_matching_dim",
-        "TestNestedTensor.test_numel",
-        "TestNestedTensor.test_repr_string",
-        "TestNestedTensor.test_size",
-        "TestNestedTensor.test_size_dim",
-        "TestNestedTensor.test_stride",
-        "TestNestedTensor.test_to",
-        "TestNestedTensor.test_to_padded_tensor_on_empty_tensor",
-        "TestNestedTensor.test_unbind_*",
-        "TestNestedTensor.test_unbind_dim",
-        "TestNestedTensor.test_zero_",
-    ]
-    expectedFailureIfCrossRef = expectedFailureIf(TEST_WITH_CROSSREF)
-    for full_test_name in crossref_xfails:
-        test_cls_name, test_name = full_test_name.split('.')
-        test_cls = globals().get(test_cls_name)
-        if test_name.endswith('*'):
-            # Decorate all tests that match the prefix
-            for cls_attr in test_cls.__dict__.keys():
-                if cls_attr.startswith(test_name[:-1]):
-                    test = getattr(test_cls, cls_attr)
-                    expectedFailureIfCrossRef(test)
-
-        else:
-            test = getattr(test_cls, test_name)
-            expectedFailureIfCrossRef(test)
-
 class CrossRefNestedFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
         super().__init__(
@@ -151,6 +111,11 @@ class CrossRefNestedFakeMode(torch._subclasses.CrossRefFakeMode):
 
 
 class TestNestedTensor(TestCase):
+    # _nested_tensor_from_tensor_list() is not implemented for fake; skip tests
+    # that use it as they're expected to fail.
+    _ignore_not_implemented_error = True
+    _not_implemented_error_type = _NestedTensorFakeNotImplementedError
+
     def run(self, result=None):
         if TEST_WITH_CROSSREF:
             with CrossRefNestedFakeMode():
@@ -925,7 +890,8 @@ class TestNestedTensorDeviceType(TestCase):
                           subtest(torch.abs, name="abs"),
                           subtest(torch.abs_, name="abs_"),
                           subtest(torch.sgn, name="sgn"),
-                          subtest(torch.logical_not, name='logical_not'),])
+                          subtest(torch.logical_not, name='logical_not'),
+                          ])
     def test_activations(self, device, func):
         nt, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7), device=device, dtype=torch.float32)
         nested_result = func(nt)
@@ -2701,7 +2667,6 @@ class TestNestedTensorAutograd(TestCase):
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 instantiate_device_type_tests(TestNestedTensorAutograd, globals())
-define_crossref_xfails()
 
 if __name__ == '__main__':
     run_tests()
