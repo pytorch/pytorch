@@ -1005,7 +1005,7 @@ class CPUReproTests(TestCase):
             traced = make_fx(fn)(x1, x2)
             compiled = compile_fx_inner(traced, [x1, x2])
             assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-            assert metrics.generated_cpp_vec_kernel_count == 1
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
             torch._dynamo.reset()
             metrics.reset()
@@ -1059,9 +1059,9 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 x = torch.randn(64, 58, 28, 28)
                 opt_fn = torch._dynamo.optimize("inductor")(channel_shuffle)
-                same(channel_shuffle(x, 2), opt_fn(x, 2))
+                self.assertTrue(same(channel_shuffle(x, 2), opt_fn(x, 2)))
                 if simdlen != 1:
-                    assert metrics.generated_cpp_vec_kernel_count == 1
+                    assert metrics.generated_cpp_vec_kernel_count == 2
 
     @slow()
     @unittest.skipIf(
@@ -1111,22 +1111,23 @@ class CPUReproTests(TestCase):
 
         for simdlen in (None, 256, 1):
             with config.patch({"cpp.simdlen": simdlen}):
-                for shape in (
-                    (7, 7),
-                    (8, 8),
-                    (9, 9),
-                    (16, 16),
-                    (17, 17),
-                    (32, 32),
-                    (33, 33),
-                ):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    x = torch.randn(shape)
-                    opt_fn = torch._dynamo.optimize("inductor")(fn)
-                    same(fn(x), opt_fn(x))
-                    if simdlen != 1:
-                        assert metrics.generated_cpp_vec_kernel_count == 1
+                for dtype in (torch.float, torch.bfloat16):
+                    for shape in (
+                        (7, 7),
+                        (8, 8),
+                        (9, 9),
+                        (16, 16),
+                        (17, 17),
+                        (32, 32),
+                        (33, 33),
+                    ):
+                        torch._dynamo.reset()
+                        metrics.reset()
+                        x = torch.randn(shape, dtype=dtype)
+                        opt_fn = torch._dynamo.optimize("inductor")(fn)
+                        self.assertTrue(same(fn(x), opt_fn(x)))
+                        if simdlen != 1:
+                            assert metrics.generated_cpp_vec_kernel_count == 2
 
     def test_transpose_non_contiguous(self):
         def fn(a):
@@ -1190,6 +1191,49 @@ class CPUReproTests(TestCase):
         with patch.object(GraphLowering, "run_node", run_node_alt):
             fn(torch.randn([8, 128]))
         self.assertGreater(len(strings), 3)
+
+    def test_vertical_sum_cpu_only(self):
+        def fn1(a):
+            return a.sum(dim=0)
+
+        def fn2(a):
+            return a.sum(dim=1)
+
+        metrics.reset()
+        x = torch.randn(100, 100)
+        opt_fn1 = torch._dynamo.optimize("inductor")(fn1)
+        self.assertTrue(same(fn1(x), opt_fn1(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+        metrics.reset()
+        x = torch.randn(100, 100, 100)
+        opt_fn2 = torch._dynamo.optimize("inductor")(fn2)
+        self.assertTrue(same(fn2(x), opt_fn2(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_transpose_vertical_sum_cpu_only(self):
+        def fn(a, b):
+            c = a * b
+            return c.sum(dim=1)
+
+        metrics.reset()
+        x = torch.randn(100, 50, 50)
+        y = torch.randn(100, 50, 50).transpose(1, 2)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x, y), opt_fn(x, y)))
+        assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_transpose_sum2d_cpu_only(self):
+        def fn(a, b):
+            c = a * b
+            return c.sum()
+
+        metrics.reset()
+        x = torch.randn(50, 50)
+        y = torch.randn(50, 50).transpose(0, 1)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x, y), opt_fn(x, y)))
+        assert metrics.generated_cpp_vec_kernel_count == 2
 
 
 if __name__ == "__main__":
