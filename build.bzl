@@ -6,6 +6,24 @@ load(
 )
 
 def define_targets(rules):
+    rules.cmake_configure_file(
+        name = "caffe2_core_macros_h",
+        src = "caffe2/core/macros.h.in",
+        out = "caffe2/core/macros.h",
+        definitions = [
+            "CAFFE2_BUILD_SHARED_LIBS",
+            "CAFFE2_PERF_WITH_AVX",
+            "CAFFE2_PERF_WITH_AVX2",
+            "CAFFE2_PERF_WITH_AVX512",
+            "CAFFE2_USE_EXCEPTION_PTR",
+            "CAFFE2_USE_CUDNN",
+            "USE_MKLDNN",
+            "CAFFE2_USE_ITT",
+            "TORCH_DISABLE_GPU_ASSERTS",
+            "EIGEN_MPL2_ONLY",
+        ],
+    )
+
     rules.cc_library(
         name = "caffe2_serialize",
         srcs = [

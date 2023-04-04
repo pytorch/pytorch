@@ -450,28 +450,6 @@ CAFFE2_COPTS = COMMON_COPTS + [
     "-fno-trapping-math",
 ]
 
-header_template_rule(
-    name = "caffe2_core_macros_h",
-    src = "caffe2/core/macros.h.in",
-    out = "caffe2/core/macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-        "#define CAFFE2_FORCE_FALLBACK_CUDA_MPI": "/* #undef CAFFE2_FORCE_FALLBACK_CUDA_MPI */",
-        "#define CAFFE2_HAS_MKL_DNN": "/* #undef CAFFE2_HAS_MKL_DNN */",
-        "#define CAFFE2_HAS_MKL_SGEMM_PACK": "/* #undef CAFFE2_HAS_MKL_SGEMM_PACK */",
-        "#define CAFFE2_THREADPOOL_MAIN_IMBALANCE": "/* #undef CAFFE2_THREADPOOL_MAIN_IMBALANCE */",
-        "#define CAFFE2_THREADPOOL_STATS": "/* #undef CAFFE2_THREADPOOL_STATS */",
-        "#define CAFFE2_USE_ACCELERATE": "/* #undef CAFFE2_USE_ACCELERATE */",
-        "#define CAFFE2_USE_EIGEN_FOR_BLAS": "/* #undef CAFFE2_USE_EIGEN_FOR_BLAS */",
-        "#define CAFFE2_USE_FBCODE": "/* #undef CAFFE2_USE_FBCODE */",
-        "#define CAFFE2_USE_GOOGLE_GLOG": "/* #undef CAFFE2_USE_GOOGLE_GLOG */",
-        "#define CAFFE2_USE_LITE_PROTO": "/* #undef CAFFE2_USE_LITE_PROTO */",
-        "#define CAFFE2_USE_MKL\n": "/* #undef CAFFE2_USE_MKL */\n",
-        "#define CAFFE2_USE_NVTX": "/* #undef CAFFE2_USE_NVTX */",
-        "#define CAFFE2_USE_TRT": "/* #undef CAFFE2_USE_TRT */",
-    },
-)
-
 filegroup(
     name = "caffe2_contrib_srcs",
     srcs = [
