@@ -425,6 +425,10 @@ class FlatParamHandle:
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
         self._fully_sharded_module = fully_sharded_module
+        # NOTE: For the code path using this flag, we only skip calling
+        # `_use_sharded_views()` and do not skip switching to the sharded flat
+        # parameter since whether `self.flat_param` uses the sharded or
+        # unsharded flat parameter parameterizes behavior.
         self._skipped_use_sharded_views = False
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
@@ -1058,7 +1062,7 @@ class FlatParamHandle:
         matches the dtype of the expected unsharded parameter.
         """
         ret = False
-        if self._use_orig_params and not self._skipped_use_sharded_views:
+        if self._use_orig_params:
             ret = self._writeback_orig_params()
         if (
             self.uses_sharded_strategy
@@ -1540,8 +1544,10 @@ class FlatParamHandle:
             # call to after the reduce-scatter.
             if (
                 in_forward
-                and self._sharding_strategy
-                not in NO_RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
+                # Skip using gradient views if skipped using sharded views
+                # since exposing unsharded parameters with sharded gradients
+                # may be confusing to the user
+                and not self._skipped_use_sharded_views
             ):
                 # TODO: Change `_unpadded_unsharded_size` if we change the
                 # gradient to be computed directly with padding.
@@ -1896,12 +1902,21 @@ class FlatParamHandle:
             but no longer has the expected flattened shape.
         Returns: ``True`` if some writeback happened, and ``False`` otherwise.
         """
-        if self.uses_sharded_strategy and not self.is_sharded(self.flat_param):
+        if (
+            self.uses_sharded_strategy
+            and not self.is_sharded(self.flat_param)
+            and not self._skipped_use_sharded_views
+        ):
             # For `NO_SHARD`, we may still need to writeback
             return False
         flat_param = self.flat_param
         wroteback = False
-        flat_param_data_ptr = flat_param.untyped_storage().data_ptr()
+        if self._skipped_use_sharded_views and self.uses_sharded_strategy:
+            flat_param_data_ptr = (
+                self._get_padded_unsharded_flat_param().untyped_storage().data_ptr()
+            )
+        else:
+            flat_param_data_ptr = flat_param.untyped_storage().data_ptr()
         # NOTE: Since this method is called in the pre-unshard, which is only
         # called during computation in the pre-forward or pre-backward, the
         # sharded gradient should be guaranteed to be in `.grad`, not in
@@ -1935,6 +1950,12 @@ class FlatParamHandle:
                 continue
 
             # Check for parameter writeback
+            if self._skipped_use_sharded_views:
+                param = flat_param._tensors[i]
+                _p_assert(
+                    param is not None,
+                    f"Expects to have saved tensor for {flat_param._fqns[i]}",
+                )
             param_changed = getattr(module, param_name) is not param
             needs_param_writeback = (
                 param_changed  # changed parameter variable itself
@@ -1942,6 +1963,13 @@ class FlatParamHandle:
                     param, flat_param_data_ptr
                 )  # changed `.data`
             )
+            if self._skipped_use_sharded_views and (
+                param_changed or needs_param_writeback
+            ):
+                raise AssertionError(
+                    "FSDP does not support changing the parameters between "
+                    f"forward and backward for {self._sharding_strategy}"
+                )
             if param_changed:
                 # NOTE: The gradient is not preserved after a parameter change.
                 param = getattr(module, param_name)
@@ -1954,6 +1982,10 @@ class FlatParamHandle:
                 wroteback = True
 
             # Check for gradient writeback
+            if self._skipped_use_sharded_views:
+                # Skip the writeback check because we do not expose gradients
+                # when we skipped using sharded views
+                continue
             if param.grad is None and flat_param.grad is not None:
                 expected_shape = torch.Size([numel_in_shard])
                 self._writeback_tensor(
