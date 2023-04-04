@@ -809,6 +809,8 @@ def guard_fail_hook(
     first = index == 0
     global stashed_first_fail_reason
     # Don't waste time computing the fail reason for guards we aren't going to report out.
+    if not config.report_guard_failures and not guard_fn.guard_fail_fn:
+        return
     if not guard_fn.guard_fail_fn and not (first or last):
         return
     scope = {rename_implicit(k): v for k, v in f_locals.items()}

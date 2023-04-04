@@ -78,6 +78,8 @@ allow_ignore_mark_dynamic = False
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 
+report_guard_failures = False
+
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
 #
