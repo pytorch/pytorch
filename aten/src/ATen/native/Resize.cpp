@@ -146,35 +146,8 @@ const Tensor& resize_as_(
 }
 
 
-void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes) {
-  TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
-  storage->set_nbytes(std::move(size_bytes));
-}
-
-static void maybe_resize_storage_meta(TensorImpl* self, c10::SymInt new_size_bytes) {
-  // It does not make sense to try to resize a storage
-  // to hold 0 elements, and this can break
-  // if storage_offset is positive but
-  // new_size is 0, so just bail in that case
-  // (same comment is in Resize.h)
-  if (self->sym_numel() == 0) {
-    return;
-  }
-
-  const Storage& storage = self->unsafe_storage();
-  if (!storage) {
-    TORCH_INTERNAL_ASSERT(0, "NYI, this should only be Caffe2");
-  } else if (new_size_bytes > storage.nbytes()) {
-    resize_bytes_meta(storage.unsafeGetStorageImpl(), std::move(new_size_bytes));
-  }
-}
-
 static void _maybe_resize_storage(TensorImpl* self, int64_t new_size_bytes) {
   maybe_resize_storage_cpu(self, new_size_bytes);
-}
-
-static void _maybe_resize_storage(TensorImpl* self, c10::SymInt new_size_bytes) {
-  maybe_resize_storage_meta(self, std::move(new_size_bytes));
 }
 
 template <typename T>
