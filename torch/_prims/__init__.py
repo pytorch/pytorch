@@ -1,6 +1,5 @@
 import contextlib
 import itertools
-import math
 import operator
 import weakref
 from enum import Enum
