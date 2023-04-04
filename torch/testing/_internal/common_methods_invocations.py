@@ -133,6 +133,10 @@ from torch.testing._internal.opinfo.definitions.special import (
 from torch.testing._internal.opinfo.definitions._masked import (
     sample_inputs_softmax_variant,
 )
+from torch.testing._internal.opinfo.definitions.sparse import (
+    sample_inputs_elementwise_binary_operation_sparse,
+)
+
 
 if TEST_SCIPY:
     from scipy import stats
@@ -4509,7 +4513,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
         args = []
 
         # dim. We handle the scalar case
-        dim = 1 if t.ndim == 2 else 0
+        dim = -1 if t.ndim == 2 else 0
         args.append(dim)
 
         idx = make_idx(t.shape[dim] if t.ndim != 0 else 1)
@@ -5887,6 +5891,12 @@ def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs
                       args=(torch.randn(S, S, device=device) > 0, make_arg((S, S))),
                       broadcasts_input=True)
 
+def error_inputs_masked_scatter(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float)
+    for mask_dtype in [torch.float, torch.uint8]:
+        yield ErrorInput(SampleInput(make_arg(1, 3), args=(torch.ones(1, 3, device=device, dtype=mask_dtype),
+                                                           make_arg(3, 4))),
+                         error_regex=r"masked_scatter_ only supports boolean masks")
 
 def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -6827,7 +6837,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
 
         if mask_t.sum() == 0:
             def random_index(shape):
-                return tuple(map(lambda max_idx: random.randrange(0, max_idx), shape))
+                return tuple((random.randrange(0, max_idx) for max_idx in shape))
 
             mask_t[random_index(mask_t.shape)] = True
             return mask_t
@@ -9240,7 +9250,23 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_two_python_scalars=True),
+                    supports_two_python_scalars=True,
+                    supports_sparse=True,
+                    supports_sparse_csr=True,
+                    supports_sparse_csc=True,
+                    supports_sparse_bsr=True,
+                    supports_sparse_bsc=True,
+                    sample_inputs_sparse_coo_func=partial(sample_inputs_elementwise_binary_operation_sparse,
+                                                          layout=torch.sparse_coo),
+                    sample_inputs_sparse_csr_func=partial(sample_inputs_elementwise_binary_operation_sparse,
+                                                          layout=torch.sparse_csr),
+                    sample_inputs_sparse_csc_func=partial(sample_inputs_elementwise_binary_operation_sparse,
+                                                          layout=torch.sparse_csc),
+                    sample_inputs_sparse_bsr_func=partial(sample_inputs_elementwise_binary_operation_sparse,
+                                                          layout=torch.sparse_bsr),
+                    sample_inputs_sparse_bsc_func=partial(sample_inputs_elementwise_binary_operation_sparse,
+                                                          layout=torch.sparse_bsc),
+                    ),
     BinaryUfuncInfo('sub',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
                     ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
@@ -11010,6 +11036,7 @@ op_db: List[OpInfo] = [
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_scatter,
+           error_inputs_func=error_inputs_masked_scatter,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
@@ -12767,6 +12794,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
+           supports_gradgrad=True,
            sample_inputs_func=sample_inputs_linear,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),

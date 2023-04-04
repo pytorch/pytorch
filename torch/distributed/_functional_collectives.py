@@ -11,6 +11,10 @@ import torch.distributed.distributed_c10d as c10d
 
 from torch.utils._pytree import tree_map_only
 
+from torch.fx.experimental.proxy_tensor import (
+    get_innermost_proxy_mode,
+)
+
 """
 New traceable, functional collectives.
 RFC: https://github.com/pytorch/pytorch/issues/93173
@@ -171,7 +175,12 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
     out_size[0] *= group_size
     out_tensor = shard.new_empty(out_size)
     assert out_tensor.is_contiguous()
-    work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
+    # FIXME gloo doesn't support _allgather_base
+    if shard.is_cpu:
+        tensor_list = list(torch.chunk(out_tensor, group_size))
+        work = dist.all_gather(tensor_list, shard, group=group, async_op=True)
+    else:
+        work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
     _register_tensor_work(out_tensor, work)
 
     return out_tensor
@@ -226,17 +235,20 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         group_size = len(rankset)
         tag = tag or c10d._get_group_tag(group)
     elif isinstance(group, dt.DeviceMesh):
-        rankset = group.mesh.flatten().tolist()
-        group_size = group.mesh.size(0)
-        rankset = group.mesh.swapdims(-1, 0).reshape(-1, group_size).flatten().tolist()
-        tag = tag or c10d._get_group_tag(group.get_dim_groups()[0])
+        assert group.ndim == 1, "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
+        # TODO: it should run collective in the whole mesh instead of dim 0
+        mesh_pg = group.get_dim_groups()[0]
+        rankset = dist.get_process_group_ranks(mesh_pg)
+        group_size = len(rankset)
+        tag = tag or c10d._get_group_tag(mesh_pg)
     elif isinstance(group, tuple):
         if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
             dmesh = group[0]
             dim = group[1]
-            group_size = dmesh.mesh.size(dim)
-            rankset = dmesh.mesh.swapdims(-1, dim).reshape(-1, group_size).flatten().tolist()
-            tag = tag or c10d._get_group_tag(dmesh.get_dim_groups()[dim])
+            dim_group = dmesh.get_dim_groups()[dim]
+            rankset = dist.get_process_group_ranks(dim_group)
+            group_size = len(rankset)
+            tag = tag or c10d._get_group_tag(dim_group)
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
@@ -244,6 +256,18 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
 
     return (tag, rankset, group_size)
 
+def _are_we_tracing() -> bool:
+    mode = get_innermost_proxy_mode()
+    if mode is None:
+        return False
+    return mode.tracer is not None
+
+def _maybe_wrap_tensor(self):
+    if _are_we_tracing():
+        return wait_tensor(self)
+    res = AsyncCollectiveTensor(self)
+    _register_wrapper_tensor(res, self)
+    return res
 
 def wait_tensor(tensor):
     """
@@ -273,8 +297,40 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     """
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
-    res = AsyncCollectiveTensor(tensor)
+    return _maybe_wrap_tensor(tensor)
+
+
+
+def all_gather_tensor(
+    self: torch.Tensor,
+    gather_dim: int,
+    group: RANK_TYPES,
+    tag: str = "",
+):
+    """
+    Gather tensor data across from all machines and concatenate over ``gather_dim``.
+
+    Note that it currently only supports gather_dim = 0.
+
+    The input tensor is left unmodified.
+    Group can be one of:
+        List[int]: ranks participating in the collective.
+        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
+        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
+        DeviceMesh: Do a SPMD collective over all ranks of the mesh
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+
+    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
+    that information and perform collective algebraic optimization. Use other forms of input for that.
+    """
+    assert self.is_contiguous()
+    tag, rankset, group_size = _expand_group(group, tag)
+    tensor = torch._C._nn.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
+    res: torch.Tensor = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
+    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
+    if gather_dim != 0:
+        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 
 def reduce_scatter_tensor(
@@ -288,7 +344,6 @@ def reduce_scatter_tensor(
     Reduces the tensor data across all machines in such a way that all get
     the final result, then scatter the results to correponding ranks.
 
-    Note that it currently only supports scatter_dim = 0.
 
     The input tensor is left unmodified.
     Group can be one of:
@@ -302,11 +357,14 @@ def reduce_scatter_tensor(
     """
     tag, rankset, group_size = _expand_group(group, tag)
     assert (
-        self.size(0) % group_size == 0
+        self.size(scatter_dim) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
-    tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, scatter_dim, tag, rankset, group_size)  # type: ignore[attr-defined]
-    res = AsyncCollectiveTensor(tensor)
-    _register_wrapper_tensor(res, tensor)
+    if scatter_dim != 0:
+        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
+        self = torch.cat(tensor_list)
+
+    tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, 0, tag, rankset, group_size)  # type: ignore[attr-defined]
+    res = _maybe_wrap_tensor(tensor)
     return res
 
 
