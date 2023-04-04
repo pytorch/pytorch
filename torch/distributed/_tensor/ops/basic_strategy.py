@@ -105,7 +105,7 @@ def gen_einsum_strategies(
         mesh_dim_strategies = []
 
         # always have replicate all
-        placement_list = [Replicate()] * (len(input_dims) + 1)
+        placement_list: List[Placement] = [Replicate()] * (len(input_dims) + 1)
         mesh_dim_strategies.append(placement_list)
 
         if mesh.size(mesh_dim) <= 1:
@@ -116,7 +116,7 @@ def gen_einsum_strategies(
         # split batch dim
         for batch_dim in edims.batch_dims:
             output_batch_dim = output_dim.index(batch_dim)
-            placement_list: List[Placement] = [Shard(output_batch_dim)]
+            placement_list = [Shard(output_batch_dim)]
             for input_dim in input_dims:
                 input_batch_dim = input_dim.index(batch_dim)
                 placement_list.append(Shard(input_batch_dim))
