@@ -866,10 +866,13 @@ Tensor& intersection_binary_op_sparse_dense_out(
     const auto sparse_dim = s_.sparse_dim();
     const auto dense_dim = s_.dense_dim();
     const auto indices = at::empty({sparse_dim, 0}, s_._indices().options());
-    const auto values = at::empty(s_._values().sizes(), s_._values().options().dtype(res.scalar_type()));
-    get_sparse_impl(res)->raw_resize_(sparse_dim, dense_dim, /*size=*/res_shape);
-    get_sparse_impl(res)->set_indices_and_values_unsafe(indices, values);
-    get_sparse_impl(res)->set_nnz_and_narrow(0);
+    auto res_values_shape = s_._values().sizes().vec();
+    res_values_shape[0] = 0;
+    const auto values = at::empty(res_values_shape, s_._values().options().dtype(res.scalar_type()));
+    auto* res_impl = get_sparse_impl(res);
+    res_impl->raw_resize_(sparse_dim, dense_dim, /*size=*/res_shape);
+    res_impl->set_indices_and_values_unsafe(indices, values);
+    res_impl->set_nnz_and_narrow(0);
     return res._coalesced_(true);
   }
 
