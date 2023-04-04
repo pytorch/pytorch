@@ -9,9 +9,10 @@ import torch.distributed._tensor.api as dtensor
 from torch.distributed._tensor.op_schema import (
     ArgsType,
     KwargsType,
+    OpSchema,
+    OutputSharding,
     OutputSpecType,
 )
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
