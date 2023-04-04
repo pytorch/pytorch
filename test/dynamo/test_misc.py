@@ -438,7 +438,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )(compare_shapes)
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
-        self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
+        self.assertExpectedInline(guard_failure.reason, """L['a'].size()[0] == 3""")
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -618,6 +618,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
 
+    # TODO fix
     def test_return_nested_function(self):
         out = None
 
@@ -1162,6 +1163,26 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_inplace_resize_on_graph_input(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # graph break when calling resize_() on graph input
+        def f1(x):
+            x.resize_(6)
+            x.mul_(2)
+            return x
+
+        @torch.compile(backend=cnts)
+        def f2(x):
+            x.resize_(6)
+            x.mul_(2)
+            return x
+
+        x = torch.ones(4)
+        y = torch.ones(4)
+        self.assertTrue(same(f1(x).shape, f2(y).shape))
+        self.assertEqual(cnts.frame_count, 0)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -3795,7 +3816,7 @@ def fn():
         else:
             self.assertTrue(guard_failure is not None)
             if not torch._dynamo.config.dynamic_shapes:
-                self.assertEqual(guard_failure[0], "k == 3")
+                self.assertExpectedInline(guard_failure[0], """L['k'] == 3""")
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_guard_failure_fn_shape_control(self):
@@ -3829,9 +3850,9 @@ def fn():
 
         self.assertTrue(guard_failure is not None)
         if torch._dynamo.config.assume_static_by_default:
-            self.assertEqual(guard_failure[0], "x.size()[0] == 2")
+            self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] == 2""")
         else:
-            self.assertEqual(guard_failure[0], "x.size()[0] < 3")
+            self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] < 3""")
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -3860,17 +3881,17 @@ def fn():
 
         if torch._dynamo.config.dynamic_shapes:
             if torch._dynamo.config.assume_static_by_default:
-                self.assertEqual(
+                self.assertExpectedInline(
                     guard_failure[0],
-                    "x.size()[0] == 2",
+                    """L['x'].size()[0] == 2""",
                 )
             else:
                 self.assertTrue(guard_failure is None)
         else:
             self.assertTrue(guard_failure is not None)
-            self.assertEqual(
+            self.assertExpectedInline(
                 guard_failure[0],
-                "tensor 'x' size mismatch at index 0. expected 2, actual 3",
+                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
             )
 
     def test_guard_failure_fn_tensor_iter(self):
@@ -3901,7 +3922,7 @@ def fn():
 
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
-        self.assertEqual(guard_failure[0], "len(x) == 10")
+        self.assertExpectedInline(guard_failure[0], """len(L['x']) == 10""")
 
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
@@ -4773,9 +4794,9 @@ def fn():
             _ = compiled(new_shape_input)
 
             base_checker().check("Recompile Reasons").check("'forward'").check(
-                "tensor 'input' size mismatch at index 0. expected 2, actual 3"
+                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
             ).check(
-                "tensor 'input' size mismatch at index 0. expected 3, actual 4"
+                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
             ).run(
                 prof.report()
             )
