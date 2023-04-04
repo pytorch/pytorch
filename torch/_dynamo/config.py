@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import tempfile
@@ -7,8 +8,15 @@ import torch
 
 from . import external_utils
 
-from .logging import get_loggers_level, set_loggers_level
 
+# to configure logging for dynamo, aot, and inductor
+# use the following API in the torch._logging module
+# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
+# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
+# see this design doc for more detailed info
+# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
+# the name of a file to write the logs to
+log_file_name = None
 
 # Note (mlazos): This is deprecated and will be removed very soon
 # to configure logging for dynamo, aot, and inductor
@@ -17,12 +25,8 @@ from .logging import get_loggers_level, set_loggers_level
 # or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
 # see this design doc for more detailed info
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
-log_level = property(
-    lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
-)
-
-# the name of a file to write the logs to
-log_file_name = None
+log_level = logging.ERROR
+output_code = None
 
 # Verbose will print full stack traces on warnings and errors
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
@@ -54,10 +58,6 @@ constant_functions = {
     external_utils.is_compiling: True,
     torch._utils.is_compiling: True,
 }
-
-# Here for bw compat, will be removed (mlazos)
-# see above notes for log_level on how to configure the new logging system
-output_code = None
 
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
@@ -131,6 +131,7 @@ skipfiles_inline_module_allowlist = {
     torch._refs,
     torch._prims,
     torch._decomp,
+    torch.utils._contextlib,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
