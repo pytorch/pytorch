@@ -1130,7 +1130,7 @@ class GuardCompiler:
 
         # 2. Function definition
         #     a) Generate the actual guard expression
-        guard_expression = " && ".join(exprs)
+        guard_expression = " & ".join(exprs)
         #     b) Generate the extra temporary variables corresponding to Tensor
         #        properties (e.g. sizes, strides, and storage_offset)
         source_creation = []
@@ -1147,7 +1147,7 @@ class GuardCompiler:
                         tensor_property_str = "storage_offset"
                         tensor_property_source = TensorPropertySource(info.source, tensor_property)
                     else:
-                        tensor_property_str = f"{tensor_property.name.lower()}s"
+                        tensor_property_str = f"{tensor_property.name.lower()}s().data"
                         tensor_property_source = TensorPropertySource(info.source, tensor_property, idx=0)
 
                     if not self.is_source_registered(tensor_property_source):
