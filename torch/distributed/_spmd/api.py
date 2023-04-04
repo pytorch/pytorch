@@ -6,6 +6,7 @@ from functools import partial, wraps
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     List,
     Optional,
@@ -13,7 +14,6 @@ from typing import (
     Tuple,
     Type,
     Union,
-    cast,
 )
 
 from functorch import make_fx
@@ -156,10 +156,7 @@ def _dtensor_expand(
             inps.append(a)
             if id(a) in _placements_override:
                 schemas.append(
-                    Schema(
-                        mesh=mesh,
-                        placements=_placements_override[id(a)]
-                    )
+                    Schema(mesh=mesh, placements=_placements_override[id(a)])
                 )
             else:
                 schemas.append(shard_schema)
