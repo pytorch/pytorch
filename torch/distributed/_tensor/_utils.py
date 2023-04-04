@@ -52,7 +52,7 @@ def compute_local_offset(
         local_shape = list(global_shape)
 
         for idx, placement in enumerate(placements):
-            mesh_dim_size = mesh.size(idx)
+            mesh_dim_size = cast(int, mesh.size(idx))
             my_coordinate = mesh.get_coordinate()
             assert my_coordinate is not None, "Rank not part of mesh!"
             if isinstance(placement, Shard):
