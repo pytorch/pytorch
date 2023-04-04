@@ -321,13 +321,10 @@ def _unshard(
             any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
     if any_ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
-    if state.limit_all_gathers:
-        event = state._free_event_queue.dequeue_if_needed()
-        if event:
-            event.synchronize()
+    free_event_queue = state._free_event_queue if state.limit_all_gathers else None
     with torch.cuda.stream(unshard_stream):
         for handle in handles:
-            handle.unshard()
+            handle.unshard(free_event_queue)
             handle.post_unshard()
 
 

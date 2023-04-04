@@ -8,6 +8,7 @@ from itertools import accumulate, chain
 from typing import (
     Any,
     Callable,
+    Deque,
     Dict,
     Generator,
     Iterator,
@@ -1111,7 +1112,7 @@ class FlatParamHandle:
         # Invariant: `_mp_shard` is always on the compute device.
         flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
 
-    def unshard(self):
+    def unshard(self, free_event_queue: Optional[Deque[torch.cuda.Event]]):
         """
         Runs the unshard logic. This includes all-gathering the flat parameter
         and switching to using the unsharded flat parameter. If the handle does
@@ -1120,6 +1121,8 @@ class FlatParamHandle:
 
         If FSDP is in :meth:`summon_full_params` and the handle uses parameter
         mixed precision, then the parameter is forced to full precision.
+
+        ``free_event_queue`` is ``None`` iff ``limit_all_gathers=True``.
         """
         if not self.needs_unshard():
             # Even when not needing an unshard, we should switch to using
@@ -1131,6 +1134,11 @@ class FlatParamHandle:
             )
             self._use_unsharded_flat_param(unsharded_flat_param)
             return
+        # Only synchronize the free event if actually needs unshard
+        if free_event_queue is not None:
+            event = free_event_queue.dequeue_if_needed()
+            if event:
+                event.synchronize()
         unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
         padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
         self._use_unsharded_flat_param(padded_unsharded_flat_param)
