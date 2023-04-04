@@ -328,12 +328,16 @@ void Pickler::pushBytes(const std::string& string) {
 }
 
 void Pickler::pushGlobal(
-    const std::string& module_name,
-    const std::string& class_name) {
+    c10::string_view module_name,
+    c10::string_view class_name) {
   std::string key;
   key.reserve(module_name.size() + class_name.size() + 2);
-  key.append(module_name).append("\n").append(class_name).append("\n");
-  auto memo_entry = memoized_globals_map_.find(key);
+  key.append(module_name.data(), module_name.size());
+  key.push_back('\n');
+  key.append(class_name.data(), class_name.size());
+  key.push_back('\n');
+
+  const auto memo_entry = memoized_globals_map_.find(key);
   if (memo_entry == memoized_globals_map_.end()) {
     push<PickleOpCode>(PickleOpCode::GLOBAL);
     pushBytes(key);
