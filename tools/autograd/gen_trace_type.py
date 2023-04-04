@@ -19,33 +19,29 @@ from torchgen.utils import FileManager
 #   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
 # Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_BACKEND = set(
-    [
-        "options",
-        "data",
-        "set_data",
-        "is_leaf",
-        "output_nr",
-        "_version",
-        "retain_grad",
-        "_backward",
-        "requires_grad_",
-    ]
-)
+MANUAL_BACKEND = {
+    "options",
+    "data",
+    "set_data",
+    "is_leaf",
+    "output_nr",
+    "_version",
+    "retain_grad",
+    "_backward",
+    "requires_grad_",
+}
 
 # For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD_AND_TRACER = set(
-    [
-        "resize_",
-        "resize_as_",
-        "detach",
-        "detach_",
-        "copy_",
-        "_fw_primal",
-        "_make_dual",
-    ]
-)
+MANUAL_AUTOGRAD_AND_TRACER = {
+    "resize_",
+    "resize_as_",
+    "detach",
+    "detach_",
+    "copy_",
+    "_fw_primal",
+    "_make_dual",
+}
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
 #   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)

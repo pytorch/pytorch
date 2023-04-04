@@ -22,8 +22,8 @@ import torch
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
-
 from torch.distributed._shard.sharded_tensor.shard import Shard
+from torch.distributed._tensor import DTensor
 
 from .metadata import (
     STATE_DICT_TYPE,
@@ -316,6 +316,8 @@ def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
 def find_tensor_shard(
     tensor: torch.Tensor, index: MetadataIndex
 ) -> torch.Tensor:
+    if isinstance(tensor, DTensor):
+        return tensor.to_local()
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
     if index.offset is not None:
@@ -334,6 +336,7 @@ def find_state_dict_object(
     if index.fqn not in state_dict:
         raise ValueError(f"Could not find FQN: '{index.fqn}'")
     obj = state_dict[index.fqn]
+
     if isinstance(obj, torch.Tensor):
         return find_tensor_shard(obj, index)
     elif index.offset is not None:

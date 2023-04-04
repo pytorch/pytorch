@@ -3348,11 +3348,12 @@ struct to_ir {
         return emitForkExpr(apply.range(), forked, args, kwargs);
       }
       case prim::awaitable: {
-        auto& trees = apply.inputs().tree()->trees();
-        if (trees.size() < 1) {
+        auto tree = apply.inputs().tree();
+        if (!tree || tree->trees().size() < 1) {
           throw ErrorReport(apply)
               << "Expected at least one argument to awaitable()";
         }
+        auto& trees = tree->trees();
         auto awaited = emitSugaredExpr(Expr(trees[0]), 1);
         TreeList sliced_trees(trees.begin() + 1, trees.end());
         auto args = getNamedValues(sliced_trees, true);
@@ -4140,16 +4141,15 @@ struct to_ir {
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Node* await_node;
     TypePtr out_type;
 
-    await_node =
+    auto await_node =
         g->insertNode(method.graph()->create(prim::awaitableClosure, 1))
             ->setSourceRange(loc);
 
     {
       WithInsertPoint insert(await_node);
-      if (ClosureValue* sv = dynamic_cast<ClosureValue*>(awaited.get())) {
+      if (auto sv = dynamic_cast<ClosureValue*>(awaited.get())) {
         Value* closure_output = sv->asValue(loc, method);
         Block* closure_block = closure_output->node()->blocks().at(0);
         TORCH_INTERNAL_ASSERT(closure_block->outputs().size() == 1);

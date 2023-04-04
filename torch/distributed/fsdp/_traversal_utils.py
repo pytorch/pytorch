@@ -6,7 +6,7 @@ imports. For brevity, we may import the file as ``traversal_utils``.
 """
 
 import collections
-from typing import Deque, List, Set
+from typing import Deque, List, Set, Tuple
 
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
@@ -40,22 +40,30 @@ def _composable(module: nn.Module) -> bool:
     return "replicate" not in _get_registry(module)
 
 
-def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
+# TODO (awgu): We may be able to remove this function if we retired the
+# `use_orig_params=False` code path since so far we only need the module for
+# `FlatParameter` registration, which is not needed for `use_orig_params=True`.
+def _get_fsdp_states_with_modules(
+    module: nn.Module,
+) -> Tuple[List[_FSDPState], List[nn.Module]]:
     """
-    Returns all ``_FSDPState`` instances in the module tree rooted at
+    Returns a tuple containing:
+    1. A list of the ``_FSDPState`` instances in the module tree rooted at
     ``module`` without any duplicates and following the ``module.modules()``
-    traversal order (which is assumed to remain as depth-first). However, the
-    traversal does not proceed into any module annotated by an incompatible
-    API (e.g. ``replicate``).
+    traversal order (which is assumed to be depth-first).
+    2. A corresponding list of the modules owning the states in the first list.
 
-    For the wrapper code path, this returns all ``FullyShardedDataParallel``
-    instances. For the non-wrapper code path, this returns composable state
-    instances.
+    For the wrapper code path, both returned lists are the same, each
+    containing all ``FullyShardedDataParallel`` instances. For the composable
+    code path, this returns a list of all composable state instances and a list
+    of the corresponding fully sharded modules. See [Note: Fully Sharded
+    Module].
 
-    NOTE: For now, we must pass an ``nn.Module`` as the argument because
-    ``_FSDPState`` does not support graph traversal.
+    NOTE: The traversal does not proceed into any module annotated by an
+    incompatible API (e.g. ``replicate``).
     """
     fsdp_states: List[_FSDPState] = []
+    fsdp_modules: List[nn.Module] = []
     # Track the visited FSDP states since multiple modules may share the same
     # one and we want to return a de-duplicated list
     visited_fsdp_states: Set[_FSDPState] = set()
@@ -80,6 +88,13 @@ def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
         if optional_state is not None and optional_state not in visited_fsdp_states:
             visited_fsdp_states.add(optional_state)
             fsdp_states.append(optional_state)
+            fsdp_modules.append(submodule)
+    return fsdp_states, fsdp_modules
+
+
+def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
+    """See :func:`_get_fsdp_states_with_modules`."""
+    fsdp_states, _ = _get_fsdp_states_with_modules(module)
     return fsdp_states
 
 

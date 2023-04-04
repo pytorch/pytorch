@@ -32,7 +32,7 @@ struct SROperatorFunctor {
   virtual ~SROperatorFunctor() = default;
 };
 
-C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
+TORCH_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
 #define REGISTER_OPERATOR_FUNCTOR(name, id, ...)             \
   struct SROperatorFunctor_##id : public SROperatorFunctor { \
@@ -43,7 +43,7 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
   };                                                         \
   C10_REGISTER_CLASS(SROperatorRegistry, name, SROperatorFunctor_##id);
 
-C10_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
+TORCH_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
 #define REGISTER_NATIVE_OPERATOR_FUNCTOR(name, id, ...)            \
   struct SRNativeOperatorFunctor_##id : public SROperatorFunctor { \
     const SROpFunctor fn = __VA_ARGS__;                            \
@@ -148,10 +148,10 @@ bool nativeOpIsRegistered(const c10::Symbol& op_name);
 
 bool canReuseInputsOutputs(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant);
+    const c10::FastMap<Node*, bool>& node_has_out_variant);
 bool isOptimizableContainerType(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant);
+    const c10::FastMap<Node*, bool>& node_has_out_variant);
 
 SROperator getOutOfPlaceOperation(Node* n);
 SROperator getNativeOperation(Node* n);

@@ -3,9 +3,6 @@ def define_targets(rules):
         name = "CPUAllocator",
         srcs = ["CPUAllocator.cpp"],
         hdrs = ["CPUAllocator.h"],
-        # This library defines a flag, The use of alwayslink keeps it
-        # from being stripped.
-        alwayslink = True,
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
@@ -16,6 +13,9 @@ def define_targets(rules):
             "//c10/mobile:CPUProfilingAllocator",
             "//c10/util:base",
         ],
+        # This library defines a flag, The use of alwayslink keeps it
+        # from being stripped.
+        alwayslink = True,
     )
 
     rules.cc_library(
@@ -39,9 +39,6 @@ def define_targets(rules):
         name = "alloc_cpu",
         srcs = ["impl/alloc_cpu.cpp"],
         hdrs = ["impl/alloc_cpu.h"],
-        # This library defines flags, The use of alwayslink keeps them
-        # from being stripped.
-        alwayslink = True,
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
@@ -50,6 +47,9 @@ def define_targets(rules):
             "//c10/macros",
             "//c10/util:base",
         ],
+        # This library defines flags, The use of alwayslink keeps them
+        # from being stripped.
+        alwayslink = True,
     )
 
     rules.cc_library(
@@ -74,9 +74,6 @@ def define_targets(rules):
                 "impl/alloc_cpu.h",
             ],
         ),
-        # This library uses flags and registration. Do not let the
-        # linker remove them.
-        alwayslink = True,
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
@@ -87,6 +84,9 @@ def define_targets(rules):
             "//c10/util:base",
             "//c10/util:typeid",
         ],
+        # This library uses flags and registration. Do not let the
+        # linker remove them.
+        alwayslink = True,
     )
 
     rules.filegroup(

@@ -12,7 +12,7 @@ number = Union[int, float]
 # After regenerating files, compile PyTorch.
 # Then run: ./build/bin/test_jit --gtest_filter=TestShapeGraphLinting.Basic
 # If you have enabled opinfo testing for the op, also run:
-# python test/test_ops_jit.py TestJitCPU::test_variant_consistency_jit_[FAILING_OP]_cpu_float32
+# python test/test_ops_jit.py TestJitCPU.test_variant_consistency_jit_[FAILING_OP]_cpu_float32
 # to reproduce errors from opinfo tests.
 
 # Example PR: https://github.com/pytorch/pytorch/pull/80860/files
@@ -426,6 +426,20 @@ def squeeze(li: List[int], dim: int):
             out.append(li[i])
     return out
 
+def squeeze_dims(li: List[int], dims: List[int]):
+    if len(dims) == 0:
+        return li
+    wrapped_dims = _copy(dims)
+    for i in range(len(dims)):
+        wrapped_dims[i] = maybe_wrap_dim(wrapped_dims[i], len(li))
+    result: List[int] = []
+    for i in range(len(li)):
+        if li[i] == 1:
+            if i not in wrapped_dims:
+                result.append(li[i])
+        else:
+            result.append(li[i])
+    return result
 
 def index_select(self: List[int], dim: int, index: List[int]):
     dim = maybe_wrap_dim(dim, len(self))
@@ -543,6 +557,14 @@ def cat(tensors: List[List[int]], dim: int):
     result_size = _copy(not_skipped_tensor)
     result_size[dim] = cat_dim_size
     return result_size
+
+
+def stack(tensors: List[List[int]], dim: int):
+    unsqueezed_tensors: List[List[int]] = []
+    for tensor in tensors:
+        unsqueezed = unsqueeze(tensor, dim)
+        unsqueezed_tensors.append(unsqueezed)
+    return cat(unsqueezed_tensors, dim)
 
 
 def select(self: List[int], dim: int, index: int):
@@ -1072,6 +1094,7 @@ add_shape_compute_mapping("aten::arange.start(Scalar start, Scalar end, *, Scala
 add_shape_compute_mapping("aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", arange_start_step)
 add_shape_compute_mapping("aten::squeeze(Tensor(a) self) -> Tensor(a)", squeeze_nodim)
 add_shape_compute_mapping("aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", squeeze)
+add_shape_compute_mapping("aten::squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)", squeeze_dims)
 add_shape_compute_mapping("aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", unsqueeze)
 add_shape_compute_mapping("aten::slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)", slice)
 add_shape_compute_mapping("aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", select)
@@ -1100,6 +1123,7 @@ add_shape_compute_mapping("aten::convolution(Tensor input, Tensor weight, Tensor
 add_shape_compute_mapping("aten::conv_transpose2d.input(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor", conv_transpose2d_input)
 add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", flatten)
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
+add_shape_compute_mapping("aten::stack(Tensor[] tensors, int dim=0) -> Tensor", stack)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
 add_shape_compute_mapping("aten::movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)", movedim)
 add_shape_compute_mapping("aten::view(Tensor(a) self, int[] size) -> Tensor(a)", view)

@@ -25,7 +25,7 @@ def main():
     ja = load(args.file[0])
     jb = load(args.file[1])
 
-    keys = (set(ja.keys()) | set(jb.keys())) - set(["benchmark_results"])
+    keys = (set(ja.keys()) | set(jb.keys())) - {"benchmark_results"}
     print("{:20s} {:>20s}      {:>20s}".format("", "baseline", "test"))
     print("{:20s} {:>20s}      {:>20s}".format("", "-" * 20, "-" * 20))
     for key in sorted(keys):

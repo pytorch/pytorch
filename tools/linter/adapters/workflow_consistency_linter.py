@@ -10,7 +10,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterable, NamedTuple, Optional
 
-from yaml import CSafeLoader, dump, load
+from yaml import dump, load
+
+# Safely load fast C Yaml loader/dumper if they are available
+try:
+    from yaml import CSafeLoader as Loader
+except ImportError:
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 
 class LintSeverity(str, Enum):
@@ -38,7 +44,7 @@ def glob_yamls(path: Path) -> Iterable[Path]:
 
 def load_yaml(path: Path) -> Any:
     with open(path) as f:
-        return load(f, CSafeLoader)
+        return load(f, Loader)
 
 
 def is_workflow(yaml: Any) -> bool:

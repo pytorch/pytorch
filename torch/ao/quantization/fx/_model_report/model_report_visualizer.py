@@ -355,8 +355,8 @@ class ModelReportVisualizer:
                     tensor_features.add(feature_name)
 
         # we make them lists for iteration purposes
-        tensor_features_list: List[str] = sorted(list(tensor_features))
-        channel_features_list: List[str] = sorted(list(channel_features))
+        tensor_features_list: List[str] = sorted(tensor_features)
+        channel_features_list: List[str] = sorted(channel_features)
 
         # get the tensor info
         tensor_headers, tensor_table = self._generate_tensor_table(filtered_data, tensor_features_list)

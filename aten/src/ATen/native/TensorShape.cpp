@@ -11,7 +11,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/DimVector.h>
@@ -19,6 +18,7 @@
 #include <ATen/native/Copy.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
@@ -566,7 +566,9 @@ TORCH_IMPL_FUNC(cat_out_cpu)
   // fast path for single thread when both inputs and result are contiguous and not empty
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   ScalarType dtype = materialized[valid].get().scalar_type();
-  bool serial_dtype = (dtype == ScalarType::Double || dtype == ScalarType::Float || dtype == ScalarType::BFloat16);
+  bool serial_dtype =
+      (dtype == ScalarType::Double || dtype == ScalarType::Float ||
+       dtype == ScalarType::BFloat16 || dtype == ScalarType::Half);
   if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
     cat_serial_stub(kCPU, result, materialized, dim);
     return;
@@ -1118,8 +1120,8 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand_symint(other.sym_sizes());
 }
 
-Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
-  TORCH_CHECK(is_expandable_to(size, self.sizes()),
+Tensor sum_to_size_symint(const Tensor& self, SymIntArrayRef size) {
+  TORCH_CHECK(is_expandable_to(size, self.sym_sizes()),
            "size {", size, "} is not expandable to size {", self.sizes(), "}.");
 
   return sum_to(self, size);
@@ -1567,6 +1569,11 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
+
+  if (self.is_contiguous() && !self.is_mkldnn()) {
+    return self.view_symint(proposed_shape);
+  }
+
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
 
   if (self.is_mkldnn()) {
@@ -3392,7 +3399,7 @@ Tensor ravel(const Tensor& self) {
 static inline void handle_unflatten_exception(const std::runtime_error &e,
                                               const Tensor &self,
                                               int64_t dim,
-                                              IntArrayRef sizes,
+                                              SymIntArrayRef sizes,
                                               c10::optional <DimnameList> names) {
   if (!strstr(e.what(), "is invalid for input of size")) {
     TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
@@ -3401,16 +3408,16 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   if (self.has_names()) {
     TORCH_CHECK(false,
                 "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
-                dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
+                dim, " (", self.names()[dim], ": ", self.sym_size(dim), ") in Tensor", self.names());
 
   } else {
     TORCH_CHECK(false,
                 "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
-                dim, " (", self.size(dim), ") in the input tensor");
+                dim, " (", self.sym_size(dim), ") in the input tensor");
   }
 }
 
-Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(!sizes.empty(), "unflatten: sizes must be non-empty");
@@ -3419,9 +3426,9 @@ Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::o
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
   }
 
-  DimVector inferred_size;
+  SymDimVector inferred_size;
   try {
-    inferred_size = at::infer_size_dv(sizes, self.size(dim));
+    inferred_size = at::infer_size_dv(sizes, self.sym_size(dim));
   } catch (const std::runtime_error& e) {
     // at::infer_size would throw std::runtime_error for invalid size,
     // catch the runtime_error and display the error message in a more user-friendly way
@@ -3429,14 +3436,14 @@ Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::o
     handle_unflatten_exception(e, self, dim, sizes, names);
   }
 
-  DimVector shape(self.sizes().begin(), self.sizes().end());
+  SymDimVector shape(self.sym_sizes().begin(), self.sym_sizes().end());
   shape.erase(shape.begin() + dim);
   shape.insert(shape.begin() + dim, inferred_size.begin(), inferred_size.end());
 
   Tensor result;
   {
     NoNamesGuard guard;
-    result = self.view(shape);
+    result = self.view_symint(shape);
   }
 
   if (names) {
@@ -3449,11 +3456,11 @@ Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::o
   return result;
 }
 
-Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes) {
+Tensor unflatten_symint(const Tensor& self, int64_t dim, SymIntArrayRef sizes) {
   return native::unflatten_impl(self, dim, sizes, c10::nullopt);
 }
 
-Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
+Tensor unflatten_dimname_symint(const Tensor& self, Dimname dim, SymIntArrayRef sizes, DimnameList names) {
   return native::unflatten_impl(self, dimname_to_position(self, dim), sizes, names);
 }
 
@@ -3931,6 +3938,34 @@ at::Tensor lift(const at::Tensor& self) {
 // See notes in native_functions.yaml
 at::Tensor lift_fresh(const at::Tensor& self) {
     return self;
+}
+
+// Autogen kernels for tensor list ops dont work on XLA. TODO(jakeszwe)
+void split_copy_Tensor_out(const at::Tensor & self, int64_t split_size, int64_t dim, at::TensorList  out) {
+  auto tmp = self.split(split_size, dim);
+
+  TORCH_CHECK(out.size() == tmp.size(), "split_copy_Tensor_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
+  for (const auto i : c10::irange(out.size())) {
+    out[i].copy_(tmp[i]);
+  }
+}
+
+void split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_sizes, int64_t dim, at::TensorList  out) {
+  auto tmp = self.split_with_sizes(split_sizes, dim);
+
+  TORCH_CHECK(out.size() == tmp.size(), "split_with_sizes_copy_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
+  for (const auto i : c10::irange(out.size())) {
+    out[i].copy_(tmp[i]);
+  }
+}
+
+void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  out) {
+  auto tmp = self.unbind(dim);
+
+  TORCH_CHECK(out.size() == tmp.size(), "unbind_copy_int_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
+  for (const auto i : c10::irange(out.size())) {
+    out[i].copy_(tmp[i]);
+  }
 }
 
 int64_t sparse_dim_strided(const at::Tensor& self) {

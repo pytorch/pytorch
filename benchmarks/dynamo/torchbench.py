@@ -75,6 +75,12 @@ SKIP = {
     "fambench_xlmr",
 }
 
+SKIP_FOR_CUDA = {
+    "gat",  # only works on CPU
+    "gcn",  # only works on CPU
+    "sage",  # only works on CPU
+}
+
 # Additional models that are skipped in training
 SKIP_TRAIN = {
     # not designed for training
@@ -84,6 +90,8 @@ SKIP_TRAIN = {
     # Unusual training setup
     "opacus_cifar10",
     "maml",
+    # segfault: Internal Triton PTX codegen error
+    "timm_efficientdet",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -183,6 +191,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_GPT2_large",
     "hf_T5_large",
     "timm_vision_transformer_large",
+    "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 }
 
 
@@ -194,13 +203,17 @@ MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
 
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
-        super(TorchBenchmarkRunner, self).__init__()
+        super().__init__()
         self.suite_name = "torchbench"
         self.optimizer = None
 
     @property
     def skip_models(self):
         return SKIP
+
+    @property
+    def skip_models_for_cuda(self):
+        return SKIP_FOR_CUDA
 
     @property
     def slow_models(self):
@@ -239,7 +252,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         batch_size=None,
         part=None,
     ):
-
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
@@ -323,7 +335,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
                 or model_name in args.exclude_exact
-                or model_name in SKIP
+                or model_name in self.skip_models
             ):
                 continue
 
@@ -373,9 +385,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return None
 
 
-if __name__ == "__main__":
-
+def torchbench_main():
     original_dir = setup_torchbench_cwd()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TorchBenchmarkRunner(), original_dir)
+
+
+if __name__ == "__main__":
+    torchbench_main()

@@ -98,7 +98,7 @@ enum MessageType {
 //        to determine how to serialize them. This design is helpful for
 //        communicating super large tensors where serializing all the data at
 //        once leads to excessively large memory footprint. An implementation
-//        can then serialize and send tensors chunck-by-chunk, in the streaming
+//        can then serialize and send tensors chunk-by-chunk, in the streaming
 //        fashion.
 //    type (MessageType): type of the message.
 //    id (int64_t): message id, this is used to match request and response.

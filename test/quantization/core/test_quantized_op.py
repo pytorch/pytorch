@@ -330,7 +330,7 @@ class TestQuantizedOps(TestCase):
             {
                 'quantized_fn': [
                     torch.ao.nn.quantized.functional.hardsigmoid,
-                    torch.nn.quantized.functional.hardsigmoid,
+                    torch.ao.nn.quantized.functional.hardsigmoid,
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
                 'output_range': (0.0, 1.0),
@@ -339,7 +339,7 @@ class TestQuantizedOps(TestCase):
             {
                 'quantized_fn': [
                     torch.ao.nn.quantized.functional.hardsigmoid,
-                    torch.nn.quantized.functional.hardsigmoid,
+                    torch.ao.nn.quantized.functional.hardsigmoid,
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
                 'output_range': (0.0, 1.0),
@@ -661,7 +661,7 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             'native': torch.threshold,
             'nn.functional': torch.nn.functional.threshold,
-            'nn.quantized.functional': torch.nn.quantized.functional.threshold,
+            'nn.quantized.functional': torch.ao.nn.quantized.functional.threshold,
             'ao.nn.quantized.functional': torch.ao.nn.quantized.functional.threshold,
         }
 
@@ -734,7 +734,7 @@ class TestQuantizedOps(TestCase):
 
             ops_under_test = {
                 'nn.quantized.functional.hardtanh':
-                    torch.nn.quantized.functional.hardtanh,
+                    torch.ao.nn.quantized.functional.hardtanh,
                 'ao.nn.quantized.functional.hardtanh':
                     torch.ao.nn.quantized.functional.hardtanh,
             }
@@ -745,7 +745,7 @@ class TestQuantizedOps(TestCase):
 
             ops_under_test_inplace = {
                 'inplace nn.quantized.functional.hardtanh':
-                    torch.nn.quantized.functional.hardtanh,
+                    torch.ao.nn.quantized.functional.hardtanh,
                 'inplace ao.nn.quantized.functional.hardtanh':
                     torch.ao.nn.quantized.functional.hardtanh,
             }
@@ -1346,7 +1346,7 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             "torch": torch.max_pool1d,
             "nn.functional": torch.nn.functional.max_pool1d,
-            "nn.quantized.functional": torch.nn.quantized.functional.max_pool1d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool1d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool1d,
         }
 
@@ -1443,7 +1443,7 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             "torch": torch.max_pool2d,
             "nn.functional": torch.nn.functional.max_pool2d,
-            "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
         }
 
@@ -1502,7 +1502,7 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             "torch": torch.max_pool2d,
             "nn.functional": torch.nn.functional.max_pool2d,
-            "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
         }
 
@@ -1552,7 +1552,7 @@ class TestQuantizedOps(TestCase):
             ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool2d,
-            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1614,7 +1614,7 @@ class TestQuantizedOps(TestCase):
         self.assertTrue(qX.stride() != sorted(qX.stride()))
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool2d,
-            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1669,7 +1669,7 @@ class TestQuantizedOps(TestCase):
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool3d,
-            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool3d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1732,7 +1732,7 @@ class TestQuantizedOps(TestCase):
         self.assertTrue(qX.stride() != sorted(qX.stride()))
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool3d,
-            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool3d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1802,7 +1802,7 @@ class TestQuantizedOps(TestCase):
             ops_under_test = {
                 "nn.functional": torch.nn.functional.adaptive_avg_pool2d,
                 "nn.quantized.functional":
-                    torch.nn.quantized.functional.adaptive_avg_pool2d,
+                    torch.ao.nn.quantized.functional.adaptive_avg_pool2d,
                 "ao.nn.quantized.functional":
                     torch.ao.nn.quantized.functional.adaptive_avg_pool2d,
             }
@@ -1873,7 +1873,7 @@ class TestQuantizedOps(TestCase):
                     "nn.functional":
                         getattr(torch.nn.functional, 'adaptive_avg_pool{}d'.format(dim)),
                     "nn.quantized.functional":
-                        getattr(torch.nn.quantized.functional, 'adaptive_avg_pool{}d'.format(dim)),
+                        getattr(torch.ao.nn.quantized.functional, 'adaptive_avg_pool{}d'.format(dim)),
                     "ao.nn.quantized.functional":
                         getattr(torch.ao.nn.quantized.functional, 'adaptive_avg_pool{}d'.format(dim))
                 }
@@ -1952,7 +1952,7 @@ class TestQuantizedOps(TestCase):
             ops_under_test = {
                 "nn.functional": torch.nn.functional.adaptive_avg_pool3d,
                 "nn.quantized.functional":
-                    torch.nn.quantized.functional.adaptive_avg_pool3d,
+                    torch.ao.nn.quantized.functional.adaptive_avg_pool3d,
                 "ao.nn.quantized.functional":
                     torch.ao.nn.quantized.functional.adaptive_avg_pool3d,
             }
@@ -2100,7 +2100,7 @@ class TestQuantizedOps(TestCase):
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.interpolate,
-            "nn.quantized.functional": torch.nn.quantized.functional.interpolate,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -2154,7 +2154,7 @@ class TestQuantizedOps(TestCase):
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.interpolate,
-            "nn.quantized.functional": torch.nn.quantized.functional.interpolate,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
         }
 
@@ -2337,6 +2337,13 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qX.equal(qX), equal_ref(qX, qX))
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
+    """Tests quantized equal op with input of non-quantized tensor."""
+    def test_quantized_equal(self,):
+        x = torch.rand(1)
+        y = torch.quantize_per_tensor(x, scale=0.5, zero_point=0, dtype=torch.qint8)
+        self.assertTrue(not torch.equal(x, y))
+        self.assertTrue(not torch.equal(y, x))
+
     @skipIfNoFBGEMM
     def test_group_norm(self):
         # hypothesis is flaky for this test, create test cases manually
@@ -2443,7 +2450,7 @@ class TestQuantizedOps(TestCase):
         affine_list = (True, False)
         combined = [shape_list, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
         test_cases_product = itertools.product(*combined)
-        test_cases = list(test_case for test_case in test_cases_product)
+        test_cases = list(test_cases_product)
         # add just one test case to test overflow
         test_cases.append([
             [1, 4, 224, 224, 160],  # shape,
@@ -2831,7 +2838,7 @@ class TestQuantizedOps(TestCase):
                 lstm_prepared = torch.ao.quantization.prepare(lstm)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
-                assert type(lstm_prepared[0]) == torch.nn.quantizable.LSTM
+                assert type(lstm_prepared[0]) == torch.ao.nn.quantizable.LSTM
 
                 # Calibrate
                 y = lstm_prepared(x)
@@ -2839,7 +2846,7 @@ class TestQuantizedOps(TestCase):
 
                 # Quantize
                 lstm_quantized = torch.ao.quantization.convert(lstm_prepared)
-                assert type(lstm_quantized[0]) == torch.nn.quantized.LSTM
+                assert type(lstm_quantized[0]) == torch.ao.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
@@ -2861,7 +2868,7 @@ class TestQuantizedOps(TestCase):
     def test_custom_module_multi_head_attention(self):
         class MultiheadAttentionModel(torch.nn.Module):
             def __init__(self, *args, **kwargs):
-                super(MultiheadAttentionModel, self).__init__()
+                super().__init__()
                 self.layer = torch.nn.MultiheadAttention(*args, **kwargs)
 
             def forward(
@@ -3007,7 +3014,7 @@ class TestDynamicQuantizedOps(TestCase):
         # W_scale = 1.0
         # W_zp = 0
         W_scales = np.ones(output_channels)
-        W_zps = np.zeros(output_channels).astype(np.int)
+        W_zps = np.zeros(output_channels).astype(int)
         W_value_min = -128
         W_value_max = 127
         W_q0 = np.round(
@@ -3571,9 +3578,9 @@ class TestQuantizedLinear(TestCase):
             # xnnpack forces W_zp to 0 when using symmetric quantization
             # ONEDNN only supports symmetric quantization of weight
             if dtype == torch.qint8 or qengine_is_onednn():
-                W_zps = np.zeros(output_channels).astype(np.int)
+                W_zps = np.zeros(output_channels).astype(int)
             else:
-                W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(np.int)
+                W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(int)
             # when using symmetric quantization
             # special restriction for xnnpack fully connected op weight
             # [-127, 127] instead of [-128, 127]
@@ -4667,6 +4674,20 @@ class TestQuantizedConv(TestCase):
             X2_q = torch.quantize_per_tensor(
                 X2, scale=X2_scale, zero_point=X2_zero_point, dtype=input_dtype)
             result_ref = result_ref + X2
+        elif post_op == 'add_relu':
+            (X_value_min, X_value_max) = (0, 4)
+            X2_init = torch.randint(
+                X_value_min,
+                X_value_max,
+                result_ref.size(),
+                device=device
+            )
+            X2 = X2_scale * (X2_init - X2_zero_point).float()
+            X2_q = torch.quantize_per_tensor(
+                X2, scale=X2_scale, zero_point=X2_zero_point, dtype=input_dtype)
+            result_ref = result_ref + X2
+            relu = torch.nn.ReLU()
+            result_ref = relu(result_ref)
         # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
@@ -4679,7 +4700,7 @@ class TestQuantizedConv(TestCase):
             else:
                 W_prepack = qconv_prepack_fn(
                     W_q, bias_float, strides, pads, dilations, groups)
-            if post_op == 'add':
+            if post_op == 'add' or post_op == 'add_relu':
                 Y_q = qconv_fn(
                     X_q,
                     X2_q,
@@ -4936,6 +4957,63 @@ class TestQuantizedConv(TestCase):
                     output_channels_per_group, groups, kernels, strides, pads, None,
                     dilations, X_scale, X_zero_point, W_scale, W_zero_point,
                     Y_scale, Y_zero_point, use_bias, "add", use_channelwise, False,
+                    input_dtype=X_qdtype, output_dtype=X_qdtype, X2_scale=X2_scale, X2_zero_point=X2_zero_point)
+
+    @skipIfNoONEDNN
+    def test_qconv2d_add_relu(self):
+        batch_size = 3
+        height = 10
+        width = 10
+        groups_list = [1, 10]
+        input_channels_per_group = 2
+        output_channels_per_group = 2
+        kernel_h = 3
+        kernel_w = 3
+        stride_h = 2
+        stride_w = 2
+        pad_h = 1
+        pad_w = 1
+        dilation = 1
+        X_scale = 1.5
+        X_zero_point = 2
+        W_scale = [1.5]
+        W_zero_point = [-3]
+        Y_scale = 4.2
+        Y_zero_point = 0
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
+        X2_scale = 1.2
+        X2_zero_point_list = [0, 4]
+
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list, X2_zero_point_list)
+        for groups, use_bias, use_channelwise, X2_zero_point in options:
+            with override_quantized_engine('onednn'):
+                input_channels = input_channels_per_group * groups
+                output_channels = output_channels_per_group * groups
+                kernels = (kernel_h, kernel_w)
+                strides = (stride_h, stride_w)
+                pads = (pad_h, pad_w)
+                dilations = (dilation, dilation)
+
+                qconv = torch.ops.quantized.conv2d_add_relu
+                qconv_prepack = torch.ops.quantized.conv2d_prepack
+                conv_op = torch.nn.Conv2d(
+                    input_channels,
+                    output_channels,
+                    kernels,
+                    strides,
+                    pads,
+                    dilations,
+                    groups,
+                )
+
+                X_qdtype = torch.quint8
+                self._test_qconv_impl(
+                    qconv, qconv_prepack, conv_op, batch_size,
+                    input_channels_per_group, (height, width),
+                    output_channels_per_group, groups, kernels, strides, pads, None,
+                    dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+                    Y_scale, Y_zero_point, use_bias, "add_relu", use_channelwise, False,
                     input_dtype=X_qdtype, output_dtype=X_qdtype, X2_scale=X2_scale, X2_zero_point=X2_zero_point)
 
     # TODO: merge this test with test_qconv2d when CUDNN runtime flags becomes available
@@ -6130,22 +6208,46 @@ class TestQuantizedConv(TestCase):
             bs = 1
             ic, oc = 128, 512
             kh, kw = 1, 1
-            ih, iw = 28, 28
             bias = None
-            strides, paddings, dilates, groups = (1, 1), (0, 0), (1, 1), 1
-            w = torch.randn((oc, ic, kh, kw))
+            strides, paddings, dilates = (1, 1), (0, 0), (1, 1)
+            for groups in [1, 2]:
+                ih, iw = 28, 28
+                w = torch.randn((oc * groups, ic, kh, kw))
+                qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+                x = torch.randn((bs, ic * groups, ih, iw))
+                qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+                w_packed = torch.ops.quantized.conv2d_prepack(
+                    qw, bias, strides, paddings, dilates, groups
+                )
+                torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+                ih, iw = 5, 4
+                x = torch.randn((bs, ic * groups, ih, iw))
+                qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+                # The following should pass when input shape is changed
+                torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+
+    @skipIfNoONEDNN
+    def test_conv_transpose_reorder_issue_onednn(self):
+        with override_quantized_engine('onednn'):
+            bs = 1
+            ic, oc = 16, 33
+            kh, kw = 3, 3
+            ih, iw = 50, 100
+            bias = None
+            strides, paddings, output_paddings, dilates, groups = [2, 2], [0, 0], [0, 0], [1, 1], 1
+            w = torch.randn((ic, oc, kh, kw))
             qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
             x = torch.randn((bs, ic, ih, iw))
             qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
-            w_packed = torch.ops.quantized.conv2d_prepack(
-                qw, bias, strides, paddings, dilates, groups
+            w_packed = torch.ops.quantized.conv_transpose2d_prepack(
+                qw, bias, strides, paddings, output_paddings, dilates, groups
             )
-            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+            torch.ops.quantized.conv_transpose2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
             ih, iw = 5, 4
             x = torch.randn((bs, ic, ih, iw))
             qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
             # The following should pass when input shape is changed
-            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+            torch.ops.quantized.conv_transpose2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
 
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),

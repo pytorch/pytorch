@@ -7,7 +7,7 @@
 import re
 
 
-class Parser(object):
+class Parser:
     # List of tuples (regex_str, lambda(regex_match, formatter))
     # If a lambda returns True it will be called repeatedly with replacement
     # otherwise it will only be called on text that hasn't been parsed yet.

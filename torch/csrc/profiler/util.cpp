@@ -97,6 +97,46 @@ bool softAssertRaises() {
   return soft_assert_raises_.value_or(false);
 }
 
+void logSoftAssert(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* cond,
+    const char* args) {
+#ifdef USE_KINETO
+  std::string error;
+  error = fmt::format(
+      "{} SOFT ASSERT FAILED at {}:{}, func: {}, args: {}",
+      cond,
+      file,
+      line,
+      func,
+      args);
+  // TODO: Implement profile_id and group_profile_id as 3rd/4th arguments.
+  kineto::logInvariantViolation(cond, error, "", "");
+#endif
+}
+
+void logSoftAssert(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* cond,
+    const std::string& args) {
+#ifdef USE_KINETO
+  std::string error;
+  error = fmt::format(
+      "{} SOFT ASSERT FAILED at {}:{}, func: {}, args: {}",
+      cond,
+      file,
+      line,
+      func,
+      args);
+  // TODO: Implement profile_id and group_profile_id as 3rd/4th arguments.
+  kineto::logInvariantViolation(cond, error, "", "");
+#endif
+}
+
 // ----------------------------------------------------------------------------
 // -- NVTX --------------------------------------------------------------------
 // ----------------------------------------------------------------------------

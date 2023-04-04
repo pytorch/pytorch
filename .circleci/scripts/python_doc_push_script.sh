@@ -109,6 +109,7 @@ if [ "$is_main_doc" = true ]; then
   elif [ $undocumented -gt 0 ]; then
     echo undocumented objects found:
     cat build/coverage/python.txt
+    echo "Make sure you've updated relevant .rsts in docs/source!"
     exit 1
   fi
 else
@@ -140,6 +141,7 @@ git status
 if [[ "${WITH_PUSH:-}" == true ]]; then
   # push to a temp branch first to trigger CLA check and satisfy branch protections
   git push -u origin HEAD:pytorchbot/temp-branch-py -f
+  git push -u origin HEAD^:pytorchbot/base -f
   sleep 30
   git push -u origin "${branch}"
 fi

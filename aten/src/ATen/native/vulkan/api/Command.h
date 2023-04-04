@@ -120,7 +120,7 @@ class CommandBuffer final {
   void write_timestamp(const VkQueryPool, const uint32_t) const;
   void reset_querypool(const VkQueryPool, const uint32_t, const uint32_t) const;
 
-  VkCommandBuffer get_submit_handle();
+  VkCommandBuffer get_submit_handle(const bool final_use = false);
 
   inline operator bool() const {
     return VK_NULL_HANDLE != handle_;

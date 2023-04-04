@@ -133,6 +133,17 @@ AttrFunction attr_func_gelu = [](torch::List<c10::optional<at::Scalar>> scalars,
   return ideep::attr_t::fuse_gelu(1.0, 0.f, 0.f, gelu_type);
 };
 
+AttrFunction attr_func_hardsigmoid =
+    [](torch::List<c10::optional<at::Scalar>> scalars,
+       c10::optional<c10::string_view> algorithm) {
+      ideep::attr_t attr;
+      ideep::post_ops po;
+      po.append_eltwise(
+          1.0f, ideep::algorithm::eltwise_hardsigmoid, 1.0f / 6.0f, 0.5f);
+      attr.set_post_ops(po);
+      return attr;
+    };
+
 const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map() {
   static const std::map<c10::string_view, AttrFunction> fusion_attr_map{
       {"relu", ATTR_FUNC(relu)},
@@ -140,6 +151,7 @@ const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map() {
       {"tanh", ATTR_FUNC(tanh)},
       {"swish", ATTR_FUNC(swish)},
       {"hardswish", ATTR_FUNC(hardswish)},
+      {"hardsigmoid", attr_func_hardsigmoid},
       {"leaky_relu", attr_func_leaky_relu},
       {"hardtanh", attr_func_hardtanh},
       {"gelu", attr_func_gelu},

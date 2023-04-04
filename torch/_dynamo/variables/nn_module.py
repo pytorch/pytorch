@@ -12,12 +12,21 @@ from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
-from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
+from ..source import (
+    AttrSource,
+    FSDPNNModuleSource,
+    GetItemSource,
+    NNModuleSource,
+    NotNNModuleSource,
+)
 from ..utils import (
+    get_custom_getattr,
+    get_fake_value,
     is_lazy_module,
     is_safe_constant,
     istensor,
     istype,
+    object_has_getattribute,
     proxy_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
@@ -30,7 +39,7 @@ class NNModuleVariable(VariableTracker):
     _nonvar_fields = ["module_type", "module_key"]
 
     def __init__(self, module_type: type, module_key: str, **kwargs):
-        super(NNModuleVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
         assert self.source
@@ -86,6 +95,22 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise RestartAnalysis()
 
+    def _custom_getattr_fallback(self, base, tx, name, options):
+        """Check for a __getattr__ and handle it specially if it is implemented"""
+        if object_has_getattribute(base):
+            unimplemented("torch.nn.Module with a custom __getattribute__ defined")
+
+        getattr_fn = get_custom_getattr(base)
+        if getattr_fn is None:
+            return None
+
+        if not isinstance(getattr_fn, types.FunctionType):
+            unimplemented("torch.nn.Module with a non-function custom __getattr__")
+
+        return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
+            tx, [variables.ConstantVariable(name)], {}
+        )
+
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder
 
@@ -121,8 +146,18 @@ class NNModuleVariable(VariableTracker):
         elif "_buffers" in base_dict and name in base_dict["_buffers"]:
             subobj = base_dict["_buffers"][name]
         else:
-            subobj = inspect.getattr_static(base, name)
-            object_member = False
+            try:
+                subobj = inspect.getattr_static(base, name)
+                object_member = False
+            except AttributeError:
+                # see if we can fallback to __getattr__, which is not checked by getattr_static
+                result = self._custom_getattr_fallback(
+                    base=base, tx=tx, name=name, options=options
+                )
+                if result is not None:
+                    return result
+                # if we can't find a __getattr__, just raise the AttributeError
+                raise
 
         if name == "__class__" and not object_member:
             return variables.UserDefinedClassVariable(base.__class__, **options)
@@ -165,8 +200,9 @@ class NNModuleVariable(VariableTracker):
 
         @contextmanager
         def record_nn_module_stack():
+            fully_qualified_name = self.source.name()
             try:
-                tx.nn_module_stack[self.module_key] = type(mod)
+                tx.nn_module_stack[self.module_key] = (fully_qualified_name, type(mod))
                 yield
             finally:
                 del tx.nn_module_stack[self.module_key]
@@ -180,13 +216,13 @@ class NNModuleVariable(VariableTracker):
                 # unroll Sequential()
                 assert not kwargs
                 (arg,) = args
-                for idx, submod in enumerate(mod):
+                for child_name, submod in mod.named_children():
                     tx.call_function(
                         tx.output.register_attr_or_module(
                             submod,
                             self.module_key,
-                            idx,
-                            source=NNModuleSource(GetItemSource(self.source, idx)),
+                            child_name,
+                            source=NNModuleSource(AttrSource(self.source, child_name)),
                             **options,
                         ),
                         [arg],
@@ -211,28 +247,42 @@ class NNModuleVariable(VariableTracker):
                 )
 
             else:
-                # for lazy modules, run the pre-hooks which will update the type
-                # TODO mlazos: we don't fully support all of the hooks that exist,
-                # so restrict using __call__ only to lazy modules for now
                 assert self.source, (
                     "Must provide a valid source in order to inline, "
                     "since inlined function may have default args which must be guarded."
                 )
-                class_source = AttrSource(self.source, "__class__")
-                if is_lazy:
-                    fn = mod.__call__.__func__
-                    fn_source = AttrSource(
-                        AttrSource(self.source, "__call__"), "__func__"
-                    )
+                if isinstance(mod, torch.fx.GraphModule):
+                    # TODO: do we want to support __call__ for GM's?
+                    # If so at least some changes are needed, we don't allow inlining
+                    # the call_wrapped currently, and maybe other issues too
+                    fn = mod.forward
+                elif is_lazy:
+                    # In the case of a lazy module, we want to run
+                    # the pre-hooks which initialize it.
+                    # Afterwards, lazy module deletes its pre-hooks
+                    # to avoid treating it as lazy on subsequent recompile.
+                    assert len(kwargs) == 0
+                    if hasattr(mod, "_initialize_hook"):
+                        input = [
+                            get_fake_value(x.node, tx)
+                            for x in proxy_args_kwargs(args, {})[0]
+                        ]
+                        mod._infer_parameters(mod, input)
+                    fn = mod.__call__
                 else:
-                    fn = mod.forward.__func__
-                    fn_source = AttrSource(
-                        AttrSource(self.source, "forward"), "__func__"
-                    )
+                    fn = mod.__call__
+                fn_source = AttrSource(self.source, "__call__")
+                if istype(fn, types.MethodType):
+                    fn = fn.__func__
+                    fn_source = AttrSource(fn_source, "__func__")
+                    args = [self] + args
+                else:
+                    assert istype(fn, types.FunctionType)
+
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
-                    [self] + args,
+                    args,
                     kwargs,
                 )
 
@@ -250,8 +300,33 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         module = tx.output.get_submodule(key)
 
-        if name == "forward":
+        if name == "__call__":
+            # TODO(whc)  do we really need this special case?
             return self.call_function(tx, args, kwargs)
+        elif name == "forward":
+            # TODO(whc)
+            # This is the old special case moved to a new place.  (copy from call_function below)
+            # Old behavior: we'd route "forward" meth call to 'call_function', which inlined forward.
+            # New behavior: since call_function now hits '__call__', forward would fall through to 'wrap_proxy' below,
+            # instead of being inlined.  What should we do about this?
+            #   1) all methods get inlined now at the bottom of this call_method, instead of put into the graph as calls
+            #   2) we maintain this special case just for forward
+            assert self.source, (
+                "Must provide a valid source in order to inline, "
+                "since inlined function may have default args which must be guarded."
+            )
+            fn = module.forward.__func__
+            assert istype(fn, types.FunctionType)
+            options["source"] = AttrSource(
+                AttrSource(self.source, "forward"), "__func__"
+            )
+            args = [self] + args
+
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, **options),
+                args,
+                kwargs,
+            )
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
@@ -331,9 +406,12 @@ class NNModuleVariable(VariableTracker):
                 source = AttrSource(source, x)
             return source
 
-        if name == "children":
+        if name == "named_children":
             assert not (args or kwargs)
-            return wrap_values(module.named_children())
+            result = []
+            for name, submod in module.named_children():
+                result.append(named_embed(name, submod))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_parameters":
             result = []
             for name, param in module.named_parameters(
@@ -355,6 +433,9 @@ class NNModuleVariable(VariableTracker):
             ):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "children":
+            assert not (args or kwargs)
+            return wrap_values(module.named_children())
         elif name == "modules":
             return wrap_values(module.named_modules())
         elif name == "parameters":
@@ -505,7 +586,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
-        super(UnspecializedNNModuleVariable, self).__init__(value=value, **kwargs)
+        super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
             # force guard checks even when `not config.guard_nn_modules``
             self.source = NotNNModuleSource(self.source)
@@ -549,12 +630,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         # TODO mlazos: only support __call__ for lazy modules
         # until we can support a larger swath of python
-        if is_lazy_module(self.value):
-            fn = self.value_type.__call__
-            source = AttrSource(AttrSource(self.source, "__class__"), "__call__")
+        if is_lazy_module(self.value) and self.source:
+            name = "__call__"
         else:
-            fn = self.value_type.forward
-            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
+            name = "forward"
+
+        fn = getattr(self.value_type, name)
+        if self.source:
+            source = AttrSource(AttrSource(self.source, "__class__"), name)
+        else:
+            source = None
 
         return variables.UserFunctionVariable(
             fn, source=source, **options
@@ -603,7 +688,34 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     args,
                     kwargs,
                 )
+
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
         return super().call_method(tx, name, args, kwargs)
+
+
+class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
+    """
+    Tracing behavior: trace into submodules and treat them as Unspecialized, do not
+    register parameters to the top-level, treat them as function inputs.
+
+    Guards behavior: if 'skip_fsdp_guards', many guards that would be installed
+    by a vanilla UnspecializedNNModuleVariable are simply dropped, on the basis
+    that a user wrapping their model in FSDP(model) is already opting into a
+    requirement to not modify internal model state, which would already break FSDP without
+    compilation.
+    """
+
+    def __init__(self, value, **kwargs):
+        source = kwargs.get("source", None)
+        assert (
+            source is not None
+        ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
+
+        super().__init__(value=value, **kwargs)
+        if torch._dynamo.config.skip_fsdp_guards:
+            self.source = FSDPNNModuleSource(source)
+        else:
+            # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
+            self.source = NotNNModuleSource(source)

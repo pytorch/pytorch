@@ -434,8 +434,7 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
 // correctly. For example, T = std::unique_ptr may evaluate to true and be
 // treated as POD. This can cause unexpected behavior.
-#if defined(__GNUG__) && __GNUC__ < 5 && \
-    !(defined(__clang__) && defined(_LIBCPP_VERSION))
+#if defined(__GNUG__) && __GNUC__ < 5 && !defined(__clang__)
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value

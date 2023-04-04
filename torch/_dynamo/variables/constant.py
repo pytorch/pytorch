@@ -11,7 +11,7 @@ from .base import typestr, VariableTracker
 
 class ConstantVariable(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(ConstantVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         assert not isinstance(value, torch.Tensor)
         assert not isinstance(value, torch.SymInt)
         assert not isinstance(value, torch.SymFloat)
@@ -76,7 +76,7 @@ class ConstantVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from .tensor import DynamicShapeVariable
+        from .tensor import SymNodeVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -86,25 +86,17 @@ class ConstantVariable(VariableTracker):
                 items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)
 
-        if any([isinstance(x, DynamicShapeVariable) for x in args]):
-            # NOTE! DANGER! THIS ONLY WORKS FOR COMMUTATIVE OPS
-            # we are relying on add to have arg[0] be a DynamicShapeVariable
-            # because we are in ConstantVariable land
-            # This transforms
-            # constant + dynamic
-            # into
-            # dynamic + constant
-            # Which already has infra built for writing to the graph
-            if name == "__add__":
-                assert len(args) == 1
-                return args[0].call_method(tx, name, [self], {})
-            # Unfortunate constant
-            return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
+        if any([isinstance(x, SymNodeVariable) for x in args]):
+            # Promote to SymNodeVariable for operations involving dynamic shapes.
+            return variables.SymNodeVariable(self.as_proxy(), self.value).call_method(
+                tx, name, args, kwargs
+            )
+
         try:
             const_args = [a.as_python_constant() for a in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except NotImplementedError:
-            return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
+            return super().call_method(tx, name, args, kwargs)
 
         def has_arith_binop(num_ty):
             return (
@@ -122,16 +114,16 @@ class ConstantVariable(VariableTracker):
             op = getattr(operator, name)
             add_target = const_args[0]
             if isinstance(add_target, (torch.SymInt, torch.SymFloat)):
-                from .tensor import DynamicShapeVariable
+                from .tensor import SymNodeVariable
 
                 # Addition between a non sym and sym makes a sym
-                # dyn_shape = tx.output.register_attr_or_module(
+                # sym_num = tx.output.register_attr_or_module(
                 #     add_target, f"sym_shape_{add_target}", source=None
                 # )
                 proxy = tx.output.create_proxy(
                     "call_function", op, (self.value, add_target), {}
                 )
-                return DynamicShapeVariable.create(tx, proxy, add_target, **options)
+                return SymNodeVariable.create(tx, proxy, add_target, **options)
             return ConstantVariable(op(self.value, add_target), **options)
         elif name == "__len__" and not (args or kwargs):
             return ConstantVariable(len(self.value), **options)
@@ -146,7 +138,7 @@ class ConstantVariable(VariableTracker):
 
 class EnumVariable(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(EnumVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def as_proxy(self):
@@ -160,3 +152,9 @@ class EnumVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+    def const_getattr(self, tx, name):
+        member = getattr(self.value, name)
+        if callable(member):
+            raise NotImplementedError()
+        return member
