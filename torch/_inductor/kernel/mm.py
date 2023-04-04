@@ -80,7 +80,7 @@ mm_template = TritonTemplate(
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 
-aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
+aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out", ("beta", "alpha"))
 
 aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
 
@@ -124,7 +124,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
     choices = [aten__int_mm.bind((mat1, mat2), layout)]
-    if use_triton_template(layout):
+    if use_triton_template(layout, enable_int32=True):
         # TODO: Re-enable eager mode implementation once cuBLAS is fixed
         choices = []
         for config in int8_mm_configs(m, n, k):

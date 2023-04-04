@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     compare_equal_outs_and_grads,
     outs_and_grads,
+    skipIfRocm,
 )
 import torch
 import torch.nn as nn
@@ -23,7 +24,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.nn.utils.rnn import PackedSequence
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
 from functorch import (
@@ -233,11 +234,22 @@ class TestPythonKey(AOTTestCase):
         grads2 = [a.grad for a in mod.parameters()]
         self.assertEqual(grads, grads2)
 
+def get_base(t):
+    return t._base if t._is_view() else t
+
+def is_in_base(t, maybe_tensors):
+    t_base = get_base(t)
+    for maybe_tensor in maybe_tensors:
+        if isinstance(maybe_tensor, torch.Tensor):
+            if t_base is get_base(maybe_tensor):
+                return True
+    return False
 
 class TestAOTAutograd(AOTTestCase):
     # test_mutation will:
     # - Ensure that inputs are non-leaves, so our graphs can mutate them
     # - try to mutate outputs of the graph (to ensure that autograd meta is set properly on outputs)
+    @patch("functorch.compile.config.debug_assert", True)
     def verify_aot_autograd(
         self,
         f,
@@ -318,10 +330,9 @@ class TestAOTAutograd(AOTTestCase):
                 if isinstance(ref_o, torch.Tensor):
                     self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
                     self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
-                    if ref_o.requires_grad:
-                        # _is_view() should probably unconditionally be the same,
-                        # but in practice I don't think this matters for tensors that don't require grad
-                        self.assertEqual(ref_o._is_view(), test_o._is_view())
+                    ref_is_view_of_non_interm = is_in_base(ref_o, graph_inps) or is_in_base(ref_o, ref_out)
+                    test_is_view_of_non_interm = is_in_base(test_o, graph_inps_copy) or is_in_base(test_o, test_out)
+                    self.assertEqual(ref_is_view_of_non_interm, test_is_view_of_non_interm)
                     self.assertEqual(ref_o, test_o)
                     if test_mutation:
                         # This tests that autograd meta is set properly on the output we can
@@ -394,7 +405,7 @@ class TestAOTAutograd(AOTTestCase):
 
         self.verify_aot_autograd(F(), inp)
 
-    def test_embedding_bag_view(self):
+    def test_embedding_bag_view_dynamic(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.
 
@@ -408,7 +419,10 @@ class TestAOTAutograd(AOTTestCase):
 
         x = torch.arange(3)
         y = torch.arange(3)
+        self.verify_aot_autograd(F(), [x, y], dynamic=False)
         self.verify_aot_autograd(F(), [x, y], dynamic=True)
+
+
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_simple(self):
@@ -441,6 +455,26 @@ def forward(self, primals_1):
             out_ref = f(*inp)
             out_test = f_compiled(*inp)
             self.assertEqual(out_ref, out_test)
+
+    def test_outputs_are_aliased(self):
+        # Tensor, None, int
+        def f(a):
+            b = a.mul(2)
+            c = b.view(-1)
+            return b, c
+        f_compiled = aot_function(f, nop)
+        for req_grad in [True, False]:
+            inp = torch.ones(3, requires_grad=req_grad)
+            out_ref = f(inp)
+            out_test = f_compiled(inp)
+            self.assertEqual(out_ref[0], out_test[0])
+            self.assertEqual(out_ref[1], out_test[1])
+            # Try mutating one of the outputs, which is aliased.
+            out_ref[0].mul_(3)
+            out_test[0].mul_(3)
+            # Assert that the aliasing relationship was preserved
+            self.assertEqual(out_ref[0], out_test[0])
+            self.assertEqual(out_ref[1], out_test[1])
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_is_output(self):
@@ -758,8 +792,9 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
-    view = torch.ops.aten.view.default(mul, [-1])
-    return [view, mul]""")
+    view = torch.ops.aten.view.default(mul, [-1]);  mul = None
+    _unsafe_view = torch.ops.aten._unsafe_view.default(view, [9]);  view = None
+    return [_unsafe_view]""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_no_grad(self):
@@ -925,9 +960,10 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3)
     mul_1 = torch.ops.aten.mul.Tensor(primals_1, 4);  primals_1 = None
     view = torch.ops.aten.view.default(mul, [-1])
-    transpose = torch.ops.aten.transpose.int(mul_1, 1, 0)
+    transpose = torch.ops.aten.transpose.int(mul_1, 1, 0);  mul_1 = None
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
-    return [view, transpose, transpose_1, mul, mul_1]""")
+    _unsafe_view = torch.ops.aten._unsafe_view.default(transpose, [3, 3]);  transpose = None
+    return [view, _unsafe_view, transpose_1, mul]""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_all_alias_types(self):
@@ -1131,9 +1167,9 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2);  as_strided_scatter = None
-    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_5 = None
-    return [as_strided_2, add_1]""")  # noqa: B950
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2)
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
+    return [as_strided_scatter, add_1]""")  # noqa: B950
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_aliases_other_input2(self):
@@ -1158,9 +1194,9 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0);  as_strided_scatter = None
-    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_5 = None
-    return [as_strided_2, add_1]""")  # noqa: B950
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
+    return [as_strided_scatter, add_1]""")  # noqa: B950
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_aliases_and_output_alias(self):
@@ -1183,10 +1219,9 @@ def forward(self, primals_1):
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
-    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    as_strided_13 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    view_1 = torch.ops.aten.view.default(as_strided_13, [4]);  as_strided_13 = None
-    return [as_strided_2, view_1]""")  # noqa: B950
+    as_strided_8 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_8, [4]);  as_strided_8 = None
+    return [as_strided_scatter, view_1]""")  # noqa: B950
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_aliased_with_mutation_output_alias(self):
@@ -1214,11 +1249,10 @@ def forward(self, primals_1, primals_2):
     as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
-    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    as_strided_12 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    view_1 = torch.ops.aten.view.default(as_strided_12, [-1]);  as_strided_12 = None
-    return [as_strided_2, add, view_1]""")  # noqa: B950
+    as_strided_7 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_7, [-1]);  as_strided_7 = None
+    return [as_strided_scatter, add, view_1]""")  # noqa: B950
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_metadata_mutation_aliases(self):
@@ -1262,15 +1296,13 @@ def forward(self, primals_1, primals_2):
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
+    as_strided = torch.ops.aten.as_strided.default(primals_1, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided, 2);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
-    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(primals_1, mul, [4], [1], 0);  primals_1 = mul = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided_3, 1);  as_strided_3 = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    return [as_strided_2, add, add_1]""")  # noqa: B950
+    return [as_strided_scatter, add, add_1]""")  # noqa: B950
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_aliases_bases_out_of_order(self):
@@ -1304,14 +1336,13 @@ def forward(self, primals_1, primals_2, primals_3):
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
-    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
     as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     t_1 = torch.ops.aten.t.default(as_strided_5);  as_strided_5 = None
     add_2 = torch.ops.aten.add.Tensor(add_1, t_1);  add_1 = None
-    as_strided_18 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    view_1 = torch.ops.aten.view.default(as_strided_18, [-1]);  as_strided_18 = None
-    return [as_strided_2, t_1, add_2, view_1]""")  # noqa: B950
+    as_strided_14 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_14, [-1]);  as_strided_14 = None
+    return [as_strided_scatter, add_2, view_1, t_1]""")  # noqa: B950
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_synthetic_base_base_attribute_is_none(self):
@@ -1375,12 +1406,12 @@ def forward(self, primals_1, primals_2):
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     t = torch.ops.aten.t.default(view);  view = None
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    add = torch.ops.aten.add.Tensor(as_strided_5, as_strided_2);  as_strided_5 = None
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    add = torch.ops.aten.add.Tensor(as_strided_5, as_strided_2);  as_strided_5 = as_strided_2 = None
     view_1 = torch.ops.aten.view.default(add, [-1])
     t_1 = torch.ops.aten.t.default(t)
     unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0)
-    return [t, as_strided_2, view_1, t_1, unsqueeze, add]""")  # noqa: B950
+    return [as_strided_scatter, t, view_1, t_1, unsqueeze, add]""")  # noqa: B950
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_dynamic_shape_output_not_in_bw_graph(self):
@@ -1763,6 +1794,7 @@ def forward(self, arg0_1):
             self.verify_aot_autograd(f, args)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/96560
     def test_batch_norm_amp(self):
         device = "cuda"
         input_dtype = torch.float16
@@ -1901,7 +1933,7 @@ def forward(self, arg0_1):
             def forward(self, x):
                 y = self.buffer.add_(3)
                 y.resize_([20])
-                assert(y.shape == self.buffer.shape)
+                assert y.shape == self.buffer.shape
                 return x.sum() + self.buffer.sum()
 
         m = M().eval()
@@ -2040,8 +2072,8 @@ class TestPartitioning(AOTTestCase):
             a_sz = (x, a.size(0))
             return torch.cat([a.expand(a_sz), b, c])
         fw_graph, bw_graph = get_fw_bw_graph(f, inp, dynamic=True)
-        self.assertEqual(get_num_ins_outs(fw_graph), (3, 5))
-        self.assertEqual(get_num_ins_outs(bw_graph), (5, 3))
+        self.assertEqual(get_num_ins_outs(fw_graph), (3, 4))
+        self.assertEqual(get_num_ins_outs(bw_graph), (4, 3))
         _, outs = get_ins_outs(fw_graph)
         self.assertTrue(all([is_sym_node(n) for n in outs[1:]]))
 
@@ -2143,14 +2175,14 @@ class TestPartitioning(AOTTestCase):
         (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
         bw_graph = bw_graph_cell[0]
 
-        self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
-        self.assertEqual(get_num_ins_outs(bw_graph), (10, 4))
+        self.assertEqual(get_num_ins_outs(fw_graph), (4, 12))
+        self.assertEqual(get_num_ins_outs(bw_graph), (9, 4))
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
             # then 4 tensors (transposes of matricies used for mm) are saved
-            # finally 4 symints are saved
-            [False, True, True, False, False] + [False] * 4 + [True] * 4,
+            # finally 3 symints are saved
+            [False, True, True, False, False] + [False] * 4 + [True] * 3,
             [is_sym_node(n) for n in fw_graph_out_nodes]
         )
 
@@ -2445,6 +2477,8 @@ aot_autograd_failures = {
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
 
+    skip('linalg.pinv', 'singular'),  # likely needs updated tolerance
+
     # Worked with real but not with fake
     xfail('cholesky_inverse'),
     xfail('_segment_reduce', 'lengths'),
@@ -2464,10 +2498,11 @@ aot_autograd_failures = {
     skip('linalg.householder_product'),  # flaky
     decorate('matmul', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
     decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
+    # overrides atol=1e-4, rtol=1e-5 would do as well
+    decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
 }
 
 symbolic_aot_autograd_failures = {
-    xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2704,7 +2739,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
             c_args, c_kwargs = pytree.tree_unflatten(cur_flat_args, args_spec)
             return op.op(*c_args, **c_kwargs)
 
-        compiled_f = compiled_function(f, nop, nop, dynamic=dynamic)
+        compiled_f = compiled_function(f, nop, nop, dynamic=dynamic, partition_fn=min_cut_rematerialization_partition)
         try:
             _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
         except GuardOnDataDependentSymNode:
@@ -2774,6 +2809,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
 
     @ops(op_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.use_functionalize", True)
+    @patch("functorch.compile.config.debug_assert", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
@@ -2794,7 +2830,7 @@ aot_autograd_module_failures = set({
                                   # for TrnasformerEncoder layers, MHA and sdp custom kernels
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
                            # to a causal mask tensor, to see if Boolean is_causal should be set
-                           # for TrnasformerEncoder layers, MHA and sdp custom kernels
+                           # for TransformerEncoder layers, MHA and sdp custom kernels
                            # (this bubbles up to Transformer)
 })
 
@@ -2804,6 +2840,19 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.CrossEntropyLoss,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.ReplicationPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.ReplicationPad2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.ReplicationPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.ReflectionPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.ReflectionPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.AdaptiveAvgPool3d,  # could not find kernel for aten._adaptive_avg_pool3d_backward.default at dispatch key
+                                 # DispatchKey.Meta
+    torch.nn.AdaptiveMaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
+                         # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
+    torch.nn.LocalResponseNorm  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 

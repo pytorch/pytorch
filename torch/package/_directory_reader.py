@@ -5,6 +5,7 @@ from typing import cast
 import torch
 from torch.types import Storage
 
+
 # because get_storage_from_record returns a tensor!?
 class _HasStorage:
     def __init__(self, storage):

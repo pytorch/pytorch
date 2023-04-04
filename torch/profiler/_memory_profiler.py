@@ -381,8 +381,7 @@ class SizeMap:
             if isinstance(i, _TensorMetadata):
                 yield i
             elif isinstance(i, list):
-                for t in i:
-                    yield t
+                yield from i
 
     def __getitem__(self, key: TensorKey):
         return self._values[key]
@@ -670,7 +669,7 @@ class MemoryProfile:
                     allocation_times[(key, is_allocation)] = event.start_time_ns
 
         snapshot = self._category_snapshot()
-        last_version = {key: version for key, version in sorted(snapshot.keys())}
+        last_version = dict(sorted(snapshot.keys()))
 
         events: List[Tuple[int, Action, TensorAndID]] = [
             (-1, Action.PREEXISTING, (key, version))

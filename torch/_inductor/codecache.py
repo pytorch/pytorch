@@ -15,6 +15,7 @@ import sys
 import sysconfig
 import tempfile
 import types
+from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
 from functools import partial
@@ -73,6 +74,13 @@ def cache_dir():
     return cache_dir
 
 
+@functools.lru_cache(None)
+def cubin_cache_dir():
+    cubin_dir = os.path.join(cache_dir(), "cubin")
+    os.makedirs(cubin_dir, exist_ok=True)
+    return cubin_dir
+
+
 class PersistentCache:
     def __init__(self):
         self.local_cache_path = os.path.join(cache_dir(), "local_cache")
@@ -120,9 +128,9 @@ class PersistentCache:
             1. Check global_cache[name][inputs][choice], return benchmark if cached.
             2. Check local_cache[name][inputs][choice], return benchmark if cached.
             3.
-                a. `max_autotune=True`: benchmark the choice, update
+                a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[name][inputs][choice], and return the benchmark.
-                b. `max_autotune=False`: don't benchmark the choice, return nothing.
+                b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
 
         gc_log = partial(global_cache_log, self.dinfo, self.vinfo, name, inputs)
@@ -145,7 +153,7 @@ class PersistentCache:
                         callback(choice_hash, cached=False)
             return hit
 
-        if config.max_autotune:
+        if config.max_autotune or config.max_autotune_gemm:
             local_cache = self.get_local_cache()
             # check local cache first since it is data specific to the current machine
             if not check_cache(local_cache) and not check_cache(
@@ -446,8 +454,11 @@ def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
 
 
-def optimization_flags():
+def optimization_flags(cuda=False):
     base_flags = "-O3 -ffast-math -fno-finite-math-only"
+    if cuda:
+        return base_flags
+
     if sys.platform == "darwin":
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         # Also, `-march=native` is unrecognized option on M1
@@ -462,30 +473,38 @@ def use_custom_generated_macros():
 
 
 def get_include_and_linking_paths(
-    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa
+    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False
 ):
+    macros = ""
     if sys.platform == "linux" and (
         include_pytorch
         or vec_isa != invalid_vec_isa
+        or cuda
         or config.cpp.enable_kernel_profile
     ):
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
-        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
-        lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
-        macros = vec_isa.build_macro()
-        if macros:
-            macros = f"-D{macros}"
+        ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        lpaths = cpp_extension.library_paths(cuda) + [
+            sysconfig.get_config_var("LIBDIR")
+        ]
+        libs = ["c10", "torch", "torch_cpu", "torch_python"]
+        if cuda:
+            libs += ["c10_cuda", "cuda", "torch_cuda"]
+            ipaths += [f"{cpp_extension._TORCH_PATH}/../aten/src/"]
+        else:
+            libs += ["gomp"]
+            macros = vec_isa.build_macro()
+            if macros:
+                macros = f"-D{macros}"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
-        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
+        ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
         lpaths = []
-        macros = ""
         if sys.platform == "darwin":
             # GNU OpenMP generally is not available on MacOS
             # There is either Intel OpenMP(for x86) or LLVM OpenMP (for both x86 and arm64)
@@ -516,22 +535,63 @@ def cpp_compile_command(
     shared=True,
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
+    cuda=False,
 ):
     ipaths, lpaths, libs, macros = get_include_and_linking_paths(
-        include_pytorch, vec_isa
+        include_pytorch, vec_isa, cuda
     )
 
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {input} {get_shared(shared)} {get_warning_all_flag(warning_all)} {cpp_flags()}
+            {cpp_compiler()} {input} {get_shared(shared)}
+            {get_warning_all_flag(warning_all)} {cpp_flags()}
             {ipaths} {lpaths} {libs} {macros}
-            {optimization_flags()}
+            {optimization_flags(cuda)}
             {use_custom_generated_macros()}
-            -o{output}
+            -o {output}
         """,
     ).strip()
+
+
+class AotCodeCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def compile(cls, source_code, cuda):
+        # TODO: update cpp_compile_command for different platforms
+        picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
+        key, input_path = write(
+            source_code,
+            "cpp",
+            code_hash(
+                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
+            ),
+        )
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                output_so = f"{input_path[:-4]}.so"
+                if not os.path.exists(output_so):
+                    cmd = cpp_compile_command(
+                        input=input_path,
+                        output=output_so,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                    ).split(" ")
+                    try:
+                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                    except subprocess.CalledProcessError as e:
+                        raise exc.CppCompileError(cmd, e.output) from e
+
+                cls.cache[key] = output_so
+
+        return cls.cache[key]
 
 
 class CppCodeCache:
@@ -589,11 +649,16 @@ class CppCodeCache:
 
 class PyCodeCache:
     cache = dict()
+    linemaps = dict()
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, source_code, extra=""):
+    def load(cls, source_code, extra="", linemap=()):
         key, path = write(source_code, "py", extra)
+        return cls.load_by_key_path(key, path, linemap)
+
+    @classmethod
+    def load_by_key_path(cls, key, path, linemap=()):
         if key not in cls.cache:
             with open(path) as f:
                 try:
@@ -608,7 +673,36 @@ class PyCodeCache:
                 exec(code, mod.__dict__, mod.__dict__)
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)
+                # unzip into separate lines/nodes lists
+                cls.linemaps[path] = list(zip(*linemap))
+
         return cls.cache[key]
+
+    @classmethod
+    @functools.lru_cache(None)
+    def stack_frames_for_code(cls, path, lineno):
+        if path not in cls.linemaps:
+            return None
+        # [(starting_line, <fx node>), ...]
+        lines, nodes = cls.linemaps[path]
+        p = bisect_right(lines, lineno)
+        if p == 0:
+            return None
+        entry = nodes[p - 1]
+        if not entry:
+            return None
+
+        def parse_stack_trace(stack_trace):
+            # ideally fx stores stack traces as data rather than a string
+            # but this is not along a performance critical path
+            regex = r'File "(.+)", line (\d+), in (.+)\n'
+            matches = re.findall(regex, stack_trace)
+            return [
+                {"filename": f, "line": int(l), "name": n}
+                for f, l, n in reversed(matches)
+            ]
+
+        return parse_stack_trace(entry.stack_trace)
 
 
 class TritonCodeCache:

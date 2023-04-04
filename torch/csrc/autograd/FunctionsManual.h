@@ -92,6 +92,11 @@ Tensor _nested_from_padded_backward(
     const Tensor& grad,
     const Tensor& input,
     const bool do_transform_0213);
+std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
+    const variable_list& grads,
+    const Tensor& self,
+    const Tensor& grad_output,
+    const Tensor& weight);
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -391,6 +396,11 @@ at::Tensor split_with_sizes_backward(
     int64_t dim,
     c10::SymIntArrayRef sizes,
     const at::TensorOptions& options);
+at::Tensor _nested_split_with_sizes_backward(
+    const std::vector<torch::autograd::Variable>& grads,
+    c10::SymIntArrayRef split_sizes,
+    int64_t dim,
+    const Tensor& self);
 at::Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymInt split_size,
