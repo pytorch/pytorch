@@ -654,7 +654,7 @@ if torch._C.has_mkldnn:
         "mkldnn", "IMPL", "Meta"
     )
 
-    @register_meta(torch.ops.mkldnn._convolution.default)
+    @register_meta(torch.ops.mkldnn._convolution_pointwise.default)
     def meta_mkldnn_convolution_default(
         input_tensor,
         weight,
@@ -663,6 +663,9 @@ if torch._C.has_mkldnn:
         stride,
         dilation,
         groups,
+        attr,
+        scalars,
+        algorithm,
     ):
         shape_out = calc_conv_nd_return_shape(
             input_tensor, weight, stride, padding, dilation, False, groups, []
