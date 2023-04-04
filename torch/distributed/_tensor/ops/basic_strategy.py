@@ -102,12 +102,16 @@ def gen_einsum_strategies(
 
     # generate strategies for each mesh dim
     for mesh_dim in range(mesh.ndim):
-        if mesh.size(mesh_dim) <= 1:
-            # no strategy for mesh dim with size 1
-            # TODO: maybe see if submesh needs this and we want to fully replicate
-            continue
-
         mesh_dim_strategies = []
+
+        # always have replicate all
+        placement_list = [Replicate()] * (len(input_dims) + 1)
+        mesh_dim_strategies.append(placement_list)
+
+        if mesh.size(mesh_dim) <= 1:
+            # only replicate strategy for mesh dim with size 1
+            # TODO: see if this is valid for the submesh case
+            continue
 
         # split batch dim
         for batch_dim in edims.batch_dims:
@@ -154,10 +158,6 @@ def gen_einsum_strategies(
             for input_dim in input_dims:
                 linearity_placement_list.append(_Partial())
             mesh_dim_strategies.append(linearity_placement_list)
-
-        # always by replicate all
-        placement_list = [Replicate()] * (len(input_dims) + 1)
-        mesh_dim_strategies.append(placement_list)
 
         all_mesh_dim_strategies.append(mesh_dim_strategies)
 
