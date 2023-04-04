@@ -251,7 +251,7 @@ def compile_fx_inner(
             # See [Backward Generation Handling]
             # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
             # know we are we running the backward even if we will not run it in cudagraphs
-            if is_backward:
+            if is_backward and config.triton.cudagraph_trees:
                 assert boxed_forward_device_index.value is not None
                 compiled_fn_inner = compiled_fn
 
