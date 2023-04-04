@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
-from functools import wraps, partial
+from functools import partial, wraps
 from typing import (
     Any,
     Callable,
@@ -16,6 +16,8 @@ from typing import (
     cast,
 )
 
+from functorch import make_fx
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -27,14 +29,8 @@ from torch.distributed._spmd.distribute import (
     Schema,
 )
 from torch.distributed._spmd.distributed_graph import DistributedGraph
-from torch.distributed._tensor import (
-    DeviceMesh,
-    Placement,
-    Replicate,
-    Shard,
-)
+from torch.distributed._tensor import DeviceMesh, Placement, Replicate, Shard
 from torch.nn.utils import stateless
-from functorch import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
@@ -71,9 +67,7 @@ class SPMD(nn.Module):
         self._compiled_m: Optional[nn.Module] = None
         self._dist_graph = DistributedGraph(orig_module=module)
 
-    def forward(
-        self, *args: Tuple[object], **kwargs: Dict[str, object]
-    ) -> object:
+    def forward(self, *args: Tuple[object], **kwargs: Dict[str, object]) -> object:
         if self._compiled_m is None:
             self._compiled_m = distribute(
                 self._dist_graph,
@@ -320,6 +314,48 @@ def _foreach_addcop_scalar_decomp(op, self, tensor1, tensor2, scalar=1):
         s.copy_(s_u)
 
 
+def _fused_adam_decomp(
+    self,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    max_exp_avg_sqs,
+    state_steps,
+    *,
+    lr=1,
+    beta1=1,
+    beta2=1,
+    weight_decay=1,
+    eps=1,
+    amsgrad=True,
+    maximize=True,
+    grad_scale=None,
+    found_inf=None,
+):
+    orig_tuple = (self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs)
+    updated_tuple = aten._fused_adam.default(
+        self,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        state_steps,
+        lr=lr,
+        beta1=beta1,
+        beta2=beta2,
+        weight_decay=weight_decay,
+        eps=eps,
+        amsgrad=amsgrad,
+        maximize=maximize,
+        grad_scale=grad_scale,
+        found_inf=found_inf,
+    )
+
+    for orig, updated in zip(orig_tuple, updated_tuple):
+        for o, u in zip(orig, updated):
+            o.copy_(u)
+
+
 FOREACH_DECOMP_TABLE = {
     aten._foreach_add_.List: _foreach_add_decomp,
     aten._foreach_add_.Scalar: partial(
@@ -346,6 +382,7 @@ FOREACH_DECOMP_TABLE = {
     aten._foreach_sub_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_sub.Scalar
     ),
+    aten._fused_adam_.default: _fused_adam_decomp,
 }
 
 
@@ -376,9 +413,7 @@ def _compile(
             assert opt is None, "Only support single Optimizer for now"
             opt = arg
 
-    assert (
-        mod is not None
-    ), "Couldn't find nn.Module instances from the arguments."
+    assert mod is not None, "Couldn't find nn.Module instances from the arguments."
 
     # 2. Override target submodules (e.g., MoE) with dummy replacements
     if module_override:
@@ -387,9 +422,7 @@ def _compile(
         for typ, override in module_override.items():
             for name, submodule in mod.named_modules():
                 if isinstance(submodule, typ):
-                    accessor.swap_submodule(
-                        name, override.replacement(submodule)
-                    )
+                    accessor.swap_submodule(name, override.replacement(submodule))
 
     # 3. Trace statelss version of the train_step
     params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
@@ -467,9 +500,7 @@ COMPILED_OBJECT_KEY = "_compiled_obj"
 
 def compile(
     module_override: Optional[Dict[Type[Any], Override]] = None,
-    gm_transformation: Optional[
-        Callable[[fx.GraphModule], fx.GraphModule]
-    ] = None,
+    gm_transformation: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
 ):
     r"""
     Compile and optimize a callable, which can be a train step within a training
