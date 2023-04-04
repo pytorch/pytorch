@@ -117,6 +117,7 @@ namespace c10d {
 std::string getNcclVersion();
 std::string ncclGetErrorWithVersion(ncclResult_t error);
 bool nccl_use_nonblocking();
+int nccl_nonblocking_timeout();
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
