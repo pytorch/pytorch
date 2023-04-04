@@ -649,7 +649,6 @@ exclude_patterns = [
     'aten/src/ATen/cuda/CUDAGeneratorImpl.cpp',
     'aten/src/ATen/test/**',
     'c10/core/impl/InlineDeviceGuard.h',
-    'c10/cuda/CUDACachingAllocator.cpp',
     'c10/cuda/CUDADeviceAssertionHost.cpp',
     'c10/cuda/CUDAFunctions.cpp',
     'c10/cuda/CUDAGuard.h',

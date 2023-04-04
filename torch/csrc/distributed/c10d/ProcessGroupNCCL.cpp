@@ -540,9 +540,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   // Device synchronize only after we've completed timeout checks.
   if (!barrierTensors_.empty()) {
     // If we use the work to do barrier, we should block here
-    at::cuda::OptionalCUDAGuard gpuGuard;
     for (auto& device : devices_) {
-      gpuGuard.set_index(device.index());
+      at::cuda::CUDAGuard gpuGuard(device);
       AT_CUDA_CHECK(cudaDeviceSynchronize());
     }
   }
