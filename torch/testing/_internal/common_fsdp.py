@@ -843,7 +843,15 @@ class FSDPTest(MultiProcessTestCase):
                         input = tuple(x.half() for x in input)
                 output = model(*input)
                 # Post-forward, if CPU offloading model param should be on CPU.
-                if cpu_offload_params and isinstance(model, FSDP):
+                if (
+                    cpu_offload_params
+                    and isinstance(model, FSDP)
+                    and model.sharding_strategy
+                    not in (
+                        ShardingStrategy.SHARD_GRAD_OP,
+                        ShardingStrategy._HYBRID_SHARD_ZERO2,
+                    )
+                ):
                     for p in model.parameters():
                         # Params should always be on CPU
                         self.assertEqual(p.device, torch.device("cpu"))
