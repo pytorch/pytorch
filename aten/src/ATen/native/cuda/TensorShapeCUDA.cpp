@@ -18,7 +18,6 @@ namespace at::native {
 Tensor& set_cuda_(Tensor& result) {
   caffe2::TypeMeta dtype = result.dtype();
   Storage storage(
-      Storage::use_byte_size_t(),
       0,
       at::cuda::getCUDADeviceAllocator(),
       true);

@@ -195,7 +195,6 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
     uint64_t record_size;
     std::tie(storage_ptr, record_size) = reader_->getRecord(record_key);
     auto cpu_storage = at::Storage(
-        c10::Storage::use_byte_size_t(),
         record_size,
         std::move(storage_ptr),
         /*allocator=*/nullptr,

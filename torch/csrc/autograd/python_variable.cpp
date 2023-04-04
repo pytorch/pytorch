@@ -695,7 +695,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     tracer::impl::NoTracerDispatchMode tracer_guard{};
 
     // We shouldn't need storage
-    Storage storage{Storage::use_byte_size_t{}, 0, at::DataPtr{}};
+    Storage storage{0, at::DataPtr{}};
 
     tensor = at::detail::make_tensor<TensorImpl>(
         std::move(storage), options.computeDispatchKey(), options.dtype());

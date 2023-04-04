@@ -6,15 +6,12 @@ namespace c10 {
 
 struct C10_API Storage {
  public:
-  struct use_byte_size_t {};
-
   Storage() = default;
   Storage(c10::intrusive_ptr<StorageImpl> ptr)
       : storage_impl_(std::move(ptr)) {}
 
   // Allocates memory buffer using given allocator and creates a storage with it
   Storage(
-      use_byte_size_t /*use_byte_size*/,
       SymInt size_bytes,
       Allocator* allocator = nullptr,
       bool resizable = false)
@@ -27,7 +24,6 @@ struct C10_API Storage {
   // potential future reallocations, however it can be nullptr if the storage
   // is non-resizable
   Storage(
-      use_byte_size_t /*use_byte_size*/,
       size_t size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator = nullptr,
