@@ -3010,5 +3010,8 @@
 - name: all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor
   shard: non_differentiable
 
+- name: reduce_scatter_tensor(Tensor input, str reduceOp, int scatter_dim, str tag, int[] ranks, int group_size) -> Tensor
+  input: non_differentiable
+
 - name: wait_tensor(Tensor self) -> Tensor
   self: non_differentiable
