@@ -218,12 +218,12 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
-            if self.value is torch.nn.Softmax:
-                return self._call_softmax(tx, args, kwargs, options)
             if self.value is torch.nn.CrossEntropyLoss:
                 return self._call_cross_entropy_loss(tx, args, kwargs, options)
             else:
-                unimplemented(f"construct nn.Module: {self.value.__name__}")
+                return variables.UserDefinedClassVariable(
+                    self.value, source=self.source, **options
+                ).call_function(tx, args, kwargs)
         elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
             assert len(args) == 1
             if isinstance(args[0], TensorVariable) or (
@@ -662,25 +662,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return locals()[self.value.__name__](*args, **kwargs)
 
         return False
-
-    def _call_softmax(self, tx, args, kwargs, options):
-        """rewrite the pattern nn.Softmax(dim=-1)(x) to F.softmax(x, -1)"""
-        dim = args[0] if args else kwargs.get("dim", variables.ConstantVariable(None))
-
-        def fake_softmax(input):
-            from .builder import wrap_fx_proxy
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    torch.nn.functional.softmax,
-                    *proxy_args_kwargs([input, dim], {}),
-                ),
-                **VariableTracker.propagate([self, dim, input]),
-            )
-
-        return variables.LambdaVariable(fake_softmax, **options)
 
     def _call_cross_entropy_loss(self, tx, args, kwargs, options):
         """

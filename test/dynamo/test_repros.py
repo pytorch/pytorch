@@ -6,6 +6,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
+import functools
 import inspect
 import itertools
 import random
@@ -26,11 +27,6 @@ import torch._dynamo.utils
 import torch._functorch.config
 import torch.library
 
-try:
-    from test_minifier import requires_cuda
-except ImportError:
-    from .test_minifier import requires_cuda
-
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
@@ -44,6 +40,11 @@ _orig_module_call = torch.nn.Module.__call__
 lib = torch.library.Library("test_sample", "DEF")
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
+
+
+requires_cuda = functools.partial(
+    unittest.skipIf, not torch.cuda.is_available(), "requires cuda"
+)
 
 
 def is_fx_tracing_test() -> bool:
@@ -2506,6 +2507,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         result = f(torch.ones(8), ClassInstantier({"key2": torch.ones(8)}))
         self.assertTrue(same(result, torch.full([8], 13.0)))
 
+    def test_hf_classinstantier(self):
+        # hf activations.py
+        class ClassInstantier(collections.OrderedDict):
+            def __getitem__(self, key):
+                content = super().__getitem__(key)
+                cls, kwargs = content if isinstance(content, tuple) else (content, {})
+                return cls(**kwargs)
+
+        ACT2CLS = ClassInstantier(
+            {
+                "relu": (nn.ReLU, {"inplace": False}),
+                "tanh": nn.Tanh,
+            }
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x, act):
+            return ACT2CLS[act](x)
+
+        y = torch.randn(10)
+        self.assertTrue(same(f(y, "tanh"), torch.tanh(y)))
+        self.assertTrue(same(f(y, "relu"), torch.relu(y)))
+
     def test_ephemeral_module(self):
         # hf activations.py
         class ReLUSquaredActivation(nn.Module):
@@ -2581,6 +2605,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue(same(buffer_ref, buffer_test))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_dynamic_shapes_right_side(self):
         def f(x):
             return torch.ones(5 * x.shape[0])
@@ -2676,6 +2701,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):
             return torch.split(x, x.shape[0] // 2, dim=0)[0]
