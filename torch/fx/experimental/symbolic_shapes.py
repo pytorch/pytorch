@@ -453,7 +453,7 @@ class SymNode:
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
     def __init__(self, expr, shape_env, pytype, hint: Optional[Union[int, float]], constant=None):
-        self._expr = expr
+        self.expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
         # What's the difference between hint and constant?
@@ -475,11 +475,6 @@ class SymNode:
         self.hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
 
-    @property
-    def expr(self):
-        self._update_expr()
-        return self._expr
-
     def has_hint(self):
         return self.hint is not None
 
@@ -488,9 +483,6 @@ class SymNode:
             raise self.shape_env._make_data_dependent_error(self.expr.xreplace(self.shape_env.var_to_val), self.expr)
         else:
             return self.hint
-
-    def _update_expr(self):
-        self._expr = self.shape_env.replace(self._expr)
 
     def is_int(self):
         return self.pytype is int
@@ -1713,7 +1705,7 @@ class ShapeEnv:
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
             if isinstance(val, SymInt):
-                s = val.node.expr
+                s = self.simplify(val.node.expr)
 
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
@@ -2214,6 +2206,7 @@ class ShapeEnv:
         """
         Given an expression, evaluates it, adding guards if necessary
         """
+        expr = self.simplify(expr)
         if len(expr.free_symbols) == 0:
             return expr
         expr = self.simplify(expr)

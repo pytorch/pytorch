@@ -1174,10 +1174,6 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(3))
         meta_cos = _get_node(fx_g, lambda x: x.target == aten.cos.default)
         meta_inp = _get_node(fx_g, lambda x: x.op == 'placeholder')
-        self.assertTrue(meta_cos.meta['val'].shape[0].node.expr == 3)
-        # Checks if the input expr has been updated even though the constraint
-        # happened afterwards
-        self.assertTrue(meta_inp.meta['val'].shape[0].node.expr == 3)
 
     def test_elementwise_meta_with_sym_numbers(self):
         def f(x, offset, as_sym_float=False):
