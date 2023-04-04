@@ -1237,6 +1237,24 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
                 self.assertEqual(param.grad.dtype, torch.float32)
 
 
+class TestFSDPUseOrigParamsInit(FSDPTest):
+    @skip_if_lt_x_gpu(2)
+    def test_non_uniform_requires_grad(self):
+        model = nn.Sequential(
+            nn.Linear(3, 3, device="cuda"),
+            nn.Linear(3, 3, device="cuda"),
+        )
+        # Freeze biases only and flatten both weights and biases into the same
+        # `FlatParameter` to exercise non-uniform `requires_grad`
+        model[0].bias.requires_grad = False
+        model[1].bias.requires_grad = False
+        fsdp_model = FSDP(model, use_orig_params=True)
+        self.assertTrue(fsdp_model[0].weight.requires_grad)
+        self.assertFalse(fsdp_model[0].bias.requires_grad)
+        self.assertTrue(fsdp_model[1].weight.requires_grad)
+        self.assertFalse(fsdp_model[1].bias.requires_grad)
+
+
 # Define this to be large enough to trigger stack corruption
 NUM_SIZE0_TENSORS = 1000
 
