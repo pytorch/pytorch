@@ -651,10 +651,11 @@ inline std::ostream& operator<<(
     return index;                                                    \
   }
 
-#define CAFFE_DEFINE_KNOWN_TYPE(T, ident)                                 \
-  template uint16_t TypeMeta::addTypeMetaData<T>();                       \
-  namespace detail {                                                      \
-  EXPORT_IF_NOT_GCC const uint16_t ident##_metadata_index = TypeMeta::addTypeMetaData<T>(); \
+#define CAFFE_DEFINE_KNOWN_TYPE(T, ident)            \
+  template uint16_t TypeMeta::addTypeMetaData<T>();  \
+  namespace detail {                                 \
+  C10_EXPORT const uint16_t ident##_metadata_index = \
+      TypeMeta::addTypeMetaData<T>();                \
   } // namespace detail
 
 // Unlike CAFFE_KNOWN_TYPE, CAFFE_DECLARE_KNOWN_TYPE avoids a function
@@ -662,7 +663,7 @@ inline std::ostream& operator<<(
 #define CAFFE_DECLARE_KNOWN_TYPE(T, ident)                 \
   extern template uint16_t TypeMeta::addTypeMetaData<T>(); \
   namespace detail {                                       \
-  extern EXPORT_IF_NOT_GCC const uint16_t ident##_metadata_index;            \
+  extern C10_EXPORT const uint16_t ident##_metadata_index; \
   } /* namespace detail */                                 \
   template <>                                              \
   EXPORT_IF_NOT_GCC C10_ALWAYS_INLINE uint16_t             \
