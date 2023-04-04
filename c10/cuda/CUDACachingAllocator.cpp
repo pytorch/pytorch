@@ -258,7 +258,8 @@ struct Block {
     }                                                 \
   } while (0)
 
-#if !defined(USE_ROCM) && !defined(USE_BAZEL)
+#if !defined(USE_ROCM) && !defined(USE_BAZEL) && !defined(FBCODE_CAFFE2) && \
+    !defined(OVRSOURCE)
 #define EXPANDABLE_SEGMENTS_SUPPORTED
 #endif
 
