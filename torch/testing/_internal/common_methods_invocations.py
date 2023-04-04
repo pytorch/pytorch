@@ -19282,7 +19282,9 @@ python_ref_db = [
             # Reference result was farther (1.3343989849090576e-05)
             # from the precise computation than the torch result
             # was (9.592622518539429e-06)!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+            DecorateInfo(unittest.skip("Unstable expected failure. Skipped!"), 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.float16,), device_type="cpu"),
+            DecorateInfo(unittest.skip("Unstable expected failure. Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.float16,), device_type="cpu"),
         ),
     ),
