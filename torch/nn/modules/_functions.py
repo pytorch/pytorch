@@ -85,6 +85,9 @@ class SyncBatchNorm(Function):
             invstd_all = invstd_all[mask]
 
         # calculate global mean & invstd
+        counts = count_all.view(-1)
+        if counts.dtype != running_mean.dtype:
+            counts = counts.to(running_mean.dtype)
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
             input,
             mean_all,
@@ -93,7 +96,7 @@ class SyncBatchNorm(Function):
             running_var,
             momentum,
             eps,
-            count_all.view(-1)
+            counts,
         )
 
         self.save_for_backward(input, weight, mean, invstd, count_all.to(torch.int32))
