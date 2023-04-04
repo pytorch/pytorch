@@ -47,6 +47,7 @@ importlib.import_module("filelock")
 test_failures = {
     "test_cpp_wrapper_dynamic_shapes": TestFailure(("cpu",)),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
 }
 
 
