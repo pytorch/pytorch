@@ -7,14 +7,14 @@ import operator
 import os
 import re
 from collections import defaultdict
-from typing import Any, Callable, List, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
 import torch._inductor as inductor
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
-
+from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from .._functorch.aot_autograd import aot_function, make_boxed_func
@@ -30,6 +30,9 @@ aten = torch.ops.aten
 
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
+
+# Sentinel indicating multiple quantities can be matched
+MULTIPLE = object()
 
 
 class Match:
@@ -61,7 +64,7 @@ class Match:
 
     def bundle(self):
         # Wrap args in an extra list
-        self.args = [tuple(self.args)]
+        self.args = [tuple(self.args)] if self.args else []
         return self
 
     def __repr__(self):
@@ -88,7 +91,11 @@ class MatchContext:
     State needed while running PatternExpr._match().
     """
 
-    def __init__(self, outputs: List["PatternExpr"], pattern_to_node=None):
+    def __init__(
+        self,
+        outputs: List["PatternExpr"],
+        pattern_to_node: Optional[Dict["PatternExpr", Node]] = None,
+    ):
         self.outputs = outputs
         self.pattern_to_node = pattern_to_node
         if self.pattern_to_node is None:
@@ -107,6 +114,13 @@ class MatchContext:
         m.ctx = self
         return m
 
+    def filter_multi_user_patterns(self):
+        return {
+            pattern: node
+            for pattern, node in self.pattern_to_node.items()
+            if pattern.has_multiple_users()
+        }
+
 
 class PatternExpr:
     """
@@ -124,20 +138,15 @@ class PatternExpr:
         except FailedMatch as e:
             return e
 
+    def has_multiple_users(self) -> bool:
+        return False
+
     def __repr__(self):
         return self.__class__.__name__ + "()"
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
         if self in ctx.pattern_to_node:
             yield ctx.pattern_to_node[self]
-
-
-class Ignored(PatternExpr):
-    def _match(self, node: NodeOrConstant, ctx: MatchContext):
-        return Match(self)  # matches anything
-
-    def __repr__(self):
-        return "*"
 
 
 class Arg(PatternExpr):
@@ -148,6 +157,18 @@ class Arg(PatternExpr):
 
     def _match(self, node: NodeOrConstant, ctx: MatchContext):
         return Match(self, args=[node])  # matches anything
+
+
+class Ignored(PatternExpr):
+    """
+    Match an arg, but don't pass it to handler
+    """
+
+    def _match(self, node: NodeOrConstant, ctx: MatchContext):
+        return Match(self)  # matches anything
+
+    def __repr__(self):
+        return "*"
 
 
 class KeywordArg(PatternExpr):
@@ -232,10 +253,12 @@ class CallFunction(PatternExpr):
         ):
             return FailedMatch("function_mismatch")
 
-        if self not in ctx.outputs and len(node.users) != self.users:
-            return FailedMatch(
-                f"users_mismatch: {node} {len(node.users)}!={self.users}"
-            )
+        if (
+            self not in ctx.outputs
+            and self.users is not MULTIPLE
+            and len(node.users) != self.users
+        ):
+            return FailedMatch("multiple_users")
 
         node_items, node_spec = self.flatten(node.args, node.kwargs)
         self_items, self_spec = self.flat_args_kwargs
@@ -255,6 +278,9 @@ class CallFunction(PatternExpr):
         m.nodes.append(node)
         m.targets[self] = node.target
         return m
+
+    def has_multiple_users(self) -> bool:
+        return self.users is MULTIPLE or self.users > 1
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
         """
@@ -298,10 +324,15 @@ class ListOf(PatternExpr):
         if not isinstance(node, (list, tuple)) or len(node) == 0:
             return FailedMatch("non_list")
         m = Match(self)
+        # Propogating patterns with multiple users will ensure we don't revisit
+        # the same nodes
+        pattern_to_node = ctx.filter_multi_user_patterns()
         for i, child_node in enumerate(node):
-            child_match = MatchContext(ctx.outputs).match(self.pattern, child_node)
+            child_ctx = MatchContext(ctx.outputs, pattern_to_node)
+            child_match = child_ctx.match(self.pattern, child_node)
             if not child_match:
                 return FailedMatch(f"list[{i}]: {child_match}")
+            pattern_to_node = child_ctx.filter_multi_user_patterns()
             m.extend(child_match.bundle())
         return m.bundle()
 
@@ -402,7 +433,7 @@ class ReplacementPatternEntry(PatternEntry):
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     result = graph.call_function(target, args, kwargs)
-                    if "val" in node.meta:
+                    if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
                     return result
                 raise NotImplementedError(f"unhandled {node}")
@@ -421,7 +452,8 @@ class ReplacementPatternEntry(PatternEntry):
                 elif new is None:
                     old.replace_all_uses_with(None)
                 else:
-                    new.meta.update(old.meta)
+                    if "val" not in new.meta:
+                        new.meta.update(old.meta)
                     old.replace_all_uses_with(new)
 
         match.erase_nodes(graph)
@@ -893,6 +925,68 @@ def addmm(match, mat1, mat2, inp):
         return L[aten.addmm](inp, mat1, mat2)
     else:
         return L[aten.add](inp, L[aten.mm](mat1, mat2))
+
+
+def get_arg_value(node, arg_number, kwarg_name=None):
+    return (
+        node.args[arg_number]
+        if len(node.args) > arg_number
+        else node.kwargs.get(kwarg_name)
+    )
+
+
+def filter_nodes(nodes, fn):
+    fns = [fn]
+    if isinstance(fn, torch._ops.OpOverloadPacket):
+        fns.extend([getattr(fn, overload) for overload in fn.overloads()])
+
+    return [node for node in nodes if node.target in fns]
+
+
+def is_valid_splitwithsizes_cat(match):
+    split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
+    cat_nodes = filter_nodes(match.nodes, aten.cat)
+    get_item_nodes = filter_nodes(match.nodes, operator.getitem)
+    if len(split_nodes) != 1 or len(cat_nodes) != 1:
+        return False
+    split_node, cat_node = split_nodes[0], cat_nodes[0]
+    # The dim of split and cat should match for passthrough
+    if get_arg_value(split_node, 2, "dim") != get_arg_value(cat_node, 1, "dim"):
+        return False
+    get_item_args = {
+        get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
+    }
+    assert None not in get_item_args
+    split_sizes = get_arg_value(split_node, 1, "split_sizes")
+    # All parts of split should be included in the cat
+    if get_item_args != set(range(len(split_sizes))):
+        return False
+    return True
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.cat,
+        ListOf(
+            CallFunction(
+                operator.getitem,
+                CallFunction(
+                    aten.split_with_sizes,
+                    KeywordArg("input_"),
+                    Ignored(),
+                    Ignored(),
+                    _users=MULTIPLE,
+                ),
+                Ignored(),
+            ),
+        ),
+        Ignored(),
+    ),
+    pass_number=2,
+    extra_check=is_valid_splitwithsizes_cat,
+)
+def splitwithsizes_cat_replace(match, input_):
+    return input_
 
 
 # This slows things down:

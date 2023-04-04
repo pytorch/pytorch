@@ -7,7 +7,7 @@ from torch._guards import GuardSource, Source
 
 from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
-from .utils import enum_repr, rename_implicit
+from .utils import enum_repr
 
 # It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
 # so those cases are omitted intentionally
@@ -71,12 +71,7 @@ class LocalSource(Source):
         return GuardSource.LOCAL
 
     def name(self):
-        return rename_implicit(self.local_name)
-
-
-@dataclasses.dataclass
-class LocalInputSource(LocalSource):
-    pos: int
+        return f"L[{repr(self.local_name)}]"
 
 
 @dataclasses.dataclass
@@ -94,7 +89,7 @@ class RandomValueSource(Source):
         ]
 
     def name(self):
-        return rename_implicit(f"random_value_{self.random_call_index}")
+        return f"random_value_{self.random_call_index}"
 
 
 @dataclasses.dataclass
@@ -110,7 +105,8 @@ class GeneratorStateSource(Source):
         raise NotImplementedError()
 
     def name(self):
-        return rename_implicit(f"generator_state_{self.device}_{self.initial_seed}")
+        name = f"generator_state_{self.device}_{self.initial_seed}"
+        return f"L[{name}]"
 
 
 @dataclasses.dataclass
@@ -124,7 +120,7 @@ class GlobalSource(Source):
         return GuardSource.GLOBAL
 
     def name(self):
-        return self.global_name
+        return f"G[{repr(self.global_name)}]"
 
 
 @dataclasses.dataclass
@@ -141,7 +137,7 @@ class GlobalWeakRefSource(Source):
         return GuardSource.GLOBAL
 
     def name(self):
-        return f"{self.global_name}()"
+        return f"G[{repr(self.global_name)}]()"
 
 
 @dataclasses.dataclass
