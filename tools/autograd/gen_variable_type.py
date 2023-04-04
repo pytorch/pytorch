@@ -1140,14 +1140,23 @@ def emit_body(
             return f"grad_fn->should_compute_output({edge_off})"
 
         if is_inplace_foreach:
+            args: List[str] = [arg.name for arg in args_with_derivatives]
+            for i, argument in enumerate(args):
+                if inplace_foreacharg2refarg:
+                    for f_arg, r_arg in inplace_foreacharg2refarg.items():
+                        if argument == r_arg.name:
+                            args[i] = f_arg.name
+                            if hasattr(f_arg.type, "elem"):
+                                args[i] += "[i]"
+                else:
+                    if hasattr(args_with_derivatives[i].type, "elem"):
+                        args[i] += "[i]"
             setup.append("for (const auto& i : c10::irange(grad_fns.size())) {")
             setup.append("  auto grad_fn = grad_fns[i];")
-            setup.extend(
-                [
-                    f"  {stmt}"
-                    for stmt in save_variables(info.all_saved_inputs, False, guard_for)
-                ]
-            )
+            setup.append(f"  if (compute_requires_grad({', '.join(set(args))})) {{")
+            save_input_stmts = save_variables(info.all_saved_inputs, False, guard_for)
+            setup.extend([f"    {stmt}" for stmt in save_input_stmts])
+            setup.append("  }")
         else:
             setup.extend(save_variables(info.all_saved_inputs, False, guard_for))
         for arg in args_with_derivatives:
@@ -1603,7 +1612,7 @@ def emit_body(
         output_names = [r.name for r in differentiable_outputs]
         # TODO: flatten allocates a std::vector, which could be expensive
         outs = CodeTemplate("flatten_tensor_args( ${outs} )").substitute(
-            outs=output_names
+            outs=output_names if not is_inplace_foreach else "self"
         )
         set_history_template = (
             SET_HISTORY if not is_inplace_foreach else SET_HISTORY_FOR_VECTOR_OF_GRAD_FN
