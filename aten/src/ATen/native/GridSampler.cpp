@@ -538,7 +538,7 @@ Tensor _grid_sampler_2d_cpu_quantized(
             res += within_bounds_2d(iy_se, ix_se, inp_H, inp_W)
                 ? inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se
                 : zero_point * se;
-            *out_ptr_NCHW = std::nearbyint(res);
+            *out_ptr_NCHW = std::round(res);
           }
         }
       }

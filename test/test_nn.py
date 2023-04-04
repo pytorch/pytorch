@@ -6082,8 +6082,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         for device in device_list:
             for padding_mode in ('zeros', 'border', 'reflection'):
                 for align_corners in (True, False):
-                    # Normalized inquery indices
-                    inquery_indices_unnormalized = torch.arange(
+                    # Unnormalized inquiry indices
+                    inquiry_indices_unnormalized = torch.arange(
                         0,
                         test_dim_size - 1 + step_size, step_size,
                         dtype=torch.float32,
@@ -6096,13 +6096,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     # The best we could do is to ensure the rounding behaviors across
                     # different implementations for different dimensions are
                     # exactly the same.
-                    inquery_indices = normalize_indices(
-                        indices_unnormalized=inquery_indices_unnormalized,
+                    inquiry_indices = normalize_indices(
+                        indices_unnormalized=inquiry_indices_unnormalized,
                         dim_size=test_dim_size,
                         align_corners=align_corners
                     )
-                    num_inqueries = inquery_indices.shape[0]
-                    inquery_fixed_indices = torch.full((num_inqueries,), 0.5, dtype=torch.float32, device=device)
+                    num_inqueries = inquiry_indices.shape[0]
+                    inquiry_fixed_indices = torch.full((num_inqueries,), 0.5, dtype=torch.float32, device=device)
                     array_data = torch.rand(test_dim_size, dtype=torch.float32, device=device)
                     # 2D grid sample x-dim interpolation
                     # The input_tensor_2d_x is of shape
@@ -6117,8 +6117,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     # [batch_size, 1, num_inqueries]
                     grid_tensor_2d_x = torch.cat(
                         tensors=(
-                            inquery_indices.reshape(num_inqueries, 1),
-                            inquery_fixed_indices.reshape(num_inqueries, 1),
+                            inquiry_indices.reshape(num_inqueries, 1),
+                            inquiry_fixed_indices.reshape(num_inqueries, 1),
                         ),
                         dim=1
                     ).repeat(batch_size, 1, 1, 1)
@@ -6161,9 +6161,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     # [batch_size, 1, 1, num_inqueries]
                     grid_tensor_3d_x = torch.cat(
                         tensors=(
-                            inquery_indices.reshape(num_inqueries, 1),
-                            inquery_fixed_indices.reshape(num_inqueries, 1),
-                            inquery_fixed_indices.reshape(num_inqueries, 1),
+                            inquiry_indices.reshape(num_inqueries, 1),
+                            inquiry_fixed_indices.reshape(num_inqueries, 1),
+                            inquiry_fixed_indices.reshape(num_inqueries, 1),
                         ),
                         dim=1
                     ).repeat(batch_size, 1, 1, 1, 1)
