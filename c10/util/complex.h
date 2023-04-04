@@ -268,7 +268,7 @@ struct alignas(sizeof(T) * 2) complex {
         real_ = a / abs_c;
         imag_ = b / abs_d;
       } else {
-        auto rat = c / d;
+        auto rat = d / c;
         auto scl = 1.0 / (c + d * rat);
         real_ = (a + b * rat) * scl;
         imag_ = (b - a * rat) * scl;
