@@ -3,6 +3,7 @@
 import copy
 import functools
 import itertools
+import os
 import sys
 import unittest
 from typing import Any, Dict, List, Optional, Tuple, Type
@@ -19,6 +20,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
+from torch.distributed.fsdp.flat_param import _FSDP_SKIP_WRITEBACK_CHECK
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -288,6 +290,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                     BackwardPrefetch.BACKWARD_PRE,
                     BackwardPrefetch.BACKWARD_POST,
                 ],
+                "skip_writeback_check": [False, True],
             },
             self._test_diff_hyperparams,
             cpu_offload=CPUOffload(offload_params=False),
@@ -308,16 +311,18 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         with ``offload_params=False`` followed by ``True`` but not vice versa).
         """
         sharding_strategy = self._get_sharding_strategy_from_str(sharding_strategy_str)
-        self._test_diff_hyperparams(
-            cuda_init_mode=CUDAInitMode.CUDA_BEFORE,
-            init_optim_before_wrap=False,
-            optim_class=torch.optim.Adam,
-            multi_tensor=False,
-            set_to_none=False,
-            backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-            cpu_offload=CPUOffload(offload_params=True),
-            sharding_strategy=sharding_strategy,
-        )
+        for skip_writeback_check in (False, True):
+            self._test_diff_hyperparams(
+                cuda_init_mode=CUDAInitMode.CUDA_BEFORE,
+                init_optim_before_wrap=False,
+                optim_class=torch.optim.Adam,
+                multi_tensor=False,
+                set_to_none=False,
+                backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+                cpu_offload=CPUOffload(offload_params=True),
+                sharding_strategy=sharding_strategy,
+                skip_writeback_check=skip_writeback_check,
+            )
 
     def _test_diff_hyperparams(
         self,
@@ -329,6 +334,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         backward_prefetch: Optional[BackwardPrefetch],
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy,
+        skip_writeback_check: bool,
     ):
         """
         Args:
@@ -340,6 +346,8 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         """
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER and cpu_offload.offload_params:
             return  # not supported
+        if skip_writeback_check:
+            os.environ[_FSDP_SKIP_WRITEBACK_CHECK] = "1"
         ddp_model = self._get_ddp_transformer(find_unused_params=False)
         ddp_optim = self._get_optim(ddp_model, optim_class, multi_tensor)
         fsdp_model, fsdp_optim = self._get_fsdp_transformer_and_optim(
