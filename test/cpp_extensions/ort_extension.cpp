@@ -8,7 +8,6 @@ static int test_int;
 Tensor get_tensor(caffe2::TypeMeta dtype, IntArrayRef size) {
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
-          Storage::use_byte_size_t(),
           0,
           at::DataPtr(nullptr, Device(DeviceType::ORT, 0)),
           nullptr,
