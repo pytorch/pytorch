@@ -45,6 +45,7 @@ from common_utils import (
     compute_quantities_for_vmap_test,
     is_valid_inplace_sample_input,
     decorate,
+    DisableVmapFallback,
 )
 import types
 from collections import namedtuple
@@ -1062,13 +1063,9 @@ class TestVmapAPI(TestCase):
         # Here we test that decomps registered to FuncTorchBatchedDecomposition
         # are respected by the Python Dispatcher.
         t = torch.ones(3, 3) * 5
-        with warnings.catch_warnings(record=True) as wa:
-            warnings.simplefilter('always')
-            with EnableVmapFallbackWarnings():
-                with torch._dispatch.python.enable_python_dispatcher():
-                    o = torch.vmap(torch.square)(t)
-                # Assert no warnings
-                self.assertEqual(len(wa), 0)
+        with DisableVmapFallback():
+            with torch._dispatch.python.enable_python_dispatcher():
+                o = torch.vmap(torch.square)(t)
         self.assertEqual(o, torch.square(t))
 
     def _test_vmap_autocast(self, device):
