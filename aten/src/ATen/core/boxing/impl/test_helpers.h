@@ -20,7 +20,6 @@ inline at::Tensor dummyTensor(c10::DispatchKeySet ks, bool requires_grad=false) 
   auto dtype = caffe2::TypeMeta::Make<float>();
   int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<c10::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,

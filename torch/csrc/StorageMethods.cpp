@@ -99,7 +99,6 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   c10::Allocator* allocator = THPStorage_Unpack(self).allocator();
   auto new_storage = c10::make_intrusive<at::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       0,
       allocator,
       /*resizable=*/true);
@@ -266,7 +265,6 @@ static PyObject* THPStorage_fromBuffer(
 
   uint8_t* src = (uint8_t*)buffer.buf;
   auto storage = c10::make_intrusive<at::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       size_bytes,
       c10::GetDefaultCPUAllocator(),
       /*resizable=*/true);
@@ -371,7 +369,6 @@ static PyObject* THPStorage_fromFile(
 
   size_t actual_nbytes = -1;
   auto storage = c10::make_intrusive<at::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       nbytes,
       at::MapAllocator::makeDataPtr(filename, shared, nbytes, &actual_nbytes),
       /*allocator=*/nullptr,

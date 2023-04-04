@@ -156,7 +156,6 @@ TensorBase _empty_generic(
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
   auto size_bytes = computeStorageNbytesContiguous(size, dtype.itemsize());
   auto storage_impl = c10::make_intrusive<StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       size_bytes,
       allocator,
       /*resizeable=*/true);
@@ -200,7 +199,6 @@ TensorBase _empty_strided_generic(
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
   auto size_bytes = computeStorageNbytes(size, stride, dtype.itemsize());
   auto storage_impl = c10::make_intrusive<StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       size_bytes,
       allocator,
       /*resizeable=*/true);

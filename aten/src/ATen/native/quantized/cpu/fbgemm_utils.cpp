@@ -169,7 +169,6 @@ Tensor MakeStridedQTensorCPU(
       "ScalarType is not supported in new_qtensor_cpu.");
   int64_t size_bytes = nelements * dtype.itemsize();
   auto storage = c10::make_intrusive<StorageImpl>(
-      StorageImpl::use_byte_size_t(),
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,

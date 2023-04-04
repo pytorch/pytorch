@@ -147,7 +147,6 @@ inline Tensor new_qtensor(
   int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 
   auto storage = c10::make_intrusive<StorageImpl>(
-      StorageImpl::use_byte_size_t(),
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,

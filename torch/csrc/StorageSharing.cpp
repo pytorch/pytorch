@@ -75,7 +75,6 @@ static PyObject* THPStorage_pyNewFilenameStorage(
   int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
   std::string handle = at::NewProcessWideShmHandle();
   return THPStorage_New(c10::make_intrusive<at::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       size,
       THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, size),
       /*allocator=*/nullptr,
@@ -101,7 +100,6 @@ static PyObject* THPStorage_shareFilename(PyObject* self, PyObject* noargs) {
     std::string handle = at::NewProcessWideShmHandle();
     // Create a new storage in shared memory
     at::Storage new_storage(c10::make_intrusive<at::StorageImpl>(
-        c10::StorageImpl::use_byte_size_t(),
         storage.nbytes(),
         THManagedMapAllocator::makeDataPtr(
             "", handle.c_str(), flags, storage.nbytes()),
@@ -166,7 +164,6 @@ static PyObject* THPStorage_newSharedFilename(
   int64_t size = THPUtils_unpackLong(_size);
   int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
   return THPStorage_New(c10::make_intrusive<at::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       size,
       THManagedMapAllocator::makeDataPtr(
           manager_handle, object_handle, flags, size),
@@ -255,7 +252,6 @@ static PyObject* THPStorage_newSharedFd(PyObject* _unused, PyObject* args) {
   int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE |
       at::ALLOCATOR_MAPPED_KEEPFD | at::ALLOCATOR_MAPPED_FROMFD;
   return THPStorage_New(c10::make_intrusive<at::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       size,
       at::MapAllocator::makeDataPtr(at::WITH_FD, "", fd, flags, size, nullptr),
       /*allocator=*/nullptr,
@@ -532,7 +528,6 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
       at::Device(at::DeviceType::CUDA, cur_device));
 
   auto base = c10::make_intrusive<at::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       storage_size,
       std::move(data_ptr),
       /*allocator=*/nullptr,

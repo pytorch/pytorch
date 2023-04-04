@@ -329,7 +329,6 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   int64_t nbytes = element_size * size;
   if (!storage.defined()) {
     storage = c10::make_intrusive<at::StorageImpl>(
-        c10::StorageImpl::use_byte_size_t(),
         nbytes,
         c10::GetDefaultCPUAllocator(),
         /*resizable=*/true);

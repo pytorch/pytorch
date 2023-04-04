@@ -19,7 +19,6 @@ struct C10_API Storage {
       Allocator* allocator = nullptr,
       bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
-            StorageImpl::use_byte_size_t(),
             std::move(size_bytes),
             allocator,
             resizable)) {}
@@ -34,7 +33,6 @@ struct C10_API Storage {
       at::Allocator* allocator = nullptr,
       bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
-            StorageImpl::use_byte_size_t(),
             size_bytes,
             std::move(data_ptr),
             allocator,
@@ -46,7 +44,6 @@ struct C10_API Storage {
   static Storage create_legacy(at::Device device) {
     auto allocator = GetAllocator(device.type());
     return Storage(c10::make_intrusive<StorageImpl>(
-        StorageImpl::use_byte_size_t(),
         0,
         allocator->allocate(0), // materialize a non-default Device.
         allocator,

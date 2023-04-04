@@ -126,7 +126,6 @@ static PyObject* THPStorage_pynew(
   if (r.idx == 0) {
     self->cdata = c10::MaybeOwned<c10::Storage>::owned(
         c10::make_intrusive<c10::StorageImpl>(
-            c10::StorageImpl::use_byte_size_t(),
             0,
             allocator,
             /*resizable=*/true));
@@ -137,7 +136,6 @@ static PyObject* THPStorage_pynew(
     int64_t size = r.toInt64(0);
     self->cdata = c10::MaybeOwned<c10::Storage>::owned(
         c10::make_intrusive<c10::StorageImpl>(
-            c10::StorageImpl::use_byte_size_t(),
             size,
             allocator,
             /*resizable=*/true));
@@ -159,7 +157,6 @@ static PyObject* THPStorage_pynew(
         THPUtils_typename(sequence));
     self->cdata = c10::MaybeOwned<c10::Storage>::owned(
         c10::make_intrusive<c10::StorageImpl>(
-            c10::StorageImpl::use_byte_size_t(),
             length,
             allocator,
             /*resizable=*/true));
@@ -239,7 +236,6 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
     at::StorageImpl* old_storage_impl = storage.unsafeGetStorageImpl();
     c10::raw::intrusive_ptr::incref(old_storage_impl);
     auto new_storage_impl = c10::make_intrusive<at::StorageImpl>(
-        c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
         slicelength * sizeof(quantized_t),
 #else

@@ -34,10 +34,7 @@ namespace c10 {
 //   mutation because data pointers are the same are totally untracked
 struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  public:
-  struct use_byte_size_t {};
-
   StorageImpl(
-      use_byte_size_t /*use_byte_size*/,
       SymInt size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
@@ -54,13 +51,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     }
   }
 
-  StorageImpl(
-      use_byte_size_t /*use_byte_size*/,
-      SymInt size_bytes,
-      at::Allocator* allocator,
-      bool resizable)
+  StorageImpl(SymInt size_bytes, at::Allocator* allocator, bool resizable)
       : StorageImpl(
-            use_byte_size_t(),
             size_bytes,
             size_bytes.is_symbolic()
                 ? allocator->allocate(0)
