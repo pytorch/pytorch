@@ -90,7 +90,6 @@ c10::SymInt get_nbytes(const Tensor& value) {
 
 FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
   : c10::StorageImpl(
-      c10::StorageImpl::use_byte_size_t(),
       get_nbytes(base),
       DataPtr{nullptr, base.device()},
       GetAllocator(kMeta),

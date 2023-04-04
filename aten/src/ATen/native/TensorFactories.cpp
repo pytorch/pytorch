@@ -1576,7 +1576,6 @@ Tensor from_file(c10::string_view filename, c10::optional<bool> shared, c10::opt
     auto my_dtype = options.dtype();
     size_t size_bytes = my_size * my_dtype.itemsize();
     auto storage_impl = c10::make_intrusive<at::StorageImpl>(
-        c10::StorageImpl::use_byte_size_t(),
         size_bytes,
         MapAllocator::makeDataPtr(
             std::string(filename), flags, size_bytes, nullptr),

@@ -51,10 +51,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     }
   }
 
-  StorageImpl(
-      SymInt size_bytes,
-      at::Allocator* allocator,
-      bool resizable)
+  StorageImpl(SymInt size_bytes, at::Allocator* allocator, bool resizable)
       : StorageImpl(
             size_bytes,
             size_bytes.is_symbolic()

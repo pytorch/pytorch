@@ -48,7 +48,6 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, size_t new_size_by
   const Storage& storage = self->unsafe_storage();
   if (!storage) {
     auto new_storage = c10::make_intrusive<StorageImpl>(
-        StorageImpl::use_byte_size_t(),
         new_size_bytes,
         c10::GetCPUAllocator(),
         true);

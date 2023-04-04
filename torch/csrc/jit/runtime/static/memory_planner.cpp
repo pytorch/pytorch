@@ -166,10 +166,7 @@ void ManagedStorages::deallocate() {
 void ManagedStorages::append(at::StorageImpl& storageImpl) {
   TORCH_INTERNAL_ASSERT(size_ < capacity_);
   new (&storages_[size_]) at::StorageImpl(
-      at::StorageImpl::use_byte_size_t(),
-      storageImpl.nbytes(),
-      storageImpl.allocator(),
-      storageImpl.resizable());
+      storageImpl.nbytes(), storageImpl.allocator(), storageImpl.resizable());
   size_++;
 }
 
