@@ -177,10 +177,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
-  export PYTORCH_TEST_WITH_TSAN=1
-fi
-
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
@@ -507,10 +503,8 @@ test_libtorch() {
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
-    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
-        # Run JIT cpp tests
-        python test/cpp/jit/tests_setup.py setup
-    fi
+    # Run JIT cpp tests
+    python test/cpp/jit/tests_setup.py setup
 
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
@@ -526,9 +520,7 @@ test_libtorch() {
       "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
     fi
 
-    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
-        python test/cpp/jit/tests_setup.py shutdown
-    fi
+    python test/cpp/jit/tests_setup.py shutdown
 
     # Wait for background download to finish
     wait
@@ -790,7 +782,51 @@ test_bazel() {
 
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
   else
-    tools/bazel test //c10/test:core_tests //c10/test:typeid_test //c10/test:util_base_tests
+    tools/bazel test \
+      //:any_test \
+      //:autograd_test \
+      //:dataloader_test \
+      //:dispatch_test \
+      //:enum_test \
+      //:expanding_array_test \
+      //:fft_test \
+      //:functional_test \
+      //:grad_mode_test \
+      //:inference_mode_test \
+      //:init_test \
+      //:jit_test \
+      //:memory_test \
+      //:meta_tensor_test \
+      //:misc_test \
+      //:moduledict_test \
+      //:modulelist_test \
+      //:modules_test \
+      //:namespace_test \
+      //:nested_test \
+      //:nn_utils_test \
+      //:operations_test \
+      //:ordered_dict_test \
+      //:parallel_benchmark_test \
+      //:parameterdict_test \
+      //:parameterlist_test \
+      //:sequential_test \
+      //:serialize_test \
+      //:special_test \
+      //:static_test \
+      //:support_test \
+      //:tensor_flatten_test \
+      //:tensor_indexing_test \
+      //:tensor_options_cuda_test \
+      //:tensor_options_test \
+      //:tensor_test \
+      //:torch_dist_autograd_test \
+      //:torch_include_test \
+      //:transformer_test \
+      //c10/cuda/test:test \
+      //c10/test:core_tests \
+      //c10/test:typeid_test \
+      //c10/test:util/ssize_test \
+      //c10/test:util_base_tests
   fi
 }
 
@@ -846,7 +882,7 @@ test_executorch() {
   assert_git_not_dirty
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
@@ -935,10 +971,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
-elif [[ "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
-  # TODO: TSAN check is currently failing with 415 data race warnings. This will
-  # be addressed later, the first PR can be merged first to setup the CI jobs
-  test_libtorch || true
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 else

@@ -1376,9 +1376,10 @@ class CUDAGraphTreeManager:
     def dealloc_current_path_weakrefs(self):
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
+        deleted = set()
         for t, stack_trace in self.current_node.path_live_weakrefs_and_stacktraces():
-            # TODO: dont need to test t(), but would need to deduplicate storages
-            if t():
+            if t() and t.data_ptr() not in deleted:
+                deleted.add(t.data_ptr())
                 torch._C._free_And_Remove_DeleterFn(t())
                 stack_trace = (
                     stack_trace.strip()
@@ -1416,7 +1417,8 @@ class CUDAGraphTreeManager:
             device, state, stale_storages, live_storages_weak_refs
         )
 
-        for ptr in ptrs_to_deallocate:
+        # NB: deduplicate aliased outputs
+        for ptr in set(ptrs_to_deallocate):
             torch._C._cuda_cudaCachingAllocator_raw_delete(ptr)
 
         # Now the live blocks should be exactly equal to the live storages in private pool
