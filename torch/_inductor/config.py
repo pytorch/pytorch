@@ -192,7 +192,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = True
+    cudagraph_trees = not is_fbcode()
 
     # assertions not on the fast path, steady state
     fast_cudagraph_asserts = True
