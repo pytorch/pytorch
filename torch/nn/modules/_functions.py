@@ -86,7 +86,7 @@ class SyncBatchNorm(Function):
 
         # calculate global mean & invstd
         counts = count_all.view(-1)
-        if counts.dtype != running_mean.dtype:
+        if running_mean is not None and counts.dtype != running_mean.dtype:
             counts = counts.to(running_mean.dtype)
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
             input,
@@ -141,7 +141,7 @@ class SyncBatchNorm(Function):
                 sum_dy, sum_dy_xmu = torch.split(combined, num_channels)
 
                 # backward pass for gradient calculation
-                if weight.dtype != mean.dtype:
+                if weight is not None and weight.dtype != mean.dtype:
                     weight = weight.to(mean.dtype)
                 grad_input = torch.batch_norm_backward_elemt(
                     grad_output,
