@@ -139,11 +139,15 @@ Tensor NestedTensor_elementwise_Tensor(
       } else if (op_name == "mul") {
         nested_dense_elementwise_stub(self.device().type(), result, self, other_, NESTED_DENSE_OP::MUL);
       } else {
-        TORCH_CHECK(false, "Unsupported nested dense elementwise op");
+        TORCH_CHECK(false, "Unsupported nested dense elementwise op: ", op_name, ".");
       }
       return result;
     }
-    TORCH_CHECK(false, "Expected both self and other to be nested, but got a nested self and non-nested other.");
+    TORCH_CHECK(
+        false,
+        "Expected both self and other to be nested, but got a nested self and non-nested other for op: ",
+        op_name,
+        ".");
   }
 
   NestedTensorImpl* self_impl = nullptr;
@@ -207,6 +211,16 @@ Tensor NestedTensor_div_Tensor(const Tensor& self, const Tensor& other) {
 Tensor NestedTensor_div_Scalar(const Tensor& self, const Scalar& other) {
   return NestedTensor_div_Tensor(self, wrapped_scalar_tensor(other));
 }
+Tensor NestedTensor_masked_fill(
+    const Tensor& self,
+    const Tensor& mask,
+    const Scalar& value) {
+  return NestedTensor_elementwise_Tensor(
+      self, mask, "masked_fill", false /* supports_striding*/, [value](const Tensor& b1, const Tensor& b2) {
+        return at::masked_fill(b1, b2, value);
+      });
+}
+
 
 template <typename Func>
 Tensor& NestedTensor_elementwise__Tensor(

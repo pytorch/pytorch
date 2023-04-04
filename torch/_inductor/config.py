@@ -12,9 +12,6 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
-# Name for generated .h and .so files
-aot_codegen_output_prefix = None
-
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -230,7 +227,7 @@ class triton:
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
     # whether they should be unique.
-    unique_kernel_names = False
+    unique_kernel_names = os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES") == "1"
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
@@ -245,6 +242,9 @@ class triton:
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
+
+    # Store the generated cubin files for cpp wrapper code to load
+    store_cubin = False
 
 
 # create a directory containing lots of debug information

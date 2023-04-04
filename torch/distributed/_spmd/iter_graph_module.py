@@ -8,8 +8,8 @@ import torch.nn as nn
 from torch import fx
 from torch.fx.graph import PythonCode
 from torch.fx.node import Argument
-from torch.utils._pytree import tree_flatten, tree_map
 from torch.profiler import record_function
+from torch.utils._pytree import tree_flatten, tree_map
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -49,9 +49,7 @@ class IterGraph(fx.Graph):
         self._codegen = copy.deepcopy(orig_graph._codegen)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
-        super().output(
-            output_val, type_expr=getattr(old_output_val, "type", None)
-        )
+        super().output(output_val, type_expr=getattr(old_output_val, "type", None))
 
         self.setup_graph = setup_graph
         self.cleanup_graph = cleanup_graph
@@ -85,9 +83,7 @@ class IterGraph(fx.Graph):
             for graph in self._all_graphs:
                 if node:
                     actual_node = self._lookup_node(node, graph)
-                    assert (
-                        actual_node is not None
-                    ), "Cannot handle None case now."
+                    assert actual_node is not None, "Cannot handle None case now."
                 else:
                     actual_node = node
                 stack.enter_context(getattr(graph, func)(actual_node))
@@ -165,9 +161,7 @@ class IterGraph(fx.Graph):
         self._fx_graph_call(graph, "erase_node", output)
         self._fx_graph_call(graph, "output", new_output)
 
-    def move_to_next_iter_before(
-        self, nodes: List[fx.Node], target_node: fx.Node
-    ):
+    def move_to_next_iter_before(self, nodes: List[fx.Node], target_node: fx.Node):
         if self._freeze_cross_iter_movement:
             raise RuntimeError(
                 "The cross-iteration movement has been freeze for the given "
@@ -195,13 +189,9 @@ class IterGraph(fx.Graph):
         # For the cleanup graph, additional input is required to get the output
         # from the last iteration -- main graph. Additional nodes are also
         # needed to perform the action moved from the last itertion.
-        new_input_node = self.cleanup_graph.placeholder(
-            nodes[0].name + "_input"
-        )
+        new_input_node = self.cleanup_graph.placeholder(nodes[0].name + "_input")
         target_cleanup_node = self._lookup_node(target_node, self.cleanup_graph)
-        assert (
-            target_cleanup_node is not None
-        ), "The target_cleanup_node is None."
+        assert target_cleanup_node is not None, "The target_cleanup_node is None."
         node_mapping: Dict[fx.Node, fx.Node] = {}
         with self.cleanup_graph.inserting_before(target_cleanup_node):
             last_new_cleanup_node: Optional[fx.Node] = None
@@ -247,9 +237,7 @@ class IterGraph(fx.Graph):
         # the output from the last iteration -- main graph or setup graph.
         # Additional output will also be generated to represent the input for
         # the next iteration -- the main graph or the cleanup graph.
-        self._convert_sese_input_to_output(
-            nodes=nodes, graph=self, erase_node=False
-        )
+        self._convert_sese_input_to_output(nodes=nodes, graph=self, erase_node=False)
         new_input_node = self.placeholder(nodes[0].name + "_input")
         nodes[0].args = (new_input_node,)
         for node in nodes:
@@ -333,9 +321,7 @@ class IterGraph(fx.Graph):
         cleanup_node = self._lookup_node(to_erase, self.cleanup_graph)
         self.cleanup_graph.erase_node(cleanup_node)
 
-    def output(
-        self, result: Argument, type_expr: Optional[Any] = None
-    ) -> fx.Node:
+    def output(self, result: Argument, type_expr: Optional[Any] = None) -> fx.Node:
         if self._freeze_cross_iter_movement:
             return super().output(result, type_expr)
 
@@ -527,9 +513,7 @@ class IterGraphModule(nn.Module):
         self.cleanup_gm = _copy_gm(main_gm, copy.deepcopy(main_gm.graph))
         self.main_gm = _copy_gm(
             main_gm,
-            IterGraph(
-                main_gm.graph, self.setup_gm.graph, self.cleanup_gm.graph
-            ),
+            IterGraph(main_gm.graph, self.setup_gm.graph, self.cleanup_gm.graph),
         )
 
         self._iter = 0
@@ -562,8 +546,7 @@ class IterGraphModule(nn.Module):
                     output, tuple
                 ), f"Only support tuple output now. {type(output)}"
                 num_actual_output = (
-                    len(output)
-                    - cast(IterGraph, self.main_gm.graph).num_extra_output
+                    len(output) - cast(IterGraph, self.main_gm.graph).num_extra_output
                 )
                 assert num_actual_output > 0
                 self._previous_output = output[num_actual_output:]
@@ -574,9 +557,7 @@ class IterGraphModule(nn.Module):
             # No cross-iteration optimization is done. Simply call the
             # GraphModule.
             output = gm(*args, **kwargs)
-        logger.debug(
-            f"The output information: size={len(output)}, type={type(output)}"
-        )
+        logger.debug(f"The output information: size={len(output)}, type={type(output)}")
         return output
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:

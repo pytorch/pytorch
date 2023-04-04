@@ -15,6 +15,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
+#include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <c10/util/intrusive_ptr.h>
@@ -117,26 +118,6 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
     }
   }
   return THPStorage_NewWithStorage(THPStorageClass, std::move(storage), status);
-}
-
-static void clear_slots(PyTypeObject* type, PyObject* self) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Py_ssize_t i, n;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyMemberDef* mp;
-
-  n = Py_SIZE(type);
-  mp = type->tp_members;
-  for (i = 0; i < n; i++, mp++) {
-    if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
-      char* addr = (char*)self + mp->offset;
-      PyObject* obj = *(PyObject**)addr;
-      if (obj != nullptr) {
-        *(PyObject**)addr = nullptr;
-        Py_DECREF(obj);
-      }
-    }
-  }
 }
 
 static bool THPStorage_isPreservable(THPStorage* self) {
@@ -409,12 +390,14 @@ static PyObject* THPStorage_pynew(
 
 static Py_ssize_t THPStorage_length(THPStorage* self) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   return THPStorage_Unpack(self).nbytes();
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   /* Integer index */
   if (THPUtils_checkLong(index)) {
@@ -487,6 +470,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
 
 static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   if (!THPByteUtils_checkReal(value)) {
     THPUtils_setError(
         "can only set storage content with a int types, but got "
@@ -635,6 +619,7 @@ int THPStorageMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
 
 static PyObject* THPStorage_device(THPStorage* self, void* unused) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   return THPDevice_New(THPStorage_Unpack(self).device());
   END_HANDLE_TH_ERRORS
 }
@@ -678,4 +663,13 @@ void THPStorage_postInit(PyObject* module) {
       (PyTypeObject*)PyObject_GetAttrString(module, "UntypedStorage");
   if (!THPStorageClass)
     throw python_error();
+}
+
+void THPStorage_assertNotNull(THPStorage* storage) {
+  TORCH_CHECK(
+      THPStorage_Unpack(storage).unsafeGetStorageImpl(), "Got a null Storage");
+}
+
+void THPStorage_assertNotNull(PyObject* obj) {
+  THPStorage_assertNotNull((THPStorage*)obj);
 }

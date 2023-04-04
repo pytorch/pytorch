@@ -1161,6 +1161,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: logical_not
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_logical_not
   tags: [core, pointwise]
 
 - func: logical_not_(Tensor(a!) self) -> Tensor(a!)
@@ -1168,6 +1169,7 @@
   variants: method
   dispatch:
     CompositeExplicitAutograd: logical_not_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_logical_not_
   tags: pointwise
 
 - func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -7434,6 +7436,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: masked_fill
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_masked_fill
   tags: pointwise
 
 - func: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
@@ -14740,6 +14743,13 @@
   python_module: nn
   dispatch:
     CompositeExplicitAutograd: wait_tensor
+
+- func: all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: all_reduce_coalesced
+  variants: function
 
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()

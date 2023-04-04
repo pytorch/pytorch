@@ -99,23 +99,6 @@ bool isStorage(PyObject* obj) {
   return THPStorage_Check(obj);
 }
 
-at::ScalarType getStorageType(PyObject* obj, bool& is_typed_storage) {
-  at::ScalarType scalar_type{at::ScalarType::Undefined};
-  is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
-
-  if (is_typed_storage) {
-    PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
-    TORCH_INTERNAL_ASSERT(dtype_obj);
-    Py_DECREF(dtype_obj);
-
-    TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_obj));
-    scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
-  } else {
-    scalar_type = at::kByte;
-  }
-  return scalar_type;
-}
-
 std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
     PyObject* obj) {
   at::ScalarType scalar_type;
@@ -130,10 +113,9 @@ std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
     // stay nonzero since the `TypedStorage` maintains a reference.
     PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
     TORCH_INTERNAL_ASSERT(dtype_obj);
-    Py_DECREF(dtype_obj);
-
     TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_obj));
     scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
+    Py_DECREF(dtype_obj);
 
     untyped_storage_obj = PyObject_GetAttrString(obj, "_untyped_storage");
     TORCH_INTERNAL_ASSERT(untyped_storage_obj);

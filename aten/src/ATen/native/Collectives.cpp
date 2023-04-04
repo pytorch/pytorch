@@ -20,6 +20,10 @@ at::Tensor all_reduce(at::Tensor const& self, const c10::string_view reduceOp, c
     TORCH_INTERNAL_ASSERT(false);
 }
 
+std::vector<at::Tensor> all_reduce_coalesced(TensorList self, const c10::string_view reduceOp, const c10::string_view tag, c10::ArrayRef<int64_t> ranks, int64_t group_size) {
+    TORCH_INTERNAL_ASSERT(false);
+}
+
 at::Tensor all_gather_into_tensor(at::Tensor const& shard, const c10::string_view tag, c10::ArrayRef<int64_t> ranks, int64_t group_size) {
     TORCH_INTERNAL_ASSERT(false);
 }

@@ -41,6 +41,7 @@
 
 static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   return py::cast(THPStorage_Unpack(self).sym_nbytes()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
@@ -56,6 +57,7 @@ static PyObject* THPStorage_copy_(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
 
   at::Storage self_ = torch::createStorage(self);
 
@@ -80,6 +82,7 @@ static PyObject* THPStorage_copy_(
 
 static PyObject* THPStorage_isPinned(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
 #if defined(USE_CUDA)
   return PyBool_FromLong(
       at::globalContext().isPinnedPtr(THPStorage_Unpack(self).data<uint8_t>()));
@@ -91,12 +94,14 @@ static PyObject* THPStorage_isPinned(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(_self);
   return THPUtils_packInt64(sizeof(uint8_t));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   c10::Allocator* allocator = THPStorage_Unpack(self).allocator();
   auto new_storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
@@ -111,6 +116,7 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   THPUtils_assert(
       THPUtils_checkLong(number_arg),
@@ -145,6 +151,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
 
 static PyObject* THPStorage_fill_(PyObject* self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   THPUtils_assert(
       THPByteUtils_checkReal(number_arg),
@@ -272,43 +279,67 @@ static PyObject* THPStorage_fromBuffer(
       /*resizable=*/true);
 
   if (scalar_type == at::kByte || scalar_type == at::kChar) {
-    memcpy(storage->data(), src + offset, count);
+    memcpy(storage->mutable_data(), src + offset, count);
   } else if (scalar_type == at::kBool) {
     // Because of ASAN checks, that are failing whenever
     // we are trying to get a value which is not 0 or 1, we have to manually
     // convert original values to boolean ones.
     torch::utils::THP_decodeBoolBuffer(
-        storage->data<bool>(), src + offset, do_byte_swap, count);
+        storage->mutable_unsafe_data<bool>(),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kShort) {
     torch::utils::THP_decodeInt16Buffer(
-        storage->data<int16_t>(), src + offset, do_byte_swap, count);
+        storage->mutable_unsafe_data<int16_t>(),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kInt) {
     torch::utils::THP_decodeInt32Buffer(
-        storage->data<int32_t>(), src + offset, do_byte_swap, count);
+        storage->mutable_unsafe_data<int32_t>(),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kLong) {
     torch::utils::THP_decodeInt64Buffer(
-        storage->data<int64_t>(), src + offset, do_byte_swap, count);
+        storage->mutable_unsafe_data<int64_t>(),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kHalf) {
     torch::utils::THP_decodeHalfBuffer(
-        storage->data<c10::Half>(), src + offset, do_byte_swap, count);
+        storage->mutable_unsafe_data<c10::Half>(),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kBFloat16) {
     torch::utils::THP_decodeBFloat16Buffer(
-        storage->data<c10::BFloat16>(), src + offset, do_byte_swap, count);
+        storage->mutable_unsafe_data<c10::BFloat16>(),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kFloat) {
     torch::utils::THP_decodeFloatBuffer(
-        storage->data<float>(), src + offset, do_byte_swap, count);
+        storage->mutable_unsafe_data<float>(),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kDouble) {
     torch::utils::THP_decodeDoubleBuffer(
-        storage->data<double>(), src + offset, do_byte_swap, count);
+        storage->mutable_unsafe_data<double>(),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kComplexFloat) {
     torch::utils::THP_decodeComplexFloatBuffer(
-        storage->data<c10::complex<float>>(),
+        storage->mutable_unsafe_data<c10::complex<float>>(),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kComplexDouble) {
     torch::utils::THP_decodeComplexDoubleBuffer(
-        storage->data<c10::complex<double>>(),
+        storage->mutable_unsafe_data<c10::complex<double>>(),
         src + offset,
         do_byte_swap,
         count);
@@ -366,6 +397,7 @@ static PyObject* THPStorage_fromFile(
 
 PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   PyObject* file = PyTuple_GetItem(args, 0);
   bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
@@ -417,6 +449,7 @@ PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
 
 static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   PyObject* file = PyTuple_GET_ITEM(args, 0);
   PyObject* offset = PyTuple_GET_ITEM(args, 1);
@@ -498,6 +531,12 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStorage_fix_weakref(PyObject* self, PyObject* noargs) {
+  const auto& storage = THPStorage_Unpack(self);
+  Py_DECREF(THPStorage_Wrap(storage));
+  Py_RETURN_NONE;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_methods[] = {
     {"copy_",
@@ -526,6 +565,7 @@ static PyMethodDef THPStorage_methods[] = {
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
+    {"_fix_weakref", THPStorage_fix_weakref, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THPStorage_getMethods() {

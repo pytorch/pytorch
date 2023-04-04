@@ -39,6 +39,9 @@ inline bool THPStorage_Check(PyObject* obj) {
 bool THPStorage_init(PyObject* module);
 void THPStorage_postInit(PyObject* module);
 
+void THPStorage_assertNotNull(THPStorage* storage);
+void THPStorage_assertNotNull(PyObject* obj);
+
 extern PyTypeObject THPStorageType;
 
 inline const c10::Storage& THPStorage_Unpack(THPStorage* storage) {

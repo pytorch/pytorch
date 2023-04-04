@@ -206,7 +206,7 @@ void TensorImpl::HandleResize() {
   // will create the data storage.
   bool reset_tensor = false;
   if (reserved_) {
-    // If tensor is reserved then don't claim its memeory unless nbytes()
+    // If tensor is reserved then don't claim its memory unless nbytes()
     // is smaller than new size
     reset_tensor =
         storage_.nbytes() < (storage_offset_ + numel_) * data_type_.itemsize();

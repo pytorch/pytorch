@@ -33,6 +33,7 @@
 
 static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCPU) {
@@ -49,6 +50,7 @@ static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_sharedIncref(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCPU) {
@@ -88,6 +90,7 @@ static PyObject* THPStorage_pyNewFilenameStorage(
 
 static PyObject* THPStorage_shareFilename(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   TORCH_CHECK(
       storage.device_type() == at::kCPU,
@@ -197,6 +200,7 @@ static PyObject* THPStorage_pyNewFdStorage(PyObject* _unused, PyObject* args) {
 
 static PyObject* THPStorage_shareFd(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   TORCH_CHECK(
       storage.device_type() == at::kCPU, "_share_fd_: only available on CPU");
@@ -278,6 +282,7 @@ static PyObject* THPStorage_newSharedFd(PyObject* _unused, PyObject* args) {
 
 static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
 #ifdef USE_CUDA
   const auto& storage = THPStorage_Unpack(self);
   TORCH_CHECK(
@@ -614,6 +619,7 @@ PyObject* THPStorage_expired(PyObject* _unused, PyObject* arg) {
 
 PyObject* THPStorage_sharedFd(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
   at::MapAllocator* ctx = nullptr;
   const auto& storage = THPStorage_Unpack(self);
   if (storage.device_type() == at::kCPU) {

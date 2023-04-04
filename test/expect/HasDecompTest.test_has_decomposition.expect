@@ -576,6 +576,7 @@ aten::alias_copy
 aten::alias_copy.out
 aten::all_gather_into_tensor
 aten::all_reduce
+aten::all_reduce_coalesced
 aten::allclose
 aten::angle
 aten::angle.out

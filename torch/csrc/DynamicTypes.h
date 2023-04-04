@@ -29,7 +29,6 @@ TORCH_PYTHON_API PyObject* createPyObject(const at::Storage& storage);
 at::Storage createStorage(PyObject* obj);
 std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
     PyObject* obj);
-at::ScalarType getStorageType(PyObject* obj, bool& is_typed_storage);
 bool isStorage(PyObject* obj);
 
 THPDtype* getTHPDtype(at::ScalarType scalarType);
