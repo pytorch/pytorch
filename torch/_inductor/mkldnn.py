@@ -361,8 +361,7 @@ class LinearBinary(nn.Linear):
             torch.ops.mkldnn._reorder_linear_weight(
                 self.weight.to_mkldnn(), self.batch_size
             )
-            if self.batch_size is not None
-            else self.weight.to_mkldnn(),
+            self.batch_size,
             requires_grad=self.weight.requires_grad,
         )
 
