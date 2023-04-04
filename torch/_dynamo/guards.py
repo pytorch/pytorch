@@ -1,6 +1,5 @@
 import builtins
 import collections
-import itertools
 import logging
 import math
 import os
@@ -36,6 +35,7 @@ from .utils import (
     istype,
     np,
     orig_code_map,
+    rename_implicit,
     tensor_always_has_static_shape,
     tensor_static_reason_to_message,
     tuple_iterator_getitem,
@@ -104,18 +104,18 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
-        user_scope: Optional[Dict[str, object]],
+        scope: Optional[Dict[str, object]],
         check_fn_manager: "CheckFunctionManager",
-        *,
-        local: bool,
+        renames=True,
     ):
         self.id_ref = id_ref
         self.source_ref = source_ref
-        if user_scope:
-            scope = {"L" if local else "G": user_scope}
+        if scope:
+            if renames:
+                scope = {rename_implicit(k): v for k, v in scope.items()}
         else:
-            scope = {"L" if local else "G": dict()}
-        self.scope: Dict[str, Dict[str, object]] = scope
+            scope = dict()
+        self.scope: Dict[str, object] = scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -218,7 +218,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
+        code = f"{self.arg_ref(guard)}.__name__ == {obj.__name__}"
         self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
@@ -256,33 +256,27 @@ class GuardBuilder(GuardBuilderBase):
             if HAS_NUMPY
             else ()
         )
-        ok_types = (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            type,
-            list,
-            tuple,
-            set,
-            slice,
-            frozenset,
-            range,
-            torch.Size,
-            torch.device,
-            torch.dtype,
-            *np_types,
-        )
-        if istype(val, dict):
-            assert all(
-                istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
+        assert istype(
+            val,
+            (
+                int,
+                float,
+                bool,
+                type(None),
+                str,
+                type,
+                list,
+                tuple,
+                set,
+                slice,
+                frozenset,
+                range,
+                torch.Size,
+                torch.device,
+                torch.dtype,
             )
-        else:
-            assert istype(
-                val,
-                ok_types,
-            ), t.__name__
+            + np_types,
+        ), t.__name__
 
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it
@@ -659,16 +653,11 @@ class CheckFunctionManager:
             source_ref,
             combine_scopes(f_globals, f_locals),
             self,
-            local=True,
+            renames=True,
         )
         global_builder = GuardBuilder(
-            self.id_ref, source_ref, f_globals, self, local=False
+            self.id_ref, source_ref, f_globals, self, renames=False
         )
-        # We need to transplant a copy here, because some guards
-        # might get a cross ref between local and global, like L['mod_name'][G['some_key']]
-        # the inverse is illegal.
-        if "G" in global_builder.scope:
-            local_builder.scope["G"] = global_builder.scope["G"]
         # source_ref can cause a cycle, make sure we break it with weakref
         w_local = weakref.ref(local_builder)
         w_global = weakref.ref(global_builder)
@@ -694,7 +683,8 @@ class CheckFunctionManager:
     ):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
-        largs = local_builder.argnames
+        largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
+        largs += [a for a in local_builder.argnames if a != "___implicit0"]
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
 
@@ -763,12 +753,13 @@ class CheckFunctionManager:
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda L: {code}
+    return lambda {args}: {code}
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out: Dict[str, Any] = dict()
+        # print("RUNNING PY CODE", py_code)
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
@@ -776,8 +767,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
-        # Grab only G, but preserve "G" because guards access it as "G"
-        guard_fn.global_scope = {"G": global_builder.scope["G"]}
+        guard_fn.global_scope = global_builder.scope
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 
@@ -814,7 +804,7 @@ def guard_fail_hook(
     # Don't waste time computing the fail reason for guards we aren't going to report out.
     if not guard_fn.guard_fail_fn and not (first or last):
         return
-    scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
+    scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
     reason = None
     for part in guard_fn.verbose_code_parts:

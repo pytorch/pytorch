@@ -21,7 +21,6 @@ from ..source import (
 )
 from ..utils import (
     get_custom_getattr,
-    get_fake_value,
     is_lazy_module,
     is_safe_constant,
     istensor,
@@ -256,28 +255,15 @@ class NNModuleVariable(VariableTracker):
                     # If so at least some changes are needed, we don't allow inlining
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
-                elif is_lazy:
-                    # In the case of a lazy module, we want to run
-                    # the pre-hooks which initialize it.
-                    # Afterwards, lazy module deletes its pre-hooks
-                    # to avoid treating it as lazy on subsequent recompile.
-                    assert len(kwargs) == 0
-                    if hasattr(mod, "_initialize_hook"):
-                        input = [
-                            get_fake_value(x.node, tx)
-                            for x in proxy_args_kwargs(args, {})[0]
-                        ]
-                        mod._infer_parameters(mod, input)
-                    fn = mod.__call__
                 else:
                     fn = mod.__call__
                 fn_source = AttrSource(self.source, "__call__")
-                if istype(fn, types.MethodType):
+                if istype(mod.__call__, types.MethodType):
                     fn = fn.__func__
                     fn_source = AttrSource(fn_source, "__func__")
                     args = [self] + args
                 else:
-                    assert istype(fn, types.FunctionType)
+                    assert istype(mod.__call__, types.FunctionType)
 
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
@@ -469,28 +455,12 @@ class NNModuleVariable(VariableTracker):
             )
         elif name == "__getitem__":
             assert not kwargs and len(args) == 1
-            builtin_supported = (
+            assert type(module).__getitem__ in (
                 torch.nn.ModuleDict.__getitem__,
                 torch.nn.ModuleList.__getitem__,
                 torch.nn.ParameterList.__getitem__,
                 torch.nn.Sequential.__getitem__,
-            )
-
-            if type(module).__getitem__ not in builtin_supported:
-                assert isinstance(args[0], variables.ConstantVariable), typestr(args[0])
-                key = args[0].as_python_constant()
-                assert isinstance(key, (str, int))
-                fn = getattr(module, name).__func__
-
-                assert isinstance(fn, types.FunctionType)
-
-                src = AttrSource(AttrSource(self.source, name), "__func__")
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=src, **options),
-                    [self] + list(args),
-                    kwargs,
-                )
-
+            ), typestr(module)
             assert self.source
 
             if isinstance(args[0], SliceVariable):
@@ -646,16 +616,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         # TODO mlazos: only support __call__ for lazy modules
         # until we can support a larger swath of python
-        if is_lazy_module(self.value) and self.source:
-            name = "__call__"
+        if is_lazy_module(self.value):
+            fn = self.value_type.__call__
+            source = AttrSource(AttrSource(self.source, "__class__"), "__call__")
         else:
-            name = "forward"
-
-        fn = getattr(self.value_type, name)
-        if self.source:
-            source = AttrSource(AttrSource(self.source, "__class__"), name)
-        else:
-            source = None
+            fn = self.value_type.forward
+            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
 
         return variables.UserFunctionVariable(
             fn, source=source, **options

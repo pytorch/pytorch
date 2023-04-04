@@ -14,7 +14,6 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import TrainingState
-from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     MixedPrecision,
@@ -844,14 +843,7 @@ class FSDPTest(MultiProcessTestCase):
                         input = tuple(x.half() for x in input)
                 output = model(*input)
                 # Post-forward, if CPU offloading model param should be on CPU.
-                if (
-                    cpu_offload_params
-                    and isinstance(model, FSDP)
-                    # If not resharding after forward, the parameters are still
-                    # exposed as unsharded views into the GPU flat parameter
-                    and model.sharding_strategy
-                    not in NO_RESHARD_AFTER_FORWARD_STRATEGIES
-                ):
+                if cpu_offload_params and isinstance(model, FSDP):
                     for p in model.parameters():
                         # Params should always be on CPU
                         self.assertEqual(p.device, torch.device("cpu"))

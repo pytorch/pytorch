@@ -954,7 +954,6 @@ class TestTorchDeviceType(TestCase):
             t + 1
 
     # TODO: this test should be in test_nn.py
-    @skipIfTorchInductor("Please convert all Tensors to FakeTensors")
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
         in_channels = 64
         out_channels = 128
@@ -3000,7 +2999,6 @@ else:
             self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
 
     # FIXME: move to data movement test suite
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/98175")
     @onlyNativeDeviceTypes
     @dtypes(torch.int64, torch.float32, torch.complex64)
     def test_copy_transpose_math_view(self, device, dtype):
@@ -3659,47 +3657,59 @@ else:
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_masked_scatter(self, device, dtype):
         dt = dtype
-        num_copy, num_dest = 3, 10
-        dest = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dt, device=device)
-        dest2 = dest.clone()
-        dest_ones = dest.clone()
-        dest_ones_expected = dest.clone()
-        src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
-        src_ones = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt, device=device)
-        mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=torch.bool, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            for maskType in [torch.uint8, torch.bool]:
+                num_copy, num_dest = 3, 10
+                dest = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dt, device=device)
+                dest2 = dest.clone()
+                dest_ones = dest.clone()
+                dest_ones_expected = dest.clone()
+                src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
+                src_ones = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt, device=device)
+                mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=maskType, device=device)
 
-        dest.masked_scatter_(mask, src)
-        j = 0
-        for i in range(num_dest):
-            if mask[i]:
-                dest2[i] = src[j]
-                dest_ones_expected[i] = src_ones[j]
-                j += 1
-        self.assertEqual(dest, dest2, atol=0, rtol=0)
+                dest.masked_scatter_(mask, src)
+                j = 0
+                for i in range(num_dest):
+                    if mask[i]:
+                        dest2[i] = src[j]
+                        dest_ones_expected[i] = src_ones[j]
+                        j += 1
+                self.assertEqual(dest, dest2, atol=0, rtol=0)
 
-        dest_ones.masked_scatter_(mask, src_ones)
-        self.assertEqual(dest_ones, dest_ones_expected, atol=0, rtol=0)
+                dest_ones.masked_scatter_(mask, src_ones)
+                self.assertEqual(dest_ones, dest_ones_expected, atol=0, rtol=0)
 
-        # Bound checking in CUDA is done inside a kernel
-        # in order to avoid synchronization, but this means
-        # we can not clear the failures. So there is no way
-        # to test it then recover.
-        if self.device_type != 'cuda':
-            # make src smaller. this should fail
-            src = torch.zeros(num_copy - 1, dtype=dt, device=device)
-            with self.assertRaises(RuntimeError):
+                # Bound checking in CUDA is done inside a kernel
+                # in order to avoid synchronization, but this means
+                # we can not clear the failures. So there is no way
+                # to test it then recover.
+                if self.device_type != 'cuda':
+                    # make src smaller. this should fail
+                    src = torch.zeros(num_copy - 1, dtype=dt, device=device)
+                    with self.assertRaises(RuntimeError):
+                        dest.masked_scatter_(mask, src)
+
+                # empty tensor
+                dest = torch.empty((5, 0, 5), dtype=dt, device=device)
+                mask = torch.ones_like(dest, dtype=maskType, device=device)
+                src = torch.empty((0,), dtype=dt, device=device)
                 dest.masked_scatter_(mask, src)
 
-        # empty tensor
-        dest = torch.empty((5, 0, 5), dtype=dt, device=device)
-        mask = torch.ones_like(dest, dtype=torch.bool, device=device)
-        src = torch.empty((0,), dtype=dt, device=device)
-        dest.masked_scatter_(mask, src)
+                dest = torch.empty((5, 0, 5), dtype=dt, device=device)
+                mask = torch.ones((5, 1, 5), dtype=maskType, device=device)
+                src = torch.empty((0,), dtype=dt, device=device)
+                dest.masked_scatter_(mask, src)
 
-        dest = torch.empty((5, 0, 5), dtype=dt, device=device)
-        mask = torch.ones((5, 1, 5), dtype=torch.bool, device=device)
-        src = torch.empty((0,), dtype=dt, device=device)
-        dest.masked_scatter_(mask, src)
+        if self.device_type != 'cuda':
+            self.assertEqual(len(w), 5)
+        else:
+            self.assertEqual(len(w), 4)
+
+        warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
+        for wi in w:
+            self.assertEqual(str(wi.message)[0:55], str(warn))
 
     # FIXME: find a test suite for the masked scatter operator
     @skipIfMps

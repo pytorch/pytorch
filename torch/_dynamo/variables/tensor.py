@@ -179,11 +179,6 @@ class TensorVariable(VariableTracker):
         if result is not None and self.source is not None:
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
-        # It's hard to get resize_() on graph input work properly across
-        # dynamo/aot/inductor, just fall back.
-        if name == "resize_" and self.source is not None:
-            unimplemented("calling resize_() on graph input")
-
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
         # a tensor.

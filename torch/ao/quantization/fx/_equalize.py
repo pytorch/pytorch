@@ -11,6 +11,8 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.ao.quantization.fx.graph_module import _get_observed_graph_module_attr
 
+from torch.ao.quantization.backend_config import get_native_backend_config
+
 from ..observer import _with_args, ObserverBase, PerChannelMinMaxObserver
 from ..utils import _parent_name, check_min_max_valid
 
@@ -317,8 +319,10 @@ def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -
     """ Gets the weight equalization observer node if it exists.
     """
     assert(op_node.op == 'call_function')
+    # TODO: Pass in backend_config into this function and parent functions.
+    backend_config = get_native_backend_config()
     for node_arg in op_node.args:
-        if node_arg_is_weight(op_node, node_arg):
+        if node_arg_is_weight(op_node, node_arg, backend_config):
             assert(isinstance(node_arg, Node) and node_arg.op == 'call_module' and
                    isinstance(modules[str(node_arg.target)], _WeightEqualizationObserver))
             return node_arg

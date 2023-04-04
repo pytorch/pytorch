@@ -1,5 +1,4 @@
 import collections
-import contextlib
 import dataclasses
 import enum
 import functools
@@ -61,7 +60,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
-from .ctx_manager import CUDAStreamVariable, NullContextVariable
+from .ctx_manager import CUDAStreamVariable
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -525,14 +524,6 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif (
-            istype(value, contextlib.nullcontext)
-            and inspect.getattr_static(value, "enter_result", None) is None
-        ):
-            return NullContextVariable(
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         else:
             result = UserDefinedObjectVariable(
                 value,
@@ -903,7 +894,9 @@ class VariableBuilder:
             )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
-                if self.tx.export and not isinstance(self.get_source(), LocalSource):
+                if self.tx.export and not isinstance(
+                    self.get_source(), LocalInputSource
+                ):
                     raise AssertionError(
                         "Dynamo attempts to add additional input during export: value={}, source={}".format(
                             wrapped_value, self.get_source()

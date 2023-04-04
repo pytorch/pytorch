@@ -2,17 +2,17 @@
 from typing import List, Optional, Sequence, Tuple
 
 import torch
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
-from torch.distributed._tensor.ops.common_rules import pointwise_rule
-from torch.distributed._tensor.ops.utils import register_prop_rule
 
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
     Placement,
     Replicate,
     Shard,
+    _Partial,
 )
+from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor.ops.utils import register_prop_rule
+from torch.distributed._tensor.ops.common_rules import pointwise_rule
 
 aten = torch.ops.aten  # pyre-ignore
 
@@ -26,7 +26,9 @@ aten = torch.ops.aten  # pyre-ignore
 )
 def _prop__foreach_unaop(op_schema: OpSchema) -> OutputSharding:
     self = op_schema.args_schema[0]
-    assert isinstance(self, list) and all([isinstance(s, DTensorSpec) for s in self])
+    assert isinstance(self, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
     # FIXME(@mrshenli): for sqrt, this is only mathematically correct for
     # Replicate and Shard tensor.
     return OutputSharding(output_spec=self)
@@ -41,7 +43,9 @@ def _prop__foreach_unaop(op_schema: OpSchema) -> OutputSharding:
 )
 def _prop__foreach_binop_list(op_schema: OpSchema) -> OutputSharding:
     self, other = op_schema.args_schema[:2]
-    scalar = None if len(op_schema.args_schema) < 3 else op_schema.args_schema[2]
+    scalar = (
+        None if len(op_schema.args_schema) < 3 else op_schema.args_schema[2]
+    )
     assert isinstance(self, list) and all(
         [isinstance(s, DTensorSpec) for s in self]
     ), f"Expect a List[DTensorSpec] but got {self}"
@@ -62,7 +66,9 @@ def _prop__foreach_binop_list(op_schema: OpSchema) -> OutputSharding:
             schema_suggestions=[
                 OpSchema(
                     func_schema=op_schema.func_schema,
-                    args_schema=(self, self, scalar) if scalar else (self, self),
+                    args_schema=(self, self, scalar)
+                    if scalar
+                    else (self, self),
                     kwargs_schema=op_schema.kwargs_schema,
                     is_inplace=op_schema.is_inplace,
                     is_out_variant=op_schema.is_out_variant,
@@ -83,7 +89,9 @@ def _prop__foreach_binop_list(op_schema: OpSchema) -> OutputSharding:
 )
 def _prop__foreach_binop_scalar(op_schema: OpSchema) -> OutputSharding:
     self, scalar = op_schema.args_schema
-    assert isinstance(self, list) and all([isinstance(s, DTensorSpec) for s in self])
+    assert isinstance(self, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
     assert not isinstance(scalar, list)
     return OutputSharding(output_spec=self)
 
@@ -96,10 +104,18 @@ def _prop__foreach_binop_scalar(op_schema: OpSchema) -> OutputSharding:
 )
 def _prop__foreach_addcop_scalar(op_schema: OpSchema):
     self, tensor1, tensor2 = op_schema.args_schema[:3]
-    scalar = None if len(op_schema.args_schema) < 4 else op_schema.args_schema[3]
-    assert isinstance(self, list) and all([isinstance(s, DTensorSpec) for s in self])
-    assert isinstance(tensor1, list) and all([isinstance(s, DTensorSpec) for s in self])
-    assert isinstance(tensor2, list) and all([isinstance(s, DTensorSpec) for s in self])
+    scalar = (
+        None if len(op_schema.args_schema) < 4 else op_schema.args_schema[3]
+    )
+    assert isinstance(self, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
+    assert isinstance(tensor1, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
+    assert isinstance(tensor2, list) and all(
+        [isinstance(s, DTensorSpec) for s in self]
+    )
     if any([s != t1 or s != t2 for s, t1, t2 in zip(self, tensor1, tensor2)]):
         # If DTensorSpec for the two operand do not match, suggest using
         # self's DTensorSpec. This will trigger allreduce if other is partial
@@ -138,7 +154,11 @@ def _prop__fused_adam(op_schema: OpSchema):
 
     assert all([isinstance(schema, list) for schema in tesnor_list_args])
     assert all(
-        [isinstance(s, DTensorSpec) for schema in tesnor_list_args for s in schema]
+        [
+            isinstance(s, DTensorSpec)
+            for schema in tesnor_list_args
+            for s in schema
+        ]
     )
 
     tensor_schemas: Tuple[List[DTensorSpec]] = [  # type: ignore[assignment]
@@ -182,7 +202,8 @@ def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:
     # only the left-most (non-normalized) dimensions of the input can be sharded
     batch_ndim = len(input.shape) - len(normalized_shape)
     assert all(
-        isinstance(p, Replicate) or (isinstance(p, Shard) and p.dim < batch_ndim,)
+        isinstance(p, Replicate)
+        or (isinstance(p, Shard) and p.dim < batch_ndim,)
         for p in input.placements
     )
     stats_spec = DTensorSpec(
