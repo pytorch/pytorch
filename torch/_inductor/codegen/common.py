@@ -506,17 +506,7 @@ class CSE:
                     V.kernel.current_node.codegen_originating_info(
                         buffer, only_once=True
                     )
-                if append_broadcast:
-                    var_suffix = "_load"
-                else:
-                    var_suffix = ""
-                buffer.writeline(
-                    f"{self.prefix}{var}{var_suffix} = {expr}{self.suffix}"
-                )
-                if append_broadcast:
-                    buffer.writeline(
-                        f"{self.prefix}{var} = tl.broadcast_to({var}{var_suffix}, {append_broadcast})"
-                    )
+                buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
 
         return self.cache[cache_key]
 
