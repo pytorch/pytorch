@@ -2435,7 +2435,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         fraction,
         ". Please set within (0, 1).");
     int activated_device;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&activated_device));
+    C10_CUDA_CHECK(cudaGetDevice(&activated_device));
     if (activated_device != device) {
       C10_CUDA_CHECK(c10::cuda::SetDevice(device));
     }
