@@ -18,6 +18,7 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
+from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -500,6 +501,10 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
 
         # Check that FSDP correctly exposes gradients even after forward
         # (namely, `None` for weights and non-`None` for biases)
+        if sharding_strategy in NO_RESHARD_AFTER_FORWARD_STRATEGIES:
+            # Skip the check since we do not expose the gradients after forward
+            # for these strategies
+            return
         for (ddp_n, ddp_p), (fsdp_n, fsdp_p) in zip(
             ddp_model.module.named_parameters(),
             fsdp_model.named_parameters(),
@@ -759,7 +764,9 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
             def get_loss(self, inp, out):
                 return out.sum()
 
-        def check_parameter_parity(ddp_model, fsdp_model):
+        def check_parameter_parity(
+            ddp_model: DDP, fsdp_model: FSDP, between_fwd_and_bwd: bool
+        ):
             assert self.rank in (
                 0,
                 1,
@@ -772,6 +779,13 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
                 if sharding_strategy == ShardingStrategy.NO_SHARD:
                     # For `NO_SHARD`, do nothing since the original parameters
                     # are unflattened
+                    pass
+                elif (
+                    between_fwd_and_bwd
+                    and sharding_strategy in NO_RESHARD_AFTER_FORWARD_STRATEGIES
+                ):
+                    # For no reshard after forward strategies, do nothing since
+                    # FSDP did not use sharded views after forward
                     pass
                 # Otherwise, case on the parameter (see the model definition)
                 elif n1 == "lin1.weight":
@@ -806,7 +820,7 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         inp = fsdp_model.get_input(device)
         ddp_out = ddp_model(*inp)
         fsdp_out = fsdp_model(*inp)
-        check_parameter_parity(ddp_model, fsdp_model)
+        check_parameter_parity(ddp_model, fsdp_model, True)
 
         ddp_loss = ddp_model.module.get_loss(inp, ddp_out)
         fsdp_loss = fsdp_model.get_loss(inp, fsdp_out)
@@ -814,23 +828,23 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         fsdp_loss.backward()
         ddp_optim.step()
         fsdp_optim.step()
-        check_parameter_parity(ddp_model, fsdp_model)
+        check_parameter_parity(ddp_model, fsdp_model, False)
 
         inp = fsdp_model.get_input(device)
         ddp_out = ddp_model(*inp)
         fsdp_out = fsdp_model(*inp)
-        check_parameter_parity(ddp_model, fsdp_model)
+        check_parameter_parity(ddp_model, fsdp_model, True)
 
 
 class TestFSDPUseOrigParamsWriteback(FSDPTest):
     """Tests parameter and gradient writeback."""
 
     class Model(nn.Module):
-        def __init__(self):
+        def __init__(self, device: torch.device):
             super().__init__()
             torch.manual_seed(42)
-            self.lin1 = nn.Linear(5, 5, bias=True)
-            self.lin2 = nn.Linear(5, 7, bias=True)
+            self.lin1 = nn.Linear(5, 5, bias=True, device=device)
+            self.lin2 = nn.Linear(5, 7, bias=True, device=device)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             z = self.lin1(x)
@@ -876,10 +890,12 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
 
         # Check that the writeback propagates
         ddp_model = DDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), device_ids=[self.rank]
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")),
+            device_ids=[self.rank],
         )
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), use_orig_params=True
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")),
+            use_orig_params=True,
         )
         ddp = ddp_model.module  # for brevity
         fsdp = fsdp_model.module
@@ -927,10 +943,12 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
             return None if set_to_none else torch.ones_like(param) * 2
 
         ddp_model = DDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), device_ids=[self.rank]
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")),
+            device_ids=[self.rank],
         )
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), use_orig_params=True
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")),
+            use_orig_params=True,
         )
         LR = 1e-2
         # TODO: If we add `summon_full_params(with_grads=True)`, then replace
@@ -982,7 +1000,8 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_writeback_shape_mismatch(self):
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), use_orig_params=True
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")),
+            use_orig_params=True,
         )
         # Check that writing back with mismatched shape errors
         fsdp = fsdp_model.module  # for brevity
@@ -1018,6 +1037,41 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
                 )
             with FSDP.summon_full_params(fsdp_model):  # triggers a writeback
                 ...
+
+    @skip_if_lt_x_gpu(2)
+    def test_writeback_between_fwd_and_bwd_for_no_reshard_raises(self):
+        fsdp_kwargs = {
+            "sharding_strategy": ShardingStrategy.SHARD_GRAD_OP,
+            "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
+            "use_orig_params": True,
+        }
+        fsdp_wrapper = functools.partial(FSDP, **fsdp_kwargs)
+
+        # Test changing the parameter storage to no longer be a view into the
+        # flat parameter
+        fsdp_model = fsdp_wrapper(
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda"))
+        )
+        inp = fsdp_model.get_input(torch.device("cuda"))
+        loss = fsdp_model(*inp).sum()
+        fsdp_model.lin1.weight.data = fsdp_model.lin1.weight.clone()
+        assert_msg = (
+            "FSDP does not support changing the parameters between forward and backward"
+        )
+        with self.assertRaisesRegex(AssertionError, assert_msg):
+            loss.backward()
+
+        # Test changing the parameter variable itself
+        fsdp_model = fsdp_wrapper(
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda"))
+        )
+        inp = fsdp_model.get_input(torch.device("cuda"))
+        loss = fsdp_model(*inp).sum()
+        fsdp_model.lin1._fsdp_wrapped_module.weight = nn.Parameter(
+            fsdp_model.lin1.weight.clone()
+        )
+        with self.assertRaisesRegex(AssertionError, assert_msg):
+            loss.backward()
 
 
 class TestFSDPUseOrigParamsFQNs(FSDPTest):
@@ -1235,6 +1289,24 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
         for param in fsdp_model.parameters():
             if param.grad is not None:
                 self.assertEqual(param.grad.dtype, torch.float32)
+
+
+class TestFSDPUseOrigParamsInit(FSDPTest):
+    @skip_if_lt_x_gpu(2)
+    def test_non_uniform_requires_grad(self):
+        model = nn.Sequential(
+            nn.Linear(3, 3, device="cuda"),
+            nn.Linear(3, 3, device="cuda"),
+        )
+        # Freeze biases only and flatten both weights and biases into the same
+        # `FlatParameter` to exercise non-uniform `requires_grad`
+        model[0].bias.requires_grad = False
+        model[1].bias.requires_grad = False
+        fsdp_model = FSDP(model, use_orig_params=True)
+        self.assertTrue(fsdp_model[0].weight.requires_grad)
+        self.assertFalse(fsdp_model[0].bias.requires_grad)
+        self.assertTrue(fsdp_model[1].weight.requires_grad)
+        self.assertFalse(fsdp_model[1].bias.requires_grad)
 
 
 # Define this to be large enough to trigger stack corruption
