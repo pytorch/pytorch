@@ -199,6 +199,24 @@ class JitScalarType(enum.IntEnum):
             value,
         )
 
+    @classmethod
+    @_beartype.beartype
+    def lowest_dtype(cls, scalar_type_a: JitScalarType, scalar_type_b: JitScalarType):
+        """Returns the lowest dtype between `scalar_type_a` and `scalar_type_b` scalar types."""
+        if scalar_type_a in (
+            JitScalarType.BFLOAT16,
+            JitScalarType.HALF,
+        ) and scalar_type_b in (JitScalarType.FLOAT, JitScalarType.DOUBLE):
+            return scalar_type_a
+        elif scalar_type_b in (
+            JitScalarType.BFLOAT16,
+            JitScalarType.HALF,
+        ) and scalar_type_a in (JitScalarType.FLOAT, JitScalarType.DOUBLE):
+            return scalar_type_b
+        raise errors.OnnxExporterError(
+            f"unsupported scalar types {scalar_type_a} and {scalar_type_b}"
+        )
+
     @_beartype.beartype
     def scalar_name(self) -> ScalarName:
         """Convert a JitScalarType to a JIT scalar type name."""
