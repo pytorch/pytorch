@@ -44,7 +44,6 @@ def triton_accuracy_error(x):
 """
 
 
-@unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
 class MinifierTests(MinifierTestBase):
     @classmethod
     def setUpClass(cls):
