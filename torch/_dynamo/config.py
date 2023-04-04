@@ -40,8 +40,11 @@ minimum_call_count = 1
 # turn on/off DCE pass
 dead_code_elimination = True
 
-# disable (for a function) when cache reaches this size
-cache_size_limit = 64
+# Try recompiling a particular function (or frame) this many times
+# (due to changing input shapes or other guard failures)
+# and then use eager execution for any subsequent new inputs that do not
+# match already compiled versions.
+cache_size_limit = 3
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
