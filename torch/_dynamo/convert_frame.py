@@ -396,9 +396,11 @@ def _compile(
 
         if guards_log.isEnabledFor(logging.DEBUG):
             guard_str = "GUARDS:\n"
-            guard_str += "\n".join(
-                [f" - {str(guard)}" for guard in sorted(output.guards)]
-            )
+            guard_str += "\n".join([
+                f"  {code}"
+                for code in guard.code
+                for guard in sorted(output.guards)
+            ])
             guards_log.debug(guard_str)
 
         if hooks.guard_export_fn is not None:
