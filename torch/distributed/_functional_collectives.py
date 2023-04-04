@@ -1,7 +1,7 @@
 import warnings
 
 import weakref
-from typing import cast, List, Tuple, Union
+from typing import Any, cast, List, Tuple, Union
 
 import sys
 import torch
@@ -102,19 +102,6 @@ def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
         _wait_and_clear_tensor(data_ptr, version_and_work[0])
     return tensor
 
-class WaitHolder:
-    def __init__(self, lookup_tensor):
-        self.lookup_tensor = lookup_tensor
-
-    def lazy_init(self, tensor):
-        if self.lookup_tensor is None:
-            self.lookup_tensor = tensor
-
-    def wait_tensor(self):
-        if self.lookup_tensor is not None:
-            wait_tensor(self.lookup_tensor)
-            self.lookup_tensor = None
-
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
     A Tensor wrapper subclass that is used to trigger a call to wait
@@ -128,14 +115,13 @@ class AsyncCollectiveTensor(torch.Tensor):
         return res
     """
     elem: torch.Tensor
-    _holder: WaitHolder
 
-    __slots__ = ['elem', '_holder']
+    __slots__ = ['elem']
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
-    def __new__(cls, elem: torch.Tensor, holder: WaitHolder):
+    def __new__(cls, elem: torch.Tensor):
 
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls, elem.size(),
@@ -144,23 +130,15 @@ class AsyncCollectiveTensor(torch.Tensor):
             device=elem.device, requires_grad=False
         )
         r.elem = elem
-        r._holder = holder
         return r
 
     def __repr__(self):
         return f"AsyncCollectiveTensor({self.elem})"
 
-    def trigger_wait(self):
-        self._holder.wait_tensor()
-        return self
-
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        def unwrap(e: AsyncCollectiveTensor):
-            # TODO do we need to insert a wait_tensor op for all tensors or just the first one?
-            # Given only first usage of any of the output tensors needs to wait, for now we emit only one wait
-            e._holder.wait_tensor()
-            return e.elem
+        def unwrap(e: Any):
+            return wait_tensor(e.elem)
 
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
@@ -188,17 +166,6 @@ def _all_reduce(self, reduceOp, tag, ranks, group_size):
     _register_tensor_work(inplace_tensor, work)
 
     return inplace_tensor
-
-def _all_reduce_coalesced(self, reduceOp, tag, ranks, group_size):
-    op = _str_to_reduce_op(reduceOp)
-    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
-    assert group is not None
-
-    inplace_tensor_list = [t.clone(memory_format=torch.contiguous_format) for t in self]
-    work = dist.all_reduce_coalesced(inplace_tensor_list, op=op, group=group, async_op=True)
-    _register_tensor_work(inplace_tensor_list[0], work)
-
-    return inplace_tensor_list
 
 def _all_gather_into_tensor(shard, tag, ranks, group_size):
     # TODO add dim support?
@@ -298,7 +265,7 @@ def _are_we_tracing() -> bool:
 def _maybe_wrap_tensor(self):
     if _are_we_tracing():
         return wait_tensor(self)
-    res = AsyncCollectiveTensor(self, WaitHolder(self))
+    res = AsyncCollectiveTensor(self)
     _register_wrapper_tensor(res, self)
     return res
 
@@ -401,33 +368,12 @@ def reduce_scatter_tensor(
     return res
 
 
-def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TYPES, tag: str = "") -> List[torch.Tensor]:
-    tag, rankset, group_size = _expand_group(group, tag)
-    tensor_list = torch._C._nn.all_reduce_coalesced(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
-
-    if _are_we_tracing():
-        return list(map(wait_tensor, tensor_list))
-
-    res = []
-    lookup_tensor = tensor_list[0]
-    wh = WaitHolder(lookup_tensor)
-    for tensor in tensor_list:
-        act = AsyncCollectiveTensor(tensor, wh)
-        res.append(cast(torch.Tensor, act))
-
-    # FIXME we should register all tensors and ref count when to emit the wait
-    _register_wrapper_tensor(res[0], lookup_tensor)
-    return res
-
 c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
 c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
 
 def _register_ops():
     c10_lib_cpu.impl("all_reduce", _all_reduce)
     c10_lib_cuda.impl("all_reduce", _all_reduce)
-
-    c10_lib_cpu.impl("all_reduce_coalesced", _all_reduce_coalesced)
-    c10_lib_cuda.impl("all_reduce_coalesced", _all_reduce_coalesced)
 
     c10_lib_cpu.impl("wait_tensor", _wait_tensor)
     c10_lib_cuda.impl("wait_tensor", _wait_tensor)
