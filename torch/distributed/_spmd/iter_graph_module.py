@@ -113,12 +113,12 @@ class IterGraph(fx.Graph):
         return _InsertPoint(insert_points)
 
     def inserting_after(self, node):
-        if self.freeze_cross_iter_movement:
+        if self._freeze_cross_iter_movement:
             return super().inserting_after(node)
         return self._insert_context("inserting_after", node)
 
     def inserting_before(self, node):
-        if self.freeze_cross_iter_movement:
+        if self._freeze_cross_iter_movement:
             return super().inserting_before(node)
         return self._insert_context("inserting_before", node)
 
