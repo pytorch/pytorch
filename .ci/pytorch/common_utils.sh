@@ -125,6 +125,19 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function install_torchaudio() {
+  local commit
+  commit=$(get_pinned_commit audio)
+  if [[ "$1" == "cuda" ]]; then
+    # TODO: This is better to be passed as a parameter from _linux-test workflow
+    # so that it can be consistent with what is set in build
+    TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
+  else
+    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
+  fi
+
+}
+
 function install_torchtext() {
   local commit
   commit=$(get_pinned_commit text)
@@ -149,29 +162,9 @@ function clone_pytorch_xla() {
   fi
 }
 
-function install_matplotlib() {
-  pip_install matplotlib
-}
-
-function install_tabulate() {
-  pip_install tabulate
-}
-
-function setup_torchdeploy_deps(){
-  conda install -y -n "py_${ANACONDA_PYTHON_VERSION}" "libpython-static=${ANACONDA_PYTHON_VERSION}"
-  local CC
-  local CXX
-  CC="$(which gcc)"
-  CXX="$(which g++)"
-  export CC
-  export CXX
-  pip install --upgrade pip
-}
-
 function checkout_install_torchdeploy() {
   local commit
   commit=$(get_pinned_commit multipy)
-  setup_torchdeploy_deps
   pushd ..
   git clone --recurse-submodules https://github.com/pytorch/multipy.git
   pushd multipy
@@ -208,9 +201,11 @@ function install_timm() {
 }
 
 function checkout_install_torchbench() {
+  local commit
+  commit=$(get_pinned_commit torchbench)
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
-  git checkout no_torchaudio
+  git checkout "$commit"
 
   if [ "$1" ]; then
     python install.py --continue_on_fail models "$@"
@@ -220,10 +215,6 @@ function checkout_install_torchbench() {
     python install.py --continue_on_fail
   fi
   popd
-}
-
-function test_functorch() {
-  python test/run_test.py --functorch --verbose
 }
 
 function print_sccache_stats() {

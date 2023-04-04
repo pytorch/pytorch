@@ -17,8 +17,8 @@ void BoxCoxNaive(
     T* output_ptr) {
   constexpr T k_eps = static_cast<T>(1e-6);
 
-  for (int64_t i = 0; i < N; i++) {
-    for (int64_t j = 0; j < D; j++, data_ptr++, output_ptr++) {
+  for (std::size_t i = 0; i < N; i++) {
+    for (std::size_t j = 0; j < D; j++, data_ptr++, output_ptr++) {
       T lambda1_v = lambda1_ptr[j];
       T lambda2_v = lambda2_ptr[j];
       T tmp = std::max(*data_ptr + lambda2_v, k_eps);

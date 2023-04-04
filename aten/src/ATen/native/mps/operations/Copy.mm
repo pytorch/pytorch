@@ -35,7 +35,7 @@ size_t compute_strided_size(const at::Tensor& t) {
 }
 
 bool is_strided_contiguous(const at::Tensor& t) {
-  return compute_strided_size(t) == t.numel();
+  return compute_strided_size(t) == static_cast<size_t>(t.numel());
 }
 
 // Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
@@ -47,11 +47,7 @@ void copy_cast_mps(at::Tensor& dst,
                    bool non_blocking = true) {
   using namespace mps;
 
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
+  using CachedGraph = MPSUnaryCachedGraph;
 
   MPSStream* stream = getCurrentMPSStream();
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
@@ -130,7 +126,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   size_t dst_tensor_nbytes = dst.nbytes();
 
   @autoreleasepool {
-    MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
+    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
 
     void* host_dst = dst.storage().data();
@@ -193,7 +189,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
   TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
 
   @autoreleasepool {
-    MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
+    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
     NSUInteger sourceOffset = 0;
 
