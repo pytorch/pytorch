@@ -97,9 +97,7 @@ class _FromTorchTensor(torch.autograd.Function):
                 for i in range(len(tensor_stride)):
                     if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
                         # rescale the stride by the shard size
-                        tensor_stride[i] = tensor_stride[i] * cast(
-                            int, device_mesh.size(idx)
-                        )
+                        tensor_stride[i] = tensor_stride[i] * device_mesh.size(idx)
             elif not isinstance(placement, (Replicate, _Partial)):
                 raise RuntimeError(f"placement type {type(placement)} not supported!")
 

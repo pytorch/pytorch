@@ -87,7 +87,7 @@ def _redistribute_with_local_tensor(
 
     for i, (current, target) in sorted_placements:
         my_coordinate = device_mesh.get_coordinate()
-        num_chunks = cast(int, device_mesh.size(dim=i))
+        num_chunks = device_mesh.size(dim=i)
         # TODO: what should happen if rank is not in the mesh?
         # see issue https://github.com/pytorch/tau/pull/492
         assert (

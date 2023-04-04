@@ -51,7 +51,7 @@ class PlacementStrategy(object):
                 ]
             )
         output_spec_str = self.pretty_print_placements(self.output_spec.placements)
-        return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {self.output_spec.mesh.size()}"
+        return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {tuple(self.output_spec.mesh.mesh.shape)}"
 
 
 @dataclass
