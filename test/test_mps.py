@@ -7174,7 +7174,7 @@ class TestNLLLoss(TestCaseMPS):
         self.assertTrue(current_alloc_after > current_alloc_before)
         self.assertTrue(driver_alloc_after > driver_alloc_before)
 
-    # Test random_.to and random_.from
+    # Test random_, random_.to and random_.from
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
 
@@ -7182,14 +7182,20 @@ class TestNLLLoss(TestCaseMPS):
 
             # We can't check reliably the mean and std.
             # Just make sure we don't return constant values
-            self.assertNotEqual(mps_out.to('cpu').float().mean(), 0.)
-            self.assertNotEqual(mps_out.to('cpu').float().std(), 0.)
+            self.assertNotEqual(mps_out.float().mean().item(), 0.)
+            self.assertNotEqual(mps_out.float().std().item(), 0.)
 
         helper([100, 100], 0, 10)
         helper([100, 100], 23, 89)
         helper([100, 100], 23, 89, dtype=torch.float32)
         helper([100, 100], 23, 89, dtype=torch.int64)
         helper([100, 100], 0, 2, dtype=torch.bool)
+
+        # Test random_
+        for dtype in [torch.bool, torch.int8, torch.uint8, torch.int32, torch.float16, torch.float32]:
+            x = torch.empty(10, 10, dtype=dtype, device='mps')
+            x.random_()
+            self.assertNotEqual(x.abs().max().item(), 0)
 
     # Test exponential
     def test_exponential(self):
