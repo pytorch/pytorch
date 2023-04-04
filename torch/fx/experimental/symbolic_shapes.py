@@ -472,17 +472,7 @@ class SymNode:
         #   there won't be any hint; it was the result of some tensor-dependent
         #   computation, but we don't know what it actually is because we
         #   haven't actually run the tensor computation.
-        #
-        # hint_expr is only set if we don't have a hint.  When it is set, it
-        # contains the expression which contains the unbacked symnodes that,
-        # if constrained, would allow this expression to be hinted again.
-        if hint is None:
-            self._hint_expr = self.expr.xreplace(shape_env.var_to_val)
-            self._hint = None
-            self._update_hint()  # check if the replacement actually was enough
-        else:
-            self._hint_expr = None
-            self._hint = hint
+        self.hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
 
     @property
@@ -490,37 +480,14 @@ class SymNode:
         self._update_expr()
         return self._expr
 
-    # Check if we have replacements hint_expr that would allow us to
-    # simplify it into a hint
-    def _update_hint(self):
-        if self._hint_expr.free_symbols <= self.shape_env.replacements.keys():
-            new_hint = self.shape_env.replace(self._hint_expr)
-            # NB: unification constraints could result in a replacement that
-            # doesn't actually solve the hint!  Check for this.
-            if new_hint.free_symbols:
-                self._hint_expr = new_hint
-                return
-            self._hint = self.pytype(new_hint)
-            self._hint_expr = None
-
-    @property
-    def hint(self):
-        if self._hint is None:
-            self._update_hint()
-        return self._hint
-
     def has_hint(self):
-        return self._hint is not None
+        return self.hint is not None
 
     def require_hint(self):
-        if self._hint is None:
-            self._update_hint()
-            if self._hint is None:
-                raise self.shape_env._make_data_dependent_error(self._hint_expr, self.expr)
-            else:
-                return self._hint
+        if self.hint is None:
+            raise self.shape_env._make_data_dependent_error(self.expr.xreplace(self.shape_env.var_to_val), self.expr)
         else:
-            return self._hint
+            return self.hint
 
     def _update_expr(self):
         self._expr = self.shape_env.replace(self._expr)
