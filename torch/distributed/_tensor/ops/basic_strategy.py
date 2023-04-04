@@ -102,8 +102,7 @@ def gen_einsum_strategies(
 
     # generate strategies for each mesh dim
     for mesh_dim in range(mesh.ndim):
-        mesh_dim_size = cast(int, mesh.size(mesh_dim))
-        if mesh_dim_size <= 1:
+        if mesh.size(mesh_dim) <= 1:
             # no strategy for mesh dim with size 1
             # TODO: maybe see if submesh needs this and we want to fully replicate
             continue
