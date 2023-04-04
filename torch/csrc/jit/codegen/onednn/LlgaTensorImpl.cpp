@@ -51,7 +51,6 @@ at::Tensor empty_llga(
 
   auto allocator = at::GetCPUAllocator();
   auto storage_impl = c10::make_intrusive<c10::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
       nbytes,
       allocator->allocate(nbytes),
       allocator,
