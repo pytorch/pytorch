@@ -206,6 +206,7 @@ def compile_fx_inner(
 
         complex_memory_overlap_inputs = any(
             complex_memory_overlap(t) for t in example_inputs
+            if isinstance(t, torch.Tensor)
         )
 
         if (
@@ -213,6 +214,7 @@ def compile_fx_inner(
             and not graph.mutated_inputs
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
+            and all(isinstance(t, torch.Tensor) for t in example_inputs)
             and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
             compiled_fn = cudagraphify(
