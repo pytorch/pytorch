@@ -273,7 +273,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
 fi
 
 if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes)
+  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes --dynamic-batch-only)
 fi
 
 if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
