@@ -47,10 +47,6 @@ void native_resize_(const Tensor& output, IntArrayRef shape) {
   native::resize_(output, shape);
 }
 
-void native_resize_(const Tensor& output, SymIntArrayRef shape) {
-  native::resize__symint(output, shape);
-}
-
 template <typename T>
 bool _resize_output(const Tensor& output, ArrayRef<T> shape) {
   if (_resize_output_check<T>(output, shape)) {
@@ -72,10 +68,6 @@ bool _resize_output(const Tensor& output, ArrayRef<T> shape) {
 }
 
 bool resize_output(const Tensor& output, IntArrayRef shape) {
-  return _resize_output(output, shape);
-}
-
-bool resize_output_symint(const Tensor& output, SymIntArrayRef shape) {
   return _resize_output(output, shape);
 }
 
@@ -258,14 +250,6 @@ const Tensor& resize_(
   if (self.has_names()) {
     return resize_named_tensor_(self, size, optional_memory_format);
   }
-  return _resize_(self, size, optional_memory_format);
-}
-
-const Tensor& resize__symint(
-    const Tensor& self,
-    c10::SymIntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
-  TORCH_INTERNAL_ASSERT(!self.has_names())
   return _resize_(self, size, optional_memory_format);
 }
 

@@ -15,6 +15,8 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
+    same_shape,
+    suggest_memory_format,
     TensorLike,
 )
 
@@ -122,6 +124,33 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 @register_meta(aten.copy_.default)
 def meta_copy_(self, src, non_blocking=False):
     return self
+
+
+@register_meta(aten.resize_.default)
+def meta_resize_(self, size, *, memory_format=None):
+    if same_shape(self.shape, size):
+        return self  # ignores memory_format
+    res = self.new_empty(size)
+    if memory_format is not None:
+        utils.check(
+            memory_format != torch.preserve_format,
+            lambda: f"Unsupported memory format {memory_format}",
+        )
+        return res.to(memory_format=memory_format)
+    return res
+
+
+@register_meta(aten.resize_as_.default)
+def meta_resize_as_(self, the_template, *, memory_format=None):
+    if same_shape(self.shape, the_template.shape):
+        return self  # ignores memory_format
+    res = self.new_empty(the_template.shape)
+    # memory_format handling is different compared to resize_
+    if memory_format is not None:
+        if memory_format == torch.preserve_format:
+            memory_format = suggest_memory_format(the_template)
+        return res.to(memory_format=memory_format)
+    return res
 
 
 def inferUnsqueezeGeometry(tensor, dim):

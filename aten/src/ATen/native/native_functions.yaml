@@ -2321,7 +2321,6 @@
   device_guard: False
   tags: inplace_view
   dispatch:
-    Meta: resize__symint
     CPU: resize_
     CUDA: resize_cuda_
     MPS: resize_mps_
