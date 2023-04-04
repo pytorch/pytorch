@@ -417,4 +417,7 @@ class SideEffects:
             cg.extend_output(suffix)
 
     def is_empty(self):
-        return not any(map(self.is_modified, self.id_to_variable.values()))
+        return not (
+            any(map(self.is_modified, self.id_to_variable.values()))
+            or self.save_for_backward
+        )

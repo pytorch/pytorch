@@ -691,6 +691,8 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
         * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
+        * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -731,6 +733,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
+        * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -1493,11 +1496,11 @@ class _TorchCompileInductorWrapper:
     def apply_mode(self, mode: Optional[str]):
         if mode is None or mode == "default":
             pass
-        elif mode in ("reduce-overhead", "max-autotune"):
+        elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
             self.apply_options(torch._inductor.list_mode_options(mode))
         else:
             raise RuntimeError(
-                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
+                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
             )
 
     def apply_options(self, options: Optional[Dict[str, Any]]):
