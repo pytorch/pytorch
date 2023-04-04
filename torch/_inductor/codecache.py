@@ -555,6 +555,28 @@ def cpp_compile_command(
     ).strip()
 
 
+class CudaKernelParamCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def set(cls, key, params, cubin):
+        from filelock import FileLock
+
+        cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")
+        params["cubin_path"] = cubin_path
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            cls.cache[key] = params
+            with open(cubin_path, "wb") as f:
+                f.write(cubin)
+
+    @classmethod
+    def get(cls, key):
+        return cls.cache.get(key, None)
+
+
 class AotCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)

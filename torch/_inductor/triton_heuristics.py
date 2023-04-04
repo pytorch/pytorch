@@ -16,7 +16,7 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config
-from .codecache import cache_dir, cubin_cache_dir
+from .codecache import cache_dir, CudaKernelParamCache
 
 from .ir import ReductionHint, TileHint
 from .utils import (
@@ -139,7 +139,7 @@ class CachingAutotuner(KernelInterface):
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
         if config.triton.store_cubin:
-            launcher.kernel_name = self.fn.__name__
+            launcher.fn = self.fn
             launcher.bin = binary
 
         return launcher
@@ -190,21 +190,12 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(self.launchers[0].config)
 
     def save_cuda_kernel(self, grid, stream, launcher):
-        from .codegen.wrapper import KernelParamCache
-
-        # Make sure kernel_name is enough for distiguishing kernels
-        assert config.triton.unique_kernel_names
-
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
             grid_x, grid_y, grid_z = grid
 
-        kernel_name = launcher.kernel_name
-        cubin_path = os.path.join(cubin_cache_dir(), f"{kernel_name}.cubin")
-        with open(cubin_path, "wb") as f:
-            f.write(launcher.bin.asm["cubin"])
-
+        key = launcher.fn.module.split(".")[-1]
         params = {
             "mangled_name": launcher.bin.metadata["name"],
             "grid_x": grid_x,
@@ -214,14 +205,7 @@ class CachingAutotuner(KernelInterface):
             "shared_mem": launcher.bin.shared,
             "stream": stream,
         }
-        with self.lock:
-            if KernelParamCache.cache.get(kernel_name, None):
-                assert (
-                    KernelParamCache.cache[kernel_name].get("mangled_name", None)
-                    == launcher.bin.metadata["name"]
-                )
-            else:
-                KernelParamCache.cache[kernel_name] = params
+        CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
 
     def run(self, *args, grid, stream):
         if len(self.launchers) != 1:
