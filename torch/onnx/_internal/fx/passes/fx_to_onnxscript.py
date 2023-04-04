@@ -512,10 +512,25 @@ def _export_fx_node_to_onnxscript(
         raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
 
 
+@_beartype.beartype
 @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
 def export_fx_to_onnxscript(
-    fx_module_with_metadata: torch.fx.GraphModule, export_options: options.ExportOptions
+    fx_module_with_metadata: torch.fx.GraphModule,
+    static_reference_graph: torch.fx.Graph,
+    export_options: options.ExportOptions,
 ):
+    """
+    Export a torch.fx.GraphModule to a TorchScript graph with ONNX symbols.
+
+    Args:
+        fx_module_with_metadata: A torch.fx.GraphModule with metadata.
+        static_reference_graph: torch.fx.graph object with real shape information to be
+            used as a reference in op_level_debug mode.
+        export_options: Export options.
+
+    Returns:
+        A TorchScript graph with ONNX symbols.
+    """
     # Initialize the ONNX graph
     onnxscript_graph = graph_building.TorchScriptGraph()
     tracer = graph_building.TorchScriptTracingEvaluator(onnxscript_graph)
@@ -536,7 +551,7 @@ def export_fx_to_onnxscript(
     ] = {}
     # node_fixed_shape is only used on op_level_debug purpose.
     for node, node_fixed_shape in zip(
-        fx_module_with_metadata.graph.nodes, export_options.static_reference_graph.nodes
+        fx_module_with_metadata.graph.nodes, static_reference_graph.nodes
     ):
         _export_fx_node_to_onnxscript(
             node,

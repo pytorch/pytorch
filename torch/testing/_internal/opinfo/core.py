@@ -869,9 +869,9 @@ class OpInfo:
 
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(
-            map(
-                lambda dtypes: isinstance(dtypes, utils._dynamic_dispatch_dtypes),
-                dtypes_args,
+            (
+                isinstance(dtypes, utils._dynamic_dispatch_dtypes)
+                for dtypes in dtypes_args
             )
         )
 
@@ -1661,7 +1661,7 @@ def generate_elementwise_binary_small_value_tensors(
         complex_vals = product(_float_vals, _float_vals)
         # Note the use of list is required here or the map generator will be
         #  emptied by the following product and it won't produce the desired cross-product
-        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        complex_vals = [complex(*x) for x in complex_vals]
         prod = product(complex_vals, complex_vals)
     elif dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
         prod = product(_int_vals, _int_vals)
@@ -1701,7 +1701,7 @@ def generate_elementwise_binary_large_value_tensors(
         complex_vals = product(_large_float_vals, _large_float_vals)
         # Note the use of list is required here or the map generator will be
         #  emptied by the following product and it won't produce the desired cross-product
-        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        complex_vals = [complex(*x) for x in complex_vals]
         prod = product(complex_vals, complex_vals)
     elif dtype in (torch.int16, torch.int32, torch.int64):
         prod = product(_large_int_vals, _large_int_vals)
@@ -1732,7 +1732,7 @@ def generate_elementwise_binary_extremal_value_tensors(
         complex_vals = product(_float_extremals, _float_extremals)
         # Note the use of list is required here or the map generator will be
         #  emptied by the following product and it won't produce the desired cross-product
-        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        complex_vals = [complex(*x) for x in complex_vals]
         prod = product(complex_vals, complex_vals)
     else:
         raise ValueError("Unsupported dtype!")

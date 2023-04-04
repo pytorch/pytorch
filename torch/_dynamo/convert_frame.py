@@ -79,6 +79,7 @@ output_codes = Tracker()
 
 
 initial_grad_state = None
+initial_deterministic_algorithms_state = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -208,6 +209,11 @@ def convert_frame_assert(
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         increment_frame()
         code = frame.f_code
+
+        if code in input_codes and config.error_on_recompile:
+            raise exc.RecompileError(
+                f"Recompiled function {code.co_name} in {code.co_filename}"
+            )
         input_codes.add(code)
         if code in output_codes:
             return None
@@ -256,9 +262,9 @@ def convert_frame_assert(
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
                 f"torch._dynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
-                + f"   function: {format_func_info(code)}\n"
-                + f"   reasons:  {format_guard_failures(code)}\n"
-                + f"to diagnose recompilation issues, see {troubleshooting_url}."
+                f"   function: {format_func_info(code)}\n"
+                f"   reasons:  {format_guard_failures(code)}\n"
+                f"to diagnose recompilation issues, see {troubleshooting_url}."
             )
             unimplemented("cache_size_limit reached")
 
@@ -267,6 +273,11 @@ def convert_frame_assert(
 
         global initial_grad_state
         initial_grad_state = torch.is_grad_enabled()
+
+        global initial_deterministic_algorithms_state
+        initial_deterministic_algorithms_state = (
+            torch.are_deterministic_algorithms_enabled()
+        )
 
         return _compile(
             frame.f_code,

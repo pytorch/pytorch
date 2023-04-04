@@ -42,7 +42,6 @@ def _export(
     static_reference_graph_module = passes.ShapeInferenceWithFakeTensor(
         static_reference_graph_module
     ).run(*args)
-    export_options.update(static_reference_graph=static_reference_graph_module.graph)
     # We want to pass list of ints and floats to TorchScript graph correctly
     # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
     # receive FakeTensor and results runtime error. In addition, TorchScript-based
@@ -50,7 +49,7 @@ def _export(
     # with FakeTensorMode.
     with torch.utils._mode_utils.no_dispatch():
         onnxscript_graph = passes.export_fx_to_onnxscript(
-            decomposed_module, export_options
+            decomposed_module, static_reference_graph_module.graph, export_options
         )
     # Export TorchScript graph to ONNX ModelProto.
     onnx_model = onnxscript_graph.to_model_proto(export_options.opset_version)

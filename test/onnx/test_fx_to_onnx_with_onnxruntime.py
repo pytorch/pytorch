@@ -65,7 +65,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         *input_args,
         opset_version=opset_version,
         use_binary_format=True,
-        enable_dynamic_axes=True,
+        enable_dynamic_axes=False,
         op_level_debug=op_level_debug,
         **input_kwargs,
     )
@@ -114,7 +114,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def tearDown(self):
         diagnostics.engine.dump(
-            f"test_report_{self._testMethodName}.sarif", compress=False
+            f"test_report_{self._testMethodName}_op_level_debug_{self.op_level_debug}.sarif",
+            compress=False,
         )
         super().tearDown()
 

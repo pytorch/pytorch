@@ -7,7 +7,7 @@ import io
 import os
 import shutil
 import zipfile
-from typing import Any, List, Mapping, Sequence, Set, Tuple, Union
+from typing import Any, List, Mapping, Set, Tuple, Union
 
 import torch
 import torch.jit._trace
@@ -301,17 +301,17 @@ def _convert_tensor_to_numpy(input: Any) -> Any:
         return input.detach().cpu().numpy()
     if isinstance(input, torch.dtype):
         return int(_type_utils.JitScalarType.from_dtype(input).onnx_type())
-    if isinstance(input, Sequence):
+    if isinstance(input, (tuple, list)):
         if len(input) == 0:
             return np.array((), dtype=np.int64)
         if isinstance(input[0], torch.Tensor):
             return [_convert_tensor_to_numpy(x) for x in input]
         if isinstance(input[0], bool):
             return np.array(input, dtype=np.bool_)
+
         # Just a sequence of numbers
         if isinstance(input[0], int):
             return np.array(input, dtype=np.int64)
         if isinstance(input[0], float):
             return np.array(input)
-
     return input

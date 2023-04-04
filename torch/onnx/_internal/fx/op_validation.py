@@ -35,13 +35,6 @@ def validate_op_between_ort_torch(
         if isinstance(symbolic_fn, onnxscript.OnnxFunction)
         else symbolic_fn.__name__
     )
-    # TODO(titaiwang): Support trace_only function
-    if not isinstance(symbolic_fn, onnxscript.OnnxFunction):
-        warnings.warn(
-            f"\nBypass the test of running on trace_only ONNX function {function_name}."
-            f"\nIt is not supported with separated parameter schema.\n"
-        )
-        return
 
     with evaluator.default_as(evaluator.ort_evaluator):
         try:
@@ -51,26 +44,69 @@ def validate_op_between_ort_torch(
             warnings.warn(
                 f"\nBypass the test of running on PyTorch Op {node.target} with "
                 f"IndexError: \n{index_error}.\n This is possibly raised by "
-                f"unsupported args {torch_args} of randomnized dim/slices(INT64).\n"
+                f"unsupported input args of randomnized dim/indices(INT64).\n"
             )
             diagnostic = diagnostics.export_context().inflight_diagnostic()
             diagnostic.with_additional_message(
-                f"### Validation bypass\n"
+                f"### Op level debug is bypassed\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(index_error)}"
             )
             diagnostic.level = diagnostics.levels.WARNING
             return
+        except RuntimeError as runtime_error:
+            warnings.warn(
+                f"\nFail the test of running on PyTorch Op {node.target} with "
+                f"RuntimeError: \n{runtime_error}.\n"
+            )
+            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic.with_additional_message(
+                f"### Op level debug fails on PyTorch\n"
+                f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
+            )
+            diagnostic.level = diagnostics.levels.ERROR
+            return
 
+        # TODO(titaiwang): Need Opschema from ONNX function to better split args/kwargs
+        # Currently, we only support torch.Tensor to numpy array. Potentially, we
+        # could fail on INT64. However, we don't support dims/indices INT64 validation.
         input_onnx = [
             onnx_proto_utils._convert_tensor_to_numpy(x)
-            if isinstance(x, (torch.Tensor, Sequence, torch.dtype))
+            if isinstance(x, (torch.Tensor, torch.dtype, list, tuple))
             else x
             for x in torch_args
         ]
         kwargs_onnx = fx_to_onnxscript.filter_incompatible_and_dtype_convert_kwargs(
             torch_kwargs
         )
-        ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
+        try:
+            ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
+        except ValueError as value_error:
+            # FIXME(titaiwang): This is caused by wronly split args/kwargs.
+            # When Opschema is ready, we should follow Opschema to split args/kwargs.
+            warnings.warn(
+                f"\nBypass the test of running on ONNX Op {function_name} with "
+                f"ValueError: \n{value_error}.\n This is possibly raised by "
+                f"unsupported input args due to lack of Opschema.\n"
+            )
+            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic.with_additional_message(
+                f"### Op level debug is bypassed\n"
+                f"{diagnostics.decorator.format_exception_in_markdown(value_error)}"
+            )
+            diagnostic.level = diagnostics.levels.WARNING
+            return
+        except RuntimeError as runtime_error:
+            warnings.warn(
+                f"\nFail the test of running on ONNX Op {function_name} with "
+                f"RuntimeError: \n{runtime_error}.\n"
+            )
+            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic.with_additional_message(
+                f"### Op level debug fails on ONNXRUNTIME:\n"
+                f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
+            )
+            diagnostic.level = diagnostics.levels.ERROR
+            return
 
         flattened_torch_outputs, _ = _pytree.tree_flatten(expected_outputs)
         flattened_function_outputs, _ = _pytree.tree_flatten(ort_outputs)
