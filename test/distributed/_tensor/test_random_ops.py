@@ -7,6 +7,8 @@ from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed._tensor.random import _set_offset, get_rng_state, manual_seed
 
+from torch.distributed.distributed_c10d import broadcast_object_list
+
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -16,6 +18,16 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
+    @with_comms
+    def test_device_mesh_init(self):
+        # device mesh init should sync seed and store it as an attribute
+        object_list = [torch.cuda.initial_seed()]
+        broadcast_object_list(object_list)
+        seed_from_rank_0 = int(object_list[0])
+
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        self.assertEqual(seed_from_rank_0, device_mesh._seed)
+
     @with_comms
     @skip_unless_torch_gpu
     def test_manual_seed(self):
