@@ -130,6 +130,30 @@ class TransformationTest(DTensorTestBase):
             # does not work because some mismatched accuracy. Need to
             # debug the issue.
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_graph_optimization(self):
+        batch_size = 100
+        layers = 2
+        dim = 4096
+        num_iters = 5
+
+        @compile(
+            gm_transformation=GraphModuleTransformation(
+                num_iters=num_iters, enable_graph_optimization=True
+            )
+        )
+        def train_step(model, optim, batch):
+            model(batch).sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+
+        model, optim, _, _ = self._init(batch_size, layers, dim)
+        for _ in range(num_iters):
+            batch = torch.randn(batch_size, dim).cuda()
+            out = train_step(model, optim, batch)
+
 
 if __name__ == "__main__":
     run_tests()
