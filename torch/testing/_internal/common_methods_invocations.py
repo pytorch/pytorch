@@ -133,6 +133,10 @@ from torch.testing._internal.opinfo.definitions.special import (
 from torch.testing._internal.opinfo.definitions._masked import (
     sample_inputs_softmax_variant,
 )
+from torch.testing._internal.opinfo.definitions.sparse import (
+    sample_inputs_elementwise_binary_operation_sparse,
+)
+
 
 if TEST_SCIPY:
     from scipy import stats
@@ -9246,7 +9250,23 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_two_python_scalars=True),
+                    supports_two_python_scalars=True,
+                    supports_sparse=True,
+                    supports_sparse_csr=True,
+                    supports_sparse_csc=True,
+                    supports_sparse_bsr=True,
+                    supports_sparse_bsc=True,
+                    sample_inputs_sparse_coo_func=partial(sample_inputs_elementwise_binary_operation_sparse,
+                                                          layout=torch.sparse_coo),
+                    sample_inputs_sparse_csr_func=partial(sample_inputs_elementwise_binary_operation_sparse,
+                                                          layout=torch.sparse_csr),
+                    sample_inputs_sparse_csc_func=partial(sample_inputs_elementwise_binary_operation_sparse,
+                                                          layout=torch.sparse_csc),
+                    sample_inputs_sparse_bsr_func=partial(sample_inputs_elementwise_binary_operation_sparse,
+                                                          layout=torch.sparse_bsr),
+                    sample_inputs_sparse_bsc_func=partial(sample_inputs_elementwise_binary_operation_sparse,
+                                                          layout=torch.sparse_bsc),
+                    ),
     BinaryUfuncInfo('sub',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
                     ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),

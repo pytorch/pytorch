@@ -21,18 +21,25 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
 from torch.testing._internal.common_methods_invocations import \
-    (reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops)
+    (reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
 
-reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and
-                                     (op.supports_sparse
-                                      or op.supports_sparse_csr
-                                      or op.supports_sparse_csc
-                                      or op.supports_sparse_bsr
-                                      or op.supports_sparse_bsc)]
+
+def _op_supports_any_sparse(op):
+    return (op.supports_sparse
+            or op.supports_sparse_csr
+            or op.supports_sparse_csc
+            or op.supports_sparse_bsr
+            or op.supports_sparse_bsc)
+
+
+reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and _op_supports_any_sparse(op)]
+
+binary_ufuncs_with_sparse_support = [op for op in binary_ufuncs if _op_supports_any_sparse(op)]
+
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -4759,6 +4766,70 @@ class TestSparseAny(TestCase):
             self.skipTest('NOT IMPL')
         else:
             torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
+
+
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(binary_ufuncs_with_sparse_support)
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_binary_operation(self, layout, device, dtype, op):
+        count = 0
+        for sample in op.sample_inputs_sparse(layout, device, dtype):
+            count += 1
+            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
+            # TODO: eliminate the if-blocks below
+            if op.name == 'mul' and layout is torch.sparse_csr and batch_dim > 0 and t_args[0].ndim > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "crow_indices is supposed to be a vector, but got 2 dimensional tensor"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            elif op.name == 'mul' and layout is torch.sparse_csr and t_inp.numel() == 0 and t_args[0].ndim > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Only tensors with two sparse dimensions can be converted to the SparseCsr layout,"
+                        " got self with 3 sparse dimensions"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            elif op.name == 'mul' and layout is torch.sparse_csc and t_args[0].ndim > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Expected result Tensor to be of format CSR"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            elif op.name == 'mul' and layout is torch.sparse_bsr and t_args[0].ndim > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor layout but got SparseBsr"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            elif op.name == 'mul' and layout is torch.sparse_bsc and t_args[0].ndim > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor layout but got SparseBsc"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            else:
+                result = op.op(t_inp, *t_args, **t_kwargs)
+                # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
+                dense = op.op(t_inp.to_dense(), *(t_args[0].to_dense(), *t_args[1:]), **t_kwargs)
+                self.assertEqual(result, dense)
+
+                # Check rop(inp, ...).shape == inp.shape
+                self.assertEqual(result.shape, t_inp.shape)
+
+                if layout is torch.sparse_coo and t_inp.numel() == 0 and op.name == 'mul':
+                    # BUG: gh-97627
+                    with self.assertRaisesRegex(
+                            AssertionError,
+                            "Scalars are not equal!"):
+                        self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+                else:
+                    # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
+                    self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+
+                    # Check rop(inp, ...).dense_dim() == inp.dense_dim()
+                    self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+
+        if count == 0:
+            # we count samples to avoid false-positive test reports
+            self.skipTest('no sample inputs')
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
