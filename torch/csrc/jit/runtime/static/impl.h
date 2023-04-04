@@ -272,8 +272,7 @@ using SROperator = std::function<void(ProcessedNode*)>;
 //   planner.
 class BlockInfo {
  public:
-  BlockInfo(uint32_t input_idx, Block& block)
-      : input_idx_(input_idx), block_(block) {}
+  BlockInfo(uint32_t input_idx, Block& block);
 
   void set_nodes(
       std::vector<StaticNodeInfo> nodes,
@@ -283,9 +282,7 @@ class BlockInfo {
     return nodes_;
   }
 
-  size_t num_nodes() const {
-    return nodes_.size();
-  }
+  size_t num_nodes() const;
 
   size_t num_inputs() const {
     return block_.inputs().size();
@@ -851,6 +848,10 @@ class TORCH_API StaticNodeInfo {
   ProcessedNodeInputs inputs_;
   uint16_t outputs_offset_;
 };
+
+inline size_t BlockInfo::num_nodes() const {
+  return nodes_.size();
+}
 
 /*
   ProcessedNodeMetadata class wraps the possible metadata
