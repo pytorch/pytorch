@@ -3,43 +3,49 @@ from __future__ import annotations
 
 import copy
 
-import inspect
-
 import io
 import os
 import tempfile
+import unittest
 
 from typing import Any, Callable, Generator, Sequence, Tuple, Union
 
 import numpy as np
-
-import onnx.reference
 import onnx_test_common
 
 import onnxruntime  # type: ignore[import]
 import torch
+import torch.onnx
 import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
+from torch.onnx._internal.fx.dynamo_exporter import DynamoOptimizeExporter
+from torch.onnx._internal.fx.fx_symbolic_exporter import FXSymbolicTraceExporter
 from torch.testing._internal import common_utils
 from torch.types import Number
 from torch.utils import _pytree as pytree
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
-_ONNXModelType = Union["onnx.ModelProto", bytes, str, io.BytesIO]
 _InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
 _OutputsType = Sequence[_NumericType]
 
 
 @_beartype.beartype
 def _run_ort(
-    onnx_model: _ONNXModelType, pytorch_inputs: Union[_InputArgsType, Generator]
+    onnx_model: Union[str, torch.onnx.ExportOutput],
+    pytorch_inputs: Union[_InputArgsType, Generator],
 ) -> _OutputsType:
+    if isinstance(onnx_model, torch.onnx.ExportOutput):
+        buffer = io.BytesIO()
+        onnx_model.save(buffer)
+        ort_model = buffer.getvalue()
+    else:
+        ort_model = onnx_model
     session = onnxruntime.InferenceSession(
-        onnx_model, providers=["CPUExecutionProvider"]
+        ort_model, providers=["CPUExecutionProvider"]
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
     return session.run(
@@ -50,7 +56,7 @@ def _run_ort(
 @_beartype.beartype
 def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     model: _ModelType,
-    input_args: _InputArgsType,
+    input_args: Sequence[_InputArgsType],
     rtol: float = 1e-3,
     atol: float = 1e-7,
     opset_version: int = 18,
@@ -60,21 +66,16 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     # Feed args and kwargs into exporter.
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
-    onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
-        model,
-        *input_args,
-        opset_version=opset_version,
-        use_binary_format=True,
-        enable_dynamic_axes=True,
-        **input_kwargs,
+    exporter = DynamoOptimizeExporter(
+        options=torch.onnx.ExportOptions(
+            opset_version=opset_version, dynamic_shapes=True
+        ),
+        model=model,
+        model_args=input_args,
+        model_kwargs=input_kwargs,
     )
 
-    # Inspect the model's signature. It will be used
-    # to flatten kwargs.
-    if isinstance(model, torch.nn.Module):
-        signature = inspect.signature(model.forward)
-    else:
-        signature = inspect.signature(model)
+    export_output = exporter.export()
 
     if input_mutation:
         ref_input_args = copy.deepcopy(input_args)
@@ -85,13 +86,13 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     # Bind args and kwargs to the model's signature to
     # flatten kwargs into positional args since ONNX
     # model cannot be called with kwargs.
-    bound = signature.bind(*ref_input_args, **ref_input_kwargs)
+    bound = exporter.model_signature.bind(*ref_input_args, **ref_input_kwargs)
     # Fill optional inputs.
     bound.apply_defaults()
     assert not bound.kwargs
 
     ref_outputs, _ = pytree.tree_flatten(model(*input_args, **input_kwargs))
-    ort_outputs = _run_ort(onnx_model, bound.args)
+    ort_outputs = _run_ort(export_output, bound.args)
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
@@ -156,6 +157,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (tensor_x,), b=torch.tensor(5.0)
         )
 
+    @unittest.skip("ORT segfaults")
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
@@ -232,13 +234,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         # FIXME(titaiwang): SegFault when symbolic tracing is used
         # https://github.com/microsoft/onnx-script/issues/523
-        onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
-            model,
-            use_binary_format=True,
-            opset_version=self.opset_version,
-            enable_dynamic_axes=False,
-            **inputs,
-        )
+        onnx_model = DynamoOptimizeExporter(
+            options=torch.onnx.ExportOptions(
+                opset_version=self.opset_version, dynamic_shapes=False
+            ),
+            model=model,
+            model_args=[],
+            model_kwargs=inputs,
+        ).export()
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
         ort_outputs = _run_ort(onnx_model, (input_ids, attention_mask))
@@ -309,12 +312,19 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 fake_args = create_args()
                 # Export ONNX model without initializers while ctx.paths records
                 # all files that contains real initializers.
-                (onnx_model, _, _, _) = fx_onnx.export_without_parameters_and_buffers(
-                    fake_model,
-                    *fake_args,
-                    use_binary_format=False,
-                    opset_version=self.opset_version,
-                    enable_dynamic_axes=enable_dynamic_axes,
+
+                onnx_model = (
+                    FXSymbolicTraceExporter(
+                        options=torch.onnx.ExportOptions(
+                            opset_version=self.opset_version,
+                            dynamic_shapes=enable_dynamic_axes,
+                        ),
+                        model=fake_model,
+                        model_args=fake_args,
+                        model_kwargs={},
+                    )
+                    .export()
+                    .model_proto
                 )
 
             # Tasks done by the following block.

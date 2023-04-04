@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict
+from typing import Callable, Mapping
 
 import torch
 import torch._ops
@@ -36,7 +36,7 @@ class Decompose(_pass.Transform):
     def __init__(
         self,
         module: torch.fx.GraphModule,
-        decomposition_table: Dict[torch._ops.OpOverload, Callable],
+        decomposition_table: Mapping[torch._ops.OpOverload, Callable],
         enable_dynamic_axes: bool,
     ):
         super().__init__(module)
