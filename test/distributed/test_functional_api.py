@@ -22,6 +22,10 @@ from torch.testing._internal.common_utils import (
     TestCase
 )
 
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+)
+
 def new_subgroups(group_size: int, pg_tag=None):
     world_size = dist.get_world_size()
     subgroups = []
@@ -224,6 +228,15 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         mesh = dt.DeviceMesh("cpu", torch.arange(4).view(2, 2))
         res2 = ft_c.all_reduce(tensor, "sum", (mesh, 1))
         self.assertEqual(res2, torch.tensor([2, 2, 2, 2], dtype=torch.float))
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_reduce_coalesced_eager(self):
+        tensor = torch.ones([4], device="cuda")
+        mesh = dt.DeviceMesh("cuda", torch.arange(4))
+
+        res = ft_c.all_reduce_coalesced([tensor], "sum", mesh)
+        self.assertEqual(res[0], tensor * 4)
+
 
 class TestMetaCollectives(TestCase):
     def test_all_reduce(self):
