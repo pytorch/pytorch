@@ -1943,7 +1943,7 @@ class FlatParamHandle:
                         flat_param_grad.untyped_storage().data_ptr()
                     )
         # TODO: If we want to handle shared parameters, we need to re-generate
-        # the shared parameter data structures in case shardness changed.
+        # the shared parameter data structures in case sharedness changed.
         for i, (
             param_name,
             module,
