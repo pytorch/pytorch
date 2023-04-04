@@ -10,5 +10,12 @@ ciflow_push_tags:
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic
+- ciflow/slow
 - ciflow/trunk
 - ciflow/unstable
+allowed_workflows:
+- lint
+- pull
+- trunk
+- linux-binary
+- windows-binary
