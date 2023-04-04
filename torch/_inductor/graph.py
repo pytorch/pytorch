@@ -465,7 +465,11 @@ class GraphLowering(torch.fx.Interpreter):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
         with ir.IRNode.current_origins(origins):
-            if n.op == "call_function" and fallback_node_due_to_unsupported_type(n):
+            if (
+                n.op == "call_function"
+                and n.target is not operator.getitem
+                and fallback_node_due_to_unsupported_type(n)
+            ):
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )

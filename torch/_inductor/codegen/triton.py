@@ -20,6 +20,7 @@ from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     get_fused_kernel_name,
+    get_kernel_category_by_source_code,
     get_kernel_metadata,
     instance_descriptor,
     next_power_of_2,
@@ -1698,7 +1699,10 @@ class TritonScheduling:
                 if config.triton.descriptive_names
                 else ""
             )
-            kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
+            kernel_category = get_kernel_category_by_source_code(src_code)[:3]
+            kernel_name = "_".join(
+                ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
+            )
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)

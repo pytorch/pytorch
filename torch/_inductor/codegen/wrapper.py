@@ -344,6 +344,18 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
+    def generate_fusion_ops_code(
+        self,
+        name,
+        kernel,
+        cpp_kernel,
+        codegen_args,
+        cpp_op_schema,
+        cpp_kernel_key,
+        cpp_kernel_overload_name="",
+    ):
+        self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
+
     @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
@@ -492,7 +504,9 @@ class WrapperCodeGen(CodeGen):
         def add_expr_input(name, val):
             output.writeline(f"{name} = {val}")
 
-        output.writelines(["", "", "def benchmark_compiled_module():"])
+        output.writelines(
+            ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]
+        )
         with output.indent():
             output.splice(
                 """
@@ -524,7 +538,7 @@ class WrapperCodeGen(CodeGen):
             output.writeline(
                 call_str
                 if V.graph.aot_mode
-                else f"print_performance(lambda: {call_str})"
+                else f"return print_performance(lambda: {call_str}, times=times, repeat=repeat)"
             )
 
     def add_benchmark_harness(self, output):
@@ -540,37 +554,10 @@ class WrapperCodeGen(CodeGen):
         with output.indent():
             output.writelines(
                 [
-                    "import argparse",
-                    "from torch._inductor.utils import benchmark_all_kernels",
-                    "",
-                    "parser = argparse.ArgumentParser()",
-                    'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
-                    'parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")',  # noqa: B950, line too long
-                    'parser.add_argument("--profile", "-p", action="store_true", help="Whether to profile the compiled module")',  # noqa: B950, line too long
-                    "args = parser.parse_args()",
-                    "",
-                    "if args.benchmark_kernels:",
+                    "from torch._inductor.utils import compiled_module_main",
+                    f"compiled_module_main('{get_benchmark_name()}', benchmark_compiled_module)",
                 ]
             )
-            with output.indent():
-                output.writeline(
-                    f"benchmark_all_kernels('{get_benchmark_name()}', args.benchmark_all_configs)"
-                )
-            output.writeline("else:")
-            with output.indent():
-                output.writeline("with maybe_profile(args.profile) as p:")
-                with output.indent():
-                    output.writeline("benchmark_compiled_module()")
-                output.writeline("")
-                output.writeline("if p:")
-                with output.indent():
-                    output.writelines(
-                        [
-                            'path = f"{tempfile.gettempdir()}/compiled_module_profile.json"',
-                            "p.export_chrome_trace(path)",
-                            'print(f"Chrome trace for the profile is written to {path}")',
-                        ]
-                    )
 
     def define_kernel(self, name: str, kernel: str, metadata: str = None):
         metadata_comment = f"{metadata}\n" if metadata else ""
@@ -657,7 +644,9 @@ class WrapperCodeGen(CodeGen):
         if isinstance(layout, ir.MutationLayout):
             return
         if isinstance(layout, ir.AliasedLayout):
-            assert isinstance(layout.view, ir.ReinterpretView)
+            assert isinstance(
+                layout.view, ir.ReinterpretView
+            ), f"unexpected {type(layout.view)}: {layout.view}"
             if not layout.maybe_guard_aligned():
                 V.graph.unaligned_buffers.add(name)
             self.codegen_allocation(layout.view.data)
@@ -727,6 +716,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.ending = ";"
         self.comment = "//"
         self.namespace = "at::"
+        self.extern_call_ops = set()
 
     def seed(self):
         """
@@ -922,6 +912,33 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"{self.codegen_shape_tuple(stride)}, "
             f"at::device({DEVICE_TO_ATEN[device.type]})"
             f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
+        )
+
+    def generate_fusion_ops_code(
+        self,
+        name,
+        kernel,
+        cpp_kernel,
+        codegen_args,
+        cpp_op_schema,
+        cpp_kernel_key,
+        cpp_kernel_overload_name="",
+    ):
+        if cpp_kernel_key not in self.extern_call_ops:
+            self.writeline(
+                f"""
+    static auto op_{cpp_kernel_key} =
+    c10::Dispatcher::singleton()
+        .findSchemaOrThrow(
+            \"{cpp_kernel}\",
+            \"{cpp_kernel_overload_name}\")
+        .typed<{cpp_op_schema}>();
+            """
+            )
+            self.extern_call_ops.add(cpp_kernel_key)
+
+        self.writeline(
+            f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
 
 
