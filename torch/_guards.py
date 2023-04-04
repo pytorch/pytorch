@@ -435,9 +435,11 @@ def detect_fake_mode(inputs: Any = None):
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
     from torch.utils._pytree import tree_flatten
 
-    fake_mode = TracingContext.get().fake_mode
-    if fake_mode is not None:
-        return fake_mode
+    context = TracingContext.get()
+    if context is not None:
+        fake_mode = context.fake_mode
+        if fake_mode is not None:
+            return fake_mode
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
@@ -445,9 +447,10 @@ def detect_fake_mode(inputs: Any = None):
         if isinstance(m, FakeTensorMode):
             return m
 
+    fake_mode = None
     flat_inputs, _ = tree_flatten(inputs)
     for flat_input in flat_inputs:
-        if isinstance(flat_input, torch._subclasses.FakeTensor):
+        if isinstance(flat_input, FakeTensor):
             if fake_mode is None:
                 fake_mode = flat_input.fake_mode
             else:
