@@ -16,7 +16,8 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config
-from .codecache import cache_dir
+from .codecache import cache_dir, cubin_cache_dir
+
 from .ir import ReductionHint, TileHint
 from .utils import (
     ceildiv,
@@ -137,6 +138,10 @@ class CachingAutotuner(KernelInterface):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
+        if config.triton.store_cubin:
+            launcher.kernel_name = self.fn.__name__
+            launcher.bin = binary
+
         return launcher
 
     def bench(self, launcher, *args, grid):
@@ -184,12 +189,49 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
 
+    def save_cuda_kernel(self, grid, stream, launcher):
+        from .codegen.wrapper import KernelParamCache
+
+        # Make sure kernel_name is enough for distiguishing kernels
+        assert config.triton.unique_kernel_names
+
+        if callable(grid):
+            grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
+        else:
+            grid_x, grid_y, grid_z = grid
+
+        kernel_name = launcher.kernel_name
+        cubin_path = os.path.join(cubin_cache_dir(), f"{kernel_name}.cubin")
+        with open(cubin_path, "wb") as f:
+            f.write(launcher.bin.asm["cubin"])
+
+        params = {
+            "mangled_name": launcher.bin.metadata["name"],
+            "grid_x": grid_x,
+            "grid_y": grid_y,
+            "grid_z": grid_z,
+            "num_warps": launcher.bin.num_warps,
+            "shared_mem": launcher.bin.shared,
+            "stream": stream,
+        }
+        with self.lock:
+            if KernelParamCache.cache.get(kernel_name, None):
+                assert (
+                    KernelParamCache.cache[kernel_name].get("mangled_name", None)
+                    == launcher.bin.metadata["name"]
+                )
+            else:
+                KernelParamCache.cache[kernel_name] = params
+
     def run(self, *args, grid, stream):
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 self.precompile()
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid)
+
+        if config.triton.store_cubin:
+            self.save_cuda_kernel(grid, stream, self.launchers[0])
 
         (launcher,) = self.launchers
         if launcher.config.pre_hook is not None:

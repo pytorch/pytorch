@@ -2,11 +2,11 @@
 from typing import cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import prod
-from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.fx.passes.shape_prop import TensorMetadata
 
 
 def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
@@ -185,9 +185,7 @@ def einop_rule(
                         assert input_spec.tensor_meta is not None
                         global_shape = input_spec.tensor_meta.shape
                         local_shape = compute_local_shape(
-                            global_shape,
-                            input_spec.mesh,
-                            input_spec.placements
+                            global_shape, input_spec.mesh, input_spec.placements
                         )
                         cost += prod(local_shape) * input_spec.mesh.size(mesh_dim)
                 costs.append(cost)
