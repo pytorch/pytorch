@@ -798,7 +798,6 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             return result
 
         elif self.target is Target.ANONYMOUS_DEFINITION:
-
             k = f.func.kind()
 
             # Construct the body of the wrapper function with signature sig

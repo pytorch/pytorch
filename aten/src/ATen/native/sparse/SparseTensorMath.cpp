@@ -13,11 +13,11 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -75,7 +75,7 @@
 
 #include <algorithm>
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 // --------------------------------------------------------------------
@@ -2064,4 +2064,4 @@ Tensor& conj_physical_out_sparse(const Tensor& input, Tensor& result) {
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

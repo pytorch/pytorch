@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -8,6 +9,7 @@
 
 #include <array>
 #include <mutex>
+#include <set>
 
 namespace c10 {
 
@@ -125,7 +127,12 @@ struct SegmentInfo {
   int64_t active_size = 0;
   cudaStream_t stream = 0;
   bool is_large = false;
+  MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
+};
+
+struct AllocatorState {
+  virtual ~AllocatorState() = default;
 };
 
 struct TraceEntry {
@@ -137,7 +144,7 @@ struct TraceEntry {
                     // This event is generated when a free actually completes.
     SEGMENT_ALLOC, // a call to cudaMalloc to get more memory from the OS
     SEGMENT_FREE, // a call to cudaFree to return memory to the OS (e.g. to
-                  // defragement or empty_caches)
+                  // defragment or empty_caches)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
     OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
@@ -164,6 +171,14 @@ struct TraceEntry {
 struct SnapshotInfo {
   std::vector<SegmentInfo> segments;
   std::vector<std::vector<TraceEntry>> device_traces;
+};
+
+// returns the pointers freed in the pool
+// and the pointers allocated. Note: a pointer
+// may appear in both freed and allocated
+struct CheckpointDelta {
+  std::vector<void*> ptrs_freed;
+  std::vector<at::DataPtr> dataptrs_allocd;
 };
 
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
@@ -193,13 +208,12 @@ class CUDAAllocator : public Allocator {
   virtual void resetAccumulatedStats(int device) = 0;
   virtual void resetPeakStats(int device) = 0;
   virtual SnapshotInfo snapshot() = 0;
-  virtual void notifyCaptureBegin(
+  virtual void beginAllocateStreamToPool(
       int device,
-      CaptureId_t graph_id,
+      cudaStream_t stream,
       MempoolId_t mempool_id) = 0;
-  virtual void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) = 0;
-  virtual void notifyCaptureEnded(int device, CaptureId_t graph_id) = 0;
-  virtual void notifyCaptureDestroy(int device, MempoolId_t mempool_id) = 0;
+  virtual void endAllocateStreamToPool(int device, cudaStream_t stream) = 0;
+  virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
   virtual void recordHistory(
       bool enabled,
@@ -208,6 +222,12 @@ class CUDAAllocator : public Allocator {
       bool alloc_trace_record_context) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
   virtual bool needsPoolSpecificPeerAccess() = 0;
+  virtual std::shared_ptr<AllocatorState> getCheckpointState(
+      int device,
+      MempoolId_t id) = 0;
+  virtual CheckpointDelta setCheckpointPoolState(
+      int device,
+      std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
 };
 
@@ -275,16 +295,28 @@ inline SnapshotInfo snapshot() {
   return get()->snapshot();
 }
 
-// CUDAGraph interactions
-inline void notifyCaptureBegin(
+inline std::shared_ptr<AllocatorState> getCheckpointState(
     int device,
-    CaptureId_t graph_id,
-    MempoolId_t mempool_id) {
-  return get()->notifyCaptureBegin(device, graph_id, mempool_id);
+    MempoolId_t id) {
+  return get()->getCheckpointState(device, id);
 }
 
-inline void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
-  return get()->notifyCaptureAboutToEnd(device, graph_id);
+inline CheckpointDelta setCheckpointPoolState(
+    int device,
+    std::shared_ptr<AllocatorState> pps) {
+  return get()->setCheckpointPoolState(device, pps);
+}
+
+// CUDAGraph interactions
+inline void beginAllocateStreamToPool(
+    int device,
+    cudaStream_t stream,
+    MempoolId_t mempool_id) {
+  return get()->beginAllocateStreamToPool(device, stream, mempool_id);
+}
+
+inline void endAllocateStreamToPool(int device, cudaStream_t stream) {
+  return get()->endAllocateStreamToPool(device, stream);
 }
 
 inline void recordHistory(
@@ -303,12 +335,8 @@ inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
   return get()->attachOutOfMemoryObserver(observer);
 }
 
-inline void notifyCaptureEnded(int device, CaptureId_t graph_id) {
-  return get()->notifyCaptureEnded(device, graph_id);
-}
-
-inline void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
-  return get()->notifyCaptureDestroy(device, mempool_id);
+inline void releasePool(int device, MempoolId_t mempool_id) {
+  return get()->releasePool(device, mempool_id);
 }
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {

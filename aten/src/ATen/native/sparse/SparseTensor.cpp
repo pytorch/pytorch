@@ -7,7 +7,7 @@
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
@@ -67,8 +67,7 @@
 #include <ATen/ops/ones.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 
@@ -526,7 +525,8 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
 SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   if (layout.has_value()) {
     if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
-      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not use specified blocksize");
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout,
+               " conversion does not use the specified blocksize ", blocksize.value(), ".");
     }
     if (self.layout() == *layout) {
       return self;
@@ -900,5 +900,4 @@ Tensor empty_like_sparse_coo(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

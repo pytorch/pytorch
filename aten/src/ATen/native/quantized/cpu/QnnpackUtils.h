@@ -16,7 +16,7 @@
 #endif
 
 #include <utility>
-
+inline int kPaddingChannels = 8;
 struct QnnpackOperatorDeleter {
   void operator()(pytorch_qnnp_operator_t op) {
     pytorch_qnnp_delete_operator(op);
@@ -48,9 +48,10 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
         per_channel_(this->orig_weight.qscheme() == at::kPerChannelAffine),
         input_scale(std::move(input_scale)),
         w_scales(std::move(w_scales)),
-        w_zero_points(std::move(w_zps)) {
-          weight_sizes = this->orig_weight.sizes().vec();
-        }
+        w_zero_points(std::move(w_zps)),
+        q_scheme(this->orig_weight.qscheme()) {
+    weight_sizes = this->orig_weight.sizes().vec();
+  }
 
   std::unique_ptr<qnnpack::PackBMatrix> w;
   at::Tensor orig_weight;
@@ -61,6 +62,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
   std::vector<uint8_t> w_zero_points;
   std::vector<float> requantization_scales;
   std::vector<int64_t> weight_sizes;
+  c10::QScheme q_scheme;
 
   at::Tensor apply(
       at::Tensor input,
@@ -474,7 +476,7 @@ C10_UNUSED std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scal
   const int out_ch_idx = transpose ? 1 : 0;
   const auto num_output_channels = weight_contig.size(out_ch_idx) * (transpose ? groups : 1);
   // Add 8 to account for bufferring needed by QNNPACK.
-  const auto num_output_channels_padded = num_output_channels + 8;
+  const auto num_output_channels_padded = num_output_channels + kPaddingChannels;
   const auto qtype = weight_contig.qscheme();
   std::vector<uint8_t> weight_zp(num_output_channels_padded, 0);
   // Adjust weight zero point, similar to weight data.

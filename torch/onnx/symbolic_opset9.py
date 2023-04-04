@@ -1324,7 +1324,6 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 
     if require_cast:
         for input in inputs:
-
             if input.isCompleteTensor():
                 input_scalar_type = _type_utils.JitScalarType.from_value(input)
                 if input_scalar_type != dtype_0:
@@ -4484,7 +4483,6 @@ def _generic_rnn(
     batch_first=None,
     batch_sizes=None,
 ):
-
     warnings.warn(
         "Exporting a model to ONNX with a batch_size other than 1, "
         + "with a variable length with "

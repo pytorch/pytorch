@@ -957,7 +957,7 @@ def largeTensorTest(size, device=None):
     In other tests, the `device=` argument needs to be specified.
     """
     if isinstance(size, str):
-        assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
+        assert size.endswith(('GB', 'gb')), "only bytes or GB supported"
         size = 1024 ** 3 * int(size[:-2])
 
     def inner(fn):
@@ -1235,9 +1235,7 @@ def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
 def has_cusolver():
-    version = _get_torch_cuda_version()
-    # cuSolver is disabled on cuda < 10.1.243
-    return version >= (10, 2)
+    return not TEST_WITH_ROCM
 
 # Skips a test on CUDA if cuSOLVER is not available
 def skipCUDAIfNoCusolver(fn):

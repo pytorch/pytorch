@@ -61,11 +61,11 @@ jobs:
       docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
@@ -119,26 +119,6 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-bionic-py3_8-clang9-slow-build:
-    name: linux-bionic-py3.8-clang9-slow
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-py3.8-clang9-slow
-      docker-image-name: pytorch-linux-bionic-py3.8-clang9
-      test-matrix: |
-        { include: [
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-        ]}
-
-  linux-bionic-py3_8-clang9-slow-test:
-    name: linux-bionic-py3.8-clang9-slow
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-py3_8-clang9-slow-build
-    with:
-      build-environment: linux-bionic-py3.8-clang9-slow
-      docker-image: ${{ needs.linux-bionic-py3_8-clang9-slow-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-py3_8-clang9-slow-build.outputs.test-matrix }}
-
   linux-focal-py3_9-clang7-tsan-build:
     name: linux-focal-py3.9-clang7-tsan
     uses: ./.github/workflows/_linux-build.yml
@@ -187,9 +167,9 @@ jobs:
       environment-file: .github/requirements/conda-env-macOS-ARM64
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "macos-m1-12" },
-          { config: "default", shard: 2, num_shards: 2, runner: "macos-m1-12" },
-          { config: "functorch", shard: 1, num_shards: 1, runner: "macos-m1-12" },
+          { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-12" },
+          { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-12" },
+          { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-12" },
         ]}
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
@@ -229,12 +209,12 @@ jobs:
       sync-tag: win-cuda-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "functorch", shard: 1, num_shards: 1, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 6, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
@@ -256,8 +236,9 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 1, num_shards: 3, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 2, num_shards: 3, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
         ]}
 
   linux-focal-rocm5_4_2-py3_8-test:
