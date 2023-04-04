@@ -863,8 +863,8 @@ Tensor& intersection_binary_op_sparse_dense_out(
 
   // Short-circuit if either s_ or d is empty.
   if (!s_._nnz() || !s_.numel() || !d.numel()) {
-    const auto sparse_dim = s_.sparse_dim();
     const auto dense_dim = s_.dense_dim();
+    const auto sparse_dim = res_shape.size() - dense_dim;
     const auto indices = at::empty({sparse_dim, 0}, s_._indices().options());
     auto res_values_shape = s_._values().sizes().vec();
     res_values_shape[0] = 0;
@@ -904,9 +904,10 @@ Tensor& intersection_binary_op_sparse_dense_out(
     // op(s.values, d).dtype == <common dtype>.
     const auto values = op(d_filtered, s_values);
     const auto res_values = is_same_tensor(s_, res) ? values : values.to(res.scalar_type());
-    get_sparse_impl(res)->raw_resize_(sparse_dim, dense_dim, res_shape);
-    get_sparse_impl(res)->set_indices_and_values_unsafe(res_indices, res_values);
-    get_sparse_impl(res)->set_nnz_and_narrow(s._nnz());
+    auto* res_impl = get_sparse_impl(res);
+    res_impl->raw_resize_(sparse_dim, dense_dim, res_shape);
+    res_impl->set_indices_and_values_unsafe(res_indices, res_values);
+    res_impl->set_nnz_and_narrow(s._nnz());
     return res._coalesced_(s.is_coalesced());
   };
 
@@ -1004,10 +1005,10 @@ Tensor& intersection_binary_op_sparse_dense_out(
 
     return indices;
   }();
-
-  get_sparse_impl(res)->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
-  get_sparse_impl(res)->set_indices_and_values_unsafe(res_indices, res_values);
-  get_sparse_impl(res)->set_nnz_and_narrow(res_nnz);
+  auto* res_impl = get_sparse_impl(res);
+  res_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
+  res_impl->set_indices_and_values_unsafe(res_indices, res_values);
+  res_impl->set_nnz_and_narrow(res_nnz);
   // By design of index expansion and that s is coalesced,
   // the result is also coalesced.
   return res._coalesced_(true);
