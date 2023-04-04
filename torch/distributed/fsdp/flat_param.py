@@ -488,7 +488,6 @@ class FlatParamHandle:
             dtype,
             flat_param_requires_grad,
             device,
-            requires_grad_mask,
         ) = self._validate_tensors_to_flatten(params)
         params_set = set(params)
         # For alignment padding, only `numels` gets strictly non-`None`
@@ -596,7 +595,6 @@ class FlatParamHandle:
         flat_param_requires_grad: Optional[bool] = None
         device: Optional[torch.device] = None
         # For `use_orig_params=True`, permit non-uniform `requires_grad`
-        requires_grad_mask: List[bool] = []
         for tensor in tensors:
             if type(tensor) is FlatParameter:
                 raise ValueError("Cannot flatten a `FlatParameter`")
@@ -623,12 +621,9 @@ class FlatParamHandle:
                 )
             dtype = tensor.dtype
             flat_param_requires_grad = flat_param_requires_grad or tensor.requires_grad
-            requires_grad_mask.append(tensor.requires_grad)
             device = tensor.device
         assert flat_param_requires_grad is not None, "Requires non-empty `tensors` list"
-        # `use_orig_params=False` uses the uniform `flat_param_requires_grad`,
-        # and `use_orig_params=True` uses the mask to set each `requires_grad`
-        return dtype, flat_param_requires_grad, device, requires_grad_mask
+        return dtype, flat_param_requires_grad, device
 
     def flatten_tensors(
         self,
@@ -651,7 +646,7 @@ class FlatParamHandle:
             raise ValueError(
                 f"Expects non-negative `aligned_numel` but got {aligned_numel}"
             )
-        dtype, _, device, _ = self._validate_tensors_to_flatten(tensors)
+        dtype, _, device = self._validate_tensors_to_flatten(tensors)
         flat_tensors: List[Tensor] = []
         if aligned_numel > 0:
             total_numel = 0
