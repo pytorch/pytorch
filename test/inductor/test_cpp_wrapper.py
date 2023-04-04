@@ -4,8 +4,13 @@ import unittest
 
 import torch._dynamo
 from torch._inductor import config
-from torch.testing._internal.common_utils import IS_MACOS, TestCase as TorchTestCase
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    TEST_WITH_ASAN,
+    TestCase as TorchTestCase,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 try:
     try:
@@ -46,6 +51,15 @@ def make_test_case(name, device="cpu"):
     setattr(TestCppWrapper, test_name, fn)
 
 
+RUN_CPU = HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS
+RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN
+
+devices = []
+if RUN_CPU:
+    devices.append("cpu")
+if RUN_CUDA:
+    devices.append("cuda")
+
 for name in [
     "test_as_strided",  # buffer reuse
     "test_bitwise",  # int32
@@ -55,6 +69,7 @@ for name in [
     "test_linear1",
     "test_linear2",
     "test_linear_packed",
+    "test_linear_unary",
     "test_lowmem_dropout1",  # None as output
     "test_mm_views",
     "test_profiler_mark_wrapper_call",
@@ -66,13 +81,15 @@ for name in [
     "test_transpose",  # multiple outputs, buffer clear
 ]:
     if name == "test_lowmem_dropout1" and device == "cuda":
-        # currently fallback to python wrapper so skip
+        # currently fallback to python wrapper, so skip
         continue
-    for device in ["cpu", "cuda"]:
+
+    for device in devices:
         make_test_case(name, device=device)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS) or HAS_CUDA:
+    if RUN_CPU or RUN_CUDA:
         run_tests(needs="filelock")
