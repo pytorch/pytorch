@@ -1,16 +1,12 @@
 # Owner(s): ["module: inductor"]
-import functools
 import itertools
-import unittest
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_SLOW
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
-
-slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
 
 
 unary_list = {
