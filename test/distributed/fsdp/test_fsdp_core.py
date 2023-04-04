@@ -482,6 +482,7 @@ class TestAutograd(FSDPTest):
             *[nn.Linear(3, 3, device=device) for _ in range(NUM_LINEARS)]
         )
         fsdp_model = FSDP(model, **fsdp_kwargs)
+        self.assertEqual(len(list(FSDP.fsdp_modules(fsdp_model))), NUM_LINEARS + 1)
         for _ in range(3):
             inp = torch.randn((2, 3), device=device)
             with self._patch_use_unsharded_views(
