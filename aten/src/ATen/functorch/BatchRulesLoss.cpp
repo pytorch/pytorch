@@ -46,6 +46,27 @@ mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const a
   TORCH_INTERNAL_ASSERT(false);
 };
 
+std::tuple<at::Tensor,optional<int64_t>>
+smooth_l1_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
+          optional<int64_t> target_bdim, int64_t reduction, double beta) {
+  auto self_ = flatten_logical(self, self_bdim);
+  auto target_ = flatten_logical(target, target_bdim);
+  auto result = at::smooth_l1_loss(self_, target_, Reduction::None, beta);
+  if (result.dim() == 1) {
+    return std::make_tuple(result, 0);
+  } else if (reduction == Reduction::None) {
+    DimVector end_shape;
+    const auto batched_elem = self_bdim.has_value() ?
+        moveBatchDimToFront(self, self_bdim) : moveBatchDimToFront(target, target_bdim);
+    return std::make_tuple(result.reshape(batched_elem.sizes()), 0);
+  } else if (reduction == Reduction::Sum) {
+    return std::make_tuple(result.sum(-1), 0);
+  } else if (reduction == Reduction::Mean) {
+    return std::make_tuple(result.mean(-1), 0);
+  }
+  TORCH_INTERNAL_ASSERT(false);
+};
+
 static Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
   if (reduction == at::Reduction::Mean) {
     return unreduced.mean();
@@ -282,6 +303,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("nll_loss_backward", nll_loss_backward_decomposition);
   m.impl("nll_loss2d_backward", nll_loss_backward_decomposition);
   VMAP_SUPPORT(mse_loss, mse_loss_batch_rule);
+  VMAP_SUPPORT(smooth_l1_loss, smooth_l1_loss_batch_rule);
   // mse_loss_backwards uses a decomposition for its batch rule
   m.impl("binary_cross_entropy", binary_cross_entropy_plumbing);
   m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
