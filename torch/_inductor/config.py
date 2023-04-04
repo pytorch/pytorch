@@ -12,9 +12,6 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
-# Name for generated .h and .so files
-aot_codegen_output_prefix = None
-
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -198,7 +195,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = not is_fbcode()
+    cudagraph_trees = False
 
     # assertions not on the fast path, steady state
     fast_cudagraph_asserts = True
@@ -248,6 +245,9 @@ class triton:
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
+
+    # Store the generated cubin files for cpp wrapper code to load
+    store_cubin = False
 
 
 # create a directory containing lots of debug information
