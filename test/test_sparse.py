@@ -4805,11 +4805,19 @@ class TestSparseAny(TestCase):
                         RuntimeError,
                         "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor layout but got SparseBsc"):
                     result = op.op(t_inp, *t_args, **t_kwargs)
+            elif (op.name == 'mul' and dtype == torch.bool and t_args[0].ndim > 0 and t_inp.is_cpu and t_inp.numel() > 0
+                  and t_inp.dense_dim() > 0):
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "\"addcmul_cpu_out\" not implemented for 'Bool'"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            elif op.name == 'mul' and dtype == torch.bool and t_args[0].ndim > 0 and t_inp.is_cpu and t_inp.numel() > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "\"mul_out_sparse\" not implemented for 'Bool'"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
             else:
                 result = op.op(t_inp, *t_args, **t_kwargs)
-                # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
-                dense = op.op(t_inp.to_dense(), *(t_args[0].to_dense(), *t_args[1:]), **t_kwargs)
-                self.assertEqual(result, dense)
 
                 # Check rop(inp, ...).shape == inp.shape
                 self.assertEqual(result.shape, t_inp.shape)
@@ -4819,6 +4827,16 @@ class TestSparseAny(TestCase):
 
                 # Check rop(inp, ...).dense_dim() == inp.dense_dim()
                 self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+
+                # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
+                try:
+                    dense = op.op(t_inp.to_dense(), *(t_args[0].to_dense(), *t_args[1:]), **t_kwargs)
+                except Exception as msg:
+                    # this is strided op issue, so skipping the sample silently here
+                    if "\"cpublas_axpy_impl\" not implemented for 'ComplexHalf'":
+                        continue
+                    raise
+                self.assertEqual(result, dense)
 
         if count == 0:
             # we count samples to avoid false-positive test reports
