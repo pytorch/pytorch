@@ -99,7 +99,7 @@ namespace {
 // hummu hummu
 SparseTensor& zero_sparse_(SparseTensor& self) {
   AT_ASSERT(self.is_sparse());
-  at::zeros_out(self, get_sparse_impl(self)->sizes());
+  self.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
   return self._coalesced_(true);
 }
 
@@ -863,10 +863,11 @@ Tensor& intersection_binary_op_sparse_dense_out(
 
   // Short-circuit if either s_ or d is empty.
   if (!s_._nnz() || !s_.numel() || !d.numel()) {
-    const auto sparse_dim = static_cast<int64_t>(res_shape.size());
+    const auto sparse_dim = s_.sparse_dim();
+    const auto dense_dim = s_.dense_dim();
     const auto indices = at::empty({sparse_dim, 0}, s_._indices().options());
-    const auto values = at::empty({0}, s_._values().options().dtype(res.scalar_type()));
-    get_sparse_impl(res)->raw_resize_(sparse_dim, /*dense_dim=*/0, /*size=*/res_shape);
+    const auto values = at::empty(s_._values().sizes(), s_._values().options().dtype(res.scalar_type()));
+    get_sparse_impl(res)->raw_resize_(sparse_dim, dense_dim, /*size=*/res_shape);
     get_sparse_impl(res)->set_indices_and_values_unsafe(indices, values);
     get_sparse_impl(res)->set_nnz_and_narrow(0);
     return res._coalesced_(true);
@@ -1066,7 +1067,6 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src_.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
-
   // case mul(sparse, dense)
   if (!src_.is_sparse()) {
     return _mul_dense_sparse_out(src_, t_, r);
