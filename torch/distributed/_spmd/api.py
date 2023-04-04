@@ -170,9 +170,9 @@ def _to_caller_flattened_graph_module(gm: torch.fx.GraphModule) -> torch.fx.Grap
     gm._graph._codegen = _PyTreeCodeGenOutputsOnly(
         pytree_info=_PyTreeInfo(
             # pyre-ignore[6]
-            orig_args=None,
+            orig_args=None,  # type: ignore
             # pyre-ignore[6]
-            in_spec=None,
+            in_spec=None,  # type: ignore
             # pyre-ignore[16]
             out_spec=gm._graph._codegen.pytree_info.out_spec,
         )
