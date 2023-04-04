@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     retry_on_connect_failures,
-    sandcastle_skip,
+    skip_but_pass_in_sandcastle,
 )
 
 
@@ -342,7 +342,7 @@ class DistributedDataParallelTest(
 
     # TODO: test_ucc_backend_2gpu_module and test_ucc_backend_4gpu_module
     # require broadcast_coalesced which is not supported by ucc currently
-    @sandcastle_skip("requires broadcast coalesced, which is not supported by ucc currently")
+    @skip_but_pass_in_sandcastle("requires broadcast coalesced, which is not supported by ucc currently")
     @requires_ucc()
     @skip_if_lt_x_gpu(4)
     def test_ucc_backend_2gpu_module(self):
@@ -350,7 +350,7 @@ class DistributedDataParallelTest(
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_ucc_backend(devices, None, multi_device=True)
 
-    @sandcastle_skip("requires broadcast coalesced, which is not supported by ucc currently")
+    @skip_but_pass_in_sandcastle("requires broadcast coalesced, which is not supported by ucc currently")
     @requires_ucc()
     @skip_if_lt_x_gpu(8)
     def test_ucc_backend_4gpu_module(self):
@@ -424,28 +424,28 @@ class DistributedDataParallelTest(
         run_and_verify_grad(gpu_model)
 
     # TODO: times out
-    @sandcastle_skip("times out")
+    @skip_but_pass_in_sandcastle("times out")
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_global_local_unused_params_grad(self):
         self._test_global_local_unused_params_grad()
 
     # TODO: times out
-    @sandcastle_skip("times out")
+    @skip_but_pass_in_sandcastle("times out")
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_global_local_unused_params_grad_with_grad_is_view(self):
         self._test_global_local_unused_params_grad(gradient_as_bucket_view=True)
 
     # TODO: times out
-    @sandcastle_skip("times out")
+    @skip_but_pass_in_sandcastle("times out")
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_global_local_unused_params_grad_with_static_graph(self):
         self._test_global_local_unused_params_grad(static_graph=True)
 
     # TODO: times out
-    @sandcastle_skip("times out")
+    @skip_but_pass_in_sandcastle("times out")
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_find_unused_parameters_when_unused_parameters_empty(self):
@@ -729,13 +729,13 @@ class DistributedDataParallelTest(
         self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
     # TODO: backward pass: input tensor has to be dense
-    @sandcastle_skip("backward pass: input tensor has to be dense")
+    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
     @requires_ucc()
     def test_sparse_gradients(self):
         self._test_sparse_gradients()
 
     # TODO: backward pass: input tensor has to be dense
-    @sandcastle_skip("backward pass: input tensor has to be dense")
+    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
     @requires_ucc()
     def test_sparse_gradients_grad_is_view(self):
         self._test_sparse_gradients(gradient_as_bucket_view=True)
@@ -888,7 +888,7 @@ class DistributedDataParallelTest(
             model.register_comm_hook(None, dummy_hook)
 
     # TODO: backward pass: input tensor must be dense
-    @sandcastle_skip("backward pass: input tensor has to be dense")
+    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
     @requires_ucc()
     def test_ddp_comm_hook_sparse_gradients(self):
         """
@@ -957,7 +957,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_ucc()
     def test_sequence_num_incremented_ucc_subgroup(self):
         if self.world_size < 4:
-            return sandcastle_skip("Test requires world_size of at least 4")
+            return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("ucc")
 
     @requires_ucc()
