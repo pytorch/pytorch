@@ -301,7 +301,7 @@ class BaseSparsifier(abc.ABC):
     def convert(
         self,
         module: nn.Module,
-        mapping: Optional[Dict[nn.Module, nn.Module]] = None,
+        mapping: Optional[Dict[Type[nn.Module], Type[nn.Module]]] = None,
         inplace: bool = False,
         parameterization: Type[nn.Module] = FakeSparsity,
     ):
