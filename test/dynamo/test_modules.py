@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import traceback
 import types
+import unittest
 from copy import deepcopy
 from typing import Tuple
 from unittest.mock import patch
@@ -464,7 +466,23 @@ class LazyModule(LazyModuleMixin, MaterializedModule):
         self.param = UninitializedParameter()
 
     def initialize_parameters(self, x):
+        # force graph break to ensure this was not inlined
+        torch._dynamo.graph_break()
         self.param.materialize(x.shape)
+
+
+class LazyMLP(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.LazyLinear(10)
+        self.relu1 = torch.nn.ReLU()
+        self.fc2 = torch.nn.LazyLinear(1)
+        self.relu2 = torch.nn.ReLU()
+
+    def forward(self, input):
+        x = self.relu1(self.fc1(input))
+        y = self.relu2(self.fc2(x))
+        return y
 
 
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
@@ -964,7 +982,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
-    def test_lazy_module(self):
+    def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -974,7 +992,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             module(input)
 
-        opt_test_static_module = torch._dynamo.optimize(cnt)(test_static_module)
+        # test no graph break
+        opt_test_static_module = torch._dynamo.optimize(cnt, nopython=True)(
+            test_static_module
+        )
         opt_test_static_module()
 
         self.assertTrue(
@@ -1014,7 +1035,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             return module(input)  # fully materialized
 
-        opt_test_torch_static = torch._dynamo.optimize(cnt)(test_torch_static)
+        # test no graph break
+        opt_test_torch_static = torch._dynamo.optimize(cnt, nopython=True)(
+            test_torch_static
+        )
         opt_test_torch_static()
         out = opt_test_torch_static()
 
@@ -1025,6 +1049,51 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             "Module should be transformed to an instance of BatchNorm3d.",
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
+
+    def test_lazy_module2(self):
+        # Test FX graph 'call_module' works well if argument is lazy module
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        # We should run compile mode firstly, otherwise the module
+        # would be initialized when running eager mode.
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_lazy_module3(self):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # move to cuda and second iteration
+        m = m.to("cuda")
+        x = x.to("cuda")
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_lazy_module4(self):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # input shape changed and second iteration
+        x = torch.rand([20, 20])
+        try:
+            opt_m(x)
+        except RuntimeError:
+            self.assertIn("must have same reduction dim", traceback.format_exc())
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
