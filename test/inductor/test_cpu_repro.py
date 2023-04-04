@@ -25,7 +25,7 @@ from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, slowTest
 from torch.utils._python_dispatch import TorchDispatchMode
 
 try:
@@ -40,7 +40,6 @@ except unittest.SkipTest:
 
 
 vec_dtypes = test_torchinductor.vec_dtypes
-slow = test_torchinductor.slow
 run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
@@ -456,7 +455,7 @@ class CPUReproTests(TestCase):
                 assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
-    @slow()
+    @slowTest
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
@@ -1081,7 +1080,7 @@ class CPUReproTests(TestCase):
                 if simdlen != 1:
                     assert metrics.generated_cpp_vec_kernel_count == 2
 
-    @slow()
+    @slowTest
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
