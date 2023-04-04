@@ -8,7 +8,6 @@ from itertools import accumulate, chain
 from typing import (
     Any,
     Callable,
-    Deque,
     Dict,
     Generator,
     Iterator,
@@ -1112,7 +1111,7 @@ class FlatParamHandle:
         # Invariant: `_mp_shard` is always on the compute device.
         flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
 
-    def unshard(self, free_event_queue: Optional[Deque[torch.cuda.Event]]):
+    def unshard(self, free_event_queue):
         """
         Runs the unshard logic. This includes all-gathering the flat parameter
         and switching to using the unsharded flat parameter. If the handle does
@@ -1136,7 +1135,7 @@ class FlatParamHandle:
             return
         # Only synchronize the free event if actually needs unshard
         if free_event_queue is not None:
-            event = free_event_queue.dequeue_if_needed()
+            event = free_event_queue.dequeue_if_needed()  # type: ignore[attr-defined]
             if event:
                 event.synchronize()
         unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
