@@ -575,6 +575,7 @@ std::shared_ptr<${op}> grad_fn;
 DECLARE_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
 std::vector<std::shared_ptr<${op}>> grad_fns;
+std::vector<bool> requires_grad_fns;
 """
 )
 
@@ -672,7 +673,9 @@ SET_HISTORY_FOR_VECTOR_OF_GRAD_FN = CodeTemplate(
 if (!grad_fns.empty()) {
     auto differentiable_outputs = ${differentiable_outputs};
     for (const auto& i : c10::irange(differentiable_outputs.size())) {
-        ${fn}_history(differentiable_outputs[i], grad_fns[i]);
+        if (requires_grad_fns[i]) {
+            ${fn}_history(differentiable_outputs[i], grad_fns[i]);
+        }
     }
 }
 """
@@ -1153,7 +1156,11 @@ def emit_body(
                         args[i] += "[i]"
             setup.append("for (const auto& i : c10::irange(grad_fns.size())) {")
             setup.append("  auto grad_fn = grad_fns[i];")
-            setup.append(f"  if (compute_requires_grad({', '.join(set(args))})) {{")
+            setup.append(
+                f"  const auto requires_grad_fn = compute_requires_grad({', '.join(set(args))});"
+            )
+            setup.append("  requires_grad_fns.push_back(requires_grad_fn);")
+            setup.append("  if (requires_grad_fn) {")
             save_input_stmts = save_variables(info.all_saved_inputs, False, guard_for)
             setup.extend([f"    {stmt}" for stmt in save_input_stmts])
             setup.append("  }")
