@@ -279,7 +279,6 @@ public:
     lo = _mm256_cmp_ps(lo, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
     hi = _mm256_cmp_ps(hi, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
     return merge_compare_result(lo, hi);
-
   }
   Vectorized<T> abs() const {
     __m256 lo, hi;
