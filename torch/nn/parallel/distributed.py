@@ -929,16 +929,16 @@ class DistributedDataParallel(Module, Joinable):
         # Check if user has used apply_optim_in_backward to overlap optimizer
         # step + DDP backward. Current constraints:
         # 1. Only allreduce is supported at the moment, no custom communication.
-        # 2. The reducer by default sets all grads for parameters DDP manages to
-        # None after they have been applied by the optimizer. There is no support
-        # for setting only some parameter grads to None, this must be done manually
-        # by user (and DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0 needs to be set.)
-        # If your use case requires some DDP managed parameters to run with
-        # an in-backward optimizer and some with a traditional optimizer, please
-        # ping https://github.com/pytorch/pytorch/issues/90052.
+        # 2. For DDP-managed parameters that have their optimizer run in
+        # backward, their gradients are set to ``None``. If your use case
+        # requires DDP parameters grad not to be set to ``None`` after their
+        # in-backward optimizer runs, please ping
+        # https://github.com/pytorch/pytorch/issues/90052.
         # NOTE: we use self._module_parameters instead of .parameters() since
         # the former excludes ignored (non-DDP managed) parameters.
-        if any(hasattr(p, "_in_backward_optimizers") for p in self._module_parameters):
+        if any(
+            hasattr(p, '_in_backward_optimizers') for p in self._module_parameters
+        ):
             # Remove hooks that apply_optim_in_backward had registered because
             # DDP customizes how optimizer is overlapped with backward due to
             # the allreduce.
@@ -949,36 +949,22 @@ class DistributedDataParallel(Module, Joinable):
                 for handle in param_to_handle_map.get(p, []):
                     handle.remove()
 
-            # Need a weakref to the reducer in order to run all_reduce.
-            reducer_weakref = weakref.ref(self.reducer)
+            # Need a weakref to DDP instance to run all_reduce (from reducer)
+            # and get managed DDP parameters.
+            ddp_weakref = weakref.ref(self)
             # Note: importing in function, otherwise this will cause a circular
             # import.
             from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
                 _apply_optim_in_backward_hook,
             )
-
             self.register_comm_hook(
-                (reducer_weakref, self.process_group),
+                ddp_weakref,
                 _apply_optim_in_backward_hook(
                     gradient_is_bucket_view=self.gradient_as_bucket_view
                 ),
             )
 
-            # TODO (rohan-varma): this is a workaround that allows users to
-            # disable the default behavior of DDP managed parameters with
-            # optimizer runing in backwards having their gradients all set to None.
-            # Currently, it is an "all or nothing behavior" where DDP will set
-            # no grads to None or all of them, relaxing this behavior will be
-            # done dependent on use cases.
-            if os.getenv("DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE", "1") != "0":
-                warnings.warn(
-                    "DDP + apply_optim_in_backward will currently set all "
-                    "parameter gradients to None. If this is not the desired "
-                    "behavior, please set env variable "
-                    "DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0, and manually set"
-                    "gradients to None/zero as desired."
-                )
-                self.reducer._set_grads_to_none()  # type: ignore[attr-defined]
+            self.reducer._set_optimizer_in_backward()
 
     def _fire_reducer_autograd_hook(self, idx, *unused):
         """
@@ -2148,6 +2134,9 @@ class DistributedDataParallel(Module, Joinable):
 
     @staticmethod
     def _get_data_parallel_params(module, named_params=False):
+        """
+        Returns a generator of parameters managed by a given DDP unit.
+        """
         for param in (
             module.parameters() if not named_params else module.named_parameters()
         ):
