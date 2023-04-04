@@ -3007,6 +3007,9 @@
 - name: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor
   self: non_differentiable
 
+- name: all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]
+  self: non_differentiable
+
 - name: all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor
   shard: non_differentiable
 
