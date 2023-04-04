@@ -744,7 +744,7 @@ class FloorDiv(sympy.Function):
     def _sympystr(self, printer):
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
-        return f"{base}//{divisor}"
+        return f"({base}//{divisor})"
 
     # SymPy assumptions based on argument types.
     def _eval_is_real(self):
@@ -1579,6 +1579,7 @@ class ShapeEnv:
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            log.info("create_symbol %s = %s", sympy_expr, val)
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
@@ -1915,12 +1916,12 @@ class ShapeEnv:
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
-        from torch._dynamo.source import GlobalSource
+        from torch._dynamo.source import LocalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names], constraint_inputs=None)
+        guards = self.produce_guards(placeholders, [LocalSource(a) for a in arg_names])
         if guards:
             code = " and ".join(guards)
-            return eval(code, SYMPY_INTERP, dict(zip(arg_names, args)))
+            return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
         return True
 
     def bind_symbols(self, placeholders, args):
