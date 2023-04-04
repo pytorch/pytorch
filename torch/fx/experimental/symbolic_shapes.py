@@ -1369,6 +1369,7 @@ class ShapeEnv:
         # symbolically equal.
         duck_shape=True,
     ):
+        log.info("create_env 0x%x", id(self))
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
         self.allow_dynamic_output_shape_ops = allow_dynamic_output_shape_ops
@@ -1579,7 +1580,7 @@ class ShapeEnv:
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
-            log.info("create_symbol %s = %s", sympy_expr, val)
+            log.info("create_symbol %s = %s (%s)", sympy_expr, val, hex(id(self)))
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
