@@ -98,6 +98,12 @@ class SubgraphMatcher:
             # and should be matched against as an anchor
             self.pattern_anchors = [n for n in output_node.all_input_nodes if len(n.users) == 1]
 
+        # Dictionary mapping type of module (ex.
+        # torch.nn.modules.linear.Linear) to another dictionary mapping each
+        # unique call of a module (ex. self_linear1 or self_linear1_1) to a list
+        # of nodes that are in this module call
+        self.module_partitions: Dict[Type[Any], Dict[str, List[torch.fx.Node]]] = {}
+
     def _match_attributes(self, pn: Node, gn: Node) -> bool:
         # Attributes matching is compilcated. Right now we only support matching constant tensor
         assert isinstance(pn.target, str), f"pn.target {pn.target} must be a string."
@@ -238,27 +244,26 @@ class SubgraphMatcher:
         # Recursively traverse upwards to check if `pn` is a true
         # match for `gn`
         match_found = True
-    
+
         if pn.op == "call_module" and self.match_flattened_modules:
             # Skip over all the nodes that are in the flattened module and find
             # all the arguments to the flattened module
-            gn_args = set()
-
             nn_module_stack = gn.meta["nn_module_stack"]
             module_call, (fqn, module_type) = nn_module_stack.popitem()
             nn_module_stack[module_call] = (fqn, module_type)
 
             gn_module_nodes = self.module_partitions[module_type][module_call]
-            logger.info(f"  Skipping over nodes {gn_module_nodes} as they are part " + 
-            f"of the same {module_type} module.")
+            logger.info(f"  Skipping over nodes {gn_module_nodes} as they are part"
+                        f"of the same {module_type} module.")
             match.nodes_map[pn] = gn_module_nodes
 
+            gn_arg_set: Set[Node] = set()
             for n in reversed(gn_module_nodes):
                 if n.op == "call_function":
-                    gn_args.update(n.args)
-                gn_args.discard(n)
+                    gn_arg_set.update(n.args)   # type: ignore[arg-type]
+                gn_arg_set.discard(n)
 
-            gn_args = list(gn_args)
+            gn_args: List[Node] = list(gn_arg_set)
         else:
             gn_args = gn.args
 
@@ -299,17 +304,13 @@ class SubgraphMatcher:
 
         return True
 
-    def get_module_partitions(self, graph: Graph) -> None: 
-        # Dictionary mapping type of module (ex.
-        # torch.nn.modules.linear.Linear) to another dictionary mapping each
-        # unique call of a module (ex. self_linear1 or self_linear1_1) to a list
-        # of nodes that are in this module call
+    def get_module_partitions(self, graph: Graph) -> None:
         modules: Dict[Type[Any], Dict[str, List[torch.fx.Node]]] = {}
 
         for node in graph.nodes:
             if (nn_module_stack := node.meta.get("nn_module_stack", None)) is None:
                 continue
-        
+
             module_call, (fqn, module_type) = nn_module_stack.popitem()
             nn_module_stack[module_call] = (fqn, module_type)
 

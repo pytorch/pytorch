@@ -2342,7 +2342,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         matches = subgraph_matcher.match(gm.graph)
         self.assertTrue(len(matches), 1)
-        
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2370,7 +2370,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         matches = subgraph_matcher.match(gm.graph)
         self.assertTrue(len(matches), 1)
-        
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
