@@ -51,6 +51,7 @@ for name in [
     "test_cat",  # alias
     "test_linear1",
     "test_linear2",
+    "test_linear_packed",
     "test_lowmem_dropout1",  # None as output
     "test_mm_views",
     "test_profiler_mark_wrapper_call",
