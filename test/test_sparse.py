@@ -4814,18 +4814,11 @@ class TestSparseAny(TestCase):
                 # Check rop(inp, ...).shape == inp.shape
                 self.assertEqual(result.shape, t_inp.shape)
 
-                if layout is torch.sparse_coo and t_inp.numel() == 0 and op.name == 'mul' and t_inp.dense_dim() > 0:
-                    # BUG: gh-97627
-                    with self.assertRaisesRegex(
-                            AssertionError,
-                            "Scalars are not equal!"):
-                        self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
-                else:
-                    # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
-                    self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+                # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
+                self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
 
-                    # Check rop(inp, ...).dense_dim() == inp.dense_dim()
-                    self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+                # Check rop(inp, ...).dense_dim() == inp.dense_dim()
+                self.assertEqual(result.dense_dim(), t_inp.dense_dim())
 
         if count == 0:
             # we count samples to avoid false-positive test reports
