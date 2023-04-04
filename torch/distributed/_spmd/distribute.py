@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum, auto
 from functools import partial
-from typing import Dict, List, Optional, Sequence, Set, Tuple, cast
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 import logging
 
 import torch
@@ -136,9 +136,18 @@ def _update_node_from_op_schema(node: torch.fx.Node, op_schema: OpSchema) -> Non
     flat_args, args_tree_spec = tree_flatten(node.args)
     flat_args_schema, _ = tree_flatten(op_schema.args_schema)
 
+    def is_sym_int_or_int(arg: Union[int, torch.fx.Node]) -> bool:
+        if isinstance(arg, torch.fx.Node):
+            return arg.target in [
+                torch.ops.aten.sym_size,
+                torch.ops.aten.sym_numel,
+                torch.ops.aten.sym_stride,
+            ]
+        return isinstance(arg, int)
+
     assert len(flat_args) == len(flat_args_schema)
     for i, (arg, arg_schema) in enumerate(zip(flat_args, flat_args_schema)):
-        if isinstance(arg, torch.fx.Node) and isinstance(arg_schema, int):
+        if is_sym_int_or_int(arg) and isinstance(arg_schema, int):
             flat_args[i] = arg_schema
 
     args = tree_unflatten(flat_args, args_tree_spec)
@@ -549,14 +558,11 @@ def _convert_to_distributed(
                     return arg
 
             args = tree_map(_remap_arg, node.args)
-            if node.target == torch.ops.aten.sym_numel:
-                node_to_obj[node] = args[0].numel()
-            else:
-                assert (
-                    len(args) >= 2
-                ), f"Expected number of args for call function to be at least 2, found {len(args)} {node}"
-                # TODO(anj): Why do we assume this is only 2?
-                node_to_obj[node] = node.target(args[0], args[1])
+            assert (
+                len(args) >= 2
+            ), f"Expected number of args for call function to be at least 2, found {len(args)}"
+            # TODO(anj): Why do we assume this is only 2?
+            node_to_obj[node] = node.target(args[0], args[1])
         else:
             raise ValueError(f"Unrecognized node.op type {node.op}")
 
