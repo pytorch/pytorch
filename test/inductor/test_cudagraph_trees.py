@@ -417,6 +417,36 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
+        def test_aliased_storage_single_weakref(self):
+            @torch.compile
+            def foo(x):
+                x = x * 20
+                x_alias = x[0]
+                y = x * 10
+                y_alias = y[0]
+                torch._dynamo.graph_break()
+                ind = torch.tensor(4, device="cuda")
+                x_alias2 = x[ind:]
+                y_alias2 = y[ind:]
+                return x, x_alias, x_alias2, y_alias, y_alias2
+
+            for _ in range(4):
+                outs = foo(torch.rand([20, 20], device="cuda"))
+
+                ptr_to_ref = {
+                    out.untyped_storage().data_ptr(): out.untyped_storage()._cdata
+                    for out in outs
+                }
+
+                self.assertEqual(len(ptr_to_ref), 2)
+                for out in outs:
+                    self.assertEqual(
+                        ptr_to_ref[out.untyped_storage().data_ptr()],
+                        out.untyped_storage()._cdata,
+                    )
+
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
             def foo(args):
