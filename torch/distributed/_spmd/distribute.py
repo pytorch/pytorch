@@ -148,9 +148,7 @@ def _update_node_from_op_schema(node: torch.fx.Node, op_schema: OpSchema) -> Non
 
 
 def _get_dtensor_dispatch_graph(
-    node: fx.Node,
-    node_to_obj: Dict[fx.Node, object],
-    force_make_fx: bool = False
+    node: fx.Node, node_to_obj: Dict[fx.Node, object], force_make_fx: bool = False
 ) -> Optional[fx.GraphModule]:
     def _remap_arg(arg: object) -> object:
         if isinstance(arg, torch.fx.Node):
@@ -488,9 +486,7 @@ def _convert_to_distributed(
             )
 
         elif isinstance(node.target, torch._ops.OpOverload):
-            replacement = _get_dtensor_dispatch_graph(
-                node, node_to_obj
-            )
+            replacement = _get_dtensor_dispatch_graph(node, node_to_obj)
             if replacement is not None:
                 node_replacements[node] = replacement
         elif node.op == OP.OUTPUT:
