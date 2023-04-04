@@ -186,7 +186,10 @@ void div_floor_kernel(TensorIteratorBase& iter) {
             floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
             const auto basic_div = a / b;
             floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
-            floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
+            vec_t inf(std::numeric_limits<scalar_t>::infinity());
+            // Sleef_fmod doesn't handle inf/nan well, so use basic_div for extremal values
+            auto nonfinite = basic_div.isnan() | (basic_div.abs() == inf);
+            floordiv = vec_t::blendv(floordiv, basic_div, nonfinite);
             return floordiv;
           });
     });
