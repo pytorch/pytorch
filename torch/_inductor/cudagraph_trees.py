@@ -1152,12 +1152,18 @@ class CUDAGraphTreeManager:
         self.forwards_with_pending_backwards: int = 0
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
+        out = self._run(new_inputs, function_id)
+
+        # The forwards are only pending following invocation, not before
         mode = self.id_to_mode[function_id]
         if mode == CompilationMode.FORWARD:
             self.forwards_with_pending_backwards += 1
         elif mode == CompilationMode.BACKWARD:
             self.forwards_with_pending_backwards -= 1
 
+        return out
+
+    def _run(self, new_inputs: List[Tensor], function_id: FunctionID):
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
@@ -1323,7 +1329,6 @@ class CUDAGraphTreeManager:
     def can_start_new_generation(self) -> bool:
         if self.forwards_with_pending_backwards != 0:
             return False
-
         return self.current_gen != self.get_curr_generation()
 
     def try_end_curr_recording(self) -> None:
