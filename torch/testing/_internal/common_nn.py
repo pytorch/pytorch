@@ -1422,26 +1422,6 @@ new_module_tests = [
         tf32_precision=0.005,
     ),
     dict(
-        module_name='MaxPool1d',
-        constructor_args=(4,),
-        cpp_constructor_args='torch::nn::MaxPool1dOptions(4)',
-        input_size=(2, 10, 4),
-    ),
-    dict(
-        module_name='MaxPool1d',
-        constructor_args=(4, 4),
-        cpp_constructor_args='torch::nn::MaxPool1dOptions(4).stride(4)',
-        input_size=(2, 10, 4),
-        desc='stride',
-    ),
-    dict(
-        module_name='MaxPool1d',
-        fullname='MaxPool1d_return_indices',
-        constructor=lambda: nn.MaxPool1d(4, return_indices=True),
-        input_size=(2, 10, 4),
-        test_cpp_api_parity=False,
-    ),
-    dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 2)),
         cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 2})',
@@ -1640,29 +1620,6 @@ new_module_tests = [
         input_size=(2, 4, 5, 5),
         with_tf32=True,
         tf32_precision=0.005,
-    ),
-    dict(
-        module_name='MaxPool2d',
-        constructor_args=((3, 3), (2, 2), (1, 1)),
-        cpp_constructor_args='torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1})',
-        input_size=(3, 7, 7),
-        desc='3d_input'
-    ),
-    dict(
-        module_name='MaxPool2d',
-        constructor_args=((3, 3), (2, 2), (1, 1)),
-        cpp_constructor_args='torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1})',
-        input_size=(1, 3, 7, 7),
-        check_with_channels_last=True,
-        desc='4d_input'
-    ),
-    dict(
-        module_name='MaxPool2d',
-        fullname='MaxPool2d_return_indices',
-        constructor=lambda: nn.MaxPool2d((3, 3), (2, 2), (1, 1), return_indices=True),
-        input_size=(1, 3, 7, 7),
-        check_with_channels_last=True,
-        test_cpp_api_parity=False,
     ),
     dict(
         module_name='AvgPool1d',
@@ -1913,33 +1870,6 @@ new_module_tests = [
         desc='dilated',
         with_tf32=True,
         tf32_precision=0.05
-    ),
-    dict(
-        module_name='MaxPool3d',
-        constructor_args=((2, 2, 2),),
-        cpp_constructor_args='torch::nn::MaxPool3dOptions({2, 2, 2})',
-        input_size=(2, 3, 5, 5, 5),
-    ),
-    dict(
-        module_name='MaxPool3d',
-        constructor_args=(2, (2, 2, 2)),
-        cpp_constructor_args='torch::nn::MaxPool3dOptions(2).stride({2, 2, 2})',
-        input_size=(2, 3, 5, 5, 5),
-        desc='stride',
-    ),
-    dict(
-        module_name='MaxPool3d',
-        constructor_args=(2, 2, (1, 1, 1)),
-        cpp_constructor_args='torch::nn::MaxPool3dOptions(2).stride(2).padding({1, 1, 1})',
-        input_size=(2, 3, 5, 5, 5),
-        desc='stride_padding',
-    ),
-    dict(
-        module_name='MaxPool3d',
-        fullname='MaxPool3d_return_indices',
-        constructor=lambda: nn.MaxPool3d(2, 2, (1, 1, 1), return_indices=True),
-        input_size=(2, 3, 5, 5, 5),
-        test_cpp_api_parity=False,
     ),
     dict(
         module_name='AvgPool3d',
