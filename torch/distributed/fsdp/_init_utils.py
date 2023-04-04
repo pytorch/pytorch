@@ -804,24 +804,25 @@ def _move_module_to_device(
     cpu_device = torch.device("cpu")
     # TODO: This only checks the parameter's device, not any buffers. Thus, a
     # buffer-only module will not get offloaded to CPU.
-    if device_from_device_id is not None and param.device == cpu_device:
-        # BFS from `module` without traversing any nested FSDP instances to
-        # collect the parameters/buffers that have not yet been managed
-        queue: Deque[nn.Module] = collections.deque()
-        queue.append(module)
-        params: List[nn.Parameter] = []
-        buffers: List[torch.Tensor] = []
-        while queue:
-            curr_module = queue.popleft()
-            params.extend(curr_module.parameters(recurse=False))
-            buffers.extend(curr_module.buffers(recurse=False))
-            for submodule in curr_module.children():
-                if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
-                    queue.append(submodule)
-        # NOTE: This includes moving ignored modules' parameters. If we decide
-        # to change the semantics in the future, simply filter based on the
-        # ignored parameters (and buffers).
-        _move_states_to_device(params, buffers, device_from_device_id)
+    if device_from_device_id is not None:
+        if param.device == cpu_device:
+            # BFS from `module` without traversing any nested FSDP instances to
+            # collect the parameters/buffers that have not yet been managed
+            queue: Deque[nn.Module] = collections.deque()
+            queue.append(module)
+            params: List[nn.Parameter] = []
+            buffers: List[torch.Tensor] = []
+            while queue:
+                curr_module = queue.popleft()
+                params.extend(curr_module.parameters(recurse=False))
+                buffers.extend(curr_module.buffers(recurse=False))
+                for submodule in curr_module.children():
+                    if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
+                        queue.append(submodule)
+            # NOTE: This includes moving ignored modules' parameters. If we
+            # decide to change the semantics in the future, simply filter based
+            # on the ignored parameters (and buffers).
+            _move_states_to_device(params, buffers, device_from_device_id)
     elif param.device == cpu_device:
         _warn_cpu_init()
 
