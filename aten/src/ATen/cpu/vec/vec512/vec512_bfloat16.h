@@ -358,9 +358,9 @@ public:
     __mmask16 lo_mask, hi_mask;
     __m512 zero = _mm512_set1_ps(0.0);
     lo_mask = _mm512_cmp_ps_mask(lo, zero, _CMP_UNORD_Q);
-    lo = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero, lo_mask, 0xFFFF'FFFF))
+    lo = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero, lo_mask, 0xFFFF'FFFF));
     hi_mask = _mm512_cmp_ps_mask(hi, zero, _CMP_UNORD_Q);
-    hi = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero, hi_mask, 0xFFFF'FFFF))
+    hi = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero, hi_mask, 0xFFFF'FFFF));
     return merge_compare_result(lo, hi);
   }
   #pragma clang diagnostic pop
