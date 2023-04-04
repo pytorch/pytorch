@@ -611,12 +611,32 @@ def addmm(match, mat1, mat2, inp):
 # TODO(XiaobingSuper): move it to fx_passes/mkldnn_fuse.py
 # after https://github.com/pytorch/pytorch/pull/97740
 if torch._C.has_mkldnn:
+
+    def get_arg_value(node, arg_number, kwarg_name=None):
+        return (
+            node.args[arg_number]
+            if len(node.args) > arg_number
+            else node.kwargs.get(kwarg_name)
+        )
+
+    def filter_nodes(nodes, fn):
+        fns = [fn]
+        if isinstance(fn, torch._ops.OpOverloadPacket):
+            fns.extend([getattr(fn, overload) for overload in fn.overloads()])
+
+        return [node for node in nodes if node.target in fns]
+
     mkldnn = torch.ops.mkldnn
-    _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
-    _computation_user_1 = [CallFunction(mkldnn._convolution, *_conv_args, _users=1)]
-    _computation_user_2 = [CallFunction(mkldnn._convolution, *_conv_args, _users=2)]
-    _computation_user_3 = [CallFunction(mkldnn._convolution, *_conv_args, _users=3)]
-    _computation_user_4 = [CallFunction(mkldnn._convolution, *_conv_args, _users=4)]
+    _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
+    _computation_user_1 = [
+        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=1)
+    ]
+    _computation_user_2 = [
+        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=2)
+    ]
+    _computation_user_4 = [
+        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=4)
+    ]
 
     def gelu_fusion_1(computation_call):
         return CallFunction(
@@ -744,9 +764,17 @@ if torch._C.has_mkldnn:
         UnaryAttr("tanh"): [tanh_fusion(u) for u in _computation_user_1],
     }
 
+    def is_single_conv(match):
+        conv_nodes = filter_nodes(match.nodes, mkldnn._convolution_pointwise.default)
+        if len(conv_nodes) < 1:
+            return False
+        if any(n.args[-3] != "none" for n in conv_nodes):
+            return False
+        return True
+
     def register_mkldnn_conv_replacement_pattern(unary_op, pattern):
-        @register_replacement_pattern(pattern)
-        def fn(input, weight, bias, padding, stride, dilation, groups):
+        @register_replacement_pattern(pattern, extra_check=is_single_conv)
+        def fn(input, weight, bias, padding, stride, dilation, groups, *args, **kwargs):
             return torch.ops.mkldnn._convolution_pointwise.default(
                 input,
                 weight,
@@ -766,28 +794,25 @@ if torch._C.has_mkldnn:
         register_mkldnn_conv_replacement_pattern(unary_op, patterns[0])
         # TODO: add linear/ConvTranspose fusion
 
-    @register_lowering_pattern(CallFunction(mkldnn._convolution, *_conv_args))
-    def single_conv_lowering(
-        match, input, weight, bias, padding, stride, dilation, groups
-    ):
-        return L[torch.ops.mkldnn._convolution_pointwise.default](
-            input, weight, bias, padding, stride, dilation, groups, "none", [], ""
-        )
-
     def register_leaky_relu_fusion_lowering(computation_call, computation_op):
         @register_lowering_pattern(leaky_relu_fusion(computation_call))
         def fn(match, *args, **kwargs):
             negative_slope = kwargs.get("negative_slope")
-            if isinstance(negative_slope, ir.TensorBox):
+            unary_attr = kwargs.get("unary_attr")
+            if isinstance(negative_slope, ir.TensorBox) or unary_attr != "none":
                 matched = False
             else:  # inp is a Number
                 matched = True
             computation_args = list(args)
             if matched:
-                computation_args += ["leaky_relu", [negative_slope], ""]
+                computation_args = computation_args[:-2] + [
+                    "leaky_relu",
+                    [negative_slope],
+                    "",
+                ]
                 return L[computation_op](*computation_args)
             else:
-                computation_args += ["none", [], ""]
+                # computation_args += ["none", [], ""]
                 computation_out = L[computation_op](*computation_args)
                 return L[aten.where](
                     L[aten.gt](computation_out, 0),
@@ -802,18 +827,24 @@ if torch._C.has_mkldnn:
         def fn(match, *args, **kwargs):
             min_value = kwargs.get("min_value")
             max_value = kwargs.get("max_value")
-            if isinstance(min_value, ir.TensorBox) or isinstance(
-                max_value, ir.TensorBox
+            unary_attr = kwargs.get("unary_attr")
+            if (
+                isinstance(min_value, ir.TensorBox)
+                or isinstance(max_value, ir.TensorBox)
+                or unary_attr != "none"
             ):
                 matched = False
             else:  # inp is a Number
                 matched = True
             computation_args = list(args)
             if matched:
-                computation_args += ["hardtanh", [min_value, max_value], ""]
+                computation_args = computation_args[:-2] + [
+                    "hardtanh",
+                    [min_value, max_value],
+                    "",
+                ]
                 return L[computation_op](*computation_args)
             else:
-                computation_args += ["none", [], ""]
                 conv_out = L[computation_op](*computation_args)
                 return L[aten.clamp_max](
                     L[aten.clamp_min](conv_out, min_value), max_value
@@ -822,13 +853,32 @@ if torch._C.has_mkldnn:
         return fn
 
     # conv_fusion lowering
-    register_leaky_relu_fusion_lowering(
-        _computation_user_3[0], torch.ops.mkldnn._convolution_pointwise.default
+    _conv_kwargs = (
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        KeywordArg("unary_attr"),
+        Arg(),
+        Arg(),
     )
-    register_hardtanh_fusion_lowering(
-        _computation_user_1[0], torch.ops.mkldnn._convolution_pointwise.default
-    )
-    # TODO: add linear/ConvTranspose lowering
+    _leaky_relu_user = {
+        CallFunction(
+            mkldnn._convolution_pointwise.default, *_conv_kwargs, _users=3
+        ): torch.ops.mkldnn._convolution_pointwise.default,
+    }
+    _hardtanh_user = {
+        CallFunction(
+            mkldnn._convolution_pointwise.default, *_conv_kwargs, _users=1
+        ): torch.ops.mkldnn._convolution_pointwise.default,
+    }
+    for _computation_call in _leaky_relu_user.items():
+        register_leaky_relu_fusion_lowering(_computation_call[0], _computation_call[1])
+    for _computation_call in _hardtanh_user.items():
+        register_hardtanh_fusion_lowering(_computation_call[0], _computation_call[1])
 
 
 # This slows things down:
