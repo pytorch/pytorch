@@ -5,7 +5,9 @@ import torch
 
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
-from torch.distributed._tensor.random import _set_offset, get_rng_state, manual_seed
+from torch.distributed._tensor.random import get_rng_state, manual_seed
+
+from torch.distributed.distributed_c10d import broadcast_object_list
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -22,6 +24,16 @@ class DistTensorRandomOpTest(DTensorTestBase):
         offset_int64 = state[-8:].view(torch.int64)
         self.assertEqual(seed_int64, torch.tensor([seed]))
         self.assertEqual(offset_int64, torch.tensor([offset]))
+
+    @with_comms
+    def test_device_mesh_init(self):
+        # device mesh init should sync seed and store it as an attribute
+        object_list = [torch.cuda.initial_seed()]
+        broadcast_object_list(object_list)
+        seed_from_rank_0 = int(object_list[0])
+
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        self.assertEqual(seed_from_rank_0, device_mesh._seed)
 
     @with_comms
     @skip_unless_torch_gpu
@@ -52,7 +64,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # random op call
         dtensor.uniform_(0, 1)
 
-        # check rng offset is correctly synchroized after perform op 
+        # check rng offset is correctly synchroized after perform op
         self.check_rng_state(1234, offset_after_op, device_mesh)
 
         dtensor = dtensor.redistribute(device_mesh, [Replicate()])
@@ -60,9 +72,11 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
         for shard_num in range(self.world_size):
             if self.rank == shard_num:
-                self.assertEqual(local_tensor[:,shard_num], local_tensor[:,self.rank])
+                self.assertEqual(local_tensor[:, shard_num], local_tensor[:, self.rank])
             else:
-                self.assertNotEqual(local_tensor[:,shard_num], local_tensor[:,self.rank])
+                self.assertNotEqual(
+                    local_tensor[:, shard_num], local_tensor[:, self.rank]
+                )
 
         dtensor.uniform_(0, 1)
         local_tensor = dtensor.to_local()
@@ -90,7 +104,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
     def test_deterministic_uniform_nd(self):
         mesh = torch.arange(self.world_size).reshape(2, 2, -1)
         device_mesh = DeviceMesh(self.device_type, mesh)
-        dtensor_size = [4 for l in mesh.size()]  # DTensor shape replace with self.world_size
+        # using world_size guarantees that each dim can be evenly partitioned
+        dtensor_size = [self.world_size for l in mesh.size()]
         # initialize rng state
         manual_seed(1234, device_mesh)
         self.check_rng_state(1234, 0, device_mesh)
@@ -112,17 +127,11 @@ class DistTensorRandomOpTest(DTensorTestBase):
         coord = device_mesh.get_coordinate()
         assert coord is not None
 
-        for (placements, dim_map) in zip(placements_list, dim_map_list):
+        for placements, dim_map in zip(placements_list, dim_map_list):
             # shard shape:
-            shard_shape = [
-                mesh.size()[dim] if dim >= 0 else 1
-                for dim in dim_map
-            ]
+            shard_shape = [mesh.size()[dim] if dim >= 0 else 1 for dim in dim_map]
             # shard coord:
-            shard_coord = [
-                coord[dim] if dim >= 0 else 0
-                for dim in dim_map
-            ]
+            shard_coord = [coord[dim] if dim >= 0 else 0 for dim in dim_map]
             strides = [1]
             for l in shard_shape[:0:-1]:
                 strides.append(strides[-1] * l)
@@ -130,8 +139,10 @@ class DistTensorRandomOpTest(DTensorTestBase):
             # shard idx:
             shard_idx = sum([x * y for x, y in zip(shard_coord, strides)])
             # compute local size
-            local_tensor_size = [size // n_shards for size, n_shards in zip(dtensor_size, shard_shape)]
-            _tensor = torch.empty(*local_tensor_size, device='cuda')
+            local_tensor_size = [
+                size // n_shards for size, n_shards in zip(dtensor_size, shard_shape)
+            ]
+            _tensor = torch.empty(*local_tensor_size, device="cuda")
             dtensor = DTensor.from_local(_tensor, device_mesh, placements)
             self.assertEqual(dtensor._spec.dim_map, dim_map)
 
@@ -144,28 +155,27 @@ class DistTensorRandomOpTest(DTensorTestBase):
             # random op call
             dtensor.uniform_(0, 1)
 
-            # check rng offset is correctly synchroized after perform op 
+            # check rng offset is correctly synchroized after perform op
             self.check_rng_state(1234, offset_after_op, device_mesh)
 
             local_tensor = dtensor.to_local()
-            dtensor = dtensor.redistribute(device_mesh, [Replicate(), Replicate(), Replicate()])
+            dtensor = dtensor.redistribute(
+                device_mesh, [Replicate(), Replicate(), Replicate()]
+            )
             local_tensor_gathered = dtensor.to_local()
             # generate shard's range on each dim
-            shard_range_on_dim = [list(range(0, l+1, l // n)) for l, n in zip(dtensor_size, shard_shape)]
             shard_range_on_dim = [
-                [
-                    (dim_range[i],dim_range[i+1])
-                    for i in range(len(dim_range)-1)
-                ]
+                list(range(0, l + 1, l // n)) for l, n in zip(dtensor_size, shard_shape)
+            ]
+            shard_range_on_dim = [
+                [(dim_range[i], dim_range[i + 1]) for i in range(len(dim_range) - 1)]
                 for dim_range in shard_range_on_dim
             ]
             from itertools import product
+
             shard_range_comb = list(product(*shard_range_on_dim))
             shard_range_comb = [
-                [
-                    slice(*t) for t in shard_range
-                ]
-                for shard_range in shard_range_comb
+                [slice(*t) for t in shard_range] for shard_range in shard_range_comb
             ]
 
             for idx in range(len(shard_range_comb)):

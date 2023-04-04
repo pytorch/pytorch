@@ -375,20 +375,3 @@ for op in linear_pointwise_ops:
 
 for op in pointwise_ops:
     register_prop_rule(op)(pointwise_rule)
-
-
-def _register_non_deterministic_op(op):
-    @register_prop_rule(op)
-    def non_deterministic_rule(op_schema: OpSchema) -> OutputSharding:
-        self_spec = cast(DTensorSpec, op_schema.args_schema[0])
-
-        # TODO: we will support native_dropout in future
-        if op == aten.native_dropout.default:
-            return OutputSharding(None, failed_reason=f"{op} is not supported yet!")
-        else:
-            return OutputSharding(self_spec)
-
-
-_register_non_deterministic_op(aten.native_dropout.default)
-_register_non_deterministic_op(aten.uniform_.default)
-_register_non_deterministic_op(aten.normal_.default)

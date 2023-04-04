@@ -210,10 +210,8 @@ def operator_dispatch(
             redistribute_with_schema=needs_redistribute,
         )
 
-        from torch.distributed._tensor.random import (
-            _set_offset,
-            get_rng_state,
-        )
+        from torch.distributed._tensor.random import _set_offset, get_rng_state
+
         aten = torch.ops.aten
         random_ops = [
             aten.native_dropout.default,
@@ -229,31 +227,39 @@ def operator_dispatch(
             local_tensor_arg = cast(Tuple[object, ...], local_tensor_args)[0]
             assert isinstance(dtensor_arg, dtensor.DTensor)
             assert isinstance(local_tensor_arg, torch.Tensor)
+
+            # we assume that the dtensor is evenly sharded on all dims
             dtensor_shape = dtensor_arg.shape
             local_tensor_shape = local_tensor_arg.shape
-            shard_shape = []
             for dim1, dim2 in zip(dtensor_shape, local_tensor_shape):
-                if dim1 % dim2 == 0:
-                    shard_shape.append(dim1 // dim2)
-                else:
+                if dim1 % dim2 != 0:
                     raise RuntimeError("DTensor is expected to be evenly sharded.")
-            import math
-            num_shards = math.prod(shard_shape)
-            # then, compute the local shard's linear idx among all shards
+
+            # compute the topology of unique local shards:
+            # example:
+            dim_map = dtensor_arg._spec.dim_map
             assert mesh is not None
+            shard_shape = [mesh.size(dim) if dim >= 0 else 1 for dim in dim_map]
+
+            # compute the total number of unique local shards
+            import math
+
+            num_shards = math.prod(shard_shape)
+
+            # then, compute the local shard's coordinate among the shard topology
             coord = mesh.get_coordinate()
             assert coord is not None
-            dtensor_dim_map = dtensor_arg._spec.dim_map
-            shard_coord = [
-                coord[dim] if dim >= 0  # sharded
-                else 0  # replicate or partial
-                for dim in dtensor_dim_map
-            ]
+            # TODO: add explanation
+            shard_coord = [coord[dim] if dim >= 0 else 0 for dim in dim_map]
+
+            # convert the coordinate to linear index
+            # TODO: is this order correct???
             strides = [1]
-            for len in shard_shape[:0:-1]:
-                strides.append(strides[-1] * len)
+            for length in shard_shape[:0:-1]:
+                strides.append(strides[-1] * length)
             strides = strides[::-1]
             shard_idx = sum([x * y for x, y in zip(shard_coord, strides)])
+
             # now, we can set the Philox offset to the right value based on shard_idx
             local_size = local_tensor_arg.numel()
             state = get_rng_state(mesh)
