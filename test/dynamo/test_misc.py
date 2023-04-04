@@ -618,6 +618,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
 
+    # TODO fix
     def test_return_nested_function(self):
         out = None
 
