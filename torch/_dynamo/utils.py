@@ -26,6 +26,7 @@ from functools import lru_cache, wraps
 from typing import Any, Dict, Tuple, Union
 
 import torch._logging
+from torch._guards import detect_fake_mode  # noqa: F401
 from . import config
 
 try:
