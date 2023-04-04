@@ -1,4 +1,5 @@
 import functools
+from enum import auto, Enum
 from typing import (
     Any,
     Callable,
@@ -47,6 +48,11 @@ HOMOGENEOUS_ATTR_NAMES = (
     "_use_orig_params",
     "limit_all_gathers",
 )
+
+
+class _PrefetchMode(Enum):
+    BACKWARD = auto()
+    FORWARD = auto()
 
 
 def _get_fsdp_root_states_with_modules(
@@ -428,11 +434,16 @@ def _pre_forward_unshard(
     """Unshards parameters in the pre-forward."""
     if not handles:
         return
-    _unshard(state, handles, state._streams["unshard"], state._streams["pre_unshard"])
     handles_key = tuple(handles)
+    # If the handles have been prefetched, then there is no need to call
+    # `_unshard()` again
+    if not state._handles_prefetched.get(handles_key, False):
+        _unshard(
+            state, handles, state._streams["unshard"], state._streams["pre_unshard"]
+        )
     state._needs_pre_forward_unshard[handles_key] = False
     torch.cuda.current_stream().wait_stream(state._streams["unshard"])
-    _prefetch_handles(state, handles_key)
+    _prefetch_handles(state, handles_key, _PrefetchMode.FORWARD)
 
 
 @no_type_check
@@ -639,7 +650,7 @@ def _pre_backward_hook(
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
         state._needs_pre_backward_unshard[_handles_key] = False
-        _prefetch_handles(state, _handles_key)
+        _prefetch_handles(state, _handles_key, _PrefetchMode.BACKWARD)
         for handle in _handles:
             handle.prepare_gradient_for_backward()
         state._ran_pre_backward_hook[_handles_key] = True
@@ -693,7 +704,7 @@ def _post_backward_hook(
         # per module case since the post-backward hook runs per handle, not per
         # group of handles.
         handles_key = (handle,)
-        _prefetch_handles(state, handles_key)
+        _prefetch_handles(state, handles_key, _PrefetchMode.BACKWARD)
 
         if not state._sync_gradients:
             if handle._use_orig_params:
@@ -994,6 +1005,7 @@ def _finalize_params(
 def _prefetch_handles(
     state: _FSDPState,
     current_handles_key: _HandlesKey,
+    prefetch_mode: _PrefetchMode,
 ) -> None:
     """
     Prefetches the next handles if needed (without synchronization). An empty
@@ -1003,11 +1015,26 @@ def _prefetch_handles(
         return
     handles_to_prefetch = _get_handles_to_prefetch(state, current_handles_key)
     for handles_key in handles_to_prefetch:
+        # Temporarily emulate the training state while calling `_unshard` to
+        # ensure the correct `as_params` for `_use_unsharded_views()`
+        prev_training_states: List[HandleTrainingState] = []
+        for handle in handles_key:
+            prev_training_states.append(handle._training_state)
+            if prefetch_mode == _PrefetchMode.BACKWARD:
+                handle._training_state = HandleTrainingState.BACKWARD_PRE
+            elif prefetch_mode == _PrefetchMode.FORWARD:
+                handle._training_state = HandleTrainingState.FORWARD
+            else:
+                raise ValueError(
+                    f"Invalid prefetch mode on rank {state.rank}: {prefetch_mode}"
+                )
         # Prefetch the next set of handles without synchronizing to allow
         # the sync to happen as late as possible to maximize overlap
         _unshard(
             state, handles_key, state._streams["unshard"], state._streams["pre_unshard"]
         )
+        for handle, prev_training_state in zip(handles_key, prev_training_states):
+            handle._training_state = prev_training_state
         state._handles_prefetched[handles_key] = True
 
 
