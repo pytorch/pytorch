@@ -99,8 +99,8 @@ def fake_tensor_unsupported(fn):
         if not isinstance(x, FakeTensor):
             return x
         if x._has_symbolic_sizes_strides:
-            size = [s.node.shape_env.size_hint(s.node.expr) for s in x.size()]
-            stride = [s.node.shape_env.size_hint(s.node.expr) for s in x.stride()]
+            size = [s.node.shape_env.size_hint(s.node.expr) if isinstance(s, torch.SymInt) else s for s in x.size()]
+            stride = [s.node.shape_env.size_hint(s.node.expr) if isinstance(s, torch.SymInt) else s for s in x.stride()]
         else:
             size = x.size()
             stride = x.stride()
