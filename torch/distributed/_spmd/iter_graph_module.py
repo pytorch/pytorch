@@ -301,7 +301,6 @@ class IterGraph(fx.Graph):
         # For the cleanup graph, additional input is required to get the output
         # from the last iteration -- main graph. Additional nodes are also
         # needed to perform the action moved from the last itertion.
-        new_input_node = self.cleanup_graph.placeholder(nodes[0].name + "_input")
         target_cleanup_node = self._lookup_node(target_node, self.cleanup_graph)
         assert target_cleanup_node is not None, "The target_cleanup_node is None."
         cleanup_subgraph: List[fx.Node] = []
