@@ -17,12 +17,10 @@ __all__ = [
 def module_contains_param(module: nn.Module, parametrization: Type[nn.Module]) -> bool:
     if is_parametrized(module):
         # see if any of the module tensors have a parametriztion attached that matches the one passed in
-        parametrizations: nn.ModuleDict = module.parameterizations  # type: ignore[assignment]
-
         return any(
             [
                 any(isinstance(param, parametrization) for param in param_list)
-                for key, param_list in parametrizations.items()
+                for key, param_list in module.parametrizations.items()  # type: ignore[assignment]
             ]
         )
     return False
