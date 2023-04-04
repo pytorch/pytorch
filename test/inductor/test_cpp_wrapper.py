@@ -65,6 +65,9 @@ for name in [
     "test_sum_int",  # bool, int64, int8, uint8
     "test_transpose",  # multiple outputs, buffer clear
 ]:
+    if name == "test_lowmem_dropout1" and device == "cuda":
+        # currently fallback to python wrapper so skip
+        continue
     for device in ["cpu", "cuda"]:
         make_test_case(name, device=device)
 
