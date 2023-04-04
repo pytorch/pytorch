@@ -298,6 +298,31 @@ class ModuleList(torch.nn.Module):
         return x
 
 
+class CustomGetItemModuleList(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+            ]
+        )
+
+    def __getitem__(self, idx: int):
+        return self.layers[idx]
+
+    def __len__(self) -> int:
+        return len(self.layers)
+
+    def forward(self, x):
+        for i in range(len(self)):
+            x = self[i](x)
+
+        return x
+
+
 class ModuleDict(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -310,6 +335,23 @@ class ModuleDict(torch.nn.Module):
     def forward(self, x):
         # TODO(future PR): handle more logic
         x = self.layers["0"](x)
+        return x
+
+
+class CustomGetItemModuleDict(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleDict(
+            {
+                "0": torch.nn.Linear(10, 10),
+            }
+        )
+
+    def __getitem__(self, key: str) -> torch.nn.Module:
+        return self.layers[key]
+
+    def forward(self, x):
+        x = self["0"](x)
         return x
 
 
@@ -777,7 +819,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
+    test_modulelist = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
+    test_moduledict = make_test(CustomGetItemModuleDict())
     test_super1 = make_test(SuperModule())
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
