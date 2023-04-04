@@ -75,6 +75,7 @@ cc_library(
         "src/cpu/**/*.cpp",
     ], exclude=[
         "src/cpu/aarch64/**/*.cpp",
+        "src/cpu/rv64/**/*.cpp",
     ]),
     hdrs = glob([
         "include/oneapi/dnnl/*.h",
@@ -88,6 +89,8 @@ cc_library(
     ], exclude=[
         "src/cpu/aarch64/**/*.hpp",
         "src/cpu/aarch64/**/*.h",
+        "src/cpu/rv64/**/*.hpp",
+        "src/cpu/rv64/**/*.h",
     ]) + [
         "include/oneapi/dnnl/dnnl_config.h",
         "include/oneapi/dnnl/dnnl_version.h",
