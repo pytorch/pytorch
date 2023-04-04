@@ -954,6 +954,7 @@ class TestTorchDeviceType(TestCase):
             t + 1
 
     # TODO: this test should be in test_nn.py
+    @skipIfTorchInductor("Please convert all Tensors to FakeTensors")
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
         in_channels = 64
         out_channels = 128
