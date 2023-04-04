@@ -1422,7 +1422,7 @@ static void addmm_impl_cpu_(
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
-  if(transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+  if(is_mkldnn_matmul_enabled() && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
       mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
       // We have dispatched to ACL GEMM for single precision float
       // so do not need to dispatch to BLAS GEMM below
