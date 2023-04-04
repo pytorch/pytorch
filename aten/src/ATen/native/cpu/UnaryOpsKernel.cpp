@@ -442,16 +442,26 @@ static void nan_to_num_kernel(
     scalar_t neg_inf_replacement = neg_inf.has_value()
         ? static_cast<scalar_t>(neg_inf.value())
         : std::numeric_limits<scalar_t>::lowest();
+    using vec_t = Vectorized<scalar_t>;
 
-    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-      return (
-          at::_isnan(a)
-              ? nan_replacement
-              : (a == std::numeric_limits<scalar_t>::infinity()
-                     ? pos_inf_replacement
-                     : (a == -std::numeric_limits<scalar_t>::infinity()
-                            ? neg_inf_replacement
-                            : a)));
+    cpu_kernel_vec(iter, [=](scalar_t a) -> scalar_t {
+      if (at::_isnan(a)) {
+        return nan_replacement;
+      }
+      if (a == std::numeric_limits<scalar_t>::infinity()) {
+        return pos_inf_replacement;
+      }
+      if (a == -std::numeric_limits<scalar_t>::infinity()) {
+        return neg_inf_replacement;
+      }
+      return a;
+    }, [=](vec_t a) -> vec_t {
+      vec_t inf(std::numeric_limits<scalar_t>::infinity());
+      vec_t result;
+      result = vec_t::blendv(a, vec_t(nan_replacement), a.isnan());
+      result = vec_t::blendv(result, vec_t(pos_inf_replacement), a == inf);
+      result = vec_t::blendv(result, vec_t(neg_inf_replacement), a == inf.neg());
+      return result;
     });
   });
 }
