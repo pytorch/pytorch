@@ -675,36 +675,11 @@ if torch._C.has_mkldnn:
         out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
         return out
 
-    @register_meta(torch.ops.mkldnn._convolution_pointwise.binary)
-    def meta_mkldnn_convolution_binary(
-        input_tensor,
-        other,
-        weight,
-        bias,
-        padding,
-        stride,
-        dilation,
-        groups,
-        binary_attr,
-        alpha,
-        unary_attr,
-        unary_scalars,
-        unary_algorithm,
-    ):
-        out = input_tensor.new_empty(other.size())
-        out = out.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
-        return out
-
     @register_meta(torch.ops.mkldnn._linear_pointwise.default)
     def meta_linear_pointwise_default(
         input_tensor, weight, bias, attr, scalars, algorithm
     ):
         return input_tensor.new_empty((*input_tensor.shape[:-1], weight.shape[0]))
-
-    @register_meta(torch.ops.mkldnn._linear_pointwise.binary)
-    def meta_linear_pointwise_binary(input_tensor, other, weight, bias, attr):
-        out = input_tensor.new_empty(other.size())
-        return out
 
     if torch._C.has_mkl:
         _meta_lib_dont_use_me_use_register_meta_for_mkl = torch.library.Library(
