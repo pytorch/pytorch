@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import tempfile
@@ -7,8 +8,15 @@ import torch
 
 from . import external_utils
 
-from .logging import get_loggers_level, set_loggers_level
 
+# to configure logging for dynamo, aot, and inductor
+# use the following API in the torch._logging module
+# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
+# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
+# see this design doc for more detailed info
+# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
+# the name of a file to write the logs to
+log_file_name = None
 
 # Note (mlazos): This is deprecated and will be removed very soon
 # to configure logging for dynamo, aot, and inductor
@@ -17,12 +25,8 @@ from .logging import get_loggers_level, set_loggers_level
 # or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
 # see this design doc for more detailed info
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
-log_level = property(
-    lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
-)
-
-# the name of a file to write the logs to
-log_file_name = None
+log_level = logging.ERROR
+output_code = None
 
 # Verbose will print full stack traces on warnings and errors
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
@@ -55,10 +59,6 @@ constant_functions = {
     torch._utils.is_compiling: True,
 }
 
-# Here for bw compat, will be removed (mlazos)
-# see above notes for log_level on how to configure the new logging system
-output_code = None
-
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 
@@ -67,6 +67,13 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
 # see [Note - on the state of mark_dynamic]
 assume_static_by_default = False
+
+# Typically, if you mark_dynamic a dimension, we will error if the dimension
+# actually ended up getting specialized.  This knob changes the behavior so
+# that we don't error at all.  This is helpful for our CI where I'm using a
+# heuristic to mark batch dimensions as dynamic and the heuristic may get it
+# wrong.
+allow_ignore_mark_dynamic = False
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
@@ -124,6 +131,7 @@ skipfiles_inline_module_allowlist = {
     torch._refs,
     torch._prims,
     torch._decomp,
+    torch.utils._contextlib,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -210,6 +218,10 @@ error_on_nested_fx_trace = True
 
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
+
+# If true, error if we try to compile a function that has
+# been seen before.
+error_on_recompile = False
 
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
