@@ -449,3 +449,6 @@ class HFPretrainedConfigVariable(VariableTracker):
         from . import ConstantVariable
 
         return ConstantVariable(getattr(self.obj, name))
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)
