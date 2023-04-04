@@ -994,12 +994,12 @@ if torch._C.has_mkldnn:
     def is_valid_sub(match):
         return is_valid_binary(match, aten.sub) or is_valid_binary(match, ops.sub)
 
-    is_valid_single_conv_add = lambda match: is_valid_add(match) and is_single_conv(
-        match
-    )
-    is_valid_single_linear_add = lambda match: is_valid_add(match) and is_single_linear(
-        match
-    )
+    def is_valid_single_conv_add(match):
+        return is_valid_add(match) and is_single_conv(match)
+
+    def is_valid_single_linear_add(match):
+        return is_valid_add(match) and is_single_linear(match)
+
     for add_fn in [aten.add, ops.add]:
         register_mkldnn_conv_binary_pattern(
             add_fn,
@@ -1022,12 +1022,12 @@ if torch._C.has_mkldnn:
             add_fusion_v2(_computation_user_1[1], add_fn),
         )
 
-    is_valid_single_conv_sub = lambda match: is_valid_sub(match) and is_single_conv(
-        match
-    )
-    is_valid_single_linear_sub = lambda match: is_valid_sub(match) and is_single_linear(
-        match
-    )
+    def is_valid_single_conv_sub(match):
+        return is_valid_sub(match) and is_single_conv(match)
+
+    def is_valid_single_linear_sub(match):
+        return is_valid_sub(match) and is_single_linear(match)
+
     for sub_fn in [aten.sub, ops.sub]:
         register_mkldnn_conv_binary_pattern(
             sub_fn, is_valid_single_conv_sub, sub_fusion(_computation_user_1[0], sub_fn)
