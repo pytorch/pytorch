@@ -15,7 +15,6 @@ import math
 import operator
 import os
 import pstats
-import re
 import sys
 import textwrap
 import time
@@ -790,7 +789,11 @@ def tuple_iterator_getitem(it, index):
 
 
 def enum_repr(value):
-    return str(value)
+    enum_name = str(value)
+
+    name, val = enum_name.split(".")
+    local_name = f'L["{name}"].{val}'
+    return local_name
 
 
 def dict_param_key_ids(value):
@@ -815,19 +818,6 @@ def dict_const_keys_repr(const_keys):
 
 def global_key_name(key):
     return f"__dict_key_{id(key)}"
-
-
-def rename_implicit(v):
-    """
-    Usage of inline comprehensions generates a implicit ".0" variable that
-    trips up guard generation.  This renames these variables in guards.
-    """
-    m = re.match(r"^[.](\d+)$", v)
-    if m:
-        assert v == ".0", f"currently only .0 supported: {v}"
-        # to support .1 etc see guards.py and _eval_frame.c
-        return f"___implicit{m.group(1)}"
-    return v
 
 
 from torch._subclasses import (  # noqa: F401
@@ -1191,14 +1181,16 @@ def get_fake_value(node, tx):
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
 
-        if not is_lazy_module(nnmodule):
-            nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
+            nnmodule._infer_parameters(nnmodule, args)
 
-    if op == "call_module" and is_lazy_module(nnmodule):
-        assert nnmodule is not None
-        # In the case of a lazy module, we want to run
-        # the pre-hooks which initialize it
-        nnmodule(*args, **kwargs)
+        # no matter it's lazy module or not, we should copy to fake mode.
+        nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+
     try:
         with tx.fake_mode, enable_python_dispatcher():
             return wrap_fake_exception(
