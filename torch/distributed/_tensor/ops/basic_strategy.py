@@ -1,7 +1,7 @@
 import itertools
 from dataclasses import dataclass
 
-from typing import cast, List, Tuple
+from typing import List, Tuple
 
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import PlacementStrategy, StrategyList
