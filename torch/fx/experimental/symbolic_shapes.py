@@ -744,7 +744,7 @@ class FloorDiv(sympy.Function):
     def _sympystr(self, printer):
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
-        return f"{base}//{divisor}"
+        return f"({base}//{divisor})"
 
     # SymPy assumptions based on argument types.
     def _eval_is_real(self):

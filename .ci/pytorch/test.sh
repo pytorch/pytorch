@@ -790,7 +790,51 @@ test_bazel() {
 
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
   else
-    tools/bazel test //c10/test:core_tests //c10/test:typeid_test //c10/test:util_base_tests
+    tools/bazel test \
+      //:any_test \
+      //:autograd_test \
+      //:dataloader_test \
+      //:dispatch_test \
+      //:enum_test \
+      //:expanding_array_test \
+      //:fft_test \
+      //:functional_test \
+      //:grad_mode_test \
+      //:inference_mode_test \
+      //:init_test \
+      //:jit_test \
+      //:memory_test \
+      //:meta_tensor_test \
+      //:misc_test \
+      //:moduledict_test \
+      //:modulelist_test \
+      //:modules_test \
+      //:namespace_test \
+      //:nested_test \
+      //:nn_utils_test \
+      //:operations_test \
+      //:ordered_dict_test \
+      //:parallel_benchmark_test \
+      //:parameterdict_test \
+      //:parameterlist_test \
+      //:sequential_test \
+      //:serialize_test \
+      //:special_test \
+      //:static_test \
+      //:support_test \
+      //:tensor_flatten_test \
+      //:tensor_indexing_test \
+      //:tensor_options_cuda_test \
+      //:tensor_options_test \
+      //:tensor_test \
+      //:torch_dist_autograd_test \
+      //:torch_include_test \
+      //:transformer_test \
+      //c10/cuda/test:test \
+      //c10/test:core_tests \
+      //c10/test:typeid_test \
+      //c10/test:util/ssize_test \
+      //c10/test:util_base_tests
   fi
 }
 
