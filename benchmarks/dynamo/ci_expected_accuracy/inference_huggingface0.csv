@@ -14,10 +14,10 @@ DebertaV2ForMaskedLM,0
 DistilBertForMaskedLM,0
 DistilBertForQuestionAnswering,0
 DistillGPT2,0
-ElectraForCausalLM,3
+ElectraForCausalLM,0
 ElectraForQuestionAnswering,0
 GPT2ForSequenceClassification,1
-GoogleFnet,41
+GoogleFnet,0
 LayoutLMForMaskedLM,0
 LayoutLMForSequenceClassification,1
 M2M100ForConditionalGeneration,0
@@ -40,4 +40,4 @@ T5Small,0
 TrOCRForCausalLM,0
 XGLMForCausalLM,0
 XLNetLMHeadModel,0
-YituTechConvBert,3
+YituTechConvBert,0
