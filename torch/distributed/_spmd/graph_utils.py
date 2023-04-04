@@ -1,9 +1,15 @@
+import os
+import logging
+import tempfile
 from enum import Enum
 from typing import Dict, List, Set, Tuple, Union
 
 import torch.fx as fx
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
+
+logger: logging.Logger = logging.getLogger("IterGraphModule")
 
 
 class OP(str, Enum):
@@ -21,60 +27,6 @@ class CommType(str, Enum):
     BROADCAST = "broadcast_"
     REDUCESCATTER = "reduce_scatter_"
     SCATTER = "scatter_"
-
-
-comm_block_op_sequence: Tuple[Union[str, Set[CommType]], ...] = (
-    "clone",
-    "_tensor_constant",
-    "_tensor_constant",
-    # The supported communication type.
-    {CommType.ALLREDUCE},
-    "comm_result",
-    "getitem",
-    "getitem",
-    "wait_comm",
-)
-
-
-def get_comm_block_nodes(
-    wait_node: fx.Node, comm_type: CommType
-) -> Tuple[int, List[fx.Node]]:
-    """
-    Given a wait_comm node, find out all the nodes belong to this communication.
-
-    Args:
-        wait_node(fx.Node): The target wait_comm node.
-        comm_type(CommType): The communication type of this communication block.
-            Currently, only allreduce is supported. An exception will be raised
-            if other values are passed.
-    Returns:
-        comm_idx(int): The index to the communication node in the return list.
-        node_list(List[fx.Node]): The list that contain the nodes in the order
-           of inserting to the graph.
-    """
-    if not wait_node.name.startswith("wait_comm"):
-        raise ValueError(
-            "Passing a wait_node that name does not start with ``wait_comm``. "
-            f"Name is {wait_node.name}, OP is {wait_node.op}."
-        )
-    node = wait_node
-    node_list = []
-    for i, prefix in enumerate(reversed(comm_block_op_sequence)):
-        node_list.append(node)
-        if isinstance(prefix, set):
-            if comm_type not in prefix:
-                raise ValueError(f"Not supported CommType {comm_type}")
-            prefix = comm_type
-            comm_idx = i
-        assert node.name.startswith(
-            prefix
-        ), f"Comm block op sequence mismatches, {node.op} {node.name} {i} {prefix}."
-        node = node.prev
-
-    comm_idx = len(node_list) - comm_idx - 1
-    node_list.reverse()
-
-    return comm_idx, node_list
 
 
 def get_node_tensor_metadata(node: fx.Node, is_required: bool = True) -> TensorMetadata:
@@ -166,3 +118,16 @@ def rebuild_graph(gm: fx.GraphModule, remove_dead_code: bool = True) -> None:
     if remove_dead_code:
         gm.graph.eliminate_dead_code()
     gm.recompile()
+
+
+def dump_graphs_to_files(graphs: Dict[str, fx.GraphModule], folder: str = "") -> str:
+    if not folder:
+        folder = tempfile.mkdtemp()
+
+    for prefix, gm in graphs.items():
+        with open(os.path.join(folder, f"{prefix}.graph"), "w") as fp:
+            fp.write(str(gm))
+
+    logger.warning("Dump graphs to %s", folder)
+
+    return folder
