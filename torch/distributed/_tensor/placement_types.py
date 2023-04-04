@@ -235,10 +235,7 @@ class Replicate(Placement):
         return "Replicate()"
 
     def _replicate_tensor(
-        self,
-        tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         """
         Replicate (broadcast) a torch.Tensor on a mesh dimension (use
