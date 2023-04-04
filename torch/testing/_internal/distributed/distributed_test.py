@@ -6258,9 +6258,12 @@ class DistributedTest:
             model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
             model = nn.parallel.DistributedDataParallel(model.cuda(rank), device_ids=[rank])
             inp = torch.randn(2, 2, dtype=torch.float16, device=torch.device(rank))
-            # Check that forward does not error with dtype mismatch
+            # Check that forward/backward do not error with dtype mismatch
             out = model(inp)
             self.assertEqual(out.dtype, torch.float16)
+            out.sum().backward()
+            for param in model.parameters():
+                self.assertEqual(param.grad.dtype, torch.float16)
 
         def _test_ddp_logging_data(self, is_gpu):
             rank = dist.get_rank()

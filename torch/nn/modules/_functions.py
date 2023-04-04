@@ -141,6 +141,8 @@ class SyncBatchNorm(Function):
                 sum_dy, sum_dy_xmu = torch.split(combined, num_channels)
 
                 # backward pass for gradient calculation
+                if weight.dtype != mean.dtype:
+                    weight = weight.to(mean.dtype)
                 grad_input = torch.batch_norm_backward_elemt(
                     grad_output,
                     saved_input,
