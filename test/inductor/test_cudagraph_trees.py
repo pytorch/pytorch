@@ -430,7 +430,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 y_alias2 = y[ind:]
                 return x, x_alias, x_alias2, y_alias, y_alias2
 
-            for _ in range(3):
+            for _ in range(4):
                 outs = foo(torch.rand([20, 20], device="cuda"))
 
                 ptr_to_ref = {
@@ -444,6 +444,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         ptr_to_ref[out.untyped_storage().data_ptr()],
                         out.untyped_storage()._cdata,
                     )
+
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):

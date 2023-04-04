@@ -76,7 +76,7 @@ from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
 
 StorageWeakRefPointer = int
-
+StorageDataPtr = int
 
 if torch.has_cuda:
     from torch._C import _cuda_CUDAAllocator_AllocatorState as AllocatorState
@@ -334,6 +334,9 @@ class StorageWeakRefWrapper:
         self.ref = StorageWeakRef(stor)
         self._data_ptr = stor.data_ptr()
 
+        # NB: only use cdata for debugging, use ref
+        self._cdata = self.ref.cdata
+
     def __call__(self) -> Optional[StorageWeakRefPointer]:
         if self.ref is None:
             return None
@@ -561,12 +564,16 @@ class CUDAGraphNode:
         self.children: Dict[FunctionID, List[CUDAGraphNode]] = defaultdict(list)
 
         # StorageWeakRef maintains whether the Storage C++ object remains allocated,
-        # not whether the corresponding memory has been deallocated. Therefore in order
+        # not whether the corresponding memory has been deallocated. In order
         # to use them to track memory deallocations we must maintain a single StorageWeakRef
         # for all Storages that reference that memory (even if we are constructing Storages
         # that do not have a deallocator function). We maintain one single storage_cache
-        # for all path executions.
-        self.storage_cache = parent.storage_cache if parent is not None else {}
+        # as we execute any tree path. When we retrieve a storage from the cache we
+        # check that it is still alive, and we hash based on observed recording data ptr
+        # and storage cdata.
+        self.storage_cache: Dict[
+            Tuple[StorageDataPtr, StorageWeakRefPointer], StorageWeakRefWrapper
+        ] = (parent.storage_cache if parent is not None else {})
 
         # we preserve a single reference to executed outputs that is then referenced
         # in children to avoid children having to chase parent pointers in the hot path
@@ -649,9 +656,8 @@ class CUDAGraphNode:
         # to reclaim the input memory when the inputs are no longer live. To accomplish this,
         # we record the metadata needed to reconstruct the inputs at their correct memory location,
         # but do not keep them live during the cuda graph recording.
-        self.non_static_inputs_metadata: InputList[Dict[str, Any]] = [
-            self._tensor_metadata(x) if idx not in (self.static_input_idxs) else None
-            for idx, x in enumerate(recording_inputs)
+        self.inputs_metadata: InputList[Dict[str, Any]] = [
+            self._tensor_metadata(x) for x in recording_inputs
         ]
 
         # DO THE RECORDING!!!
@@ -720,12 +726,12 @@ class CUDAGraphNode:
                 assert data_ptr == new_inputs[idx].data_ptr()
                 # TODO - shouldnt need to add this for persistent static inputs
                 # since we dont manage the lifetimes of their aliased outputs
-                self.add_to_storage_cache(new_inputs[idx].untyped_storage())
+                self.add_to_storage_cache(
+                    new_inputs[idx].untyped_storage(), self.inputs_metadata[idx]
+                )
             else:
                 # non-static input, need to copy it into CUDA graph
-                dst = self._reconstruct_from_tensor_metadata(
-                    self.non_static_inputs_metadata[idx], self.storage_cache
-                )
+                dst = self._reconstruct_from_tensor_metadata(self.inputs_metadata[idx])
                 src = new_inputs[idx]
                 self._copy_input(idx, dst, src)
 
@@ -733,11 +739,7 @@ class CUDAGraphNode:
         self.graph.replay()
 
         outputs = [
-            (
-                self._reconstruct_from_tensor_metadata(metadata, self.storage_cache)
-                if metadata
-                else None
-            )
+            (self._reconstruct_from_tensor_metadata(metadata) if metadata else None)
             for metadata in self.outputs_metadata
         ]
 
@@ -1021,11 +1023,12 @@ class CUDAGraphNode:
             "dtype": x.dtype,
             "device": x.device,
             "storage_offset": x.storage_offset() if not ignore_storage_offset else 0,
+            # ref_cdata was weak pointer of storage observed during recording, it may be
+            # different upon execution
+            "ref_cdata": x.untyped_storage()._cdata,
         }
 
-    def _reconstruct_from_tensor_metadata(
-        self, metadata: Dict[str, Any], storage_cache: Dict[int, torch.Storage]
-    ) -> Tensor:
+    def _reconstruct_from_tensor_metadata(self, metadata: Dict[str, Any]) -> Tensor:
         s = self.get_or_create_storage(metadata)
         t = torch.empty([0], device=metadata["device"], dtype=metadata["dtype"])
         t.set_(
@@ -1036,18 +1039,22 @@ class CUDAGraphNode:
         )
         return t
 
-    def add_to_storage_cache(self, untyped_storage: UntypedStorage):
-        self.storage_cache[untyped_storage.data_ptr()] = StorageWeakRefWrapper(
-            untyped_storage
-        )
+    def add_to_storage_cache(
+        self, untyped_storage: UntypedStorage, metadata: Dict[str, Any]
+    ):
+        self.storage_cache[
+            (untyped_storage.data_ptr(), metadata["ref_cdata"])
+        ] = StorageWeakRefWrapper(untyped_storage)
 
     def get_or_create_storage(self, metadata):
-        storage_wrapper = self.storage_cache.get(metadata["data_ptr"], None)
+        storage_wrapper = self.storage_cache.get(
+            (metadata["data_ptr"], metadata["ref_cdata"]), None
+        )
         if storage_wrapper is None or not storage_wrapper():
             s = torch._C._construct_storage_from_data_pointer(
                 metadata["data_ptr"], metadata["device"], metadata["nbytes"]
             )
-            self.storage_cache[s.data_ptr()] = StorageWeakRefWrapper(s)
+            self.add_to_storage_cache(s, metadata)
         else:
             s = torch.UntypedStorage._new_with_weak_ptr(storage_wrapper())
         return s
