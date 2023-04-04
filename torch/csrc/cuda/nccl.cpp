@@ -1022,8 +1022,7 @@ void scatter(
         size_t send_count = inputs[r].numel();
         auto send_type = to_nccl_data_type(inputs[r]);
         const auto* sendbuff = reinterpret_cast<char*>(inputs[r].data_ptr());
-        NCCL_CHECK(
-            ncclSend(sendbuff, send_count, send_type, r, comm, stream));
+        NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
       } else {
         // on its own rank, simply copy it to the output
         outputs.copy_(inputs[r]);
