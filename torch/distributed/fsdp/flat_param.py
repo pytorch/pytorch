@@ -31,6 +31,7 @@ from torch.distributed.fsdp._common_utils import (
     _set_fsdp_flattened,
     HandleTrainingState,
 )
+from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
@@ -1111,7 +1112,7 @@ class FlatParamHandle:
         # Invariant: `_mp_shard` is always on the compute device.
         flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
 
-    def unshard(self, free_event_queue):
+    def unshard(self, free_event_queue: Optional[_FreeEventQueue]):
         """
         Runs the unshard logic. This includes all-gathering the flat parameter
         and switching to using the unsharded flat parameter. If the handle does
@@ -1135,7 +1136,7 @@ class FlatParamHandle:
             return
         # Only synchronize the free event if actually needs unshard
         if free_event_queue is not None:
-            event = free_event_queue.dequeue_if_needed()  # type: ignore[attr-defined]
+            event = free_event_queue.dequeue_if_needed()
             if event:
                 event.synchronize()
         unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
