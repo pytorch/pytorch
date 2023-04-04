@@ -2281,6 +2281,21 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         constraints = [dynamic_dim(y, 0)]
         torch._dynamo.export(my_dyn_fn, y, constraints=constraints)
 
+    @config.patch(dynamic_shapes=True, capture_dynamic_output_shape_ops=True)
+    def test_export_dynamic_control_flow_error(self):
+        def f(x):
+            if x.nonzero() > 3:
+                return x.cos()
+            return x.sin()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Dynamic control flow is not supported at the moment",
+        ):
+            gm, _ = torch._dynamo.export(
+                f, torch.randn(5, 6), aten_graph=True, tracing_mode="symbolic"
+            )
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

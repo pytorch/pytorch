@@ -75,11 +75,11 @@ TABLE = {
         "inductor_no_cudagraphs": "--training --inductor --disable-cudagraphs ",
     },
     "inference": {
-        "ts_nnc": "--speedup-ts",
-        "ts_nvfuser": "-n100 --speedup-ts --nvfuser",
-        "trt": "-n100 --speedup-trt",
-        "ts_nvfuser_cudagraphs": "--backend=cudagraphs_ts",
-        "inductor": "-n50 --inductor",
+        "ts_nnc": "--inference --speedup-ts",
+        "ts_nvfuser": "--inference -n100 --speedup-ts --nvfuser",
+        "trt": "--inference -n100 --speedup-trt",
+        "ts_nvfuser_cudagraphs": "--inference --backend=cudagraphs_ts",
+        "inductor": "--inference -n50 --inductor",
     },
 }
 

@@ -394,7 +394,6 @@ set(GENERATED_CXX_PYTHON
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nested_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_sparse_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_dist_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_enum_tag.cpp"
   )
@@ -966,10 +965,17 @@ elseif(USE_CUDA)
         torch_cuda
     )
     if($ENV{ATEN_STATIC_CUDA})
-      target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::cusolver_static
-          ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-      )
+      if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
+        target_link_libraries(torch_cuda_linalg PRIVATE
+            CUDA::cusolver_static
+            ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
+        )
+      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+        target_link_libraries(torch_cuda_linalg PRIVATE
+            CUDA::cusolver_static
+            ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+        )
+      endif()
     else()
       target_link_libraries(torch_cuda_linalg PRIVATE
           CUDA::cusolver
