@@ -20,6 +20,7 @@ from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     get_fused_kernel_name,
+    get_kernel_category_by_source_code,
     get_kernel_metadata,
     instance_descriptor,
     next_power_of_2,
@@ -1459,11 +1460,20 @@ class TritonKernel(Kernel):
                 call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
-        call_args = ", ".join(call_args)
-        stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
-        code.writeline(
-            f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
-        )
+
+        if V.graph.aot_mode:
+            V.graph.wrapper_code.generate_kernel_call(
+                name, call_args, V.graph.scheduler.current_device.index
+            )
+        else:
+            # TODO: refactor generate_kernel_call
+            call_args_str = ", ".join(call_args)
+            stream_name = code.write_get_cuda_stream(
+                V.graph.scheduler.current_device.index
+            )
+            code.writeline(
+                f"{name}.run({call_args_str}, grid=grid({', '.join(grid)}), stream={stream_name})"
+            )
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)
@@ -1675,6 +1685,7 @@ class TritonScheduling:
 
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
+
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
         self.scheduler.free_buffers()
 
@@ -1688,7 +1699,10 @@ class TritonScheduling:
                 if config.triton.descriptive_names
                 else ""
             )
-            kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
+            kernel_category = get_kernel_category_by_source_code(src_code)[:3]
+            kernel_name = "_".join(
+                ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
+            )
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
