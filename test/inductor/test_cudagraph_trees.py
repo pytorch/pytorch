@@ -248,6 +248,56 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # should be in execution mode
             self.assertEqual(all_live_block_count(), 0)
 
+        def test_forward_with_skipped_cudagraphed_backward(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            for _ in range(3):
+                inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                out = foo(inp)
+
+                def complex_memory_overlap_new(t):
+                    return True
+
+                try:
+                    prev = torch._inductor.compile_fx.complex_memory_overlap
+                    torch._inductor.compile_fx.complex_memory_overlap = (
+                        complex_memory_overlap_new
+                    )
+                    back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                    out.backward(back_inp)
+                finally:
+                    torch._inductor.compile_fx.complex_memory_overlap = prev
+
+            # we should not have cudagraph'd the backwards
+            new_id = self.get_manager().new_graph_id().id
+            self.assertEqual(new_id, 1)
+
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
+        def test_forward_backward_not_called(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x, y):
+                x_out = x * x * x
+                torch._dynamo.graph_break()
+                y_out = y * y * y
+                return x_out, y_out
+
+            for _ in range(3):
+                inps = [
+                    torch.rand([20, 20], requires_grad=True, device="cuda")
+                    for _ in range(2)
+                ]
+                x_out, y_out = foo(inps[0], inps[1])
+                x_out.sum().backward()
+
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
+            # we should not have cudagraph'd the y backward
+            new_id = self.get_manager().new_graph_id().id
+            self.assertEqual(new_id, 3)
+
         def test_accumulate_multiple_recordings(self):
             def foo(x):
                 y = x + x + x
@@ -559,14 +609,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 def foo(args):
                     x = args[0]
                     args.clear()
-                    return x + 3
+                    return (x + 3,)
 
                 inp = torch.rand([20, 20], device="cuda:1")
 
                 foo_cg = tree_cudagraphify_impl(
                     foo, [inp], (), device_index=1, is_backward=False, is_inference=True
                 )
-                self.assertEqual(foo_cg([inp]), foo([inp]))
+                for _ in range(3):
+                    self.assertEqual(foo_cg([inp]), foo([inp]))
 
                 self.assertTrue(self.get_manager(device_index=0) is None)
                 self.assertFalse(self.get_manager(device_index=1) is None)
@@ -619,10 +670,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(all_live_block_count(), 2)
 
-            self.assertEqual(self.get_manager().forwards_with_pending_backwards, 2)
+            self.assertTrue(self.get_manager().running_forwards_with_pending_backwards)
 
             out2.sum().backward()
-            self.assertEqual(self.get_manager().forwards_with_pending_backwards, 0)
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
             del out
             del out2
@@ -630,7 +681,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             foo2_opt(foo_opt(ones)).sum().backward()
 
             out = foo_opt(ones.detach())
-            self.assertEqual(self.get_manager().forwards_with_pending_backwards, 0)
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
 
