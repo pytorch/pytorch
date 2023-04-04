@@ -27,6 +27,8 @@ class TestHFPretrained(torch._dynamo.test_case.TestCase):
     @maybe_skip
     def test_pretrained(self):
         def fn(a, tmp):
+            if hasattr(tmp, "somekey"):
+                a = a + 1
             if tmp.return_dict:
                 return a + torch.ones(2) * tmp.max_length
             return a
