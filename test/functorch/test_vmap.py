@@ -1057,6 +1057,20 @@ class TestVmapAPI(TestCase):
         expected = torch.mv(y, torch.ones(2)).view(3, 1, 1) + x
         self.assertEqual(out, expected)
 
+    def test_decomposition_under_python_dispatcher(self):
+        # This test will raise an error if the vmap fallback gets invoked.
+        # Here we test that decomps registered to FuncTorchBatchedDecomposition
+        # are respected by the Python Dispatcher.
+        t = torch.ones(3, 3) * 5
+        with warnings.catch_warnings(record=True) as wa:
+            warnings.simplefilter('always')
+            with EnableVmapFallbackWarnings():
+                with torch._dispatch.python.enable_python_dispatcher():
+                    o = torch.vmap(torch.square)(t)
+                # Assert no warnings
+                self.assertEqual(len(wa), 0)
+        self.assertEqual(o, torch.square(t))
+
     def _test_vmap_autocast(self, device):
 
         if torch.device(device).type == "cpu":
@@ -1434,15 +1448,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             vmap(lambda x: x.clone(memory_format=torch.channels_last))(torch.randn(B0))
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(lambda x: x.clone(memory_format=torch.channels_last_3d))(torch.randn(B0))
-
-    def test_decomposition_under_python_dispatcher(self):
-        # This test will raise an error if the vmap fallback gets invoked.
-        # Here we test that decomps registered to FuncTorchBatchedDecomposition
-        # are respected by the Python Dispatcher.
-        t = torch.ones(3, 3) * 5
-        with torch._dispatch.python.enable_python_dispatcher():
-            o = torch.vmap(torch.square)(t)
-        self.assertEqual(o, torch.square(t))
 
     def test_weird_matmul_case(self):
         # Check that this doesn't crash.
