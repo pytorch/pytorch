@@ -17,6 +17,7 @@ from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config, ir
 from .lowering import fallback_node_due_to_unsupported_type, lowerings as L
+from .mkldnn import convert_outplace_to_inplace
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -415,6 +416,10 @@ def fx_passes(gm: torch.fx.GraphModule):
 
     if config.pattern_matcher:
         replace_matched_patterns(gm.graph)
+    # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
+    # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
+    # implementation is used if available
+    gm = convert_outplace_to_inplace(gm)
 
     gm.graph.lint()
 
@@ -611,13 +616,25 @@ def addmm(match, mat1, mat2, inp):
 # TODO(XiaobingSuper): move it to fx_passes/mkldnn_fuse.py
 # after https://github.com/pytorch/pytorch/pull/97740
 if torch._C.has_mkldnn:
+
+    def get_arg_value(node, arg_number, kwarg_name=None):
+        return (
+            node.args[arg_number]
+            if len(node.args) > arg_number
+            else node.kwargs.get(kwarg_name)
+        )
+
+    def filter_nodes(nodes, fn):
+        fns = [fn]
+        if isinstance(fn, torch._ops.OpOverloadPacket):
+            fns.extend([getattr(fn, overload) for overload in fn.overloads()])
+
+        return [node for node in nodes if node.target in fns]
+
     mkldnn = torch.ops.mkldnn
-    _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
-    _linear_args = (Arg(), Arg(), Arg())
-    _conv_transpose_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
-    _conv_binary_args = (
-        Arg(),
-        Arg(),
+    _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
+    _linear_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
+    _conv_transpose_args = (
         Arg(),
         Arg(),
         Arg(),
@@ -631,35 +648,30 @@ if torch._C.has_mkldnn:
         Arg(),
     )
     _computation_user_1 = [
-        CallFunction(mkldnn._convolution, *_conv_args, _users=1),
-        CallFunction(mkldnn._linear, *_linear_args, _users=1),
-        CallFunction(mkldnn._convolution_transpose, *_conv_transpose_args, _users=1),
+        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=1),
+        CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=1),
         CallFunction(
-            mkldnn._convolution_pointwise.binary, *_conv_binary_args, _users=1
+            mkldnn._convolution_transpose_pointwise.default,
+            *_conv_transpose_args,
+            _users=1,
         ),
     ]
     _computation_user_2 = [
-        CallFunction(mkldnn._convolution, *_conv_args, _users=2),
-        CallFunction(mkldnn._linear, *_linear_args, _users=2),
-        CallFunction(mkldnn._convolution_transpose, *_conv_transpose_args, _users=2),
+        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=2),
+        CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=2),
         CallFunction(
-            mkldnn._convolution_pointwise.binary, *_conv_binary_args, _users=2
-        ),
-    ]
-    _computation_user_3 = [
-        CallFunction(mkldnn._convolution, *_conv_args, _users=3),
-        CallFunction(mkldnn._linear, *_linear_args, _users=3),
-        CallFunction(mkldnn._convolution_transpose, *_conv_transpose_args, _users=3),
-        CallFunction(
-            mkldnn._convolution_pointwise.binary, *_conv_binary_args, _users=3
+            mkldnn._convolution_transpose_pointwise.default,
+            *_conv_transpose_args,
+            _users=2,
         ),
     ]
     _computation_user_4 = [
-        CallFunction(mkldnn._convolution, *_conv_args, _users=4),
-        CallFunction(mkldnn._linear, *_linear_args, _users=4),
-        CallFunction(mkldnn._convolution_transpose, *_conv_transpose_args, _users=4),
+        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=4),
+        CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=4),
         CallFunction(
-            mkldnn._convolution_pointwise.binary, *_conv_binary_args, _users=4
+            mkldnn._convolution_transpose_pointwise.default,
+            *_conv_transpose_args,
+            _users=4,
         ),
     ]
 
@@ -798,9 +810,35 @@ if torch._C.has_mkldnn:
         UnaryAttr("tanh"): [tanh_fusion(u) for u in _computation_user_1],
     }
 
+    def is_single_conv(match):
+        conv_nodes = filter_nodes(match.nodes, mkldnn._convolution_pointwise.default)
+        if len(conv_nodes) < 1:
+            return False
+        if any(n.args[-3] != "none" for n in conv_nodes):
+            return False
+        return True
+
+    def is_single_linear(match):
+        conv_nodes = filter_nodes(match.nodes, mkldnn._linear_pointwise.default)
+        if len(conv_nodes) < 1:
+            return False
+        if any(n.args[-3] != "none" for n in conv_nodes):
+            return False
+        return True
+
+    def is_single_conv_transpose(match):
+        conv_nodes = filter_nodes(
+            match.nodes, mkldnn._convolution_transpose_pointwise.default
+        )
+        if len(conv_nodes) < 1:
+            return False
+        if any(n.args[-3] != "none" for n in conv_nodes):
+            return False
+        return True
+
     def register_mkldnn_conv_replacement_pattern(unary_op, pattern):
-        @register_replacement_pattern(pattern)
-        def fn(input, weight, bias, padding, stride, dilation, groups):
+        @register_replacement_pattern(pattern, extra_check=is_single_conv)
+        def fn(input, weight, bias, padding, stride, dilation, groups, *args, **kwargs):
             return torch.ops.mkldnn._convolution_pointwise.default(
                 input,
                 weight,
@@ -817,8 +855,8 @@ if torch._C.has_mkldnn:
         return fn
 
     def register_mkldnn_linear_replacement_pattern(unary_op, pattern):
-        @register_replacement_pattern(pattern)
-        def fn(input, weight, bias):
+        @register_replacement_pattern(pattern, extra_check=is_single_linear)
+        def fn(input, weight, bias, *args, **kwargs):
             return torch.ops.mkldnn._linear_pointwise(
                 input,
                 weight,
@@ -831,8 +869,19 @@ if torch._C.has_mkldnn:
         return fn
 
     def register_mkldnn_conv_transpose_replacement_pattern(unary_op, pattern):
-        @register_replacement_pattern(pattern)
-        def fn(input, weight, bias, padding, output_padding, stride, dilation, groups):
+        @register_replacement_pattern(pattern, extra_check=is_single_conv_transpose)
+        def fn(
+            input,
+            weight,
+            bias,
+            padding,
+            output_padding,
+            stride,
+            dilation,
+            groups,
+            *args,
+            **kwargs,
+        ):
             return torch.ops.mkldnn._convolution_transpose_pointwise(
                 input,
                 weight,
@@ -849,52 +898,6 @@ if torch._C.has_mkldnn:
 
         return fn
 
-    def get_arg_value(node, arg_number, kwarg_name=None):
-        return (
-            node.args[arg_number]
-            if len(node.args) > arg_number
-            else node.kwargs.get(kwarg_name)
-        )
-
-    def filter_nodes(nodes, fn):
-        fns = [fn]
-        if isinstance(fn, torch._ops.OpOverloadPacket):
-            fns.extend([getattr(fn, overload) for overload in fn.overloads()])
-
-        return [node for node in nodes if node.target in fns]
-
-    def is_valid_binary(match, fn):
-        binary_node = filter_nodes(match.nodes, fn)[0]
-        if not isinstance(
-            binary_node.args[0].meta.get("val", None), torch.Tensor
-        ) or not isinstance(binary_node.args[1].meta.get("val", None), torch.Tensor):
-            return False
-        # check alpha is one.
-        alpha = get_arg_value(binary_node, 2, kwarg_name="alpha")
-        if alpha != 1.0 and alpha is not None:
-            return False
-        if (
-            binary_node.args[0].meta["val"].size()
-            != binary_node.args[1].meta["val"].size()
-        ):
-            return False
-        return True
-
-    def is_valid_binary_fusion(match):
-        binary_fusion_node = filter_nodes(
-            match.nodes, torch.ops.mkldnn._convolution_pointwise.binary
-        )[0]
-        # check unary attr is None.
-        if get_arg_value(binary_fusion_node, 10) is not None:
-            return False
-        return True
-
-    def is_valid_add(match):
-        return is_valid_binary(match, aten.add) or is_valid_binary(match, ops.add)
-
-    def is_valid_sub(match):
-        return is_valid_binary(match, aten.sub) or is_valid_binary(match, ops.sub)
-
     binary_attr = {
         aten.add: "add",
         ops.add: "add",
@@ -904,7 +907,19 @@ if torch._C.has_mkldnn:
 
     def register_mkldnn_conv_binary_pattern(binary_op, extra_check, pattern):
         @register_replacement_pattern(pattern, extra_check=extra_check)
-        def fn(input, weight, bias, padding, stride, dilation, groups, other):
+        def fn(
+            input,
+            weight,
+            bias,
+            padding,
+            stride,
+            dilation,
+            groups,
+            unary_op_name,
+            unary_op_scalars,
+            unary_op_algorithm,
+            other,
+        ):
             return torch.ops.mkldnn._convolution_pointwise.binary(
                 input,
                 other,
@@ -925,7 +940,15 @@ if torch._C.has_mkldnn:
 
     def register_mkldnn_linear_binary_pattern(binary_op, extra_check, pattern):
         @register_replacement_pattern(pattern, extra_check=extra_check)
-        def fn(input, weight, bias, other):
+        def fn(
+            input,
+            weight,
+            bias,
+            unary_op_name,
+            unary_op_scalars,
+            unary_op_algorithm,
+            other,
+        ):
             return torch.ops.mkldnn._linear_pointwise.binary(
                 input,
                 other,
@@ -936,9 +959,99 @@ if torch._C.has_mkldnn:
 
         return fn
 
+    for unary_op, patterns in replacement_unary_fusion_patterns.items():
+        register_mkldnn_conv_replacement_pattern(unary_op, patterns[0])
+        register_mkldnn_linear_replacement_pattern(unary_op, patterns[1])
+        register_mkldnn_conv_transpose_replacement_pattern(unary_op, patterns[2])
+
+    def is_valid_binary(match, fn):
+        binary_nodes = filter_nodes(match.nodes, fn)
+        if len(binary_nodes) < 1:
+            return False
+        if any(
+            not isinstance(n.args[0].meta.get("val", None), torch.Tensor)
+            or not isinstance(n.args[1].meta.get("val", None), torch.Tensor)
+            for n in binary_nodes
+        ):
+            return False
+        # check alpha is one.
+        if any(
+            get_arg_value(n, 2, kwarg_name="alpha") != 1.0
+            and get_arg_value(n, 2, kwarg_name="alpha") is not None
+            for n in binary_nodes
+        ):
+            return False
+        if any(
+            n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
+            for n in binary_nodes
+        ):
+            return False
+        return True
+
+    def is_valid_add(match):
+        return is_valid_binary(match, aten.add) or is_valid_binary(match, ops.add)
+
+    def is_valid_sub(match):
+        return is_valid_binary(match, aten.sub) or is_valid_binary(match, ops.sub)
+
+    is_valid_single_conv_add = lambda match: is_valid_add(match) and is_single_conv(
+        match
+    )
+    is_valid_single_linear_add = lambda match: is_valid_add(match) and is_single_linear(
+        match
+    )
+    for add_fn in [aten.add, ops.add]:
+        register_mkldnn_conv_binary_pattern(
+            add_fn,
+            is_valid_single_conv_add,
+            add_fusion_v1(_computation_user_1[0], add_fn),
+        )
+        register_mkldnn_conv_binary_pattern(
+            add_fn,
+            is_valid_single_conv_add,
+            add_fusion_v2(_computation_user_1[0], add_fn),
+        )
+        register_mkldnn_linear_binary_pattern(
+            add_fn,
+            is_valid_single_linear_add,
+            add_fusion_v1(_computation_user_1[1], add_fn),
+        )
+        register_mkldnn_linear_binary_pattern(
+            add_fn,
+            is_valid_single_linear_add,
+            add_fusion_v2(_computation_user_1[1], add_fn),
+        )
+
+    is_valid_single_conv_sub = lambda match: is_valid_sub(match) and is_single_conv(
+        match
+    )
+    is_valid_single_linear_sub = lambda match: is_valid_sub(match) and is_single_linear(
+        match
+    )
+    for sub_fn in [aten.sub, ops.sub]:
+        register_mkldnn_conv_binary_pattern(
+            sub_fn, is_valid_single_conv_sub, sub_fusion(_computation_user_1[0], sub_fn)
+        )
+        register_mkldnn_linear_binary_pattern(
+            sub_fn,
+            is_valid_single_linear_sub,
+            add_fusion_v2(_computation_user_1[1], sub_fn),
+        )
+
+    def is_single_binary_fusion(match):
+        binary_fusion_nodes = filter_nodes(
+            match.nodes, torch.ops.mkldnn._convolution_pointwise.binary
+        )
+        if len(binary_fusion_nodes) < 1:
+            return False
+        # check unary attr is None.
+        if any(get_arg_value(n, 10) is not None for n in binary_fusion_nodes):
+            return False
+        return True
+
     def register_mkldnn_conv_binary_unary_pattern(unary_op, pattern):
         @register_replacement_pattern(
-            pattern, extra_check=is_valid_binary_fusion, pass_number=2
+            pattern, extra_check=is_single_binary_fusion, pass_number=2
         )
         def fn(
             input,
@@ -951,9 +1064,8 @@ if torch._C.has_mkldnn:
             groups,
             binary_op_name,
             alpha,
-            unary_op_name,
-            unary_op_scalars,
-            unary_op_algorithm,
+            *args,
+            **kwargs,
         ):
             return torch.ops.mkldnn._convolution_pointwise.binary(
                 input,
@@ -973,84 +1085,49 @@ if torch._C.has_mkldnn:
 
         return fn
 
-    for unary_op, patterns in replacement_unary_fusion_patterns.items():
-        register_mkldnn_conv_replacement_pattern(unary_op, patterns[0])
-        register_mkldnn_linear_replacement_pattern(unary_op, patterns[1])
-        register_mkldnn_conv_transpose_replacement_pattern(unary_op, patterns[2])
-        # TODO: add more binary+unary fusion.
-        if unary_op.op_name == "relu":
-            register_mkldnn_conv_binary_unary_pattern(unary_op, patterns[3])
-
-    for add_fn in [aten.add, ops.add]:
-        register_mkldnn_conv_binary_pattern(
-            add_fn, is_valid_add, add_fusion_v1(_computation_user_1[0], add_fn)
-        )
-        register_mkldnn_conv_binary_pattern(
-            add_fn, is_valid_add, add_fusion_v2(_computation_user_1[0], add_fn)
-        )
-        register_mkldnn_linear_binary_pattern(
-            add_fn, is_valid_add, add_fusion_v1(_computation_user_1[1], add_fn)
-        )
-        register_mkldnn_linear_binary_pattern(
-            add_fn, is_valid_add, add_fusion_v2(_computation_user_1[1], add_fn)
-        )
-
-    for sub_fn in [aten.sub, ops.sub]:
-        register_mkldnn_conv_binary_pattern(
-            sub_fn, is_valid_sub, sub_fusion(_computation_user_1[0], sub_fn)
-        )
-        register_mkldnn_linear_binary_pattern(
-            sub_fn, is_valid_sub, add_fusion_v2(_computation_user_1[1], sub_fn)
-        )
-
-    @register_lowering_pattern(CallFunction(mkldnn._convolution, *_conv_args))
-    def single_conv_lowering(
-        match, input, weight, bias, padding, stride, dilation, groups
-    ):
-        return L[torch.ops.mkldnn._convolution_pointwise.default](
-            input, weight, bias, padding, stride, dilation, groups, "none", [], ""
-        )
-
-    @register_lowering_pattern(CallFunction(mkldnn._linear, *_linear_args))
-    def single_linear_lowering(match, input, weight, bias):
-        return L[torch.ops.mkldnn._linear_pointwise](
-            input, weight, bias, "none", [], ""
-        )
-
-    @register_lowering_pattern(
-        CallFunction(mkldnn._convolution_transpose, *_conv_transpose_args)
+    _conv_binary_args = (
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
     )
-    def single_conv_transpose_lowering(
-        match, input, weight, bias, padding, output_padding, stride, dilation, groups
-    ):
-        return L[torch.ops.mkldnn._convolution_transpose_pointwise.default](
-            input,
-            weight,
-            bias,
-            padding,
-            output_padding,
-            stride,
-            dilation,
-            groups,
-            "none",
-            [],
-            "",
-        )
+    # conv+binary+relu fusion,. TDOD: add more binary+unray fusion.
+    register_mkldnn_conv_binary_unary_pattern(
+        UnaryAttr("relu"),
+        relu_fusion(
+            CallFunction(
+                mkldnn._convolution_pointwise.binary, *_conv_binary_args, _users=1
+            )
+        ),
+    )
 
     def register_leaky_relu_fusion_lowering(computation_call, computation_op):
         @register_lowering_pattern(leaky_relu_fusion(computation_call))
         def fn(match, *args, **kwargs):
             negative_slope = kwargs.get("negative_slope")
-            if isinstance(negative_slope, ir.TensorBox):
+            unary_attr = kwargs.get("unary_attr")
+            if isinstance(negative_slope, ir.TensorBox) or unary_attr != "none":
                 matched = False
             else:  # inp is a Number
                 matched = True
             computation_args = list(args)
             if matched:
-                computation_args += ["leaky_relu", [negative_slope], ""]
+                computation_args = computation_args[:-2] + [
+                    "leaky_relu",
+                    [negative_slope],
+                    "",
+                ]
                 return L[computation_op](*computation_args)
             else:
-                computation_args += ["none", [], ""]
                 computation_out = L[computation_op](*computation_args)
                 return L[aten.where](
                     L[aten.gt](computation_out, 0),
@@ -1065,19 +1142,24 @@ if torch._C.has_mkldnn:
         def fn(match, *args, **kwargs):
             min_value = kwargs.get("min_value")
             max_value = kwargs.get("max_value")
-            if isinstance(min_value, ir.TensorBox) or isinstance(
-                max_value, ir.TensorBox
+            unary_attr = kwargs.get("unary_attr")
+            if (
+                isinstance(min_value, ir.TensorBox)
+                or isinstance(max_value, ir.TensorBox)
+                or unary_attr != "none"
             ):
                 matched = False
             else:  # inp is a Number
                 matched = True
             computation_args = list(args)
             if matched:
-                computation_args += ["hardtanh", [min_value, max_value], ""]
+                computation_args = computation_args[:-2] + [
+                    "hardtanh",
+                    [min_value, max_value],
+                    "",
+                ]
                 return L[computation_op](*computation_args)
             else:
-                if not is_compute_binary:
-                    computation_args += ["none", [], ""]
                 conv_out = L[computation_op](*computation_args)
                 return L[aten.clamp_max](
                     L[aten.clamp_min](conv_out, min_value), max_value
@@ -1085,30 +1167,62 @@ if torch._C.has_mkldnn:
 
         return fn
 
-    # conv_fusion lowering
-    register_leaky_relu_fusion_lowering(
-        _computation_user_3[0], torch.ops.mkldnn._convolution_pointwise.default
+    _conv_kwargs = (
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        KeywordArg("unary_attr"),
+        Arg(),
+        Arg(),
     )
-
-    register_hardtanh_fusion_lowering(
-        _computation_user_1[0], torch.ops.mkldnn._convolution_pointwise.default
+    _linear_kwargs = (Arg(), Arg(), Arg(), KeywordArg("unary_attr"), Arg(), Arg)
+    _conv_transpose_kwargs = (
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        KeywordArg("unary_attr"),
+        Arg(),
+        Arg(),
     )
-    # linear_fusion lowering
-    register_leaky_relu_fusion_lowering(
-        _computation_user_3[1], torch.ops.mkldnn._linear_pointwise
-    )
-    register_hardtanh_fusion_lowering(
-        _computation_user_1[1], torch.ops.mkldnn._linear_pointwise
-    )
-    # conv_transpose_fusion lowering
-    register_leaky_relu_fusion_lowering(
-        _computation_user_3[2],
-        torch.ops.mkldnn._convolution_transpose_pointwise.default,
-    )
-    register_hardtanh_fusion_lowering(
-        _computation_user_1[2],
-        torch.ops.mkldnn._convolution_transpose_pointwise.default,
-    )
+    _leaky_relu_user = {
+        CallFunction(
+            mkldnn._convolution_pointwise.default, *_conv_kwargs, _users=3
+        ): torch.ops.mkldnn._convolution_pointwise.default,
+        CallFunction(
+            mkldnn._linear_pointwise.default, *_linear_kwargs, _users=3
+        ): torch.ops.mkldnn._linear_pointwise.default,
+        CallFunction(
+            mkldnn._convolution_transpose_pointwise.default,
+            *_conv_transpose_kwargs,
+            _users=3,
+        ): torch.ops.mkldnn._convolution_transpose_pointwise.default,
+    }
+    _hardtanh_user = {
+        CallFunction(
+            mkldnn._convolution_pointwise.default, *_conv_kwargs, _users=1
+        ): torch.ops.mkldnn._convolution_pointwise.default,
+        CallFunction(
+            mkldnn._linear_pointwise.default, *_linear_kwargs, _users=1
+        ): torch.ops.mkldnn._linear_pointwise.default,
+        CallFunction(
+            mkldnn._convolution_transpose_pointwise.default,
+            *_conv_transpose_kwargs,
+            _users=1,
+        ): torch.ops.mkldnn._convolution_transpose_pointwise.default,
+    }
+    for _computation_call in _leaky_relu_user.items():
+        register_leaky_relu_fusion_lowering(_computation_call[0], _computation_call[1])
+    for _computation_call in _hardtanh_user.items():
+        register_hardtanh_fusion_lowering(_computation_call[0], _computation_call[1])
 
 
 # This slows things down:

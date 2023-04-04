@@ -1,17 +1,12 @@
 # Owner(s): ["module: inductor"]
-import functools
 import itertools
-import unittest
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_SLOW
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
-
-slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
-
 
 unary_list = {
     torch.nn.ReLU(): 2,
@@ -260,16 +255,15 @@ class TestPaternMatcher(TestCase):
             )
             with torch.no_grad():
                 expected = mod(v)
-                actual = torch.compile(mod)(v.clone())
+                opt_model = torch.compile(mod)
+                actual = opt_model(v)
                 torch.testing.assert_close(actual, expected)
                 self.assertEqual(
-                    counters["inductor"]["pattern_matcher_count"], 3 if has_relu else 2
+                    counters["inductor"]["pattern_matcher_count"], 2 if has_relu else 1
                 )
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_nodes"],
-                    binary_list[binary_fn] + 3
-                    if has_relu
-                    else binary_list[binary_fn] + 1,
+                    binary_list[binary_fn] + 2 if has_relu else binary_list[binary_fn],
                 )
                 counters.clear()
 

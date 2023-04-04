@@ -56,7 +56,7 @@ class PackedConv2d(nn.Conv2d):
 
     def _conv_forward(self, input, weight, bias):
         if self.padding_mode != "zeros":
-            return torch.ops.mkldnn._convolution(
+            return torch.ops.mkldnn._convolution_pointwise(
                 F.pad(
                     input, self._reversed_padding_repeated_twice, mode=self.padding_mode
                 ),
@@ -66,8 +66,11 @@ class PackedConv2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
+                "none",
+                [],
+                "",
             )
-        return torch.ops.mkldnn._convolution(
+        return torch.ops.mkldnn._convolution_pointwise(
             input,
             weight,
             bias,
@@ -75,6 +78,9 @@ class PackedConv2d(nn.Conv2d):
             self.stride,
             self.dilation,
             self.groups,
+            "none",
+            [],
+            "",
         )
 
     def forward(self, input):
@@ -131,10 +137,13 @@ class PackedLinearBF16(nn.Linear):
         )
 
     def forward(self, input):
-        y = torch.ops.mkldnn._linear(
+        y = torch.ops.mkldnn._linear_pointwise(
             input,
             self.packed_weight,
             self.bias,
+            "none",
+            [],
+            "",
         )
         return y
 
@@ -179,7 +188,7 @@ class PackedConvTranspose2d(nn.ConvTranspose2d):
 
     def _conv_transpose_forward(self, input, weight, bias):
         if self.padding_mode != "zeros":
-            return torch.ops.mkldnn._convolution_transpose(
+            return torch.ops.mkldnn._convolution_transpose_pointwise(
                 F.pad(
                     input, self._reversed_padding_repeated_twice, mode=self.padding_mode
                 ),
@@ -190,8 +199,11 @@ class PackedConvTranspose2d(nn.ConvTranspose2d):
                 self.stride,
                 self.dilation,
                 self.groups,
+                "none",
+                [],
+                "",
             )
-        return torch.ops.mkldnn._convolution_transpose(
+        return torch.ops.mkldnn._convolution_transpose_pointwise(
             input,
             weight,
             bias,
@@ -200,6 +212,9 @@ class PackedConvTranspose2d(nn.ConvTranspose2d):
             self.stride,
             self.dilation,
             self.groups,
+            "none",
+            [],
+            "",
         )
 
     def forward(self, input):
