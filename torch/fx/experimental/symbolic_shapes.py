@@ -461,15 +461,12 @@ if HAS_SYMPY:
         def _eval_is_integer(self):
             return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
 
+        def _ccode(self, printer):
+            lhs, rhs = printer._print(self.args[0]), printer._print(self.args[1])
+            return f"floordiv({lhs}, {rhs})"
+
         # Automatic evaluation.
         # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
-        def _ccode(self, printer):
-            lhs = self.args[0]
-            rhs = self.args[1]
-            lhs_str = printer.parenthesize(lhs, self.precedence)
-            rhs_str = printer.parenthesize(rhs, self.precedence)
-            return f"floor({lhs_str}/{rhs_str})"
-
         @classmethod
         def eval(cls, base, divisor):
             def check_supported_type(x):
@@ -952,12 +949,33 @@ if HAS_SYMPY:
             self.symbol_to_source = symbol_to_source
             self.source_ref = source_ref
 
-        # Results of operations such as 'pow' and 'floor' return floating point
-        # types. 'Mod', however, only works with integer arguments. Therefore,
-        # we need to explicitly cast them before executing the mod.
+        # Results of operations such as 'pow' and division can result in floating
+        # point numbers. We call 'modi' so as to implicitly cast them to integer.
         def _print_Mod(self, expr) -> str:
-            lhs, rhs = self._print(expr.args[0]), self._print(expr.args[1])
-            return f"(((int64_t) ({lhs})) % ((int64_t) ({rhs})))"
+            dividend, divisor = self._print(expr.args[0]), self._print(expr.args[1])
+            return f"modi({dividend}, {divisor})"
+
+        # Division between integers behave differently in C++ and Python. Here, we
+        # call a 'div' function, instead, which emulates Python behavior.
+        def _print_Mul(self, expr) -> str:
+            numerator = []
+            denominator = []
+
+            for item in expr.args:
+                if item.is_commutative and item.is_Pow and item.exp.is_Rational and item.exp.is_negative:
+                    denominator.append(sympy.Pow(item.base, -item.exp))
+                else:
+                    numerator.append(item)
+
+            numerator_str = "1" if len(numerator) == 0 else \
+                super()._print_Mul(sympy.Mul._from_args(numerator))
+
+            if len(denominator) > 0:
+                denominator_str = super()._print_Mul(sympy.Mul._from_args(denominator))
+                return f"div({numerator_str}, {denominator_str})"
+
+            return numerator_str
+
 
         def _print_Symbol(self, expr) -> str:
             assert isinstance(expr, Symbol), str(type(expr))
@@ -1094,7 +1112,7 @@ class GuardCompiler:
 
         # 2. Function definition
         #     a) Generate the actual guard expression
-        guard_expression = " & ".join(exprs)
+        guard_expression = " & ".join(f"({e})" for e in exprs)
         #     b) Generate the extra temporary variables corresponding to Tensor
         #        properties (e.g. sizes, strides, and storage_offset)
         source_creation = []
@@ -1125,10 +1143,25 @@ class GuardCompiler:
 
         source_creation_str = "\n".join(" " * 4 + line for line in source_creation)
         #     c) Generate the C++ source corresponding to this guard.
+        #         - 'floordiv': applies the floor function after floating-point division
+        #         - 'modi': implicitly converts the arguments to integer
         cpp_code = f"""\
 #include <torch/python.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <cmath>
+
+static int64_t floordiv(double a, double b) {{
+    return floor(a / b);
+}}
+
+static int64_t modi(int64_t dividend, int64_t divisor) {{
+    return dividend % divisor;
+}}
+
+static double div(double dividend, double divisor) {{
+    return dividend / divisor;
+}}
+
 extern "C" int guard(PyObject** inputs) {{
 {source_creation_str}
     return {guard_expression};
