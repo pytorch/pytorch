@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import dis
 import functools
 import inspect
 import logging
@@ -98,6 +99,13 @@ class OptimizedModule(torch.nn.Module):
         super().__setattr__(name, value)
 
     def __call__(self, *args, **kwargs):
+        if hasattr(self._orig_mod, "_initialize_hook"):
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
+            assert len(kwargs) == 0
+            self._orig_mod._infer_parameters(self._orig_mod, args)
         return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
@@ -341,11 +349,21 @@ class DisableContext(_TorchDynamoContext):
         super().__init__(callback=None)
 
 
+def first_real_inst_idx(code):
+    if sys.version_info < (3, 11):
+        return 0
+    for inst in dis.get_instructions(code):
+        if inst.opname == "RESUME":
+            return inst.offset // 2
+    raise RuntimeError("RESUME instruction not found in code")
+
+
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
         if (
-            frame.f_lasti >= 0
+            # TODO: the first condition is not covered by any test
+            frame.f_lasti >= first_real_inst_idx(frame.f_code)
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):

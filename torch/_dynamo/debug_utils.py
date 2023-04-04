@@ -597,7 +597,13 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     if inner_compiled_fn is None:
                         inner_compiled_fn = compiler_fn(gm, example_inputs)
                     # Call the compiled function with real inputs
-                    return inner_compiled_fn(real_inputs)
+                    out = inner_compiled_fn(real_inputs)
+                    # sync cuda kernels to ensure IMA detection
+                    for arg in example_inputs:
+                        if isinstance(arg, torch.Tensor) and arg.is_cuda:
+                            torch.cuda.synchronize()
+                            break
+                    return out
                 except Exception as e:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
