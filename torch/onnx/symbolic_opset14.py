@@ -68,7 +68,6 @@ def batch_norm(
     eps,
     cudnn_enabled,
 ):
-
     if (
         torch.is_autocast_enabled()
         and not symbolic_helper.args_have_same_dtype(

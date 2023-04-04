@@ -32,6 +32,7 @@ Argument = Optional[Union[
 
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
+    _ops.aten.copy_.default,
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit}

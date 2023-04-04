@@ -70,7 +70,6 @@ class Net(nn.Module):
 
 
 class DummyState:
-
     __slots__ = ["process_group", "noise"]
 
     def __init__(self, process_group: dist.ProcessGroup, noise: int):
@@ -157,7 +156,6 @@ class TestCommunicationHooks(FSDPTest):
             self.assertEqual(entry._communication_hook, default_hook)
 
         for _ in range(4):
-
             # Clear gradients
             net_default_hook.zero_grad()
             loss = net_default_hook(inpt).sum()
@@ -183,7 +181,6 @@ class TestCommunicationHooks(FSDPTest):
         ]
 
     def _init_model(self, core, sharding_strategy, mixed_precision=None):
-
         device = torch.device("cuda")
         return FSDP(
             core,
@@ -424,7 +421,6 @@ class TestCommunicationHooks(FSDPTest):
     def test_fp16_hook(
         self, has_wrapping: bool, sharding_strategy: Optional[ShardingStrategy]
     ):
-
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.fp16_compress_hook
 
@@ -452,7 +448,6 @@ class TestCommunicationHooks(FSDPTest):
     def test_bf16_hook(
         self, has_wrapping: bool, sharding_strategy: Optional[ShardingStrategy]
     ):
-
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.bf16_compress_hook
 

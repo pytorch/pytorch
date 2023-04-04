@@ -20,18 +20,14 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
   }
 
   using namespace mps;
+  using CachedGraph = MPSUnaryCachedGraph;
+
   MPSStream* stream = getCurrentMPSStream();
   info.zero_();
 
   if (A.numel() == 0) {
     return;
   }
-
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
 
   Tensor output = result;
   bool isContiguous = true;

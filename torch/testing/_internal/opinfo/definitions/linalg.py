@@ -31,6 +31,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
+    get_all_complex_dtypes,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
@@ -38,6 +39,7 @@ from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.opinfo.core import (
     clone_sample,
@@ -512,10 +514,8 @@ def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwa
                 }
                 yield sample
 
-    for sample in sample_inputs_linalg_invertible(
-        op_info, device, dtype, requires_grad
-    ):
-        yield sample  # default kwargs
+    # default kwargs
+    yield from sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
 
 
 def sample_inputs_linalg_pinv_singular(
@@ -1255,6 +1255,26 @@ op_db: List[OpInfo] = [
                 "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
+            ),
+            DecorateInfo(
+                unittest.skip(
+                    "Flaky on ROCm https://github.com/pytorch/pytorch/issues/93044"
+                ),
+                "TestBwdGradients",
+                "test_fn_grad",
+                device_type="cuda",
+                dtypes=get_all_complex_dtypes(),
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.skip(
+                    "Flaky on ROCm https://github.com/pytorch/pytorch/issues/93045"
+                ),
+                "TestFwdGradients",
+                "test_forward_mode_AD",
+                device_type="cuda",
+                dtypes=get_all_complex_dtypes(),
+                active_if=TEST_WITH_ROCM,
             ),
         ),
     ),

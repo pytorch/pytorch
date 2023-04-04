@@ -97,7 +97,7 @@ std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
   if (dimOpt.has_value() && [shape count] != 1) {
     NSMutableArray* axes = [[NSMutableArray alloc] initWithCapacity:[shape count] - 1];
     for (const auto axis : c10::irange([shape count])) {
-      if (axis != dim) {
+      if (static_cast<decltype(dim)>(axis) != dim) {
         [axes addObject:[NSNumber numberWithUnsignedInteger:axis]];
       }
     }

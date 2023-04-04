@@ -34,7 +34,7 @@
  *
  * 3. How to figure out the shape/dtype
  * ------------------------------------
- * Unfortunatley there isn't a one-stop-shop for learning the output shape
+ * Unfortunately there isn't a one-stop-shop for learning the output shape
  * formulae for all operators.  This is partly because some operators are not
  * part of our 'public' API, including backward operators which users don't
  * directly invoke.
@@ -427,8 +427,8 @@ std::vector<Shape> compute_shape_expand(
     const at::Tensor& self,
     at::IntArrayRef size,
     bool implicit) {
-  TORCH_CHECK_GE(size.size(), self.dim());
-  int64_t num_new_dimensions = size.size() - self.dim();
+  TORCH_CHECK_GE(static_cast<int64_t>(size.size()), self.dim());
+  size_t num_new_dimensions = size.size() - self.dim();
   std::vector<int64_t> padded_self(num_new_dimensions, 0);
   padded_self.insert(
       padded_self.end(), self.sizes().begin(), self.sizes().end());
@@ -443,9 +443,9 @@ std::vector<Shape> compute_shape_expand(
     const at::Tensor& self,
     c10::SymIntArrayRef size,
     bool implicit) {
-  TORCH_CHECK_GE(size.size(), self.dim());
+  TORCH_CHECK_GE(static_cast<int64_t>(size.size()), self.dim());
   std::vector<c10::SymInt> _sizes = ToVector<c10::SymInt>(size);
-  int64_t num_new_dimensions = _sizes.size() - self.dim();
+  size_t num_new_dimensions = _sizes.size() - self.dim();
   std::vector<int64_t> padded_self(num_new_dimensions, 0);
   padded_self.insert(
       padded_self.end(), self.sizes().begin(), self.sizes().end());
@@ -1138,8 +1138,8 @@ std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
 std::vector<Shape> compute_shape_repeat(
     const at::Tensor& self,
     at::IntArrayRef repeats) {
-  TORCH_CHECK_GE(repeats.size(), self.dim());
-  int64_t num_new_dimensions = repeats.size() - self.dim();
+  TORCH_CHECK_GE(static_cast<int64_t>(repeats.size()), self.dim());
+  size_t num_new_dimensions = repeats.size() - self.dim();
   std::vector<int64_t> padded_size(num_new_dimensions, 1);
   padded_size.insert(
       padded_size.end(), self.sizes().begin(), self.sizes().end());
