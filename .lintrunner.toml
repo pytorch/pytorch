@@ -39,6 +39,7 @@ init_command = [
     'flake8-executable==2.1.3',
     'flake8-logging-format==0.9.0',
     'flake8-pyi==23.3.1',
+    'flake8-simplify==0.19.3',
     'mccabe==0.7.0',
     'pycodestyle==2.10.0',
     'pyflakes==3.0.1',

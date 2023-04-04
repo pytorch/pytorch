@@ -330,6 +330,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
     matched_node_pattern: NodePattern,
     last_node: Node,
     qconfig: QConfigAny,
+    qhandler: Optional[QuantizeHandler],
     backend_config: BackendConfig,
     named_modules: Dict[str, torch.nn.Module],
     cache_for_no_tensor_check: Dict[Node, bool],
@@ -344,6 +345,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
                 node_pattern,
                 last_node,
                 qconfig,
+                qhandler,
                 backend_config,
                 named_modules,
                 cache_for_no_tensor_check,
@@ -368,10 +370,11 @@ def _set_target_dtype_info_for_matched_node_pattern(
         # and set output_obs_or_fq_ctr based on qconfig.output_act
         # this also requires we extend the structure of QConfig to support more fine
         # grained configurations
-        target_dtype_info: Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]] = (
+        target_dtype_info: Dict[str, Any] = (
             _get_target_activation_dtype_for_node(
                 node,
                 qconfig,
+                qhandler,
                 named_modules,
                 cache_for_no_tensor_check,
             )
@@ -381,9 +384,10 @@ def _set_target_dtype_info_for_matched_node_pattern(
 def _get_target_activation_dtype_for_node(
     node: Node,
     qconfig: QConfigAny,
+    qhandler: Optional[QuantizeHandler],
     named_modules: Dict[str, torch.nn.Module],
     cache_for_no_tensor_check: Dict[Node, bool],
-) -> Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]:
+) -> Dict[str, Any]:
     """
     For each op attribute in the op's input activation, output activation,
     weight, bias - returns the settings of dtype and is_dynamic we expect
@@ -437,11 +441,17 @@ def _get_target_activation_dtype_for_node(
                 and weight_dtype == torch.float16
                 and (not input_act_is_dynamic)
             ) else torch.float
+
+        is_general_tensor_value_op = \
+            (qhandler is not None and qhandler.is_general_tensor_value_op())
+
         return {
             "input_act_obs_or_fq_ctr": qconfig.activation,
             "weight_obs_or_fq_ctr": qconfig.weight,
             "bias_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=bias_dtype),
             "output_act_obs_or_fq_ctr": qconfig.activation,
+            "reuse_input_obs_or_fq": _is_reuse_input_qconfig(qconfig),
+            "input_output_share_observers": is_general_tensor_value_op,
         }
     return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
@@ -560,15 +570,16 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     new_arg = arg
 
     is_standalone_module = qhandler is not None and qhandler.is_standalone_module()
-    assert qconfig is not None
     if not is_standalone_module:
+        # Note: qconfig can be None in this branch this we are getting act/fq from
+        # node.meta now
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg, backend_config)
 
-        _is_reuse_input_qconfig_ = _is_reuse_input_qconfig(qconfig)
+        reuse_input_obs_or_fq = node.meta["target_dtype_info"]["reuse_input_obs_or_fq"]
 
-        act_post_process_ctr = qconfig.weight if is_weight else \
-            qconfig.activation
+        act_post_process_ctr = node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"] if is_weight else \
+            node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"]
 
         arg_as_output_target_dtype = _get_arg_target_dtype_as_output(arg, named_modules)
         arg_as_input_target_dtype = _get_arg_target_dtype_as_input_to_node(
@@ -589,8 +600,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 (arg_as_input_target_dtype != torch.float) and
                 # if arg output dtype is in _DO_NOT_OBS_DTYPE_LIST do not insert observer
                 (arg_as_output_target_dtype not in _DO_NOT_OBS_DTYPE_LIST) and
-                # if qconfig is reuse_input qconfig, we won't insert extra observer for input
-                not _is_reuse_input_qconfig_
+                # we won't insert extra observer for input if the nodes configured with
+                # reuse_input_obs_or_fq
+                not reuse_input_obs_or_fq
             ) or (
                 # need to add input observer for dynamic quantization
                 # only add observer for first input for now, we may need to extend
@@ -601,6 +613,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             )
 
     else:
+        assert qconfig is not None
         # custom flow for standalone modules
         _, _, sm_prepare_custom_config, _ = \
             _get_standalone_module_configs(
@@ -1173,6 +1186,7 @@ def insert_observers_for_model(
             matched_node_pattern,
             last_node,
             qconfig,
+            qhandler,
             backend_config,
             named_modules,
             cache_for_no_tensor_check,
@@ -1230,6 +1244,7 @@ def insert_observers_for_model(
                 matched_node_pattern,
                 last_node,
                 torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig,
+                None,
                 backend_config,
                 named_modules,
                 cache_for_no_tensor_check,
@@ -1343,9 +1358,8 @@ def insert_observers_for_model(
                             is_quantized_branch, backend_config)
 
                     is_last_node_of_pattern = node is last_node
-                    is_general_tensor_value_op = \
-                        (qhandler is not None and qhandler.is_general_tensor_value_op())
-                    _is_reuse_input_qconfig_ = _is_reuse_input_qconfig(qconfig)
+                    input_output_share_observers = node.meta["target_dtype_info"].get("input_output_share_observers", False)
+                    reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
 
                     if is_last_node_of_pattern:
                         if _is_custom_module_lstm(node, named_modules, qconfig, qhandler):
@@ -1398,8 +1412,8 @@ def insert_observers_for_model(
                                 # for general tensor value ops, we modify the graph
                                 # to make all inputs and outputs use the first input's
                                 # observer
-                                if (is_general_tensor_value_op and _is_observer_in_same_graph_) or \
-                                        _is_reuse_input_qconfig_:
+                                if (input_output_share_observers and _is_observer_in_same_graph_) or \
+                                        reuse_input_obs_or_fq:
                                     if not _maybe_make_input_output_share_observers(node, model, named_modules):
                                         _remove_output_observer(node, model, named_modules)
 
