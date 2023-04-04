@@ -458,21 +458,6 @@ class TestAutograd(FSDPTest):
         forward_prefetch: bool,
         backward_prefetch: Optional[BackwardPrefetch],
     ):
-        NUM_MY_MODULES = 5
-
-        class MyModule(nn.Module):
-            def __init__(self, device: torch.device) -> None:
-                super().__init__()
-                self.p0 = nn.Parameter(torch.randn((3, 3), device=device))
-                self.p1 = nn.Parameter(torch.randn((3, 3), device=device))
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                z = x
-                for p in (self.p0, self.p1):
-                    z = z @ p
-                    z = torch.nn.functional.relu(z)
-                return z
-
         orig_use_unsharded_views = FlatParamHandle._use_unsharded_views
 
         def _use_unsharded_views_assert_as_tensors(
@@ -488,11 +473,14 @@ class TestAutograd(FSDPTest):
             "use_orig_params": use_orig_params,
             "forward_prefetch": forward_prefetch,
             "backward_prefetch": backward_prefetch,
-            "auto_wrap_policy": ModuleWrapPolicy({MyModule}),
+            "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
         }
         device = torch.device("cuda")
         # Define a model with enough FSDP instances to exercise prefetching
-        model = nn.Sequential(*[MyModule(device) for _ in range(NUM_MY_MODULES)])
+        NUM_LINEARS = 5
+        model = nn.Sequential(
+            *[nn.Linear(3, 3, device=device) for _ in range(NUM_LINEARS)]
+        )
         fsdp_model = FSDP(model, **fsdp_kwargs)
         for _ in range(3):
             inp = torch.randn((2, 3), device=device)
