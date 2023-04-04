@@ -360,8 +360,7 @@ class LinearBinary(nn.Linear):
         self.packed_weight = torch.nn.Parameter(
             torch.ops.mkldnn._reorder_linear_weight(
                 self.weight.to_mkldnn(), self.batch_size
-            )
-            self.batch_size,
+            ),
             requires_grad=self.weight.requires_grad,
         )
 
