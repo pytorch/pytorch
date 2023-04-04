@@ -5,6 +5,7 @@ import itertools
 import logging
 import operator
 import re
+import sys
 import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
@@ -37,6 +38,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     ConstantSource,
+    DeterministicAlgorithmsSource,
     is_constant_source,
     LocalSource,
     ParamBufferSource,
@@ -209,6 +211,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             # Register a SHAPE_ENV guard to make sure we setup shape guards
             # that show up in ShapeEnv
             self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
+        self.guards.add(
+            DeterministicAlgorithmsSource().make_guard(
+                GuardBuilder.DETERMINISTIC_ALGORITHMS
+            )
+        )
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -463,6 +471,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 return wrap_name(k)
         # create a new unique name
         name = "_".join(map(str, names))
+        # Strip the guard lookup L/G access
+        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
         # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
         name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
         # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
@@ -517,6 +527,27 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
 
+        prefix_insts: List[Instruction] = []
+        if sys.version_info >= (3, 11):
+            # prefix instructions (Python 3.11+)
+            for inst in tx.prefix_insts:
+                if inst.opname == "MAKE_CELL":
+                    prefix_insts.append(
+                        create_instruction("MAKE_CELL", argval=inst.argval)
+                    )
+                elif inst.opname == "COPY_FREE_VARS":
+                    prefix_insts.append(
+                        create_instruction(
+                            "COPY_FREE_VARS", arg=len(tx.code_options["co_freevars"])
+                        )
+                    )
+                else:
+                    prefix_insts.append(inst)
+
+        def append_prefix_insts():
+            self.add_output_instructions(prefix_insts)
+            prefix_insts.clear()
+
         for block in reversed(tx.block_stack):
             block.exit(tx)
 
@@ -533,7 +564,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if stack_values:
             val_to_names[stack_values[-1]] = list()
         for k, v in tx.symbolic_locals.items():
-            if isinstance(v.source, LocalSource) and v.source.name() == k:
+            # Note! this explicitly uses .local_name for matching
+            # Failure to do so will cause spurious registrations in val_to_names.
+            # This will in turn result in spurious variables showing up in the graph.
+            # This was very tricky to debug. For an example, dump the graph at call_user_compiler
+            # while running test_subgraphs.py
+            if isinstance(v.source, LocalSource) and v.source.local_name == k:
                 continue  # no need to restore initial state
             if v not in val_to_names:
                 val_to_names[v] = list()
@@ -544,6 +580,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # to handle random calls
         if len(tx.random_calls) > 0:
+            append_prefix_insts()
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
             rand_fn_name = unique_id("__gen_rand_values")
@@ -576,10 +613,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
+            append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
-                + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
+                + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
         else:
             graph_output_var = self.new_var("graph_out")
@@ -609,6 +647,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     output.append(pass2.create_store(graph_output_var))
                 else:
                     output.append(create_instruction("POP_TOP"))
+            append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
         # restore all the live local vars

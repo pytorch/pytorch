@@ -4,7 +4,7 @@ import unittest
 
 import torch._dynamo
 from torch._inductor import config
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from torch.testing._internal.common_utils import IS_MACOS, TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 try:
@@ -51,6 +51,8 @@ for name in [
     "test_cat",  # alias
     "test_linear1",
     "test_linear2",
+    "test_linear_packed",
+    "test_linear_unary",
     "test_lowmem_dropout1",  # None as output
     "test_mm_views",
     "test_profiler_mark_wrapper_call",
@@ -66,5 +68,5 @@ for name in [
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU and not torch.backends.mps.is_available():
+    if HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS:
         run_tests(needs="filelock")

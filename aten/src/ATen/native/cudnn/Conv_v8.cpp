@@ -153,8 +153,9 @@ cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
   return &(it->second);
 }
 
-void emplace(const KeyType& key, T& results) {
+void update(const KeyType& key, T& results) {
   std::lock_guard<std::mutex> guard(mutex);
+  engine_cache.erase(key);
   engine_cache.emplace(key, std::move(results));
 }
 
@@ -548,7 +549,7 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
   for (auto & plan : plans) {
     try {
       run_conv_plan(handle, x, y, w, plan);
-      benchmark_cache.emplace(key, plan);
+      benchmark_cache.update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
@@ -562,7 +563,7 @@ void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFuse
   for (auto & plan : plans) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.emplace(key, plan);
+      benchmark_cache_fused.update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
@@ -583,7 +584,7 @@ bool try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& o
         continue;
       }
       run_conv_plan(handle, x, y, w, plan);
-      benchmark_cache.emplace(key, plan);
+      benchmark_cache.update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
@@ -604,7 +605,7 @@ bool try_configs_fused(cudnn_frontend::EngineConfigList& configs, const std::str
         continue;
       }
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.emplace(key, plan);
+      benchmark_cache_fused.update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
