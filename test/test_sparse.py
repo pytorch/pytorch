@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests
-from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
+from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from typing import Dict, Any
 from distutils.version import LooseVersion
@@ -21,18 +21,25 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
 from torch.testing._internal.common_methods_invocations import \
-    (reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops)
+    (reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
 
-reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and
-                                     (op.supports_sparse
-                                      or op.supports_sparse_csr
-                                      or op.supports_sparse_csc
-                                      or op.supports_sparse_bsr
-                                      or op.supports_sparse_bsc)]
+
+def _op_supports_any_sparse(op):
+    return (op.supports_sparse
+            or op.supports_sparse_csr
+            or op.supports_sparse_csc
+            or op.supports_sparse_bsr
+            or op.supports_sparse_bsc)
+
+
+reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and _op_supports_any_sparse(op)]
+
+binary_ufuncs_with_sparse_support = [op for op in binary_ufuncs if _op_supports_any_sparse(op)]
+
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -1391,10 +1398,6 @@ class TestSparse(TestSparseBase):
         IS_WINDOWS and TEST_CUDA,
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
-    @unittest.skipIf(
-        TEST_CUDA and _get_torch_cuda_version() < (10, 1) and not TEST_WITH_ROCM,
-        "bmm sparse-dense requires CUDA 10.1 or greater"
-    )
     @coalescedonoff
     @dtypes(torch.double)
     def test_bmm(self, device, dtype, coalesced):
@@ -1453,10 +1456,6 @@ class TestSparse(TestSparseBase):
         IS_WINDOWS,
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (10, 1) and not TEST_WITH_ROCM,
-        "bmm sparse-dense requires CUDA 10.1 or greater"
-    )
     def test_bmm_deterministic(self, device, dtype, coalesced):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
@@ -1492,7 +1491,7 @@ class TestSparse(TestSparseBase):
 
     @onlyCUDA
     @unittest.skipIf(
-        not IS_WINDOWS or _get_torch_cuda_version() >= (11, 0),
+        not IS_WINDOWS or not TEST_WITH_ROCM,
         "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
     )
     @dtypes(torch.double)
@@ -1502,21 +1501,6 @@ class TestSparse(TestSparseBase):
         with self.assertRaisesRegex(
                 RuntimeError,
                 "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0"):
-            ab = a.bmm(b)
-
-    @onlyCUDA
-    @skipIfRocm
-    @unittest.skipIf(
-        _get_torch_cuda_version() >= (10, 1),
-        "this test ensures bmm gives error if CUDA version is less than 10.1"
-    )
-    @dtypes(torch.double)
-    def test_bmm_cuda_version_error(self, device, dtype):
-        a = torch.rand(2, 2, 2, dtype=dtype).to_sparse().cuda()
-        b = torch.rand(2, 2, 2, dtype=dtype).cuda()
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "bmm sparse-dense requires CUDA 10.1 or greater"):
             ab = a.bmm(b)
 
     @onlyCPU
@@ -4829,6 +4813,70 @@ class TestSparseAny(TestCase):
             self.skipTest('NOT IMPL')
         else:
             torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
+
+
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(binary_ufuncs_with_sparse_support)
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_binary_operation(self, layout, device, dtype, op):
+        count = 0
+        for sample in op.sample_inputs_sparse(layout, device, dtype):
+            count += 1
+            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
+            # TODO: eliminate the if-blocks below
+            if op.name == 'mul' and layout is torch.sparse_csr and batch_dim > 0 and t_args[0].ndim > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "crow_indices is supposed to be a vector, but got 2 dimensional tensor"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            elif op.name == 'mul' and layout is torch.sparse_csr and t_inp.numel() == 0 and t_args[0].ndim > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Only tensors with two sparse dimensions can be converted to the SparseCsr layout,"
+                        " got self with 3 sparse dimensions"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            elif op.name == 'mul' and layout is torch.sparse_csc and t_args[0].ndim > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Expected result Tensor to be of format CSR"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            elif op.name == 'mul' and layout is torch.sparse_bsr and t_args[0].ndim > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor layout but got SparseBsr"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            elif op.name == 'mul' and layout is torch.sparse_bsc and t_args[0].ndim > 0:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor layout but got SparseBsc"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+            else:
+                result = op.op(t_inp, *t_args, **t_kwargs)
+                # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
+                dense = op.op(t_inp.to_dense(), *(t_args[0].to_dense(), *t_args[1:]), **t_kwargs)
+                self.assertEqual(result, dense)
+
+                # Check rop(inp, ...).shape == inp.shape
+                self.assertEqual(result.shape, t_inp.shape)
+
+                if layout is torch.sparse_coo and t_inp.numel() == 0 and op.name == 'mul':
+                    # BUG: gh-97627
+                    with self.assertRaisesRegex(
+                            AssertionError,
+                            "Scalars are not equal!"):
+                        self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+                else:
+                    # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
+                    self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+
+                    # Check rop(inp, ...).dense_dim() == inp.dense_dim()
+                    self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+
+        if count == 0:
+            # we count samples to avoid false-positive test reports
+            self.skipTest('no sample inputs')
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

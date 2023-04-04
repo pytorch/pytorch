@@ -234,6 +234,16 @@ class TestPythonKey(AOTTestCase):
         grads2 = [a.grad for a in mod.parameters()]
         self.assertEqual(grads, grads2)
 
+def get_base(t):
+    return t._base if t._is_view() else t
+
+def is_in_base(t, maybe_tensors):
+    t_base = get_base(t)
+    for maybe_tensor in maybe_tensors:
+        if isinstance(maybe_tensor, torch.Tensor):
+            if t_base is get_base(maybe_tensor):
+                return True
+    return False
 
 class TestAOTAutograd(AOTTestCase):
     # test_mutation will:
@@ -320,10 +330,9 @@ class TestAOTAutograd(AOTTestCase):
                 if isinstance(ref_o, torch.Tensor):
                     self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
                     self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
-                    if ref_o.requires_grad:
-                        # _is_view() should probably unconditionally be the same,
-                        # but in practice I don't think this matters for tensors that don't require grad
-                        self.assertEqual(ref_o._is_view(), test_o._is_view())
+                    ref_is_view_of_non_interm = is_in_base(ref_o, graph_inps) or is_in_base(ref_o, ref_out)
+                    test_is_view_of_non_interm = is_in_base(test_o, graph_inps_copy) or is_in_base(test_o, test_out)
+                    self.assertEqual(ref_is_view_of_non_interm, test_is_view_of_non_interm)
                     self.assertEqual(ref_o, test_o)
                     if test_mutation:
                         # This tests that autograd meta is set properly on the output we can
@@ -396,7 +405,7 @@ class TestAOTAutograd(AOTTestCase):
 
         self.verify_aot_autograd(F(), inp)
 
-    def test_embedding_bag_view(self):
+    def test_embedding_bag_view_dynamic(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.
 
@@ -410,7 +419,10 @@ class TestAOTAutograd(AOTTestCase):
 
         x = torch.arange(3)
         y = torch.arange(3)
+        self.verify_aot_autograd(F(), [x, y], dynamic=False)
         self.verify_aot_autograd(F(), [x, y], dynamic=True)
+
+
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_simple(self):
@@ -443,6 +455,26 @@ def forward(self, primals_1):
             out_ref = f(*inp)
             out_test = f_compiled(*inp)
             self.assertEqual(out_ref, out_test)
+
+    def test_outputs_are_aliased(self):
+        # Tensor, None, int
+        def f(a):
+            b = a.mul(2)
+            c = b.view(-1)
+            return b, c
+        f_compiled = aot_function(f, nop)
+        for req_grad in [True, False]:
+            inp = torch.ones(3, requires_grad=req_grad)
+            out_ref = f(inp)
+            out_test = f_compiled(inp)
+            self.assertEqual(out_ref[0], out_test[0])
+            self.assertEqual(out_ref[1], out_test[1])
+            # Try mutating one of the outputs, which is aliased.
+            out_ref[0].mul_(3)
+            out_test[0].mul_(3)
+            # Assert that the aliasing relationship was preserved
+            self.assertEqual(out_ref[0], out_test[0])
+            self.assertEqual(out_ref[1], out_test[1])
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_is_output(self):
@@ -760,8 +792,9 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
-    view = torch.ops.aten.view.default(mul, [-1])
-    return [view, mul]""")
+    view = torch.ops.aten.view.default(mul, [-1]);  mul = None
+    _unsafe_view = torch.ops.aten._unsafe_view.default(view, [9]);  view = None
+    return [_unsafe_view]""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_no_grad(self):
@@ -927,9 +960,10 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3)
     mul_1 = torch.ops.aten.mul.Tensor(primals_1, 4);  primals_1 = None
     view = torch.ops.aten.view.default(mul, [-1])
-    transpose = torch.ops.aten.transpose.int(mul_1, 1, 0)
+    transpose = torch.ops.aten.transpose.int(mul_1, 1, 0);  mul_1 = None
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
-    return [view, transpose, transpose_1, mul, mul_1]""")
+    _unsafe_view = torch.ops.aten._unsafe_view.default(transpose, [3, 3]);  transpose = None
+    return [view, _unsafe_view, transpose_1, mul]""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_all_alias_types(self):
@@ -1899,7 +1933,7 @@ def forward(self, arg0_1):
             def forward(self, x):
                 y = self.buffer.add_(3)
                 y.resize_([20])
-                assert(y.shape == self.buffer.shape)
+                assert y.shape == self.buffer.shape
                 return x.sum() + self.buffer.sum()
 
         m = M().eval()
@@ -2796,7 +2830,7 @@ aot_autograd_module_failures = set({
                                   # for TrnasformerEncoder layers, MHA and sdp custom kernels
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
                            # to a causal mask tensor, to see if Boolean is_causal should be set
-                           # for TrnasformerEncoder layers, MHA and sdp custom kernels
+                           # for TransformerEncoder layers, MHA and sdp custom kernels
                            # (this bubbles up to Transformer)
 })
 
@@ -2816,6 +2850,9 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.AdaptiveMaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
+                         # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
+    torch.nn.LocalResponseNorm  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 

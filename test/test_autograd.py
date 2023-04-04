@@ -1463,7 +1463,7 @@ class TestAutograd(TestCase):
             mean.retain_grad()
             # node has two retains_grad hooks
             var.mul_(2)
-            # the retain_grad hook multi-output node refers shoudl now be a nullptr
+            # the retain_grad hook multi-output node refers should now be a nullptr
             (var + mean).sum().backward()
             gvar = var.grad
             gmean = mean.grad
@@ -2398,10 +2398,8 @@ class TestAutograd(TestCase):
             y = torch.randn((3, 3), requires_grad=True)
             MyFunction.apply(x, y).sum().backward()
 
-            has_deprecated = map(lambda warn:
-                                 'deprecated' in str(warn) and
-                                 'saved_variables' in str(warn),
-                                 warns)
+            has_deprecated = ('deprecated' in str(warn) and
+                              'saved_variables' in str(warn) for warn in warns)
             has_deprecated = reduce(lambda x, y: x or y, has_deprecated)
             self.assertTrue(has_deprecated)
 
