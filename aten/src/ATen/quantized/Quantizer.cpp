@@ -340,7 +340,7 @@ Tensor from_blob_quantized_per_tensor_affine(
   DataPtr data_ptr = InefficientStdFunctionContext::makeDataPtr(
       data, deleter, options.device());
 
-  Storage storage{Storage::use_byte_size_t{}, datasize, std::move(data_ptr)};
+  Storage storage{datasize, std::move(data_ptr)};
 
   QuantizerPtr quantizer =
       make_per_tensor_affine_quantizer(scale, zeroPoint, dtype);
@@ -415,7 +415,7 @@ Tensor from_blob_quantized_per_channel_affine(
   DataPtr data_ptr = InefficientStdFunctionContext::makeDataPtr(
       data, deleter, options.device());
 
-  Storage storage{Storage::use_byte_size_t{}, datasize, std::move(data_ptr)};
+  Storage storage{datasize, std::move(data_ptr)};
 
   QuantizerPtr quantizer =
       make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);

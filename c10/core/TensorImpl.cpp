@@ -1086,7 +1086,6 @@ void TensorImpl::ShareExternalPointer(
   } else {
     // Create a new Storage
     storage_ = Storage(
-        Storage::use_byte_size_t(),
         size_bytes,
         std::move(data_ptr),
         /*allocator=*/nullptr,

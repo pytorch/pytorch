@@ -36,7 +36,7 @@ Tensor TensorMaker::make_tensor() {
      data_ptr = makeDataPtrFromContext();
    }
 
-   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr)};
+   Storage storage{size_bytes, std::move(data_ptr)};
 
    Tensor tensor = detail::make_tensor<TensorImpl>(
        std::move(storage), opts_.computeDispatchKey(), opts_.dtype());

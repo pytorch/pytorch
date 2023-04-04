@@ -20,7 +20,6 @@ Tensor _pin_memory_cuda(const Tensor& self, c10::optional<Device> device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_cuda());
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
   auto storage = Storage(
-      Storage::use_byte_size_t(),
       detail::computeStorageNbytes(
           self.sizes(), self.strides(), self.dtype().itemsize()),
       allocator,

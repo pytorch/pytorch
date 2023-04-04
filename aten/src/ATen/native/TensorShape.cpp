@@ -442,7 +442,6 @@ Tensor& set_tensor_(Tensor& result, const Tensor& source) {
 Tensor& set_cpu_(Tensor& result) {
   caffe2::TypeMeta dtype = result.dtype();
   Storage storage(
-      Storage::use_byte_size_t(),
       0,
       c10::GetAllocator(kCPU),
       true);
@@ -455,7 +454,6 @@ Tensor& set_cpu_(Tensor& result) {
 Tensor& set_meta_(Tensor& result) {
   caffe2::TypeMeta dtype = result.dtype();
   Storage storage(
-      Storage::use_byte_size_t(),
       0,
       c10::GetAllocator(kMeta),
       true);

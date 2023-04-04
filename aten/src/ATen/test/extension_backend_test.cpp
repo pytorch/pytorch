@@ -20,7 +20,6 @@ Tensor empty_override(SymIntArrayRef size, c10::optional<ScalarType> dtype, c10:
   test_int = 1;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
-          Storage::use_byte_size_t(),
           0,
           at::DataPtr(nullptr, Device(DeviceType::ORT, 1)),
           nullptr,

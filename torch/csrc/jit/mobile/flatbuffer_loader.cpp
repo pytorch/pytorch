@@ -693,8 +693,7 @@ c10::Storage FlatbufferLoader::getStorage(uint32_t index) {
       void* ptr = static_cast<void*>(storage->mutable_data()->data());
       data = at::DataPtr(ptr, ptr, deleteNothing2, DeviceType::CPU);
     }
-    storages_[index] =
-        c10::Storage(c10::Storage::use_byte_size_t(), size, std::move(data));
+    storages_[index] = c10::Storage(size, std::move(data));
     storage_loaded_[index] = true;
   }
   return storages_[index];

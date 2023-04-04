@@ -1461,7 +1461,6 @@ void initJITBindings(PyObject* module) {
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
 
             c10::Storage storage(
-                c10::Storage::use_byte_size_t(),
                 numel * elementSize(scalar_type),
                 std::move(data),
                 /*allocator=*/nullptr,

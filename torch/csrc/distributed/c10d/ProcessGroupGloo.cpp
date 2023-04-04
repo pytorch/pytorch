@@ -316,7 +316,6 @@ void setOutput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
 at::Tensor pinnedLike(at::Tensor& tensor) {
   auto* allocator = at::detail::getCUDAHooks().getPinnedMemoryAllocator();
   auto storage = c10::Storage(
-      c10::Storage::use_byte_size_t(),
       at::detail::computeStorageNbytes(
           tensor.sizes(), tensor.strides(), tensor.dtype().itemsize()),
       allocator,

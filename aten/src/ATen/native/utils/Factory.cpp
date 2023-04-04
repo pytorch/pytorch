@@ -19,7 +19,6 @@ Tensor empty_with_tail_padding(
 
   Tensor tensor(c10::make_intrusive<c10::TensorImpl>(
       c10::Storage{
-          c10::Storage::use_byte_size_t(),
           size_bytes,
           allocator_ptr->allocate(size_bytes),
           allocator_ptr,

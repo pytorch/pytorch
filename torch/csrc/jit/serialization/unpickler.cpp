@@ -539,7 +539,6 @@ PickleOpCode Unpickler::readInstruction() {
         }
 
         storage = at::Storage(
-            c10::Storage::use_byte_size_t(),
             numel * dtype.itemsize(),
             std::move(storage_ptr),
             /*allocator=*/nullptr,
