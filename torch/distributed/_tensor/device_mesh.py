@@ -154,10 +154,11 @@ class DeviceMesh(object):
                 # NOTE: This device selection would only work for homogenous hardware.
                 torch.cuda.set_device(get_rank() % torch.cuda.device_count())
             # to perform DTensor random ops, we need to ensure all ranks in mesh is initialized with the same
-            # random seed. The seed to use will be the current seed on rank 0.
+            # random seed. The seed to use will be the current seed on rank 0. We store this seed as an attribute
+            # of device mesh for future use.
             object_list = [torch.cuda.initial_seed()]
             broadcast_object_list(object_list)
-            torch.cuda.manual_seed(int(object_list[0]))
+            self._seed = int(object_list[0])
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"
