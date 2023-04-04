@@ -17,8 +17,7 @@ __all__ = [
 def module_contains_param(module: nn.Module, parametrization: Type[nn.Module]) -> bool:
     if is_parametrized(module):
         # see if any of the module tensors have a parametriztion attached that matches the one passed in
-        # type: ignore
-        parametrizations: nn.ModuleDict = module.parameterizations
+        parametrizations: nn.ModuleDict = module.parameterizations  # type: ignore[assignment]
 
         return any(
             [
@@ -29,7 +28,9 @@ def module_contains_param(module: nn.Module, parametrization: Type[nn.Module]) -
     return False
 
 
-def swap_module(mod: nn.Module, mapping: Dict[Type[nn.Module], Type[nn.Module]]) -> nn.Module:
+def swap_module(
+    mod: nn.Module, mapping: Dict[Type[nn.Module], Type[nn.Module]]
+) -> nn.Module:
     r"""Swaps the module using from_dense according to the mapping passed in.
     Args:
         mod: input module
@@ -37,13 +38,11 @@ def swap_module(mod: nn.Module, mapping: Dict[Type[nn.Module], Type[nn.Module]])
     Return:
         The corresponding sparse module of `mod` according to mapping, created using from_dense
     """
-    new_mod = mod
     if type_before_parametrizations(mod) in mapping:
         sparse_mod = mapping[type_before_parametrizations(mod)]
 
         # TODO Fix this typing, as Type[Module] has no attribute "from_dense"
-        # type: ignore
-        new_mod: nn.Module = sparse_mod.from_dense(mod)
+        new_mod = sparse_mod.from_dense(mod)  # type: ignore[attr-defined]
 
         # Preserve module's pre forward hooks. They'll be called on quantized input
         for pre_hook_fn in mod._forward_pre_hooks.values():
@@ -63,7 +62,10 @@ def swap_module(mod: nn.Module, mapping: Dict[Type[nn.Module], Type[nn.Module]])
         if device:
             new_mod.to(device)
 
-    return new_mod
+        return new_mod
+
+    else:
+        return mod
 
 
 def module_to_fqn(
