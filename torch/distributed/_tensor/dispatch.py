@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
-from typing import Callable, cast, Dict, Tuple, Union, Sequence, List
+from typing import Callable, cast, Dict, List, Sequence, Tuple, Union
 
 import torch
 
@@ -13,8 +13,8 @@ from torch.distributed._tensor.op_schema import (
 )
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.distributed._tensor.redistribute import redistribute_dtensor
+from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
@@ -26,7 +26,7 @@ _ENABLE_FALLBACK = False
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
-    if isinstance(res, torch.Tensor):
+    def to_dt(res, spec):
         assert spec is not None and isinstance(
             spec, DTensorSpec
         ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
@@ -40,6 +40,9 @@ def wrap(res: object, spec: OutputSpecType) -> object:
             requires_grad=res.requires_grad,
             stride=spec.tensor_meta.stride,
         )
+
+    if isinstance(res, torch.Tensor):
+        return to_dt(res, spec)
     elif isinstance(res, (list, tuple)):
         assert spec is not None and isinstance(
             spec, (list, tuple)
@@ -49,21 +52,13 @@ def wrap(res: object, spec: OutputSpecType) -> object:
             # NOTE: local results might return Optional Tensor from ATen op, so we need
             # to handle that case and make sure we don't wrap None with DTensor.
             # (i.e. native_layer_norm.backward)
-            if e is not None and s is not None:
-                assert s.tensor_meta is not None
-                res_dt = dtensor.DTensor(
-                    e,
-                    s.mesh,
-                    s.placements,
-                    shape=s.tensor_meta.shape,
-                    dtype=s.tensor_meta.dtype,
-                    requires_grad=s.tensor_meta.requires_grad,
-                    stride=s.tensor_meta.stride
-                )
+            if isinstance(e, (list, tuple)) and isinstance(s, (list, tuple)):
+                res_list.append(type(e)([to_dt(ee, ss) for ee, ss in zip(e, s)]))
+            elif e is not None and s is not None:
+                res_list.append(to_dt(e, s))
             else:
-                res_dt = None
+                res_list.append(None)  # type: ignore[arg-type]
 
-            res_list.append(res_dt)
         return tuple(res_list) if isinstance(res, tuple) else res_list
     else:
         # if the res contains only non tensor values, we simply return it without rewrapping
@@ -186,12 +181,14 @@ def _operator_dispatch(
             ret_type = str(ret_list[0].type)
             if ret_type == "bool":
                 import operator
+
                 local_results: object = functools.reduce(operator.and_, obj_list, True)
             else:
                 raise NotImplementedError(
                     f"return type {ret_type} in DTensor op is not supported"
                 )
         else:
+
             def default_tensor(spec: DTensorSpec) -> torch.Tensor:
                 if spec.tensor_meta is not None:
                     shape = spec.tensor_meta.shape
@@ -203,16 +200,16 @@ def _operator_dispatch(
                         # non-scalar tensor
                         return torch.tensor([], dtype=dtype)
                 else:
-                    raise RuntimeError(
-                        f"{spec} has no tensor metadata."
-                    )
+                    raise RuntimeError(f"{spec} has no tensor metadata.")
 
-            if (isinstance(spec, DTensorSpec)):
+            if isinstance(spec, DTensorSpec):
                 # return a Tensor value
                 local_results = default_tensor(spec)
-            elif (isinstance(spec, Sequence)):
+            elif isinstance(spec, Sequence):
                 # return a List[Tensor] value
-                local_results = [default_tensor(s) if s is not None else None for s in spec]
+                local_results = [
+                    default_tensor(s) if s is not None else None for s in spec
+                ]
                 assert isinstance(local_results, List)
                 if None in local_results:
                     ret_type = str(ret_list[0].type)
