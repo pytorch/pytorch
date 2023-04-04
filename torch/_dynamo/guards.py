@@ -22,7 +22,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP, UniqueNameSet
+from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP, Namespace
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -737,14 +737,14 @@ class CheckFunctionManager:
         self, local_builder, global_builder, guards_out, guard_fail_fn
     ):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
-        unique_name_set = UniqueNameSet()
+        namespace = Namespace()
 
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
         largs += [a for a in local_builder.argnames if a != "___implicit0"]
 
         for name in largs:
-            unique_name_set.add(name)
+            namespace.add(name)
 
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
@@ -812,7 +812,7 @@ class CheckFunctionManager:
         assert not global_builder.shape_env_code
 
         if HAS_UNPARSE_FUNCTIONS:
-            preface, opt_code_parts = PyExprCSEPass(unique_name_set.mangle_and_add).run(
+            preface, opt_code_parts = PyExprCSEPass(lambda _: namespace.generate()).run(
                 list(unique(code_parts))
             )
             if len(preface) > 0:

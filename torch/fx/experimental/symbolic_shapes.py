@@ -972,37 +972,24 @@ TLS = threading.local()
 
 
 @dataclasses.dataclass
-class UniqueNameSet:
+class Namespace:
+    counter: int = 0
     data: Set[str] = dataclasses.field(default_factory=set)
-
-    def _mangle(self, name: str) -> str:
-        name = name.replace(" ", "_")
-        name = name.replace("-", "_Neg_")
-        name = name.replace("[", "_LBr_").replace("]", "_RBr_")
-        name = name.replace("(", "_LPar_").replace(")", "_RPar_")
-        name = name.replace("'", "_Q_")
-        name = name.replace(".", "_D_").replace(",", "_C_")
-        name = name.replace("^", "_Hat_")
-        return name
 
     def has(self, name: str) -> bool:
         return name in self.data
 
     def add(self, name: str) -> None:
+        assert not self.has(name)
         self.data.add(name)
 
-    def mangle_and_add(self, expr: str) -> str:
-        mangled = self._mangle(expr)
-        unique_name = mangled
-        # Makes sure we generate no repeated names.
-        # It's very unlikely the loop-body will be executed more than once.
-        counter = 1
-        while unique_name in self.data:
-            unique_name = mangled + str(counter)
-            counter += 1
+    def generate(self, prefix: str = "_var") -> str:
+        while True:
+            name = f"{prefix}{self.counter}"
+            self.counter += 1
+            if not self.has(name):
+                return name
 
-        self.add(unique_name)
-        return unique_name
 
 @contextmanager
 def no_conda_cpp_compiler():
@@ -1032,7 +1019,7 @@ class GuardCompiler:
 
     # Used when generating a new name for a given source.
     # Avoids dupplicated parameter names.
-    unique_name_set: UniqueNameSet = dataclasses.field(default_factory=UniqueNameSet)
+    namespace: Namespace = dataclasses.field(default_factory=Namespace)
 
     # Maps Source (unhashable, so 'name()' instead) into SourceInfo types.
     # SourceInfo holds the mapped unique name, original source, and type.
@@ -1058,36 +1045,13 @@ class GuardCompiler:
     def register_source(self, source: Source, name: Optional[str] = None, type: Optional[Type] = None) -> None:
         assert not self.is_source_registered(source)
         if name is None:
-            name = self.register_unique_name(source)
+            name = self.namespace.generate()
         self.source_expr_to_info[source.name()] = self.SourceInfo(name, source, type)
 
     def register_parameter(self, source: Source, name: Optional[str] = None, type: Optional[Type] = None) -> None:
         assert not self.is_source_registered(source)
         self.register_source(source, name=name, type=type)
         self.parameter_infos.append(self.get_source_info(source))
-
-    def register_unique_name(self, source: Union[str, Source]) -> str:
-        from torch._dynamo.source import TensorPropertySource
-
-        if isinstance(source, TensorPropertySource):
-            source_name = f"{self.source_expr_to_info[source.base.name()].name}_{source.prop.name.lower()}"
-        elif isinstance(source, Source):
-            source_name = source.name()
-        else:
-            source_name = source
-
-        return self.unique_name_set.mangle_and_add(source_name)
-
-        # Makes sure there are no repeated names.
-        # It's very unlikely the loop-body will be executed more than once.
-        counter = 1
-        unique_source_name = source_name
-        while unique_source_name in self._unique_names:
-            unique_source_name = source_name + str(counter)
-            counter += 1
-
-        self._unique_names.add(unique_source_name)
-        return unique_source_name
 
     def flat_source_ref(self, source: Source) -> str:
         from torch._dynamo.source import TensorPropertySource
@@ -1139,8 +1103,7 @@ class GuardCompiler:
                 source_creation.append(f"int64_t {info.name} = THPUtils_unpackLong(inputs[{i}]);")
 
             elif info.type == torch.Tensor:
-                tensor_name = self.register_unique_name(f"{info.name}_tensor")
-                source_creation.append(f"const auto& {tensor_name} = THPVariable_Unpack(inputs[{i}]);")
+                source_creation.append(f"const auto& {info.name} = THPVariable_Unpack(inputs[{i}]);")
 
                 for tensor_property in TensorProperty:
                     if tensor_property == TensorProperty.STORAGE_OFFSET:
@@ -1157,7 +1120,7 @@ class GuardCompiler:
 
                     tensor_property_info = self.get_source_info(tensor_property_source)
                     source_creation.append(
-                        f"auto {tensor_property_info.name} = {tensor_name}.{tensor_property_str}();"
+                        f"auto {tensor_property_info.name} = {info.name}.{tensor_property_str}();"
                     )
 
         source_creation_str = "\n".join(" " * 4 + line for line in source_creation)
@@ -1459,7 +1422,7 @@ class ShapeEnv:
             else:
                 input_guards.append((source, sympy.Integer(val)))
 
-        def track_tensor_property(source, val, name):
+        def track_tensor_property(source, val, name = None):
             guard_compiler.register_source(source, name=name)
             track_symint(source, val)
 
@@ -1482,17 +1445,15 @@ class ShapeEnv:
             assert isinstance(t, torch.Tensor)
             guard_compiler.register_parameter(source, type=torch.Tensor)
 
-            tensor_size_name = guard_compiler.register_unique_name(TensorPropertySource(source, TensorProperty.SIZE, 0))
+            tensor_size_name = guard_compiler.namespace.generate()
             for i, s in enumerate(t.size()):
                 track_tensor_property(TensorPropertySource(source, TensorProperty.SIZE, i), s, tensor_size_name)
 
-            tensor_stride_name = guard_compiler.register_unique_name(TensorPropertySource(source, TensorProperty.STRIDE, 0))
+            tensor_stride_name = guard_compiler.namespace.generate()
             for i, s in enumerate(t.stride()):
                 track_tensor_property(TensorPropertySource(source, TensorProperty.STRIDE, i), s, tensor_stride_name)
 
-            tensor_property_source = TensorPropertySource(source, TensorProperty.STORAGE_OFFSET)
-            tensor_storage_name = guard_compiler.register_unique_name(tensor_property_source)
-            track_tensor_property(tensor_property_source, t.storage_offset(), tensor_storage_name)
+            track_tensor_property(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
         exprs = []
         python_exprs = []
