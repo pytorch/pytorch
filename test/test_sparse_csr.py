@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
+    (op_db, sparse_csr_unary_ufuncs, BinaryUfuncInfo, ReductionOpInfo)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUDA
 from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
@@ -480,6 +480,9 @@ class TestSparseCompressed(TestCase):
                 and op.name in ('masked.mean', 'masked.amax', 'masked.amin')):
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
+        if isinstance(op, BinaryUfuncInfo):
+            self.skipTest("test does not support binary operations")
+
         require_mask = isinstance(op, ReductionOpInfo) and 'masked.' in op.name
         if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
             self.skipTest(f"{op.name} does not support input with {layout} layout")
@@ -506,18 +509,12 @@ class TestSparseCompressed(TestCase):
                     continue
             expected = op(sample.input, **sample.kwargs)
             assert torch.is_tensor(expected)
-            # Use smallest non-trivial blocksize for the given input shape:
-            blocksize = tuple(map(self._smallest_divisor, sample.input.shape[-2:]))
-            if layout is torch.sparse_bsr:
-                sparse = sample.input.to_sparse_bsr(blocksize)
-            elif layout is torch.sparse_bsc:
-                sparse = sample.input.to_sparse_bsc(blocksize)
-            elif layout is torch.sparse_csr:
-                sparse = sample.input.to_sparse_csr()
-            elif layout is torch.sparse_csc:
-                sparse = sample.input.to_sparse_csc()
+            if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                # Use smallest non-trivial blocksize for the given input shape:
+                blocksize = tuple(map(self._smallest_divisor, sample.input.shape[-2:]))
             else:
-                assert 0, layout
+                blocksize = None
+            sparse = sample.input.to_sparse(layout=layout, blocksize=blocksize)
 
             assert torch.is_tensor(sparse)
             output = op(sparse, **sample.kwargs)
