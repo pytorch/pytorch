@@ -16,7 +16,8 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config
-from .codecache import cache_dir
+from .codecache import cache_dir, cubin_cache_dir
+
 from .ir import ReductionHint, TileHint
 from .utils import (
     ceildiv,
@@ -137,6 +138,10 @@ class CachingAutotuner(KernelInterface):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
+        if config.triton.store_cubin:
+            launcher.kernel_name = self.fn.__name__
+            launcher.bin = binary
+
         return launcher
 
     def bench(self, launcher, *args, grid):
@@ -184,12 +189,49 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
 
+    def save_cuda_kernel(self, grid, stream, launcher):
+        from .codegen.wrapper import KernelParamCache
+
+        # Make sure kernel_name is enough for distiguishing kernels
+        assert config.triton.unique_kernel_names
+
+        if callable(grid):
+            grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
+        else:
+            grid_x, grid_y, grid_z = grid
+
+        kernel_name = launcher.kernel_name
+        cubin_path = os.path.join(cubin_cache_dir(), f"{kernel_name}.cubin")
+        with open(cubin_path, "wb") as f:
+            f.write(launcher.bin.asm["cubin"])
+
+        params = {
+            "mangled_name": launcher.bin.metadata["name"],
+            "grid_x": grid_x,
+            "grid_y": grid_y,
+            "grid_z": grid_z,
+            "num_warps": launcher.bin.num_warps,
+            "shared_mem": launcher.bin.shared,
+            "stream": stream,
+        }
+        with self.lock:
+            if KernelParamCache.cache.get(kernel_name, None):
+                assert (
+                    KernelParamCache.cache[kernel_name].get("mangled_name", None)
+                    == launcher.bin.metadata["name"]
+                )
+            else:
+                KernelParamCache.cache[kernel_name] = params
+
     def run(self, *args, grid, stream):
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 self.precompile()
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid)
+
+        if config.triton.store_cubin:
+            self.save_cuda_kernel(grid, stream, self.launchers[0])
 
         (launcher,) = self.launchers
         if launcher.config.pre_hook is not None:
@@ -541,6 +583,12 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 Config({"XBLOCK": 256}, num_warps=2, num_stages=1),
                 # improve 1.011x for https://gist.github.com/shunting314/600ecb80dc7339be4f08bea75c40cdbd
                 Config({"XBLOCK": 512}, num_warps=8, num_stages=1),
+                # improve 1.056x for https://gist.github.com/shunting314/83084eb255cb7df7776fbea20663048f
+                Config({"XBLOCK": 512}, num_warps=4, num_stages=1),
+                # improve 1.091x for https://gist.github.com/shunting314/bc5019bdfa78421a72822ce312df9639
+                Config({"XBLOCK": 1024}, num_warps=2, num_stages=1),
+                # improve 1.100x for https://gist.github.com/shunting314/5761558133f815b49984f094cc2a2e2c
+                Config({"XBLOCK": 1024}, num_warps=4, num_stages=1),
             ])
         return cached_autotune(configs, meta=meta, filename=filename)
     if len(size_hints) == 2:
@@ -556,6 +604,8 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 triton_config(size_hints, 16, 256),
                 triton_config(size_hints, bs, 1),
                 triton_config(size_hints, 1, bs),
+                # improve 1.04x for https://gist.github.com/shunting314/ec7db8a92ddec406ddd802813cfe0d50
+                Config({"XBLOCK": 16, "YBLOCK": 256}, num_warps=16, num_stages=1),
             ],
             meta=meta,
             filename=filename,
@@ -655,6 +705,15 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
                 size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
             )
         ]
+
+    if config.max_autotune:
+        configs.extend([
+            # improve by 1.043x for https://gist.github.com/shunting314/f5f5beb553f139be7ea3c122173a2288
+            Config({"XBLOCK": 2, "RBLOCK": rnumel}, num_warps=2, num_stages=2),
+            # improve by 1.147x for https://gist.github.com/shunting314/552ee9d73d0bec3426c5886d992b1654
+            #            1.133x for https://gist.github.com/shunting314/014112d71f9f692249eaed9d6325884d
+            Config({"XBLOCK": 4, "RBLOCK": rnumel}, num_warps=4, num_stages=2),
+        ])
 
     return cached_autotune(
         configs,

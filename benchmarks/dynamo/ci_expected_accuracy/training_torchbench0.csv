@@ -11,7 +11,7 @@ fastNLP_Bert,14
 functorch_dp_cifar10,9
 functorch_maml_omniglot,9
 hf_Albert,8
-hf_Bart,20
+hf_Bart,8
 hf_Bert,8
 hf_Bert_large,8
 hf_DistilBert,8
