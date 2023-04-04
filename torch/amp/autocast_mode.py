@@ -199,23 +199,21 @@ class autocast:
         elif self.device == 'hpu':
             self.fast_dtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
         elif self.device == self.custom_backend_name:
-            name_ = self.custom_backend_name
-            necessary_funcs = [f'is_autocast_{name_}_enabled', f'set_autocast_{name_}_enabled',
-                               f'get_autocast_{name_}_dtype', f'set_autocast_{name_}_dtype',
-                               'get_amp_supported_dtype']
-            message = f"Tried to use AMP with the `{name_}` backend, but the backend has not registered a module or "
-            message += "the module miss some necessary funcs. The backend should register a corresponding module "
-            message += "`torch._register_device_module`, and the module must have these funcs: \n"
-            message += f"`is_autocast_{name_}_enabled() -> bool`, `set_autocast_{name_}_enabled(bool) -> None`, "
-            message += f"`get_autocast_{name_}_dtype() -> torch.dtype`, `set_autocast_{name_}_dtype(torch.dtype) "
+            necessary_funcs = ['is_autocast_enabled', 'set_autocast_enabled', 'get_autocast_dtype',
+                               'set_autocast_dtype', 'get_amp_supported_dtype']
+            message = f"Tried to use AMP with the `{self.custom_backend_name}` backend, but the backend has not "
+            message += "registered a module or  the module miss some necessary funcs. The backend should register "
+            message += "a module by `torch._register_device_module`, and the module must have these funcs: \n"
+            message += "`is_autocast_enabled() -> bool`, `set_autocast_enabled(bool) -> None`, "
+            message += "`get_autocast_dtype() -> torch.dtype`, `set_autocast_dtype(torch.dtype) "
             message += "-> None` and `get_amp_supported_dtype() -> List[torch.dtype]`. \n"
 
-            assert hasattr(torch, name_), message
-            self.custom_device_mod = getattr(torch, name_)
+            assert hasattr(torch, self.custom_backend_name), message
+            self.custom_device_mod = getattr(torch, self.custom_backend_name)
             for func in necessary_funcs:
                 assert hasattr(self.custom_device_mod, func), message + f"But the func `{func}` is missing. \n"
 
-            self.fast_dtype = getattr(self.custom_device_mod, f'get_autocast_{name_}_dtype')()
+            self.fast_dtype = self.custom_device_mod.get_autocast_dtype()
         else:
             raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
         self._cache_enabled = torch.is_autocast_cache_enabled()
@@ -286,10 +284,10 @@ class autocast:
             torch.hpu.set_autocast_hpu_dtype(self.fast_dtype)  # type: ignore[attr-defined]
             torch.autocast_increment_nesting()
         elif self.device == self.custom_backend_name:
-            self.prev = getattr(self.custom_device_mod, f'is_autocast_{self.custom_backend_name}_enabled')()
-            self.prev_fastdtype = getattr(self.custom_device_mod, f'get_autocast_{self.custom_backend_name}_dtype')()
-            getattr(self.custom_device_mod, f'set_autocast_{self.custom_backend_name}_enabled')(self._enabled)
-            getattr(self.custom_device_mod, f'set_autocast_{self.custom_backend_name}_dtype')(self.fast_dtype)
+            self.prev = self.custom_device_mod.is_autocast_enabled()
+            self.prev_fastdtype = self.custom_device_mod.get_autocast_dtype()
+            self.custom_device_mod.set_autocast_enabled(self._enabled)
+            self.custom_device_mod.set_autocast_dtype(self.fast_dtype)
             torch.autocast_increment_nesting()
         else:
             self.prev = torch.is_autocast_enabled()
@@ -322,8 +320,8 @@ class autocast:
         elif self.device == self.custom_backend_name:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
-            getattr(self.custom_device_mod, f'set_autocast_{self.custom_backend_name}_enabled')(self._enabled)
-            getattr(self.custom_device_mod, f'set_autocast_{self.custom_backend_name}_dtype')(self.fast_dtype)
+            self.custom_device_mod.set_autocast_enabled(self._enabled)
+            self.custom_device_mod.set_autocast_dtype(self.fast_dtype)
         else:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
