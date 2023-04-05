@@ -344,7 +344,7 @@ class TensorVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
-        elif name in ("tolist", "numpy", "backward", "data_ptr"):
+        elif name in ("tolist", "numpy", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "nonzero" and not config.dynamic_shapes:
             unimplemented(f"Tensor.{name}")
@@ -419,6 +419,14 @@ class TensorVariable(VariableTracker):
             )
             return self.call_method(tx, "add_", [result], {})
         else:
+            if name == "backward":
+                # Dynamo is tracing a train step graph.
+                # 1. we need to assert some things for safety, such as no double backward and no input grad_fns
+                # 2. call special version of aot before going to real backend
+                assert (
+                    len(args) == 0
+                ), "Currently support .backward() call without args only."
+
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
             if (
