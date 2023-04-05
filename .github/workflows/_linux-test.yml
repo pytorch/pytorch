@@ -71,7 +71,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - name: Setup SSH (Click me for login details)
-        if: !contains(matrix.runner, 'gcp')
+        if: !contains(matrix.runner, 'gcp-a100')
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
