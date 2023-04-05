@@ -13361,6 +13361,7 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
+            # https://github.com/pytorch/pytorch/issues/98431
             # ROCM fails with Device-side assertion `target_val >= zero && target_val <= one' failed
             # even though sample inputs for target are generated with low=0 and high=1
             DecorateInfo(
