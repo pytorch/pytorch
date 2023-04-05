@@ -1143,15 +1143,17 @@ def skipRocmIfTorchDynamo(msg="test doesn't currently work with dynamo on the RO
 
     return decorator
 
-def skipIfRocm(msg="test doesn't currently work on the ROCm stack"):
+def skipIfRocm(*args, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):
+        reason = f"skipIfRocm: {msg}"
         @wraps(fn)
-        def wrap_fn(self, *args, **kwargs):
+        def wrapper(*args, **kwargs):
             if TEST_WITH_ROCM:
-                raise unittest.SkipTest(f"skipIfRocm: {msg}")
-            return fn(self, *args, **kwargs)
-        return wrap_fn
-    return dec_fn
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    return dec_fn(args[0]) if args else dec_fn
 
 def skipIfMps(fn):
     @wraps(fn)

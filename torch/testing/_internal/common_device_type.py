@@ -1250,19 +1250,11 @@ def skipCUDAIfNoMagmaAndNoCusolver(fn):
         return skipCUDAIfNoMagma(fn)
 
 # Skips a test on CUDA when using ROCm.
-def skipCUDAIfRocm(msg="test doesn't currently work on the ROCm stack"):
-
+def skipCUDAIfRocm(*args, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):
-        @wraps(fn)
-        def wrap_fn(self, *args, **kwargs):
-            if TEST_WITH_ROCM:
-                if self.device_type == 'cuda':
-                    raise unittest.SkipTest(f"skipCUDAIfRocm: {msg}")
-
-            return fn(self, *args, **kwargs)
-
-        return wrap_fn
-    return dec_fn
+        reason = f"skipCUDAIfRocm: {msg}"
+        return skipCUDAIf(TEST_WITH_ROCM, reason=reason)(fn)
+    return dec_fn(args[0]) if args else dec_fn
 
 # Skips a test on CUDA when not using ROCm.
 def skipCUDAIfNotRocm(fn):
