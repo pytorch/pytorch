@@ -1,5 +1,6 @@
 import builtins
 import collections
+import dataclasses
 import itertools
 import logging
 import math
@@ -12,7 +13,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
 import torch
-import dataclasses
 
 from torch._guards import (
     DuplicateInputs,
@@ -99,19 +99,27 @@ def strip_getattr_getitem(name):
     """
     return re.split(r"[.\[]", name)[0]
 
+
 # Don't put anything on here you don't want laundered to the next frame
 @dataclasses.dataclass
 class CodePart:
-    source: Union[Source, List[Source]] # Note: List of sources for tensor checks
+    source: Union[Source, List[Source]]  # Note: List of sources for tensor checks
     code: str
     origin: str
 
+    # bound at guard failure time
+    scope = None
+
+    # tensor check only
+    check_tensor_verbose = None
+    check_tensor_names: str = None
+
     def __hash__(self):
         return hash(self.code)
-    
+
     def __eq__(self, other):
         return self.code == other.code
-    
+
 
 class GuardBuilder(GuardBuilderBase):
     def __init__(
@@ -718,7 +726,7 @@ class CheckFunctionManager:
         code_parts.append(validation_code_part)
         code_parts += local_builder.code + global_builder.code
         part_map = {}
-        
+
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
         )
@@ -728,6 +736,7 @@ class CheckFunctionManager:
         assert len(tensor_check_names) == len(tensor_check_sources)
 
         check_tensors_fn = None
+        check_tensor_verbose = None
         if tensor_check_names:
             assert (
                 not self.output_graph.export
@@ -740,8 +749,13 @@ class CheckFunctionManager:
                 *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
             )
             check_tensors_fn = tensor_guards.check
-            check_tensor_slug = f"___check_tensors({', '.join(tensor_check_names)})"
-            code_part = CodePart(tensor_check_sources, check_tensor_slug, "TENSOR_MATCH")
+            check_tensor_names = ", ".join(tensor_check_names)
+            check_tensor_slug = f"___check_tensors({check_tensor_names})"
+            code_part = CodePart(
+                tensor_check_sources, check_tensor_slug, "TENSOR_MATCH"
+            )
+            check_tensor_verbose = tensor_guards.check_verbose
+            code_part.tensor_check_names = tensor_check_names
             code_parts.append(code_part)
 
         aotautograd_guards: List[GuardEnvExpr] = (
@@ -763,15 +777,18 @@ class CheckFunctionManager:
 
         code = "      passing = True \n"
         for code_part in unique(code_parts):
-            part_map[id(code_part)] = code_part 
+            part_map[id(code_part)] = code_part
             code += f"      passing = {code_part.code} \n"
             code += f"      if not passing: \n"
-            code += f"          return (False, part_map[{id(code_part)}]) \n"
-        code += f"      return True, None"
+            code += f"          code_part = part_map[{id(code_part)}] \n"
+            code += "          code_part.scope = {'L': L, '___check_tensors_verbose':___check_tensors_verbose} \n"
+            code += f"          return (False, code_part) \n"
+        code += f"      return (True, None)"
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
+                ("___check_tensors_verbose", check_tensor_verbose),
                 ("tensor_check_names", tensor_check_names),
             ]
             + list(SYMPY_INTERP.items())
@@ -779,7 +796,7 @@ class CheckFunctionManager:
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}, part_map):
-    def guard_fn(L): 
+    def guard_fn(L):
 {code}
     return guard_fn
 """
@@ -812,39 +829,28 @@ def ___make_guard_fn({','.join(closure_vars.keys())}, part_map):
         return id(obj)
 
 
-stashed_first_fail_reason = None
-
-
 def guard_fail_hook(
     guard_fail_fn,
     code,
     code_part: CodePart,
-    cache_size: int,
 ) -> None:
     """
     called whenever a guard fails.
     """
-    first = cache_size == 1
-    last = cache_size == config.cache_size_limit
-    global stashed_first_fail_reason
     # Don't waste time computing the fail reason for guards we aren't going to report out.
-    if not guard_fail_fn and not (first or last):
-        return
     reason = code_part.code
-
-    if first:
-        stashed_first_fail_reason = reason
-
-    if not last:
-        return
-
     # Technically, we're failing our last guard, which is our oldest guard due to the
     # eval_frame.c logic that moves newest frames to head, but for logging purposes
     # it's more useful to see the 'first' failure (if we never got a hit) since it's
     # likely not yet been logged as a failure reason in a case of repeating failures.
-    assert stashed_first_fail_reason
-    guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
-    stashed_first_fail_reason = None
+    if "__check_tensors" in reason:
+        reason = eval(
+            f"___check_tensors_verbose({', '.join(code_part.tensor_check_names)}, tensor_check_names={code_part.tensor_check_names})",
+            code_part.scope,
+        )
+    guard_failures[code].append(reason)
+    if guard_fail_fn:
+        guard_fail_fn(GuardFail(reason, code))
 
 
 def guard_error_hook(

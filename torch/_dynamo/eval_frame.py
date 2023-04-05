@@ -362,8 +362,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
     def catch_errors(frame, cache_size, code_part):
         msg = f"Compiling {frame.f_code.co_name} {frame.f_code.co_filename} with cache_size {cache_size}."
         if code_part is not None:
-            torch._dynamo.guards.guard_fail_hook(hooks.guard_fail_fn, frame.f_code, code_part, cache_size)
-            msg += (f" Due to guard failure {code_part.code} from guard {code_part.origin} and source {code_part.source}")
+            torch._dynamo.guards.guard_fail_hook(
+                hooks.guard_fail_fn, frame.f_code, code_part
+            )
+            msg += f" Due to guard failure {code_part.code} from guard {code_part.origin} and source {code_part.source}"
         log.debug(msg)
         if (
             # TODO: the first condition is not covered by any test

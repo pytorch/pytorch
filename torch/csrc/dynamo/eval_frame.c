@@ -795,9 +795,6 @@ static PyObject* _custom_eval_frame(
   // that gets re-interpreted as a PyObject (which it is NOT!)
   PyObject* result =
       call_callback(callback, frame, cache_size(extra), code_part);
-  if (code_part != NULL) {
-    Py_DECREF(code_part);
-  }
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
