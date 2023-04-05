@@ -141,20 +141,14 @@ class TraceDeviceMeshTestBase:
                 get_global_rank(dim_group, i) for i in range(dim_group_size)
             ]
 
-            gathered_list = [
-                torch.empty_like(local_tensor) for _ in range(dim_group_size)
-            ]
-
-            def fn(gathered_list: List[torch.Tensor], tensor: torch.Tensor):
-                gathered_list = [CommTensor(t) for t in gathered_list]
-                tensor = CommTensor(tensor)
-                mesh.all_gather(gathered_list, tensor, mesh_dim=dim)
-                return [t * 1 for t in gathered_list]
+            def fn(tensor: torch.Tensor):
+                big_tensor = mesh.all_gather(tensor, mesh_dim=dim)
+                return list(torch.chunk(big_tensor, dim_group_size))
 
             # use a local_tensor + 1 for tracing to make sure that we are not
             # simply replaying recorded tensor value
-            traced_fn = make_fx(fn)(gathered_list, local_tensor + 1)
-            gathered_list = traced_fn(gathered_list, local_tensor)
+            traced_fn = make_fx(fn)(local_tensor + 1)
+            gathered_list = traced_fn(local_tensor)
 
             self.assertEqual(len(gathered_list), dim_group_size)
             for idx, gathered_tensor in enumerate(gathered_list):
@@ -590,7 +584,10 @@ class TraceTrainStepTest(DTensorTestBase):
                 return DummyDDM()
 
             def transform(
-                self, gm: fx.GraphModule, schema_map: Dict[str, Schema]
+                self,
+                gm: fx.GraphModule,
+                schema_map: Dict[str, Schema],
+                flat_state: List[torch.Tensor],
             ) -> fx.Graph:
                 nonlocal transform_targets
                 for node in gm.graph.nodes:
