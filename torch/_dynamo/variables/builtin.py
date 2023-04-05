@@ -12,7 +12,7 @@ from torch import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
-from ..exc import unimplemented, Unsupported
+from ..exc import unimplemented, Unsupported, UserError, UserErrorType
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
@@ -1075,7 +1075,11 @@ class BuiltinVariable(VariableTracker):
                 self, obj
             )
 
-        unimplemented(f"type({obj})")
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "Can't call type() on generated custom object. "
+            "Please use __class__ instead",
+        )
 
     def call_reversed(self, tx, obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
