@@ -1493,6 +1493,13 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_scalar_input(self):
+        def fn(x, y):
+            a = torch.div(x, y, rounding_mode="floor")
+            return a
+
+        self.common(fn, [torch.randint(5, (1, 8)), 5400])
+
     def test_shape_prop_torch_ones(self):
         class Model(torch.nn.Module):
             def forward(self, attention_scores):

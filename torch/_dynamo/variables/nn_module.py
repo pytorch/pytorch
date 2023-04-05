@@ -469,12 +469,28 @@ class NNModuleVariable(VariableTracker):
             )
         elif name == "__getitem__":
             assert not kwargs and len(args) == 1
-            assert type(module).__getitem__ in (
+            builtin_supported = (
                 torch.nn.ModuleDict.__getitem__,
                 torch.nn.ModuleList.__getitem__,
                 torch.nn.ParameterList.__getitem__,
                 torch.nn.Sequential.__getitem__,
-            ), typestr(module)
+            )
+
+            if type(module).__getitem__ not in builtin_supported:
+                assert isinstance(args[0], variables.ConstantVariable), typestr(args[0])
+                key = args[0].as_python_constant()
+                assert isinstance(key, (str, int))
+                fn = getattr(module, name).__func__
+
+                assert isinstance(fn, types.FunctionType)
+
+                src = AttrSource(AttrSource(self.source, name), "__func__")
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(fn, source=src, **options),
+                    [self] + list(args),
+                    kwargs,
+                )
+
             assert self.source
 
             if isinstance(args[0], SliceVariable):

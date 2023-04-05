@@ -135,7 +135,9 @@ REQUIRE_COSINE_TOLERACE = {
 }
 
 # non-deterministic output / cant check correctness
-NONDETERMINISTIC = set()
+NONDETERMINISTIC = {
+    "mobilenet_v3_large",
+}
 
 # These benchmarks took >600s on an i9-11900K CPU
 VERY_SLOW_BENCHMARKS = {
