@@ -584,7 +584,10 @@ class TraceTrainStepTest(DTensorTestBase):
                 return DummyDDM()
 
             def transform(
-                self, gm: fx.GraphModule, schema_map: Dict[str, Schema]
+                self,
+                gm: fx.GraphModule,
+                schema_map: Dict[str, Schema],
+                flat_state: List[torch.Tensor],
             ) -> fx.Graph:
                 nonlocal transform_targets
                 for node in gm.graph.nodes:
