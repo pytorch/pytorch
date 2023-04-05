@@ -21,6 +21,7 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
+from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
@@ -1027,8 +1028,9 @@ def register_onednn_fusion_ops():
 register_onednn_fusion_ops()
 
 
-def fallback_handler(kernel):
-    fallbacks.add(kernel)
+def fallback_handler(kernel, add_to_fallback_set=True):
+    if add_to_fallback_set:
+        fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
         return pytree.tree_map(
@@ -1036,6 +1038,38 @@ def fallback_handler(kernel):
         )
 
     return handler
+
+
+def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
+    if t.dtype in (torch.complex32, torch.complex64, torch.complex128):
+        return True
+    return t.is_cpu and config.disable_cpp_codegen
+
+
+def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
+    def check_skip_condition(node, is_output):
+        if not isinstance(node, torch.fx.Node):
+            return False
+
+        if "val" not in node.meta:
+            return False
+
+        for meta in tree_flatten(node.meta["val"])[0]:
+            if not isinstance(meta, torch._subclasses.FakeTensor):
+                continue
+
+            if is_output:
+                if unsupported_output_tensor(meta):
+                    return True
+
+        return False
+
+    # only skip codegen if there is a cpu output, not input
+    for arg in tree_flatten((node.args, node.kwargs))[0]:
+        if check_skip_condition(arg, is_output=(False or not allow_cpu_inputs)):
+            return True
+
+    return check_skip_condition(node, is_output=True)
 
 
 def make_fallback(kernel, layout_constraint=None, warn=True):
@@ -2008,6 +2042,10 @@ def index_put_(self, indices, values, accumulate=False):
         for _ in range(len(mask.get_size()), len(self.get_size())):
             mask = unsqueeze(mask, -1)
         return index_put_as_masked_fill(self, [mask], values, accumulate)
+
+    # Fallback in torch deterministic mode
+    if torch.are_deterministic_algorithms_enabled():
+        return index_put_fallback(self, indices, values, accumulate)
 
     # Fallback if there is a boolean index
     for index in indices:
