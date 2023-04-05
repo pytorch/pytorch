@@ -84,7 +84,9 @@ def benchmark_compile(
 
             running_time = bench_loop(opt_model, sample_input, num_iters, optimizer, loss_fn)
 
-            # TODO: Not 100% sure this is the right way to do this yet
+            if compile_counter_with_backend.frame_count == 0:
+                raise RuntimeError("No compilation occurred during benchmarking.")
+            
             if compile_counter_with_backend.frame_count > 1:
                 raise RuntimeError("Recompilation occurred during benchmarking.")
 
