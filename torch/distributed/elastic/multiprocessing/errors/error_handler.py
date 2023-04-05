@@ -110,7 +110,7 @@ class ErrorHandler:
         with open(rootcause_error_file, "r") as fp:
             rootcause_error = json.load(fp)
             # Override error code since the child process cannot capture the error code if it
-            # is terminated by singals like SIGSEGV.
+            # is terminated by signals like SIGSEGV.
             if error_code:
                 self.override_error_code_in_rootcause_data(rootcause_error_file, rootcause_error, error_code)
             log.debug(
