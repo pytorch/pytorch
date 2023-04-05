@@ -84,7 +84,7 @@ class OpSchema:
             with NO non-DTensor positional arguments (i.e. int/float/tuple, etc)
             mainly used by sharding propagation to propagate the output spec
         """
-        # filter out non-relavant values from args schema to get a clean spec list
+        # filter out non-relevant values from args schema to get a clean spec list
         # this would mainly be used by sharding propagation rules
         return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
 
