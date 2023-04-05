@@ -39,7 +39,7 @@ def with_comms(func):
         # make sure we set different random seeds for each rank
         # otherwise we dont need DDP / SPMD
         # (we would have the same parameters and inputs everywhere)
-        torch.manual_seed(torch.distributed.get_rank())
+        torch.manual_seed(self.rank)
         return func(self, *args, **kwargs)
 
     return wrapper
@@ -472,14 +472,13 @@ class TraceTrainStepTest(DTensorTestBase):
             mod(inp).sum().backward()
             return [p.grad for p in mod.parameters()]
 
-        rank = torch.distributed.get_rank()
-        inp = torch.randn(2, 10).cuda(rank)
+        inp = torch.randn(2, 10).cuda(self.rank)
         # FIXME(@mrshenli): remove manual seed once dist.compile can synchronize
         # module parameters.
         torch.manual_seed(0)
-        mod = nn.Linear(10, 10).cuda(rank)
+        mod = nn.Linear(10, 10).cuda(self.rank)
 
-        ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
         ddp_inp = deepcopy(inp)
 
         grads = train_step(mod, inp)
@@ -524,15 +523,14 @@ class TraceTrainStepTest(DTensorTestBase):
             mod(inp).sum().backward()
             opt.step()
 
-        rank = torch.distributed.get_rank()
         # FIXME(@mrshenli): remove manual seed once dist.compile can synchronize
         # module parameters.
         torch.manual_seed(1)
-        mod = nn.Linear(10, 10, bias=True).cuda(rank)
+        mod = nn.Linear(10, 10, bias=True).cuda(self.rank)
         opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
-        inp = torch.randn(2, 10).cuda(rank)
+        inp = torch.randn(2, 10).cuda(self.rank)
 
-        ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
         ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.01, foreach=True)
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
 
@@ -568,12 +566,11 @@ class TraceTrainStepTest(DTensorTestBase):
             mod(inp).sum().backward()
             opt.step()
 
-        rank = torch.distributed.get_rank()
         # FIXME(@mrshenli): remove manual seed once dist.compile can synchronize
         # module parameters.
         torch.manual_seed(0)
         # FIXME(@mrshenli): gradients for bias is missing
-        mod = nn.Sequential(nn.Linear(10, 10, bias=False)).cuda(rank)
+        mod = nn.Sequential(nn.Linear(10, 10, bias=False)).cuda(self.rank)
         opt = torch.optim.Adam(
             mod.parameters(),
             lr=0.01,
@@ -581,9 +578,9 @@ class TraceTrainStepTest(DTensorTestBase):
             fused=fused,
             capturable=True,
         )
-        inp = torch.randn(2, 10).cuda(rank)
+        inp = torch.randn(2, 10).cuda(self.rank)
 
-        ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
         ddp_opt = torch.optim.Adam(
             ddp_mod.parameters(), lr=0.01, foreach=foreach, fused=fused
         )
@@ -637,11 +634,10 @@ class TraceTrainStepTest(DTensorTestBase):
             mod(inp).sum().backward()
             opt.step()
 
-        rank = torch.distributed.get_rank()
-        mod = DummyModel(self.world_size).cuda(rank)
+        mod = DummyModel(self.world_size).cuda(self.rank)
         opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=False)
         # FIXME: symbolic tracing treats bs=1 as constant, have to use bs > 1.
-        inp = torch.randn(4, 10).cuda(rank)
+        inp = torch.randn(4, 10).cuda(self.rank)
         train_step(mod, opt, inp)
 
         # checking transforms are indeed invoked.
