@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.fx
@@ -162,9 +162,6 @@ class FXSymbolicTraceExporter(fx_exporter.FXGraphModuleExporter):
 
     def export(self) -> torch.onnx.ExportOutput:
         graph_module, bound_args = self._trace_into_fx_graph_via_fx_symbolic_trace()
-        self._output_formatter.append_step(
-            fx_exporter.FlattenOutputWithTreeSpecValidationStep()
-        )
 
         # Make sure all placeholder nodes are executed before get_attr nodes.
         # Otherwise, inputs can interleave with initializers in the final ModeoProto.graph.input.

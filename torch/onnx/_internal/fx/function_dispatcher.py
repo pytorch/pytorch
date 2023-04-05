@@ -132,6 +132,7 @@ _ATENLIB_FUNCTIONS = {
     "aten::softmax": ops.special.aten_special_softmax,
     "aten::split": ops.core.aten_split,
     "aten::sqrt": ops.core.aten_sqrt,
+    "aten::stack": ops.core.aten_stack,
     "aten::sub": ops.core.aten_sub,
     "aten::sum": ops.core.aten_sum_dim_IntList,
     "aten::sym_size": ops.core.aten_sym_size,

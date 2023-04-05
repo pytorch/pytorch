@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import onnx_test_common
@@ -25,7 +25,7 @@ from torch.types import Number
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
-_InputArgsType = Optional[Union[torch.Tensor, Sequence[Any]]]
+_InputArgsType = Optional[Union[torch.Tensor, Sequence[Any], Mapping[str, Any]]]
 _OutputsType = Sequence[_NumericType]
 
 
@@ -205,6 +205,56 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x, 8.0))
         # Test while specifying optional kwarg.
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,), b=5.0)
+
+    def test_func_with_nested_input_structure(self):
+        def func(
+            x_dict: Dict[str, torch.Tensor],
+            y_tuple: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]],
+            z_list: List[List[torch.Tensor]],
+        ):
+            if "a" in x_dict:
+                x = x_dict["a"]
+            elif "b" in x_dict:
+                x = x_dict["b"]
+            else:
+                x = torch.randn(3)
+
+            y1, (y2, y3) = y_tuple
+
+            z = x + y1 + y2 + y3
+            for z_sub_list in z_list:
+                z = z + torch.stack(z_sub_list).sum()
+
+            return z
+
+        # NOTE: `DynamoOptimizeExporter` fails if used argument 'c' is passed in.
+        x_dict = {"a": torch.randn(3)}  # , "c": torch.randn(3)}
+        y_tuple = (torch.randn(3), (torch.randn(3), torch.randn(3)))
+        z_list = [
+            [torch.randn(3), torch.randn(3)],
+            [torch.randn(3), torch.randn(3), torch.randn(3)],
+        ]
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (x_dict, y_tuple, z_list)
+        )
+
+    def test_func_with_nested_output_structure(self):
+        def func(x, y, z):
+            x = x + y
+            y = y + z
+            z = x + y
+            out1 = (x, (y, z))
+            out2 = [[x, y], [y, z]]
+            out3 = {"z": z, "x": x}
+            return out1  # , out2, out3
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = torch.randn(3)
+        # NOTE: `DynamoOptimizeExporter` fails if `, out2, out3` is uncommented and returned.
+        # It does not capture the output structure, which is the non computation part of
+        # the graph. It only sets `(x, y, z)` as output.
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (x, y, z))
 
     @unittest.skip("ORT segfaults")
     def test_mnist(self):
@@ -416,7 +466,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 tensor_x = self.fc2(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
                 output = self.fc3(tensor_x)
-                return output
+                return (output, (output, output))
 
         def create_model() -> nn.Module:
             return MLPModel()

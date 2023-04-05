@@ -135,7 +135,9 @@ class TestDynamoExportAPI(unittest.TestCase):
     def test_raise_on_invalid_save_argument_type(self):
         with self.assertRaises(roar.BeartypeException):
             ExportOutput(torch.nn.Linear(2, 3))  # type: ignore[arg-type]
-        export_output = ExportOutput(onnx.ModelProto())
+        export_output = ExportOutput(
+            onnx.ModelProto(), torch.onnx.InputFormatter(), torch.onnx.OutputFormatter()
+        )
         with self.assertRaises(roar.BeartypeException):
             export_output.save(None)  # type: ignore[arg-type]
         export_output.model_proto

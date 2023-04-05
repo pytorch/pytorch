@@ -25,7 +25,6 @@ import torch
 import torch._ops
 
 from torch.onnx._internal import _beartype
-from torch.utils import _pytree
 
 # We can only import onnx from this module in a type-checking context to ensure that
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
@@ -243,13 +242,13 @@ class ExportOutput:
 
     @property
     def input_formatter(self) -> InputFormatter:
-        """The input formatter used to convert inputs between format of PyTorch, torch.fx and ONNX."""
+        """The input formatter to convert inputs from PyTorch to compatible format in ONNX."""
 
         return self._input_formatter
 
     @property
     def output_formatter(self) -> OutputFormatter:
-        """The output formatter used to convert outputs between format of PyTorch, torch.fx and ONNX."""
+        """The output formatter to convert outputs from PyTorch to compatible format in ONNX."""
 
         return self._output_formatter
 
@@ -276,15 +275,6 @@ class Exporter(abc.ABC):
     _input_formatter: InputFormatter
     _output_formatter: OutputFormatter
 
-    class WrappedFuncModule(torch.nn.Module):
-        def __init__(self, forward: Callable):
-            super().__init__()
-            self.actual_forward = forward
-
-        def forward(self, *args, **kwargs):
-            result, _ = _pytree.tree_flatten(self.actual_forward(*args, **kwargs))
-            return result
-
     @_beartype.beartype
     def __init__(
         self,
@@ -299,11 +289,7 @@ class Exporter(abc.ABC):
             self.options = options
         assert self.options is not None
 
-        self.model: torch.nn.Module = (
-            model
-            if isinstance(model, torch.nn.Module)
-            else Exporter.WrappedFuncModule(model)
-        )
+        self.model = model
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
@@ -323,9 +309,9 @@ class Exporter(abc.ABC):
     @property
     def model_signature(self) -> inspect.Signature:
         return inspect.signature(
-            self.model.actual_forward
-            if isinstance(self.model, Exporter.WrappedFuncModule)
-            else self.model.forward
+            self.model.forward
+            if isinstance(self.model, torch.nn.Module)
+            else self.model
         )
 
 
@@ -337,15 +323,10 @@ class UnsatisfiedDependencyError(RuntimeError):
         self.package_name = package_name
 
 
-def _assert_dependencies(export_options: ExportOptions):
-    T = TypeVar("T")
-
-    def assert_not_optional(value: Optional[T]) -> T:
-        assert value is not None
-        return value
-
-    logger = assert_not_optional(export_options.logger)
-    opset_version = assert_not_optional(export_options.opset_version)
+@_beartype.beartype
+def _assert_dependencies(export_options: ResolvedExportOptions):
+    logger = export_options.logger
+    opset_version = export_options.opset_version
 
     def missing_package(package_name: str, exc_info: logging._ExcInfoType):
         message = (
@@ -439,4 +420,6 @@ __all__ = [
     "ExportOutputSerializer",
     "UnsatisfiedDependencyError",
     "dynamo_export",
+    "InputFormatter",
+    "OutputFormatter",
 ]
