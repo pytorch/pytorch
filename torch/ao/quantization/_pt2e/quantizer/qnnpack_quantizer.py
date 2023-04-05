@@ -30,11 +30,6 @@ SUPPORTED_QSCHEMES = [
     torch.per_channel_affine_float_qparams,
 ]
 
-
-# Note: do we need order=True? this is just added so that
-# selecting an supported_operator_spec is easeir (returns the same thing every time)
-# we can remove it later when we have easier apis for users to get an supported
-# operator spec
 @dataclass(eq=True, frozen=True)
 class TensorSpec:
     dtype: torch.dtype
