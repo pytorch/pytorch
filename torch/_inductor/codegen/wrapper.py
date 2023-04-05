@@ -1039,19 +1039,8 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.generate_load_kernel(name, params)
 
         call_args = self.generate_args_decl(call_args)
-        kernel_args = f"kernel_args_{next(self.kernel_callsite_id)}"
-        self.writeline(f"void* {kernel_args}[] = {{{call_args}}};")
-        all_args = [
-            name,
-            params["grid_x"],
-            params["grid_y"],
-            params["grid_z"],
-            params["num_warps"],
-            params["shared_mem"],
-            kernel_args,
-            device_index,
-        ]
-        # self.writeline(f"launchKernel({', '.join(all_args)});")
+        kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
+        self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
         self.writeline(
             "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
                 name,
@@ -1060,7 +1049,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 params["grid_z"],
                 params["num_warps"],
                 params["shared_mem"],
-                kernel_args,
+                kernel_args_var,
                 device_index,
             )
         )
