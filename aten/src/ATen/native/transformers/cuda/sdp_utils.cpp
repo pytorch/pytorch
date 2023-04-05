@@ -45,6 +45,7 @@ namespace {
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
+      SDPBackend::cudnn_mha,
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
@@ -264,7 +265,6 @@ bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
   return true;
 }
 
-
 bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug) {
   // FlashAttention 2 updated the default mask meaning for causal in this PR:
   // 9e5e8bc91e it is now aligned to lower_right which would be a BC break
@@ -303,6 +303,12 @@ bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
 }
 
 } // namespace
+
+inline bool use_cudnn_mha(sdp_params const& kernel_params, bool print_debug) {
+  static bool flag = c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true;
+  return flag;
+}
+
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_WARN_ONCE(!debug, "Torch was not compiled with flash attention.");
@@ -432,6 +438,10 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   bool print_debug = false;
   for (auto& backend : ordering) {
     switch (backend) {
+      case SDPBackend::cudnn_mha:
+        if (use_cudnn_mha(kernel_params, print_debug)) {
+              return SDPBackend::cudnn_mha;
+        }
       case SDPBackend::flash_attention:
         if (sdp::can_use_flash_attention(kernel_params, print_debug)) {
           return SDPBackend::flash_attention;

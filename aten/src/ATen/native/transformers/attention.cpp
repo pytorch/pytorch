@@ -645,6 +645,11 @@ Tensor scaled_dot_product_attention(
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
+    case sdp::SDPBackend::cudnn_mha: {
+      auto out_lse_softmax = at::_cudnn_mha(
+	query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+      return std::get<0>(out_lse_softmax);
+    }
     case sdp::SDPBackend::flash_attention: {
       if(query_.device().type() == DeviceType::CUDA){
         c10::SymInt og_size = query_.sym_size(-1);
