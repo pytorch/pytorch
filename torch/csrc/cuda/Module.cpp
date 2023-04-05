@@ -637,7 +637,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str cpp_frames_s = "cpp_frames";
   py::str history_s = "history";
   py::str blocks_s = "blocks";
-  py::str is_expandable_s = "is_expandable";
 
   std::vector<CapturedTraceback*> to_gather_frames;
   std::vector<py::dict> to_gather_dest;
@@ -655,7 +654,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     segmentDict[stream_s] = int64_t(segmentInfo.stream);
     segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
     segmentDict[segment_pool_id] = segmentInfo.owner_private_pool_id;
-    segmentDict[is_expandable_s] = segmentInfo.is_expandable;
 
     py::list blocks;
     for (const auto& blockInfo : segmentInfo.blocks) {
@@ -703,9 +701,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str free_completed_s = "free_completed";
   py::str segment_alloc_s = "segment_alloc";
   py::str segment_free_s = "segment_free";
-  py::str segment_map_s = "segment_map";
-  py::str segment_unmap_s = "segment_unmap";
-
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
@@ -728,10 +723,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         return oom_s;
       case TraceEntry::SNAPSHOT:
         return snapshot_s;
-      case TraceEntry::SEGMENT_UNMAP:
-        return segment_unmap_s;
-      case TraceEntry::SEGMENT_MAP:
-        return segment_map_s;
     }
     throw std::runtime_error("unreachable");
   };

@@ -4,6 +4,8 @@ import itertools
 import logging
 import sys
 import warnings
+
+from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
 import functorch
@@ -23,6 +25,7 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics, overrides, pattern_matcher
+from .codegen.wrapper import KernelParamCache
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
@@ -47,6 +50,15 @@ class BoxedBool:
             obj.value = False
             return obj
         return False
+
+
+@dataclasses.dataclass
+class BoxedDeviceIndex:
+    value: Optional[int]
+
+    def set(self, device_idx):
+        assert device_idx is None or isinstance(device_idx, int)
+        self.value = device_idx
 
 
 # copy_ fails when trying to write to tensors with memory overlap,
@@ -141,6 +153,7 @@ def compile_fx_inner(
     graph_id=None,
     aot_mode=False,
     is_inference=False,
+    boxed_forward_device_index=None,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -188,6 +201,7 @@ def compile_fx_inner(
             num_static_inputs=num_fixed,
             graph_id=graph_id,
             aot_mode=aot_mode,
+            cpp_wrapper=config.cpp_wrapper,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
@@ -215,6 +229,13 @@ def compile_fx_inner(
             and not complex_memory_overlap_inputs
             and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
+            if (
+                boxed_forward_device_index is not None
+                and not is_inference
+                and not is_backward
+            ):
+                boxed_forward_device_index.set(next(iter(graph.device_idxs)))
+
             compiled_fn = cudagraphify(
                 compiled_fn,
                 example_inputs,
@@ -226,6 +247,23 @@ def compile_fx_inner(
             )
         else:
             BoxedBool.disable(cudagraphs)
+
+            # See [Backward Generation Handling]
+            # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+            # know we are we running the backward even if we will not run it in cudagraphs
+            if is_backward and config.triton.cudagraph_trees:
+                assert boxed_forward_device_index.value is not None
+                compiled_fn_inner = compiled_fn
+
+                manager = torch._inductor.cudagraph_trees.get_manager(
+                    boxed_forward_device_index.value, create_if_none_exists=False
+                )
+                # should already exist from forward
+                assert manager is not None
+
+                def compiled_fn(new_inputs):
+                    manager.set_to_running_backward()
+                    return compiled_fn_inner(new_inputs)
 
             if len(set(graph.device_types)) > 1:
                 developer_warning("skipping cudagraphs due to multiple devices")
@@ -451,6 +489,76 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
+def compile_fx_aot(
+    module: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+    inner_compile=compile_fx_inner,
+    config_patches: Optional[Dict[str, Any]] = None,
+    decompositions: Optional[Dict[OpOverload, Callable]] = None,
+):
+    """
+    JIT-compile the model and run it to generate kernel binaries in the first pass;
+    Generate cpp wrapper code and compile it to a dynamic library in the second pass
+    """
+    from torch.ao.quantization.fx.utils import assert_and_get_unique_device
+
+    # Do we need to check inputs device as well?
+    device = assert_and_get_unique_device(module)
+    new_config_patches = config_patches.copy() if config_patches is not None else dict()
+
+    if device.type == "cuda":
+        # So far, we only need to do this for the Triton backend
+        with KernelParamCache():
+            new_config_patches.update(
+                {
+                    "cpp_wrapper": False,
+                    "triton.cudagraphs": False,
+                    "triton.unique_kernel_names": True,
+                    "triton.store_cubin": True,
+                }
+            )
+            with config.patch(new_config_patches):
+                module_copy = deepcopy(module)
+                inputs_copy = deepcopy(example_inputs)
+                compiled = compile_fx(
+                    module_copy,
+                    inputs_copy,
+                    inner_compile,
+                    new_config_patches,
+                    decompositions,
+                )
+                compiled(inputs_copy)
+                del module_copy, inputs_copy
+
+            new_config_patches.update(
+                {
+                    "cpp_wrapper": True,
+                    "triton.store_cubin": False,
+                }
+            )
+            return compile_fx(
+                module,
+                example_inputs,
+                inner_compile=functools.partial(inner_compile, aot_mode=True),
+                config_patches=new_config_patches,
+                decompositions=decompositions,
+            )
+    else:
+        assert device.type == "cpu"
+        new_config_patches.update(
+            {
+                "cpp_wrapper": True,
+            }
+        )
+        return compile_fx(
+            module,
+            example_inputs,
+            inner_compile=functools.partial(inner_compile, aot_mode=True),
+            config_patches=new_config_patches,
+            decompositions=decompositions,
+        )
+
+
 _graph_counter = itertools.count(0)
 
 
@@ -460,7 +568,6 @@ def compile_fx(
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
-    aot_mode=False,
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
@@ -470,21 +577,6 @@ def compile_fx(
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
-                decompositions=decompositions,
-                aot_mode=aot_mode,
-            )
-
-    if aot_mode:
-        aot_config_patches = {
-            "cpp_wrapper": True,
-            "debug": True,
-            "triton.cudagraphs": False,
-        }
-        with config.patch(aot_config_patches):
-            return compile_fx(
-                model_,
-                example_inputs_,
-                inner_compile=functools.partial(inner_compile, aot_mode=aot_mode),
                 decompositions=decompositions,
             )
 
@@ -530,6 +622,8 @@ def compile_fx(
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes
     )
+    forward_device = BoxedDeviceIndex(None)
+
     graph_id = next(_graph_counter)
 
     @dynamo_utils.dynamo_timed
@@ -546,6 +640,7 @@ def compile_fx(
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             is_inference=is_inference,
+            boxed_forward_device_index=forward_device,
         )
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
@@ -567,6 +662,7 @@ def compile_fx(
                 cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=graph_id,
+                boxed_forward_device_index=forward_device,
             )
 
     with overrides.patch_functions():
