@@ -214,6 +214,8 @@ class WrapperCodeGen(CodeGen):
         self.ending = ""
         self.comment = "#"
         self.namespace = ""
+        self.size = "size()"
+        self.stride = "stride()"
 
         self.set_header()
         self.write_prefix()
@@ -283,6 +285,9 @@ class WrapperCodeGen(CodeGen):
     @cache_on_self
     def get_output_refs(self):
         return [x.codegen_reference() for x in V.graph.graph_outputs]
+
+    def mark_output_type(self):
+        return
 
     def write_prefix(self):
         self.prefix.splice(
@@ -399,6 +404,7 @@ class WrapperCodeGen(CodeGen):
                     self.wrapper_call.writeline(line)
 
             output_refs = self.get_output_refs()
+            self.mark_output_type()
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
 
@@ -428,13 +434,15 @@ class WrapperCodeGen(CodeGen):
 
         @functools.lru_cache(None)
         def sizeof(name):
-            code.writeline(f"{self.declare}{name}_size = {name}.size(){self.ending}")
+            code.writeline(
+                f"{self.declare}{name}_size = {name}.{self.size}{self.ending}"
+            )
             return f"{name}_size"
 
         @functools.lru_cache(None)
         def strideof(name):
             code.writeline(
-                f"{self.declare}{name}_stride = {name}.stride(){self.ending}"
+                f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
             )
             return f"{name}_stride"
 
@@ -717,6 +725,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.comment = "//"
         self.namespace = "at::"
         self.extern_call_ops = set()
+        self.size = "sizes()"
+        self.stride = "strides()"
 
     def seed(self):
         """
@@ -741,6 +751,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else x.codegen_reference()
             for x in V.graph.graph_outputs
         ]
+
+    def mark_output_type(self):
+        # mark output type to unwrap tensor back to python scalar
+        from ..ir import ShapeAsConstantBuffer
+
+        output_is_tensor = dict()
+        for idx, x in enumerate(V.graph.graph_outputs):
+            if isinstance(x, ShapeAsConstantBuffer):
+                output_is_tensor[idx] = False
+            else:
+                output_is_tensor[idx] = True
+
+        self.output_is_tensor = output_is_tensor
 
     def call_func_name(self):
         return f"call_{self._call_func_id}"
@@ -777,10 +800,26 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
         with self.wrapper_call.indent():
             if inputs_len != 0:
-                inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
-                self.wrapper_call.writeline(f"at::Tensor {inputs_keys_str};")
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
-                    self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
+                    # unwrap input tensor back to scalar
+                    if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
+                        from ..graph import may_get_constant_buffer_dtype
+                        from .cpp import DTYPE_TO_CPP
+
+                        dtype = may_get_constant_buffer_dtype(
+                            V.graph.graph_inputs[input_key]
+                        )
+                        assert (
+                            dtype is not None
+                        ), "Fails to get the dtype of the sympy.Expr"
+                        cpp_dtype = DTYPE_TO_CPP[dtype]
+                        self.wrapper_call.writeline(f"{cpp_dtype} {input_key};")
+                        self.wrapper_call.writeline(
+                            f"{input_key} = args[{idx}].item<{cpp_dtype}>();"
+                        )
+                    else:
+                        self.wrapper_call.writeline(f"at::Tensor {input_key};")
+                        self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
 
             for name in V.graph.randomness_seeds:
                 self.wrapper_call.writeline(f"at::Tensor {name};")
@@ -858,12 +897,28 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 extra_include_paths=['{extra_include_paths}'])
             """
         )
+
+        # unwrap output tensor back to python scalar
+        if all(x for x in self.output_is_tensor.values()):
+            # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
+            return_str = "return f(args_tensor)"
+        else:
+            outputs = [
+                f"outputs[{i}]" if self.output_is_tensor[i] else f"outputs[{i}].item()"
+                for i in range(len(V.graph.graph_outputs))
+            ]
+            outputs_str = f"[{', '.join(outputs)}]"
+            return_str = f"""
+                    outputs = f(args_tensor)
+                    return {outputs_str}
+            """
         # Wrap the func to support setting result._boxed_call = True
         result.splice(
             f"""
             def _wrap_func(f):
                 def g(args):
-                    return f(args)
+                    args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]
+                    {return_str}
                 return g
             call = _wrap_func(module.call_{self._call_func_id})
             """
@@ -881,6 +936,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             args.insert(0, f"{codegen_reference}")
         self.writeline(f"{cpp_kernel}({', '.join(args)});")
+
+    def codegen_sizevar(self, x: Expr) -> str:
+        from .cpp import cexpr
+
+        return cexpr(V.graph.sizevars.simplify(x))
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
