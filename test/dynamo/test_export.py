@@ -2351,10 +2351,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     @config.patch(dynamic_shapes=True)
     def test_round_dynamic_shapes(self):
         def f(x):
-            return x[:round(x.shape[0]/2)]
+            return x[: round(x.shape[0] / 2)]
 
         def f_correct(x):
-            return x[:math.floor(x.shape[0]/2)]
+            return x[: math.floor(x.shape[0] / 2)]
 
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Calling round()"):
             gm, _ = torch._dynamo.export(
@@ -2366,6 +2366,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         )
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
