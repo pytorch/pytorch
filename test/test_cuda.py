@@ -2512,6 +2512,43 @@ torch.cuda.synchronize()
                         actual = actual.squeeze()
                     self.assertEqual(state_control[k], actual)
 
+    def test_grads_invalidated_between_unscale_and_step(self):
+        for optimizer_ctor, optimizer_kwargs in product(
+            (torch.optim.Adam, torch.optim.AdamW),
+            (
+                {"foreach": False, "fused": False},
+                {"foreach": True, "fused": False},
+                {"foreach": False, "fused": True},
+            ),
+        ):
+            with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
+                self._test_grads_invalidated_between_unscale_and_step(optimizer_ctor, optimizer_kwargs)
+
+    def _test_grads_invalidated_between_unscale_and_step(self, optimizer_ctor, optimizer_kwargs):
+        model, _, optimizer, _, data, loss_fn, _ = self._create_scaling_case(
+            optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+        )
+        scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
+
+        orig_params = [p.clone().detach() for p in model.parameters()]
+
+        for i, (input, target) in enumerate(data):
+            optimizer.zero_grad()
+            with torch.autocast('cuda', enabled=True):
+                output = model(input)
+                loss = loss_fn(output, target)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+
+            # deliberately break grads
+            for j, param in enumerate(model.parameters()):
+                param.grad.copy_(torch.inf if j % 2 else torch.nan)
+
+            scaler.step(optimizer)
+            scaler.update()
+
+        self.assertEqual(orig_params, list(model.parameters()))
+
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
