@@ -17,14 +17,7 @@ from torch.distributed._spmd.api import (
     SPMD,
 )
 from torch.distributed._spmd.comm_tensor import CommTensor
-from torch.distributed._tensor import (
-    DeviceMesh,
-    distribute_module,
-    distribute_tensor,
-    DTensor,
-    Replicate,
-    Shard,
-)
+from torch.distributed._tensor import DeviceMesh, Replicate
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec
@@ -591,7 +584,10 @@ class TraceTrainStepTest(DTensorTestBase):
                 return DummyDDM()
 
             def transform(
-                self, gm: fx.GraphModule, schema_map: Dict[str, Schema]
+                self,
+                gm: fx.GraphModule,
+                schema_map: Dict[str, Schema],
+                flat_state: List[torch.Tensor],
             ) -> fx.Graph:
                 nonlocal transform_targets
                 for node in gm.graph.nodes:
