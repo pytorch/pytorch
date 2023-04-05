@@ -8550,11 +8550,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del z  # it's dead again
         self.assertEqual(type(y.grad), MyTensor)
 
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
     def test_storage_dealloc(self):
         m, t = Tracker.make()
         s0 = torch.UntypedStorage(10)
         s1 = s0
-        s0.__dict__['tmp'] = t
+        s0._tracker = t
         del t
 
         self.assertFalse(m[0])
@@ -8563,16 +8564,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del s1
         self.assertTrue(m[0])
 
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
     def test_storage_from_tensor_dealloc(self):
         m, t = Tracker.make()
         a = torch.randn(10)
         s0 = a.untyped_storage()
-        s0.__dict__['tmp'] = t
+        s0._tracker = t
         del t
 
         s1 = a.untyped_storage()
         self.assertTrue(s0 is s1)
-        self.assertTrue(hasattr(s1, 'tmp'))
+        self.assertTrue(hasattr(s1, '_tracker'))
 
         del a
 
@@ -8582,16 +8584,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del s1
         self.assertTrue(m[0])
 
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
     def test_storage_from_tensor_dealloc_zombie(self):
         m, t = Tracker.make()
         a = torch.randn(10)
         s0 = a.untyped_storage()
-        s0.__dict__['tmp'] = t
+        s0._tracker = t
         del t
 
         s1 = a.untyped_storage()
         self.assertTrue(s0 is s1)
-        self.assertTrue(hasattr(s1, 'tmp'))
+        self.assertTrue(hasattr(s1, '_tracker'))
 
         self.assertFalse(m[0])
         del s0
@@ -8601,16 +8604,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del a
         self.assertTrue(m[0])
 
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
     def test_storage_from_tensor_dealloc_resurrected(self):
         m, t = Tracker.make()
         a = torch.randn(10)
         s0 = a.untyped_storage()
-        s0.__dict__['tmp'] = t
+        s0._tracker = t
         del t
 
         s1 = a.untyped_storage()
         self.assertTrue(s0 is s1)
-        self.assertTrue(hasattr(s1, 'tmp'))
+        self.assertTrue(hasattr(s1, '_tracker'))
 
         self.assertFalse(m[0])
         del s0
@@ -8626,10 +8630,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del s0
         self.assertTrue(m[0])
 
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
     def test_storage_dealloc_resurrected(self):
         m, t = Tracker.make()
         s = torch.UntypedStorage(10)
-        s.__dict__['tmp'] = t
+        s._tracker = t
         del t
 
         a = torch.tensor(s)
@@ -8646,6 +8651,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del s
         self.assertTrue(m[0])
 
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
     def test_storage_dealloc_subclass_zombie(self):
         class MyStorage(torch.UntypedStorage):
             finalized_count = 0
@@ -8655,7 +8661,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         m, t = Tracker.make()
         s = MyStorage(10)
-        s.__dict__['tmp'] = t
+        s._tracker = t
         del t
 
         a = torch.tensor(s)
@@ -8669,6 +8675,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(MyStorage.finalized_count, 1)
         self.assertTrue(m[0])
 
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
     def test_storage_dealloc_subclass_resurrected(self):
         class MyStorage(torch.UntypedStorage):
             finalized_count = 0
@@ -8678,7 +8685,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         m, t = Tracker.make()
         s = MyStorage(10)
-        s.__dict__['tmp'] = t
+        s._tracker = t
         del t
 
         a = torch.tensor(s)
