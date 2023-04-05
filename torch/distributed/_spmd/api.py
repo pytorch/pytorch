@@ -397,6 +397,9 @@ def _compile(
         gm, args, kwargs, named_states, params_and_buffers
     )
 
+    if torch.distributed.get_rank() == 0:
+        gm.graph.print_tabular()
+
     # 5. Replace previously inserted dummy ones with real graphs.
     if module_override:
         for _, override in module_override.items():

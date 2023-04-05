@@ -662,5 +662,66 @@ class TraceTrainStepTest(DTensorTestBase):
         self.assertEqual(graph_optimization.call_count, 1)
 
 
+class CoverageTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 2
+
+    def _test_train_step(self, mod, inp):
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+            return [p.grad for p in mod.parameters()]
+
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
+        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.01, foreach=True)
+
+        ddp_inp = deepcopy(inp)
+
+        # materialize optimizer states
+        mod(inp).sum().backward()
+        opt.step()
+        opt.zero_grad()
+
+        ddp_mod(ddp_inp).sum().backward()
+        ddp_opt.step()
+        ddp_opt.zero_grad()
+
+        if self.rank == 0:
+            print("====== ", list(mod.parameters()))
+            print("====== ", list(ddp_mod.parameters()))
+
+        # test parameter parity
+        grads = train_step(mod, opt, inp)
+
+        ddp_mod(ddp_inp).sum().backward()
+        # FIXME(@mrshenli): DDP by default divides grads by world size, but
+        # torch.distributed.compile does not do that yet.
+        with torch.no_grad():
+            for p in ddp_mod.parameters():
+                p.grad *= self.world_size
+        ddp_opt.step()
+
+        if self.rank == 0:
+            print("====== ", grads)
+            print("====== ", [p.grad for p in ddp_mod.parameters()])
+
+        for p1, p2 in zip(mod.parameters(), ddp_mod.parameters()):
+            self.assertEqual(p1, p2)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_log_softmax(self):
+        mod = nn.Sequential(
+            nn.Linear(10, 10),
+            nn.Softmax(dim=1),
+        ).cuda(self.rank)
+        inp = torch.randn(20, 10).cuda(self.rank)
+        self._test_train_step(mod, inp)
+
+
 if __name__ == "__main__":
     run_tests()
