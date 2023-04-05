@@ -5,9 +5,10 @@ import operator
 import unittest
 from dataclasses import asdict, dataclass
 from enum import Enum
-from functools import partial
+from functools import partial, wraps
 from itertools import product
 from typing import Any, Callable, Iterable, List, Optional, Tuple
+from torch.testing._internal.common_utils import freeze_rng_state
 
 from torchgen.utils import dataclass_repr
 
@@ -964,25 +965,37 @@ class OpInfo:
 
         self.decorators = (*self.decorators, *self.skips)
 
-        # We run the sampling functions without tracking the gradiends of the creation of inputs
-        self.sample_inputs_func = torch.no_grad()(self.sample_inputs_func)
-        self.sample_inputs_sparse_coo_func = torch.no_grad()(
+        # We run the sampling functions:
+        # 1. without tracking the gradiends of the creation of inputs
+        # 2. In a function that automatically sets the seed before calling
+        #    the sampling function. The user of the sampling function can
+        #    pass seed=None to disable this feature
+        #    (see deterministic_rng_wrapper's implementation for details)
+        seed = hash(f'{self.name}_{self.variant_test_name}')
+
+        def wrap_sampling_fn(f):
+            f = torch.no_grad()(f)
+            f = deterministic_rng_wrapper(f, seed)
+            return f
+
+        self.sample_inputs_func = wrap_sampling_fn(self.sample_inputs_func)
+        self.sample_inputs_sparse_coo_func = wrap_sampling_fn(
             self.sample_inputs_sparse_coo_func
         )
-        self.sample_inputs_sparse_csr_func = torch.no_grad()(
+        self.sample_inputs_sparse_csr_func = wrap_sampling_fn(
             self.sample_inputs_sparse_csr_func
         )
-        self.sample_inputs_sparse_csc_func = torch.no_grad()(
+        self.sample_inputs_sparse_csc_func = wrap_sampling_fn(
             self.sample_inputs_sparse_csc_func
         )
-        self.sample_inputs_sparse_bsr_func = torch.no_grad()(
+        self.sample_inputs_sparse_bsr_func = wrap_sampling_fn(
             self.sample_inputs_sparse_bsr_func
         )
-        self.sample_inputs_sparse_bsc_func = torch.no_grad()(
+        self.sample_inputs_sparse_bsc_func = wrap_sampling_fn(
             self.sample_inputs_sparse_bsc_func
         )
         if self.reference_inputs_func is not None:
-            self.reference_inputs_func = torch.no_grad()(self.reference_inputs_func)
+            self.reference_inputs_func = wrap_sampling_fn(self.reference_inputs_func)
 
         if not self.autodiff_fusible_nodes:
             self.autodiff_fusible_nodes = []
@@ -1104,12 +1117,21 @@ class OpInfo:
         Returns None if the operator has no inplace operator variant"""
         return self.inplace_operator_variant
 
-    def conjugate_sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
+    def conjugate_sample_inputs(self, device, dtype, requires_grad=False, *, seed='auto', **kwargs):
         """Returns an iterable of SampleInputs but with the tensor input or first
         tensor in a sequence input conjugated.
+
+        Arguments:
+            seed ('auto', None, or int): If int: we will set the seed via
+                torch.manual_seed before calling the function.
+                If 'auto' (default): we will automatically set the seed
+                to make calling this function deterministic.
+                If None, then we will not set the seed and every call to
+                this function is non-deterministic.
+
         """
 
-        samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
+        samples = self.sample_inputs_func(self, device, dtype, requires_grad, seed=seed, **kwargs)
         conj_samples = list(samples)
 
         def conjugate(tensor):
@@ -1127,14 +1149,23 @@ class OpInfo:
 
         return tuple(conj_samples)
 
-    def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
+    def sample_inputs(self, device, dtype, requires_grad=False, *, seed='auto', **kwargs):
         """
         Returns an iterable of SampleInputs.
 
         These samples should be sufficient to test the function works correctly
         with autograd, TorchScript, etc.
+
+        Arguments:
+            seed ('auto', None, or int): If int: we will set the seed via
+                torch.manual_seed before calling the function.
+                If 'auto' (default): we will automatically set the seed
+                to make calling this function deterministic.
+                If None, then we will not set the seed and every call to
+                this function is non-deterministic.
+
         """
-        samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
+        samples = self.sample_inputs_func(self, device, dtype, requires_grad, seed=seed, **kwargs)
 
         if kwargs.get("include_conjugated_inputs", False):
             conj_samples = self.conjugate_sample_inputs(
@@ -1146,13 +1177,22 @@ class OpInfo:
 
         return samples
 
-    def reference_inputs(self, device, dtype, requires_grad=False, **kwargs):
+    def reference_inputs(self, device, dtype, requires_grad=False, *, seed='auto', **kwargs):
         """
         Returns an iterable of SampleInputs.
 
         Distinct from sample_inputs() above because this returns an expanded set
         of inputs when reference_inputs_func is defined. If undefined this returns
         the sample inputs.
+
+        Arguments:
+            seed ('auto', None, or int): If int: we will set the seed via
+                torch.manual_seed before calling the function.
+                If 'auto' (default): we will automatically set the seed
+                to make calling this function deterministic.
+                If None, then we will not set the seed and every call to
+                this function is non-deterministic.
+
         """
         if self.reference_inputs_func is None:
             return self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
@@ -1169,54 +1209,108 @@ class OpInfo:
         return self.error_inputs_func(self, device, **kwargs)
 
     def sample_inputs_sparse(
-        self, layout, device, dtype, requires_grad=False, **kwargs
+        self, layout, device, dtype, requires_grad=False, *, seed='auto', **kwargs
     ):
         """Returns an iterable of SampleInputs that contain inputs with a
         specified sparse layout.
+
+        Arguments:
+            seed ('auto', None, or int): If int: we will set the seed via
+                torch.manual_seed before calling the function.
+                If 'auto' (default): we will automatically set the seed
+                to make calling this function deterministic.
+                If None, then we will not set the seed and every call to
+                this function is non-deterministic.
+
         """
         sample_inputs_mth = getattr(
             self, "sample_inputs_" + str(layout).split(".", 1)[-1]
         )
-        return sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs)
+        return sample_inputs_mth(device, dtype, requires_grad=requires_grad, seed=seed, **kwargs)
 
-    def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, **kwargs):
+    def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, *, seed='auto', **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
         coo layout.
+
+        Arguments:
+            seed ('auto', None, or int): If int: we will set the seed via
+                torch.manual_seed before calling the function.
+                If 'auto' (default): we will automatically set the seed
+                to make calling this function deterministic.
+                If None, then we will not set the seed and every call to
+                this function is non-deterministic.
+
         """
         return self.sample_inputs_sparse_coo_func(
-            self, device, dtype, requires_grad, **kwargs
+            self, device, dtype, requires_grad, seed=seed, **kwargs
         )
 
-    def sample_inputs_sparse_csr(self, device, dtype, requires_grad=False, **kwargs):
+    def sample_inputs_sparse_csr(self, device, dtype, requires_grad=False, *, seed='auto', **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
         csr layout.
+
+        Arguments:
+            seed ('auto', None, or int): If int: we will set the seed via
+                torch.manual_seed before calling the function.
+                If 'auto' (default): we will automatically set the seed
+                to make calling this function deterministic.
+                If None, then we will not set the seed and every call to
+                this function is non-deterministic.
+
         """
         return self.sample_inputs_sparse_csr_func(
             self, device, dtype, requires_grad, **kwargs
         )
 
-    def sample_inputs_sparse_csc(self, device, dtype, requires_grad=False, **kwargs):
+    def sample_inputs_sparse_csc(self, device, dtype, requires_grad=False, *, seed='auto', **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
         csc layout.
+
+        Arguments:
+            seed ('auto', None, or int): If int: we will set the seed via
+                torch.manual_seed before calling the function.
+                If 'auto' (default): we will automatically set the seed
+                to make calling this function deterministic.
+                If None, then we will not set the seed and every call to
+                this function is non-deterministic.
+
         """
         return self.sample_inputs_sparse_csc_func(
-            self, device, dtype, requires_grad, **kwargs
+            self, device, dtype, requires_grad, seed=seed, **kwargs
         )
 
-    def sample_inputs_sparse_bsr(self, device, dtype, requires_grad=False, **kwargs):
+    def sample_inputs_sparse_bsr(self, device, dtype, requires_grad=False, *, seed='auto', **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
         bsr layout.
+
+        Arguments:
+            seed ('auto', None, or int): If int: we will set the seed via
+                torch.manual_seed before calling the function.
+                If 'auto' (default): we will automatically set the seed
+                to make calling this function deterministic.
+                If None, then we will not set the seed and every call to
+                this function is non-deterministic.
+
         """
         return self.sample_inputs_sparse_bsr_func(
-            self, device, dtype, requires_grad, **kwargs
+            self, device, dtype, requires_grad, seed=seed, **kwargs
         )
 
-    def sample_inputs_sparse_bsc(self, device, dtype, requires_grad=False, **kwargs):
+    def sample_inputs_sparse_bsc(self, device, dtype, requires_grad=False, *, seed='auto', **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
         bsc layout.
+
+        Arguments:
+            seed ('auto', None, or int): If int: we will set the seed via
+                torch.manual_seed before calling the function.
+                If 'auto' (default): we will automatically set the seed
+                to make calling this function deterministic.
+                If None, then we will not set the seed and every call to
+                this function is non-deterministic.
+
         """
         return self.sample_inputs_sparse_bsc_func(
-            self, device, dtype, requires_grad, **kwargs
+            self, device, dtype, requires_grad, seed=seed, **kwargs
         )
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
@@ -1273,6 +1367,24 @@ class OpInfo:
             else ""
         )
         return "{}{}".format(self.name.replace(".", "_"), variant)
+
+
+# We make all OpInfo reference input functions deterministic by default
+# by using deterministic_rng_wrapper.
+# NB: this only affects random PyTorch operations. It does not affect
+# things like random numpy operations.
+def deterministic_rng_wrapper(f, default_seed):
+    @wraps(f)
+    def inner(*args, seed='auto', **kwargs):
+        if seed is None:
+            return f(*args, **kwargs)
+        if seed == 'auto':
+            seed = default_seed
+        with freeze_rng_state():
+            torch.manual_seed(seed)
+            return f(*args, **kwargs)
+
+    return inner
 
 
 def _generate_reduction_inputs(device, dtype, requires_grad, **kwargs):
