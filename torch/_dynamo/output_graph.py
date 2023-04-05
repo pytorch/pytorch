@@ -54,6 +54,7 @@ from .utils import (
     dynamo_timed,
     format_graph_code,
     format_graph_tabular,
+    nnmodule_has_hooks,
     same,
 )
 from .variables.base import VariableTracker
@@ -68,6 +69,9 @@ from .variables.tensor import (
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
+
+hook_doc_url = "https://pytorch.org/docs/master/compile/nn_module.html"
+hook_doc_url_msg = f"See {hook_doc_url} for more information and limitations."
 
 
 class OutputGraphState(NamedTuple):
@@ -378,26 +382,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
 
-    @staticmethod
-    def module_has_hooks(mod, only_check_unsupported=False):
-        supported_hooks = [
-            "_forward_pre_hooks",
-            "_forward_hooks",
-        ]
-        unsupported_hooks = [
-            "_backward_pre_hooks",
-            "_backward_hooks",
-            "_state_dict_pre_hooks",
-            "_state_dict_hooks",
-            "_load_state_dict_pre_hooks",
-            "_load_state_dict_post_hooks",
-        ]
-        check_hooks = unsupported_hooks
-        if not only_check_unsupported:
-            check_hooks += supported_hooks
-
-        return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
-
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
@@ -429,9 +413,20 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if self.module_has_hooks(target, only_check_unsupported=True):
+            if nnmodule_has_hooks(target, check_call_hooks=False):
                 torch._logging.warning_once(
-                    log, "nn.Module hooks are not fully supported, they may be ignored"
+                    log,
+                    "nn.Module state_dict hooks are not yet supported by torch.compile, but were detected and will be "
+                    f"silently ignored. {hook_doc_url_msg}",
+                )
+            if nnmodule_has_hooks(target, check_state_dict_hooks=False):
+                torch._logging.warning_once(
+                    log,
+                    "nn.Module __call__ hooks are only partially supported, and were detected in your model. "
+                    "In particular, if you do not change/remove hooks after calling .compile(), you can disregard this "
+                    "warning, and otherwise you may need to set torch._dynamo.config.skip_nnmodule_hook_guards=False "
+                    "to ensure recompiling after changing hooks."
+                    f"{hook_doc_url_msg} ",
                 )
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
