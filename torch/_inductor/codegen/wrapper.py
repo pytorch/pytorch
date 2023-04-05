@@ -805,9 +805,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{name}({', '.join(call_args)});"
 
     def generate_return(self, output_refs):
-        self.wrapper_call.writeline(
-            f"return std::vector<at::Tensor>({{{', '.join(output_refs)}}});\n}}"
-        )
+        self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
 
     def generate_end(self, result):
         if V.graph.aot_mode:
