@@ -1107,7 +1107,9 @@ def emit_body(
             assert info is not None
 
             # It's hard to determine the edge offset if we have TensorLists
-            if has_tensorlist_arg:
+            # NOTE(crcrpar): in-place foreach functions' arguments include tensorlist
+            # but their derivatives don't use it, so let them bypass this check.
+            if has_tensorlist_arg and (not is_inplace_foreach):
                 return None
 
             # Empirical evaluation of the cases where we insert those guards in
