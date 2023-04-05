@@ -10,8 +10,6 @@ from torch.ao.quantization.observer import (
     MinMaxObserver,
     PerChannelMinMaxObserver,
 )
-from torch.fx import Node
-
 import torch
 
 __all__ = [
@@ -147,7 +145,7 @@ _TORCH_DTYPE_TO_QDTYPE = {
     torch.int32: torch.qint32,
     torch.float16: torch.float16,
 }
-def _get_act_obs_or_fq_ctr(operator_spec: Optional[TensorSpec]):
+def _get_act_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
     if operator_spec is None:
         return None
     assert operator_spec is not None

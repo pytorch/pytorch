@@ -34,7 +34,6 @@ from torch.ao.ns.fx.utils import (
 import copy
 import itertools
 from torch._inductor.compile_fx import compile_fx
-from torch.fx import Node
 
 
 @skipIfNoQNNPACK
