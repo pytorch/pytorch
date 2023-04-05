@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
 import torch
+import dataclasses
 
 from torch._guards import (
     DuplicateInputs,
@@ -24,7 +25,7 @@ from torch._guards import (
 from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
 
 from . import config, convert_frame, mutation_guard
-from .eval_frame import set_guard_error_hook, set_guard_fail_hook
+from .eval_frame import set_guard_error_hook
 from .exc import unimplemented
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
@@ -98,6 +99,19 @@ def strip_getattr_getitem(name):
     """
     return re.split(r"[.\[]", name)[0]
 
+# Don't put anything on here you don't want laundered to the next frame
+@dataclasses.dataclass
+class CodePart:
+    source: Union[Source, List[Source]] # Note: List of sources for tensor checks
+    code: str
+    origin: str
+
+    def __hash__(self):
+        return hash(self.code)
+    
+    def __eq__(self, other):
+        return self.code == other.code
+    
 
 class GuardBuilder(GuardBuilderBase):
     def __init__(
@@ -149,6 +163,7 @@ class GuardBuilder(GuardBuilderBase):
         # swept up into a single call to ___check_tensors.  Invariant:
         # len(tensor_check_names) == len(tensor_check_examples).
         self.tensor_check_names: List[str] = []
+        self.tensor_check_sources: List[Source] = []
         self.tensor_check_examples: List[torch.Tensor] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
@@ -335,13 +350,10 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
-        def setup_guard():
-            assert istype(val.training, bool)
-            self.code.append(f"{ref}.training == {val.training}")
-
         if hasattr(val, "training"):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
-            setup_guard()
+            assert istype(val.training, bool)
+            self._produce_guard_code(guard, [f"{ref}.training == {val.training}"])
         else:
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
@@ -513,6 +525,7 @@ class GuardBuilder(GuardBuilderBase):
                     code.append(f"{tensor_name}.{term} == {real_value}")
             else:
                 self.tensor_check_names.append(tensor_name)
+                self.tensor_check_sources.append(guard.origin)
                 self.tensor_check_examples.append(value)
 
             # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
@@ -577,16 +590,18 @@ class GuardBuilder(GuardBuilderBase):
         del cur_frame
         assert caller is not None
         func_name = getframeinfo(caller)[2]
-        del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
         assert func_name in dir(
             self.__class__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
+        code_str = " and ".join(code_list)
+        code_part = CodePart(guard.origin, code_str, getframeinfo(caller)[2])
+        del caller
         if shape_env:
-            self.shape_env_code.extend(code_list)
+            self.shape_env_code.append(code_part)
         else:
-            self.code.extend(code_list)
+            self.code.append(code_part)
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
@@ -698,20 +713,27 @@ class CheckFunctionManager:
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
 
-        code_parts = (
-            ["___guarded_code.valid"] + local_builder.code + global_builder.code
-        )
-        # TODO(whc) maybe only the 'check_tensors' one is ambiguous? if so we can be less general..
-        verbose_code_parts = (
-            ["___guarded_code.valid"] + local_builder.code + global_builder.code
-        )
-
+        # local_code_to_source_map = dict(zip(local_builder.code, local_builder.sources))
+        # global_code_to_source_map = dict(zip(global_builder.code, global_builder.sources))
+        # code_to_source_map = {**local_code_to_source_map, **global_code_to_source_map}
+        # code_parts = (
+        #     ["___guarded_code.valid"] + local_builder.code + global_builder.code
+        # )
+        validation_code_part = CodePart(None, "___guarded_code.valid", None)
+        code_parts = []
+        code_parts.append(validation_code_part)
+        code_parts += local_builder.code + global_builder.code
+        part_map = {}
+        
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
         )
+        tensor_check_sources = (
+            local_builder.tensor_check_sources + global_builder.tensor_check_sources
+        )
+        assert len(tensor_check_names) == len(tensor_check_sources)
 
         check_tensors_fn = None
-        check_tensors_verbose_fn = None
         if tensor_check_names:
             assert (
                 not self.output_graph.export
@@ -724,12 +746,9 @@ class CheckFunctionManager:
                 *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
             )
             check_tensors_fn = tensor_guards.check
-            check_tensors_verbose_fn = tensor_guards.check_verbose
-            code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
-            verbose_args = ", ".join(
-                tensor_check_names + ["tensor_check_names=tensor_check_names"]
-            )
-            verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
+            check_tensor_slug = f"___check_tensors({', '.join(tensor_check_names)})"
+            code_part = CodePart(tensor_check_sources, check_tensor_slug, "TENSOR_MATCH")
+            code_parts.append(code_part)
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
@@ -742,40 +761,43 @@ class CheckFunctionManager:
                 source_b = guard.input_source_b
                 code_part = f"{source_a.name()} is {source_b.name()}"
                 code_parts.append(code_part)
-                verbose_code_parts.append(code_part)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
         code_parts.extend(local_builder.shape_env_code)
-        verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        code = " and ".join(unique(code_parts))
+        code = "      passing = True \n"
+        for code_part in unique(code_parts):
+            part_map[id(code_part)] = code_part 
+            code += f"      passing = {code_part.code} \n"
+            code += f"      if not passing: \n"
+            code += f"          return (False, part_map[{id(code_part)}]) \n"
+        code += f"      return True, None"
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
-                ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
             ]
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
-def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda L: {code}
+def ___make_guard_fn({','.join(closure_vars.keys())}, part_map):
+    def guard_fn(L): 
+{code}
+    return guard_fn
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
-        set_guard_fail_hook(guard_fail_hook)
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
-        guard_fn = out["___make_guard_fn"](*closure_vars.values())
+        guard_fn = out["___make_guard_fn"](*closure_vars.values(), part_map)
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
-        guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {"G": global_builder.scope["G"]}
         guard_fn.guard_fail_fn = guard_fail_fn
@@ -800,33 +822,21 @@ stashed_first_fail_reason = None
 
 
 def guard_fail_hook(
-    guard_fn: GuardFn,
-    code: types.CodeType,
-    f_locals: Dict[str, object],
-    index: int,
-    last: bool,
+    guard_fail_fn,
+    code,
+    code_part: CodePart,
+    cache_size: int,
 ) -> None:
     """
     called whenever a guard fails.
     """
-    first = index == 0
+    first = cache_size == 0
+    last = cache_size == config.cache_size_limit
     global stashed_first_fail_reason
     # Don't waste time computing the fail reason for guards we aren't going to report out.
-    if not guard_fn.guard_fail_fn and not (first or last):
+    if not guard_fail_fn and not (first or last):
         return
-    scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
-    scope.update(guard_fn.closure_vars)
-    reason = None
-    for part in guard_fn.verbose_code_parts:
-        fail_reason = eval(part, guard_fn.global_scope, scope)
-        # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
-        # is updated to return a string explaining the failure.
-        if isinstance(fail_reason, str):
-            reason = fail_reason
-            break
-        elif isinstance(fail_reason, bool) and not fail_reason:
-            reason = part
-            break
+    reason = code_part.code
 
     if first:
         stashed_first_fail_reason = reason
@@ -841,18 +851,6 @@ def guard_fail_hook(
     assert stashed_first_fail_reason
     guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
     stashed_first_fail_reason = None
-
-    # TODO should we GuardFail our stashed_first_fail_reason too?
-    try:
-        if guard_fn.guard_fail_fn is not None:
-            guard_fn.guard_fail_fn(
-                GuardFail(reason or "unknown reason", orig_code_map[code])
-            )
-    except Exception as e:
-        log.error(
-            "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
-            exc_info=True,
-        )
 
 
 def guard_error_hook(
