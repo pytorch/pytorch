@@ -9,7 +9,7 @@ from torch.fx.experimental import proxy_tensor
 
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass
-from torch.onnx._internal.fx.passes import utils
+from torch.onnx._internal.fx.passes import _utils
 
 
 @_beartype.beartype
@@ -48,7 +48,7 @@ class Decompose(_pass.Transform):
         assert not kwargs, "kwargs is not supported in Decompose."
 
         # To preserve stack trace info after `make_fx`.
-        module = utils.wrap_graph_module_for_node_meta_preservation(self.module)
+        module = _utils.wrap_graph_module_for_node_meta_preservation(self.module)
 
         # fake mode use static size to trace the size of tensors. while symbolic
         # mode generates aten::sym_size to dynamically trace the size of tensors.
@@ -76,6 +76,6 @@ class Decompose(_pass.Transform):
         )(*args)
         # Rename placeholder targets to match the original module's signature since
         # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).
-        utils.replace_placeholder_name_and_target(decomposed_module, self.module)
+        _utils.replace_placeholder_name_and_target(decomposed_module, self.module)
 
         return decomposed_module

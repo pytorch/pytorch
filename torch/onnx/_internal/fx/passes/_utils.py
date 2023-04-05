@@ -1,3 +1,7 @@
+"""Common utility functions for FX passes.
+
+These functions should NOT be directly invoked outside of `passes` package.
+"""
 from __future__ import annotations
 
 from typing import Callable
@@ -31,6 +35,12 @@ def replace_placeholder_name_and_target(
     """Replace the argument names in module with those in reference_module.
 
     This function assumes the two modules have the same signature structure.
+    The caller is responsible for ensuring this. Otherwise, the behavior of this
+    function is undefined. This function only does minimal sanity check that the two
+    modules have the same number of arguments.
+
+    TODO(bowbao): Handle potential name conflicts between new names and existing node
+    names in the graph.
 
     Raises:
         RuntimeError: If the two modules have different number of arguments.
