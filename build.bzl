@@ -7,17 +7,6 @@ load(
 
 def define_targets(rules):
     rules.cc_library(
-        name = "caffe2_core_common",
-        hdrs = ["caffe2/core/common.h"],
-        srcs = ["caffe2/core/common.cc"],
-        deps = [
-            ":caffe2_core_macros",
-            "//c10/macros",
-            "//c10/util:base",
-        ],
-    )
-
-    rules.cc_library(
         name = "caffe2_core_macros",
         hdrs = [":caffe2_core_macros_h"],
     )
@@ -57,7 +46,6 @@ def define_targets(rules):
         ],
         visibility = ["//visibility:public"],
         deps = [
-            ":caffe2_core_common",
             ":caffe2_headers",
             "//c10",
             "//third_party/miniz-2.1.0:miniz",

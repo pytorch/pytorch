@@ -15,7 +15,10 @@ from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._export import dynamic_dim
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    is_concrete_int,
+)
 from torch.testing._internal import common_utils
 
 
@@ -108,9 +111,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 if config.assume_static_by_default:
                     # The guard produced here must be narrow, because
                     # we are running with assume_static_by_default
-                    self.assertTrue("x.size()[0] == 6" in guard.code_list)
+                    self.assertTrue("L['x'].size()[0] == 6" in guard.code_list)
                 else:
-                    self.assertTrue("x.size()[0] <= 10" in guard.code_list)
+                    self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
 
         self.assertTrue(hit)
 
@@ -1631,6 +1634,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(gm(*inp), f(*inp))
 
+    @config.patch(assume_static_by_default=False)
     def test_export_symbolic_shape(self):
         def f(x: torch.Tensor) -> torch.Tensor:
             return torch.empty(x.shape[0] * 2)
@@ -1645,7 +1649,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(has_sym_size)
 
-    @config.patch(dynamic_shapes=True)
+    @config.patch(dynamic_shapes=True, assume_static_by_default=False)
     def test_dynamic_slicing(self):
         def f(x):
             return x[: x.shape[0] - 2, x.shape[1] - 1 :: 2]
@@ -2280,6 +2284,43 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         constraints = [dynamic_dim(y, 0)]
         torch._dynamo.export(my_dyn_fn, y, constraints=constraints)
+
+    @config.patch(dynamic_shapes=True, capture_dynamic_output_shape_ops=True)
+    def test_export_dynamic_control_flow_error(self):
+        def f(x):
+            if x.nonzero() > 3:
+                return x.cos()
+            return x.sin()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Dynamic control flow is not supported at the moment",
+        ):
+            gm, _ = torch._dynamo.export(
+                f, torch.randn(5, 6), aten_graph=True, tracing_mode="symbolic"
+            )
+
+    @config.patch(assume_static_by_default=True, dynamic_shapes=True)
+    def test_propagate_assume_static_by_default(self):
+        def f(x):
+            if x.shape[0] > 3:
+                return x.sin()
+            return x.cos()
+
+        gm, _ = torch._dynamo.export(
+            f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        for node in gm.graph.nodes:
+            val = node.meta.get("val", None)
+            if val is not None:
+                shapes = val.shape
+                # there should no symbols
+                for shape in shapes:
+                    self.assertTrue(is_concrete_int(shape))
+
+        # this should be captured as static, as export won't generate any symbols.
+        self.assertEqual(gm(torch.ones(2, 4)), torch.ones(2, 4).sin())
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

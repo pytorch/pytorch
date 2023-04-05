@@ -220,7 +220,7 @@ class TestQuantizePT2E(QuantizationTestCase):
 
             node_occurrence = {
                 ns.call_function(torch.ops.aten.convolution.default): 1,
-                ns.call_function(torch.ops.aten.native_batch_norm.default): 1,
+                ns.call_function(torch.ops.aten._native_batch_norm_legit_no_training.default): 1,
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
@@ -234,7 +234,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             # make sure bn is fused into conv
             node_occurrence = {
                 ns.call_function(torch.ops.aten.convolution.default): 1,
-                ns.call_function(torch.ops.aten.native_batch_norm.default): 0,
+                ns.call_function(torch.ops.aten._native_batch_norm_legit_no_training.default): 0,
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
