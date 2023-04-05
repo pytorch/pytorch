@@ -3,6 +3,7 @@ import torch
 __all__ = ["bench_all", "benchmark_compile"]
 
 import torch._dynamo
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch.utils.benchmark import Timer
 
 from typing import Optional, List, Callable, Union, Any, cast
@@ -50,7 +51,7 @@ optimizer.zero_grad()
     # Create the Timer object
     timer = Timer(
         stmt=stmt,
-        globals={"model": model, "sample_input": sample_input, "optimizer": optimizer, "loss_fn": loss_fn}
+        globals={"model": model, "sample_input": sample_input, "optimizer": optimizer, "loss_fn": loss_fn},
     )
 
 
@@ -75,10 +76,14 @@ def benchmark_compile(
     if backend:
         try:
             torch._dynamo.reset()
-            opt_model = torch.compile(model, backend=backend, mode=mode)
+            compile_counter_with_backend = CompileCounterWithBackend(backend)
+            opt_model = torch.compile(model, backend=compile_counter_with_backend, mode=mode)
 
             # Compilation only happens after the first inference
             compilation_time = bench_loop(opt_model, sample_input, 1, optimizer, loss_fn)
+
+            if compile_counter_with_backend.frame_count > 1:
+                raise RuntimeError("Recompilation occurred during benchmarking.")
 
         except Exception as e:
             print(e)
@@ -165,14 +170,14 @@ def bench_all(
                         _disable_tensor_cores()
                         if running_time is not None:
                             speedup = eager_time / running_time
-                        table.append([
-                            ("Training" if optimizer else "Inference"),
-                            backend if backend else "-",
-                            mode if mode is not None else "-",
-                            f"{compilation_time} ms " if compilation_time else "-",
-                            f"{running_time} ms " if running_time else "-",
-                            f"{int(round(speedup * 100, 4))}%" if speedup else "-"
-                        ])
+                            table.append([
+                                ("Training" if optimizer else "Inference"),
+                                backend if backend else "-",
+                                mode if mode is not None else "-",
+                                f"{compilation_time} ms " if compilation_time else "-",
+                                f"{running_time} ms " if running_time else "-",
+                                f"{int(round(speedup * 100, 4))}%" if speedup else "-"
+                            ])
 
         else:
             torch._dynamo.reset()
