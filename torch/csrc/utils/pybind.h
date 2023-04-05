@@ -257,6 +257,18 @@ struct TORCH_PYTHON_API type_caster<c10::SymFloat> {
       handle /* parent */);
 };
 
+template <>
+struct TORCH_PYTHON_API type_caster<c10::SymBool> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymBool, _("bool"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      c10::SymBool si,
+      return_value_policy /* policy */,
+      handle /* parent */);
+};
+
 template <typename T>
 struct type_caster<c10::complex<T>> {
  public:

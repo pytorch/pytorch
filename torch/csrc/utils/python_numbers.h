@@ -116,6 +116,15 @@ inline bool THPUtils_unpackBool(PyObject* obj) {
   }
 }
 
+inline bool THPUtils_checkBool(PyObject* obj) {
+#ifdef USE_NUMPY
+  if (torch::utils::is_numpy_bool(obj)) {
+    return true;
+  }
+#endif
+  return PyBool_Check(obj);
+}
+
 inline bool THPUtils_checkDouble(PyObject* obj) {
 #ifdef USE_NUMPY
   if (torch::utils::is_numpy_scalar(obj)) {
