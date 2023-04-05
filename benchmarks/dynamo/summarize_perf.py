@@ -69,7 +69,7 @@ def main(directory, amp, float32):
             "(inductor_with_cudagraphs|inductor_no_cudagraphs|inductor_dynamic)_"
             "(torchbench|huggingface|timm_models)_"
             "(float32|amp)_"
-            "training_"
+            "(inference|training)_"
             "cuda_"
             r"performance\.csv"
         )
@@ -78,6 +78,7 @@ def main(directory, amp, float32):
         compiler = m.group(1)
         benchmark = m.group(2)
         dtype = m.group(3)
+        mode = m.group(4)
 
         df = pd.concat(v)
         df = df.dropna().query("speedup != 0")
@@ -88,8 +89,11 @@ def main(directory, amp, float32):
             "memory": gmean(df["compression_ratio"]),
         }
 
+        if dtype not in dtypes:
+            continue
+
         for statistic, v in statistics.items():
-            results[dtype][statistic][benchmark][compiler] = v
+            results[f"{dtype} {mode}"][statistic][benchmark][compiler] = v
 
     descriptions = {
         "speedup": "Geometric mean speedup",
@@ -97,9 +101,8 @@ def main(directory, amp, float32):
         "memory": "Peak memory compression ratio",
     }
 
-    for dtype in dtypes:
-        r = results[dtype]
-        print(f"# {dtype} performance results")
+    for dtype_mode, r in results.items():
+        print(f"# {dtype_mode} performance results")
         for statistic, data in r.items():
             print(f"## {descriptions[statistic]}")
 
