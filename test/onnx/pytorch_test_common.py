@@ -1,4 +1,5 @@
 # Owner(s): ["module: onnx"]
+from __future__ import annotations
 
 import functools
 import os
@@ -150,6 +151,26 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
             if self.skip_this_opset and self.is_script:
                 raise unittest.SkipTest(f"Skip verify test for TorchScript. {reason}")
             return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skipDynamicFXTest(reason: str = ""):
+    """Skip dynamic exporting test.
+
+    Args:
+        reason: The reason for skipping scripting test.
+
+    Returns:
+        A decorator for skipping scripting test.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            raise unittest.SkipTest(f"Skip verify test for FX. {reason}")
 
         return wrapper
 

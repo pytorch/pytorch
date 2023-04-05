@@ -211,7 +211,9 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @unittest.skip("flaky test: https://github.com/microsoft/onnx-script/issues/523")
+    @unittest.skip(
+        "flaky test: https://github.com/microsoft/onnx-script/issues/523. Fixed in ORT-nightly"
+    )
     def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
             def forward(self, x, y):
