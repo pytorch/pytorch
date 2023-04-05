@@ -341,6 +341,42 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(all_live_block_count(), 0)
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_aliased_output_checkpoint(self):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                y = x + 2
+                return x + 1, y, y[0]
+
+            inp = torch.rand([4, 4], device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [inp], ())
+            foo_cg([inp])
+            foo_cg([inp])
+
+            out1, out2, out3 = foo_cg([inp])
+            inp = [out1]
+
+            del out1, out2, out3
+
+            def foo2(args):
+                x = args[0]
+                args.clear()
+                return [x * x * x]
+
+            self.assertEqual(self.num_checkpoints(), 0)
+            foo2_cg = self.cudagraphify_impl(foo2, inp, ())
+
+            x = foo2_cg(inp)[0]
+
+            self.assertEqual(self.num_checkpoints(), 1)
+            # out2 and out3 dies between the previous recording and the new one,
+            # need to be manually deallocated after the checkpoint
+
+            self.assertEqual(all_live_block_count(), 1)
+            del x
+            self.assertEqual(all_live_block_count(), 0)
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_tensor_no_longer_in_pool(self):
             def foo(args):
                 x = args[0]
