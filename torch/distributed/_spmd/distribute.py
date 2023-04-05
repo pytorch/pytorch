@@ -491,7 +491,7 @@ def _convert_to_distributed(
                     torch.ops.aten.scalar_tensor(
                         node.args[0],
                         dtype=node.kwargs["dtype"],
-                        device=node.kwargs["device"]
+                        device=node.kwargs["device"],
                     ),
                     schemas[0].mesh,
                     [Replicate()],
@@ -499,9 +499,7 @@ def _convert_to_distributed(
                     run_check=False,
                 )
             else:
-                replacement = _get_dtensor_dispatch_graph(
-                    node, node_to_obj
-                )
+                replacement = _get_dtensor_dispatch_graph(node, node_to_obj)
                 if replacement is not None:
                     node_replacements[node] = replacement
         elif node.op == OP.OUTPUT:
