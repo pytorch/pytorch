@@ -1582,7 +1582,7 @@ class Module:
 
         return result
 
-    __call__ : Callable[..., Any] = _wrapped_call_impl
+    __call__ : Callable[..., Any] = _call_impl if torch.jit.is_scripting() else _wrapped_call_impl
 
     def __getstate__(self):
         state = self.__dict__.copy()
