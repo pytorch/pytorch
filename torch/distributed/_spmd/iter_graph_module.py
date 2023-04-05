@@ -8,8 +8,8 @@ import torch.nn as nn
 from torch import fx
 from torch.fx.graph import PythonCode
 from torch.fx.node import Argument
-from torch.utils._pytree import tree_flatten, tree_map
 from torch.profiler import record_function
+from torch.utils._pytree import tree_flatten, tree_map
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -24,7 +24,7 @@ class IterGraph(fx.Graph):
     IterGraph subclass fx.Graph to override the necessary APIs that will be used
     when constructing a optimization, e.g., communication fusion. IterGraph also
     provides APIs that originally belong to fx.Node and all these APIs will have
-    ``node_`` prefix. For example, ``IterGraph.node_prepend`` is the equivalance
+    ``node_`` prefix. For example, ``IterGraph.node_prepend`` is the equivalence
     of ``fx.Node.prepend``. Note that all the optimizations must be constructed
     using these APIs.
     """
@@ -49,9 +49,7 @@ class IterGraph(fx.Graph):
         self._codegen = copy.deepcopy(orig_graph._codegen)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
-        super().output(
-            output_val, type_expr=getattr(old_output_val, "type", None)
-        )
+        super().output(output_val, type_expr=getattr(old_output_val, "type", None))
 
         self.setup_graph = setup_graph
         self.cleanup_graph = cleanup_graph
@@ -85,9 +83,7 @@ class IterGraph(fx.Graph):
             for graph in self._all_graphs:
                 if node:
                     actual_node = self._lookup_node(node, graph)
-                    assert (
-                        actual_node is not None
-                    ), "Cannot handle None case now."
+                    assert actual_node is not None, "Cannot handle None case now."
                 else:
                     actual_node = node
                 stack.enter_context(getattr(graph, func)(actual_node))
@@ -115,12 +111,12 @@ class IterGraph(fx.Graph):
         looks similar to SESE graph.
 
         1. Only one node has inputs/args from the external nodes (not in subgraph).
-        2. Only one node has a user from the the external nodes and the user must
+        2. Only one node has a user from the external nodes and the user must
            be output. The output condition is not strictly enforced due to the
            testing purpose.
 
         SESE graph is very restrict and is not applicable for all optimizations.
-        But this gives a good start point to explor cross-iteration optimizations.
+        But this gives a good start point to explore cross-iteration optimizations.
         """
         all_nodes: Set[fx.Node] = set(subgraph)
         for i, node in enumerate(subgraph):
@@ -131,7 +127,7 @@ class IterGraph(fx.Graph):
                     return False
             if i == len(subgraph) - 1:
                 # TODO: the only user must be the output. Otherwise, we don't
-                # know how to move this subgraph. We currently do not stricly
+                # know how to move this subgraph. We currently do not strictly
                 # force this attribute because some test code create fake output.
                 if len(node.users) > 1:
                     return False
@@ -165,9 +161,7 @@ class IterGraph(fx.Graph):
         self._fx_graph_call(graph, "erase_node", output)
         self._fx_graph_call(graph, "output", new_output)
 
-    def move_to_next_iter_before(
-        self, nodes: List[fx.Node], target_node: fx.Node
-    ):
+    def move_to_next_iter_before(self, nodes: List[fx.Node], target_node: fx.Node):
         if self._freeze_cross_iter_movement:
             raise RuntimeError(
                 "The cross-iteration movement has been freeze for the given "
@@ -182,7 +176,7 @@ class IterGraph(fx.Graph):
             )
 
         # The main graph must be the last one to be modified. Otherwise, the
-        # mapping may change and hence intorduce incorrect mapping for setup
+        # mapping may change and hence introduce incorrect mapping for setup
         # and cleanup graphs.
 
         # For the setup graph, no additional input is needed but additional
@@ -194,14 +188,10 @@ class IterGraph(fx.Graph):
 
         # For the cleanup graph, additional input is required to get the output
         # from the last iteration -- main graph. Additional nodes are also
-        # needed to perform the action moved from the last itertion.
-        new_input_node = self.cleanup_graph.placeholder(
-            nodes[0].name + "_input"
-        )
+        # needed to perform the action moved from the last iteration.
+        new_input_node = self.cleanup_graph.placeholder(nodes[0].name + "_input")
         target_cleanup_node = self._lookup_node(target_node, self.cleanup_graph)
-        assert (
-            target_cleanup_node is not None
-        ), "The target_cleanup_node is None."
+        assert target_cleanup_node is not None, "The target_cleanup_node is None."
         node_mapping: Dict[fx.Node, fx.Node] = {}
         with self.cleanup_graph.inserting_before(target_cleanup_node):
             last_new_cleanup_node: Optional[fx.Node] = None
@@ -247,9 +237,7 @@ class IterGraph(fx.Graph):
         # the output from the last iteration -- main graph or setup graph.
         # Additional output will also be generated to represent the input for
         # the next iteration -- the main graph or the cleanup graph.
-        self._convert_sese_input_to_output(
-            nodes=nodes, graph=self, erase_node=False
-        )
+        self._convert_sese_input_to_output(nodes=nodes, graph=self, erase_node=False)
         new_input_node = self.placeholder(nodes[0].name + "_input")
         nodes[0].args = (new_input_node,)
         for node in nodes:
@@ -333,9 +321,7 @@ class IterGraph(fx.Graph):
         cleanup_node = self._lookup_node(to_erase, self.cleanup_graph)
         self.cleanup_graph.erase_node(cleanup_node)
 
-    def output(
-        self, result: Argument, type_expr: Optional[Any] = None
-    ) -> fx.Node:
+    def output(self, result: Argument, type_expr: Optional[Any] = None) -> fx.Node:
         if self._freeze_cross_iter_movement:
             return super().output(result, type_expr)
 
@@ -463,7 +449,7 @@ class IterGraph(fx.Graph):
 
     def functionalize_optim(self) -> None:
         # IterGraph can only support full graph (fwd+bwd+optim). As optimizer
-        # is not a functional call (it is inplace op), this mehod adds the of
+        # is not a functional call (it is inplace op), this method adds the of
         # the optimizer call. This method has strong assumption of the optimizer
         # and may not always be working. This method is intended be a temporary
         # solution only.
@@ -527,9 +513,7 @@ class IterGraphModule(nn.Module):
         self.cleanup_gm = _copy_gm(main_gm, copy.deepcopy(main_gm.graph))
         self.main_gm = _copy_gm(
             main_gm,
-            IterGraph(
-                main_gm.graph, self.setup_gm.graph, self.cleanup_gm.graph
-            ),
+            IterGraph(main_gm.graph, self.setup_gm.graph, self.cleanup_gm.graph),
         )
 
         self._iter = 0
@@ -562,8 +546,7 @@ class IterGraphModule(nn.Module):
                     output, tuple
                 ), f"Only support tuple output now. {type(output)}"
                 num_actual_output = (
-                    len(output)
-                    - cast(IterGraph, self.main_gm.graph).num_extra_output
+                    len(output) - cast(IterGraph, self.main_gm.graph).num_extra_output
                 )
                 assert num_actual_output > 0
                 self._previous_output = output[num_actual_output:]
@@ -574,9 +557,7 @@ class IterGraphModule(nn.Module):
             # No cross-iteration optimization is done. Simply call the
             # GraphModule.
             output = gm(*args, **kwargs)
-        logger.debug(
-            f"The output information: size={len(output)}, type={type(output)}"
-        )
+        logger.debug(f"The output information: size={len(output)}, type={type(output)}")
         return output
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
