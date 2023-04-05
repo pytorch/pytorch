@@ -2588,6 +2588,10 @@ class LoopLevel:
         return loop
 
     def lines(self):
+        offset_expr = cexpr_index(self.offset)
+        size_expr = cexpr_index(self.size)
+        if config.cpp.no_redundant_loops and offset_expr == size_expr:
+            return None
         if self.reduction_var_map:
             reduction = " " + " ".join(
                 f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
@@ -2615,13 +2619,9 @@ class LoopLevel:
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
-        offset_str = f"{INDEX_TYPE} {self.var}={cexpr_index(self.offset)}"
-        size_str = f"{self.var}<{cexpr_index(self.size)}"
+        offset_str = f"{INDEX_TYPE} {self.var}={offset_expr}"
+        size_str = f"{self.var}<{size_expr}"
         steps_str = f"{self.var}+={cexpr_index(self.steps)}"
-        if cexpr_index(self.offset) == cexpr_index(self.size):
-            # Do not generate loops when the condition doesn't hold, like:
-            # for(long i0=4096; i0<4096; i0+=1)
-            return None
         line2 = f"for({offset_str}; {size_str}; {steps_str})"
         if self.collapsed or not line1:
             return [line2]

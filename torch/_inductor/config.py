@@ -165,6 +165,10 @@ class cpp:
     # set to torch.get_num_threads()
     threads = -1
 
+    # Do not generate loops when the condition doesn't hold, like:
+    # for(long i0=4096; i0<4096; i0+=1)
+    no_redundant_loops = True
+
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
     # For single-threaded workload, turning it on would incur a slight
