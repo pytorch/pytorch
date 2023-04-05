@@ -204,7 +204,7 @@ cudaError_t GetDeviceCount(int* dev_count) {
 // x = torch.empty(1, device=“cuda:1”) # no CUDA context on cuda:0 after this
 // call y = torch.empty(1, device=“cuda”) # CUDA context is created on cuda:0
 // ```
-#if CUDA_VERSION >= 12000
+#if CUDA_VERSION >= 11000
 thread_local int targetDeviceIndex = -1;
 
 cudaError_t GetDevice(int* device) {
@@ -223,7 +223,9 @@ cudaError_t SetDevice(int device) {
   if (device == cur_device) {
     return cudaSuccess;
   }
-  return cudaSetDevice(device);
+  cudaError_t err = cudaSetDevice(device);
+  C10_CUDA_CHECK(cudaFree(0));
+  return err;
 }
 
 cudaError_t MaybeSetDevice(int device) {
