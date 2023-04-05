@@ -250,6 +250,14 @@ def get_container(device_index: int):
         return container_dict[device_index]
 
 
+def get_manager(
+    device_index: int, create_if_none_exists=True
+) -> Optional[CUDAGraphTreeManager]:
+    if create_if_none_exists:
+        return get_container(device_index).get_tree_manager()
+    return get_container(device_index).tree_manager
+
+
 def cudagraphify_impl(
     model,
     inputs,
@@ -1103,11 +1111,11 @@ class CUDAGraphTreeManager:
         # will not be reused; separate recordings would have use the same memory pool, but not
         # the same memory.
 
-        torch.cuda.synchronize()
-        self.stream = torch.cuda.Stream()
-        self.stream.wait_stream(torch.cuda.current_stream())
-
         with torch.cuda.device(device_index):
+            torch.cuda.synchronize()
+            self.stream = torch.cuda.Stream()
+            self.stream.wait_stream(torch.cuda.current_stream())
+
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
             # Keeps Memory Pool Alive
             self.graph = torch.cuda.CUDAGraph()
@@ -1148,8 +1156,21 @@ class CUDAGraphTreeManager:
 
         self.id_to_mode: Dict[int, CompilationMode] = {}
 
-        # forwards that have been invoked without invocation of their corresponding backwards
-        self.forwards_with_pending_backwards: int = 0
+        # Note: [Backward Generation Handling]
+        # We generally perform a sequence of forward executions followed by backward executions.
+        # If multiple torch.compile wrapped forwards are executed with their backwards pending,
+        # we should not disregard the outputs from a prior torch.compile since the entire training
+        # loop hasn't completed.  Occasionally, a backward pass corresponding to a forward pass may
+        # not be executed, so we cannot wait for all pending forward pass backward completions, so
+        # we cannot wait for all backwards to have been invoked. Instead we wait for a single backward
+        # invocation. Triggering a backward pass typically doesn't lead to another torch.compile
+        # invocation, making it less likely for the generation to increase between multiple
+        # backward calls. The following use case is covered by this approach:
+        # mod1 = torch.compile(...)
+        # mod2 = torch.compile(...)
+        # mod2(mod1(x)).sum().backward()
+
+        self.running_forwards_with_pending_backwards = False
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
         out = self._run(new_inputs, function_id)
@@ -1157,11 +1178,14 @@ class CUDAGraphTreeManager:
         # The forwards are only pending following invocation, not before
         mode = self.id_to_mode[function_id]
         if mode == CompilationMode.FORWARD:
-            self.forwards_with_pending_backwards += 1
+            self.running_forwards_with_pending_backwards = True
         elif mode == CompilationMode.BACKWARD:
-            self.forwards_with_pending_backwards -= 1
+            self.running_forwards_with_pending_backwards = False
 
         return out
+
+    def set_to_running_backward(self):
+        self.running_forwards_with_pending_backwards = False
 
     def _run(self, new_inputs: List[Tensor], function_id: FunctionID):
         # we will try to end the current execution lazily, since
@@ -1327,7 +1351,7 @@ class CUDAGraphTreeManager:
         return GenerationTracker.generation
 
     def can_start_new_generation(self) -> bool:
-        if self.forwards_with_pending_backwards != 0:
+        if self.running_forwards_with_pending_backwards:
             return False
         return self.current_gen != self.get_curr_generation()
 

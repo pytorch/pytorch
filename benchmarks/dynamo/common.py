@@ -248,32 +248,17 @@ CI_SKIP[CI("inductor", training=True)] = [
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
-    # torchbench
-    "vision_maskrcnn",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
-    # timm_models
-    "botnet26t_256",  # sympy RecursionError
-    "eca_botnext26ts_256",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
-    # torchbench
-    "functorch_dp_cifar10",  # timeout
-    "opacus_cifar10",  # timeout
-    "PegasusForCausalLM",  # TypeError: Cannot convert symbols to int
-    "PegasusForConditionalGeneration",  # TypeError: Cannot convert symbols to int
-    # timm_models
-    "convit_base",  # TypeError: Cannot convert symbols to int
-    "pnasnet5large",  # CompilationError: math.ceil
-    "tf_efficientnet_b0",  # CompilationError: math.ceil
-    # huggingface
-    "GoogleFnet",  # Cannot call sizes() on tensor with symbolic sizes/strides
+    "convit_base",  # _print_Pow: assert exp.is_integer
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -281,8 +266,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    # timm_models
-    "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
 
 CI_SKIP_OPTIMIZER = {
