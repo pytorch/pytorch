@@ -3342,18 +3342,16 @@ class TestSparseCompressedTritonKernels(TestCase):
         def kernel_impl(*args, **kwargs):
             return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
-        wrapped_kernel_impl = torch._WrappedTritonKernel(kernel_impl)
-
         kernel = torch._TritonLibrary.probablyRegisterOp(
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
-            wrapped_kernel_impl,
+            kernel_impl,
             "SparseCsrCUDA"
         )
 
-        # kernel != wrapped_kernel_impl means dispatch was already registered.
+        # kernel != kernel_impl means dispatch was already registered.
         # This is exactly what we need!
-        self.assertTrue(kernel is not wrapped_kernel_impl)
+        self.assertTrue(kernel is not kernel_impl)
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
