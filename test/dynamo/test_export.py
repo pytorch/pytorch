@@ -2345,7 +2345,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             f_correct, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
         )
 
-        self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
+        self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
