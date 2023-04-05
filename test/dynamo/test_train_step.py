@@ -1,6 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import functools
-import unittest
 from copy import deepcopy
 
 import torch
@@ -9,9 +7,6 @@ import torch._dynamo
 import torch._dynamo.backends.ipex
 import torch._dynamo.test_case
 from torch._dynamo.testing import same
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 class Seq(torch.nn.Module):
@@ -85,6 +80,25 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             self.assertTrue(name in opt_params)
             self.assertTrue(same(correct_params[name], opt_params[name]))
         self.assertTrue(same(correct_loss, opt_loss))
+
+    def test_smoke(self):
+        # currently test_sgd and smoke both fail with the same error:
+        # RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
+        # paste: https://www.internalfb.com/phabricator/paste/view/P682652292
+        def train_step(model, optimizer, inputs):
+            out = model(*inputs)
+            loss = out.sum()
+            loss.backward()
+            optimizer.step()
+            model.zero_grad()
+            return loss
+
+        opt_model = Seq()
+        opt_model.apply(init_weights)
+        opt_optimizer = torch.optim.SGD(opt_model.parameters(), lr=0.01, momentum=0.9)
+        inputs = [torch.randn((128, 10))]
+        opt_train_step = torch.compile(train_step, backend="train_step_eager")
+        opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
 
 
 if __name__ == "__main__":
