@@ -38,6 +38,8 @@ class TestCompileBenchmarkUtil(TestCase):
         training_table = bench_all(model, torch.ones(1024, 2, 2).cuda(), 5, optimizer=torch.optim.SGD(model.parameters(), lr=0.01))
         self.assertTrue("Train" in training_table and "Eager" in training_table and "-" in training_table)
 
-
+        print(inference_table)
+        print()
+        print(training_table)
 if __name__ == '__main__':
     run_tests()
