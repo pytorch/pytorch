@@ -4,7 +4,7 @@
 #include <torch/csrc/python_headers.h>
 
 template <class T>
-class THPPointer {
+class TORCH_PYTHON_API THPPointer {
  public:
   THPPointer() : ptr(nullptr){};
   explicit THPPointer(T* ptr) noexcept : ptr(ptr){};
@@ -50,7 +50,7 @@ class THPPointer {
   }
 
  private:
-  TORCH_PYTHON_API void free();
+  void free();
   T* ptr = nullptr;
 };
 
