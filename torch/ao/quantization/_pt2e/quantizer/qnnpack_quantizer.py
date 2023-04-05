@@ -3,7 +3,7 @@ from .quantizer import Quantizer
 
 import copy
 from dataclasses import dataclass
-from typing import Callable, Tuple, Union, List, NamedTuple, Optional
+from typing import List, NamedTuple, Optional, Set
 from torch.ao.quantization.observer import (
     PlaceholderObserver,
     HistogramObserver,
@@ -65,7 +65,7 @@ OperatorSpec = NamedTuple(
 )
 
 SpecAndOperators = NamedTuple(
-    "SupportedSpecAndOperators",
+    "SpecAndOperators",
     [("operator_spec", OperatorSpec), ("operators", List[str])]
 )
 
@@ -128,14 +128,14 @@ class OperatorSpecConfig:
 
     def __init__(self):
         super().__init__()
-        self.global_spec = None
-        self.operator_type_specs = {}
+        self.global_spec: Optional[OperatorSpec] = None
+        self.operator_type_specs: Dict[str, OperatorSpec] = {}
 
-    def set_global(self, operator_spec: OperatorSpec) -> OperatorSpecConfig:
+    def set_global(self, operator_spec: Optional[OperatorSpec]) -> OperatorSpecConfig:
         self.global_spec = operator_spec
         return self
 
-    def set_operator_type(self, operator_type: str, operator_spec: OperatorSpec) -> OperatorSpecConfig:
+    def set_operator_type(self, operator_type: str, operator_spec: Optional[OperatorSpec]) -> OperatorSpecConfig:
         self.operator_type_specs[operator_type] = operator_spec
         return self
 
@@ -151,7 +151,13 @@ def _get_act_observer(tensor_spec: TensorSpec):
     qdtype = _TORCH_DTYPE_TO_QDTYPE[tensor_spec.dtype]
     assert tensor_spec.qscheme in [torch.per_tensor_affine, torch.per_tensor_symmetric]
     if not tensor_spec.is_dynamic:
-        return HistogramObserver.with_args(dtype=qdtype, quant_min=tensor_spec.quant_min, quant_max=tensor_spec.quant_max, reduce_range=False, eps=2**-12)
+        return HistogramObserver.with_args(
+            dtype=qdtype,
+            quant_min=tensor_spec.quant_min,
+            quant_max=tensor_spec.quant_max,
+            reduce_range=False,
+            eps=2**-12
+        )
     else:
         # TODO: extend this helper function to support dynamic quantization
         raise Exception("Unsupported tensor_spec for activation: {}".format(tensor_spec))
@@ -159,9 +165,21 @@ def _get_act_observer(tensor_spec: TensorSpec):
 def _get_weight_observer(tensor_spec: TensorSpec):
     qdtype = _TORCH_DTYPE_TO_QDTYPE[tensor_spec.dtype]
     if tensor_spec.qscheme == torch.per_tensor_symmetric:
-        return MinMaxObserver.with_args(qscheme=tensor_spec.qscheme, dtype=qdtype, quant_min=tensor_spec.quant_min, quant_max=tensor_spec.quant_max, eps=2**-12)
+        return MinMaxObserver.with_args(
+            qscheme=tensor_spec.qscheme,
+            dtype=qdtype,
+            quant_min=tensor_spec.quant_min,
+            quant_max=tensor_spec.quant_max,
+            eps=2**-12
+        )
     elif tensor_spec.qscheme == torch.per_channel_symmetric:
-        return PerChannelMinMaxObserver.with_args(qscheme=tensor_spec.qscheme, dtype=qdtype, quant_min=tensor_spec.quant_min, quant_max=tensor_spec.quant_max, eps=2**-12)
+        return PerChannelMinMaxObserver.with_args(
+            qscheme=tensor_spec.qscheme,
+            dtype=qdtype,
+            quant_min=tensor_spec.quant_min,
+            quant_max=tensor_spec.quant_max,
+            eps=2**-12
+        )
     else:
         raise Exception("Unsupported tensor_spec for weight: {}".format(tensor_spec))
 
@@ -184,28 +202,31 @@ class QNNPackQuantizer(Quantizer):
         return list(op_specs)
 
     @classmethod
-    def get_supported_operator_for_operator_spec(self, operator_spec: OperatorSpec) -> List[str]:
+    def get_supported_operator_for_operator_spec(cls, operator_spec: OperatorSpec) -> List[str]:
         ops: Set[str] = set({})
-        for spec, op in self.supported_spec_and_operators:
+        for spec, op in cls.supported_spec_and_operators:
             if spec == operator_spec:
                 ops.add(op)
         return ops
 
-    def set_global(self, operator_spec: OperatorSpec):
+    def set_global(self, operator_spec: Optional[OperatorSpec]) -> QNNPackQuantizer:
         self.operator_spec_config.set_global(operator_spec)
+        return self
 
     def set_spec_for_operator_type(
-        self, operator_type: str, operator_spec: OperatorSpec
-    ):
+        self, operator_type: str, operator_spec: Optional[OperatorSpec]
+    ) -> QNNPackQuantizer:
         self.operator_spec_config.set_operator_type(operator_type, operator_spec)
+        return self
 
-    def annotate(self, model: torch.fx.GraphModule) -> None:
+    def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """ just handling global spec for now
         """
         global_spec = self.operator_spec_config.global_spec
         ops = self.get_supported_operator_for_operator_spec(global_spec)
         for op in ops:
             self._annotate_op(model, op, global_spec)
+        return model
 
     def _annotate_op(self, model: torch.fx.GraphModule, op: str, operator_spec: OperatorSpec) -> None:
         _DEFAULT_TARGET_DTYPE_INFO = {
@@ -230,5 +251,5 @@ class QNNPackQuantizer(Quantizer):
                     if isinstance(arg, Node) and "target_dtype_info" not in arg.meta:
                         arg.meta["target_dtype_info"] = _DEFAULT_TARGET_DTYPE_INFO
 
-    def validate(self, graph_module: torch.fx.GraphModule) -> None:
+    def validate(self, model: torch.fx.GraphModule) -> None:
         pass

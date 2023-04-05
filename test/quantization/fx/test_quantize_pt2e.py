@@ -482,7 +482,3 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             # of quant/dequant
             self.assertTrue(torch.max(after_quant_result - after_quant_result_fx) < 1e-1)
             self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) > 35)
-
-if __name__ == "__main__":
-    import unittest
-    unittest.main()

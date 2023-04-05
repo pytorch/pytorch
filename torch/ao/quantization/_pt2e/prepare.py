@@ -15,7 +15,7 @@ from torch.fx import Node
 
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
-from typing import Dict, Tuple, Any
+from typing import Dict, Tuple
 
 def _maybe_insert_input_and_output_observers_for_node(
     node: Node,
@@ -41,13 +41,13 @@ def _maybe_insert_input_and_output_observers_for_node(
 
     _maybe_insert_input_observers_for_node(
         node,
-        None, # qconfig
+        None,  # qconfig
         model,
         named_modules,
         model.graph,
-        None, # qhandler
+        None,  # qhandler
         PrepareCustomConfig(),
-        None, # backend_config
+        None,  # backend_config
     )
 
     # this returns the new observer node if it was needed
