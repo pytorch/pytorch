@@ -72,6 +72,19 @@ struct is_floating_point:
       std::is_same<T, at::BFloat16>::value> {
 };
 
+template<typename T>
+constexpr bool is_floating_point_v = is_floating_point<T>::value;
+
+template <typename T>
+struct is_reduced_floating_point:
+    std::integral_constant<bool,
+      std::is_same<T, at::Half>::value ||
+      std::is_same<T, at::BFloat16>::value> {
+};
+
+template <typename T>
+constexpr bool is_reduced_floating_point_v = is_reduced_floating_point<T>::value;
+
 template<size_t n> struct int_of_size;
 
 #define DEFINE_INT_OF_SIZE(int_t) \
@@ -256,14 +269,14 @@ public:
     return ret;
   }
   template <typename other_t_abs = T,
-            typename std::enable_if<!is_floating_point<other_t_abs>::value && !c10::is_complex<other_t_abs>::value, int>::type = 0>
+            typename std::enable_if<!is_floating_point_v<other_t_abs> && !c10::is_complex<other_t_abs>::value, int>::type = 0>
   Vectorized<T> abs() const {
     // other_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_abs, T>::value, "other_t_abs must be T");
     return map([](T x) -> T { return x < static_cast<T>(0) ? -x : x; });
   }
   template <typename float_t_abs = T,
-            typename std::enable_if<is_floating_point<float_t_abs>::value, int>::type = 0>
+            typename std::enable_if<is_floating_point_v<float_t_abs>, int>::type = 0>
   Vectorized<T> abs() const {
     // float_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<float_t_abs, T>::value, "float_t_abs must be T");
@@ -360,7 +373,7 @@ public:
   }
   template <
     typename U = T,
-    typename std::enable_if_t<is_floating_point<U>::value, int> = 0>
+    typename std::enable_if_t<is_floating_point_v<U>, int> = 0>
   Vectorized<T> copysign(const Vectorized<T> &sign) const {
     Vectorized<T> ret;
     for (size_type i = 0; i < size(); i++) {
@@ -391,7 +404,7 @@ public:
   }
   template <
     typename U = T,
-    typename std::enable_if_t<is_floating_point<U>::value, int> = 0>
+    typename std::enable_if_t<is_floating_point_v<U>, int> = 0>
   Vectorized<T> fmod(const Vectorized<T>& q) const {
     // U is for SFINAE purposes only. Make sure it is not changed.
     static_assert(std::is_same<U, T>::value, "U must be T");

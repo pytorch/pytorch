@@ -17,7 +17,6 @@ import threading
 import unittest
 import warnings
 import subprocess
-import random
 from random import randint
 
 import torch
@@ -100,13 +99,11 @@ class TestCuda(TestCase):
         expected_each_device = collections.defaultdict(lambda: collections.defaultdict(int))
 
         for segment in snapshot:
-            expandable = segment["is_expandable"]
             expected = expected_each_device[segment["device"]]
             pool_str = segment["segment_type"] + "_pool"
 
-            if not expandable:
-                expected["segment.all.current"] += 1
-                expected["segment." + pool_str + ".current"] += 1
+            expected["segment.all.current"] += 1
+            expected["segment." + pool_str + ".current"] += 1
 
             expected["allocated_bytes.all.current"] += segment["allocated_size"]
             expected["allocated_bytes." + pool_str + ".current"] += segment["allocated_size"]
@@ -132,7 +129,7 @@ class TestCuda(TestCase):
                     expected["active.all.current"] += 1
                     expected["active." + pool_str + ".current"] += 1
 
-                if block["state"] == "inactive" and is_split and not expandable:
+                if block["state"] == "inactive" and is_split:
                     expected["inactive_split.all.current"] += 1
                     expected["inactive_split." + pool_str + ".current"] += 1
                     expected["inactive_split_bytes.all.current"] += block["size"]
@@ -143,7 +140,6 @@ class TestCuda(TestCase):
         for device, expected in expected_each_device.items():
             stats = torch.cuda.memory_stats(device)
             for k, v in expected.items():
-                print(k, v, stats[k])
                 self.assertEqual(v, stats[k])
 
     @staticmethod
@@ -5017,7 +5013,7 @@ class TestCudaComm(TestCase):
             del x
             torch.cuda.empty_cache()
             ss = torch.cuda.memory._snapshot()
-            self.assertTrue(ss['device_traces'][0][-1]['action'] in ('segment_free', 'segment_unmap'))
+            self.assertTrue(ss['device_traces'][0][-1]['action'] == 'segment_free')
 
         finally:
             torch.cuda.memory._record_memory_history(None)
@@ -5271,39 +5267,6 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
-
-    def test_allocator_fuzz(self):
-        # fuzz
-        state = random.getstate()
-        random.seed(123)
-        N = 10000
-        try:
-            mem = []
-            total = 0
-            c = 0
-
-            def alloc():
-                nonlocal total, c
-                b = random.randrange(2 * 1024 * 1024 // 4, 200 * 1024 * 1024 // 4)
-                mem.append((c, torch.full((b,), c, dtype=torch.int32, device='cuda')))
-                c += 1
-                total += b
-
-            def free():
-                nonlocal total
-                idx = random.randrange(0, len(mem))
-                v, x = mem.pop(idx)
-                assert torch.all(v == x)
-                total -= x.numel()
-
-            choices = [alloc, free, torch.cuda.memory.empty_cache]
-            for i in range(N):
-                while total >= 1024 * 1024 * 1024:
-                    free()
-                action, = random.choices(choices, weights=[1, 1 if mem else 0, .1])
-                action()
-        finally:
-            random.setstate(state)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_nvml_get_handler(self):
