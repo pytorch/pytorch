@@ -47,9 +47,9 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyLong_FromVoidPtr(THPStorage_Unpack(self)
-                                .unsafeGetStorageImpl()
-                                ->mutable_unsafe_data<uint8_t>());
+  // PyLong_FromVoidPtr should not need to mutate the pointer in order
+  // to extract a new long object from it.
+  return PyLong_FromVoidPtr(const_cast<void*>(THPStorage_Unpack(self).data()));
   END_HANDLE_TH_ERRORS
 }
 
@@ -84,9 +84,7 @@ static PyObject* THPStorage_isPinned(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 #if defined(USE_CUDA)
   return PyBool_FromLong(
-      at::globalContext().isPinnedPtr(THPStorage_Unpack(self)
-                                          .unsafeGetStorageImpl()
-                                          ->mutable_unsafe_data<uint8_t>()));
+      at::globalContext().isPinnedPtr(THPStorage_Unpack(self).data()));
 #else
   Py_RETURN_FALSE;
 #endif
@@ -282,61 +280,61 @@ static PyObject* THPStorage_fromBuffer(
     // we are trying to get a value which is not 0 or 1, we have to manually
     // convert original values to boolean ones.
     torch::utils::THP_decodeBoolBuffer(
-        storage->mutable_unsafe_data<bool>(),
+        static_cast<bool*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kShort) {
     torch::utils::THP_decodeInt16Buffer(
-        storage->mutable_unsafe_data<int16_t>(),
+        static_cast<int16_t*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kInt) {
     torch::utils::THP_decodeInt32Buffer(
-        storage->mutable_unsafe_data<int32_t>(),
+        static_cast<int32_t*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kLong) {
     torch::utils::THP_decodeInt64Buffer(
-        storage->mutable_unsafe_data<int64_t>(),
+        static_cast<int64_t*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kHalf) {
     torch::utils::THP_decodeHalfBuffer(
-        storage->mutable_unsafe_data<c10::Half>(),
+        static_cast<c10::Half*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kBFloat16) {
     torch::utils::THP_decodeBFloat16Buffer(
-        storage->mutable_unsafe_data<c10::BFloat16>(),
+        static_cast<c10::BFloat16*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kFloat) {
     torch::utils::THP_decodeFloatBuffer(
-        storage->mutable_unsafe_data<float>(),
+        static_cast<float*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kDouble) {
     torch::utils::THP_decodeDoubleBuffer(
-        storage->mutable_unsafe_data<double>(),
+        static_cast<double*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kComplexFloat) {
     torch::utils::THP_decodeComplexFloatBuffer(
-        storage->mutable_unsafe_data<c10::complex<float>>(),
+        static_cast<c10::complex<float>*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kComplexDouble) {
     torch::utils::THP_decodeComplexDoubleBuffer(
-        storage->mutable_unsafe_data<c10::complex<double>>(),
+        static_cast<c10::complex<double>*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
