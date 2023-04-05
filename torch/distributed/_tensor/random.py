@@ -1,7 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import torch
-from torch import Tensor
+import torch.distributed as dist
 
+from torch import Tensor
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
 
@@ -10,7 +11,7 @@ def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
     """Sets the random number generator state of the specified device mesh.
 
     Args:
-        new_state (torch.ByteTensor): The desired state.
+        new_state (:class:`torch.ByteTensor`): The desired state.
         device_mesh (:class:`DeviceMesh`): The device mesh to set the RNG state.
 
     Returns:
@@ -21,7 +22,11 @@ def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
         `set_rng_state` will not set its GPU device's generator state.
     """
-    if device_mesh is not None and device_mesh.get_coordinate() is not None:
+    assert isinstance(
+        device_mesh, DeviceMesh
+    ), f"expect a DeviceMesh but {device_mesh} was passed in."
+
+    if device_mesh.get_coordinate() is not None:
         # the current rank is in mesh
         if device_mesh.device_type == "cuda":
             torch.cuda.set_rng_state(new_state)
@@ -32,22 +37,23 @@ def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
 
 
 def get_rng_state(device_mesh: DeviceMesh) -> Tensor:
-    """Returns the random number generator state of the calling rank as a ByteTensor.
+    """Returns the random number generator state of the calling rank as a
+    :class:`torch.ByteTensor` object.
 
     Args:
         device_mesh (:class:`DeviceMesh`): The device mesh to return the RNG state of.
 
     Returns:
-        A :class:`Tensor` object that contains the random number generator state.
+        A :class:`torch.ByteTensor` object that contains the random number generator state.
 
     .. warning::
         Current implementation only supports a GPU device mesh.
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
         `get_rng_state` still returns its GPU device's generator state.
     """
-    assert (
-        device_mesh is not None
-    ), f"expect a DeviceMesh parameter but {device_mesh} was passed in."
+    assert isinstance(
+        device_mesh, DeviceMesh
+    ), f"expect a DeviceMesh but {device_mesh} was passed in."
 
     if device_mesh.device_type == "cuda":
         return torch.cuda.get_rng_state()
@@ -75,13 +81,11 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
         `manual_seed` will not set its GPU device's generator seed.
         Current implementation only supports a GPU device mesh.
     """
-    assert (
-        device_mesh is not None
-    ), f"expect a DeviceMesh parameter but {device_mesh} was passed in."
+    assert isinstance(
+        device_mesh, DeviceMesh
+    ), f"expect a DeviceMesh but {device_mesh} was passed in."
 
-    import torch.distributed as dist
-
-    # broadcast the seed from rank 0 over the default PG
+    # allgather the seed from rank 0 over the default PG
     object_list = [seed] * dist.get_world_size()
     dist.all_gather_object(object_list, seed)
     for rank, object in enumerate(object_list):
@@ -118,7 +122,11 @@ def _set_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
         `_set_offset` will not set its GPU device's generator offset.
     """
-    if device_mesh is not None and device_mesh.get_coordinate() is not None:
+    assert isinstance(
+        device_mesh, DeviceMesh
+    ), f"expect a DeviceMesh but {device_mesh} was passed in."
+
+    if device_mesh.get_coordinate() is not None:
         # the current rank is in mesh
         if device_mesh.device_type == "cuda":
             # source: https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
