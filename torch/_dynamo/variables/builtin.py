@@ -1131,6 +1131,17 @@ class BuiltinVariable(VariableTracker):
                 items, **VariableTracker.propagate(self, iterable, *args)
             )
 
+    # neg is a constant fold function, so we only get here if constant fold is not valid
+    def call_neg(self, tx, a):
+        if isinstance(a, SymNodeVariable):
+            return SymNodeVariable.create(
+                tx,
+                (operator.neg)(a.as_proxy()),
+                sym_num=None,
+            )
+        # None no-ops this handler and lets the driving function proceed
+        return None
+
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
             nn_mod_variable = args[0]
