@@ -2782,23 +2782,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(dict(counters["frames"]), {})
         self.assertEqual(dict(counters["graph_break"]), {})
 
-    def test_jvp_inside_autograd_function(self):
-        from torch.func import jvp
-
+    def test_autograd_function_graph_break(self):
         class MySin(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                t = torch.ones_like(x)
-                _, neg_sin_x = jvp(torch.cos, (x,), (t,))
+                torch._dynamo.graph_break()
                 ctx.save_for_backward(x)
-                return -neg_sin_x
+                return x.sin()
 
             @staticmethod
             def backward(ctx, gx):
                 (x,) = ctx.saved_tensors
-                t = torch.ones_like(x)
-                _, cos_x = jvp(torch.sin, (x,), (t,))
-                return gx * cos_x
+                return gx * x.cos()
 
         x = torch.randn([], requires_grad=True)
 
