@@ -10,7 +10,6 @@ import itertools
 import logging
 import os
 import random
-import re
 import signal
 import subprocess
 import sys
@@ -1047,7 +1046,6 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
-        self.model_names = None
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
         self.optimizer = None
@@ -1145,19 +1143,17 @@ class BenchmarkRunner:
             equal_nan = False
         return equal_nan
 
-    def iter_model_names(self, args):
-        for index, model_name in enumerate(self.model_names):
-            if index % args.total_partitions != args.partition_id:
-                continue
-            if (
-                not re.search("|".join(args.filter), model_name, re.I)
-                or re.search("|".join(args.exclude), model_name, re.I)
-                or model_name in args.exclude_exact
-                or model_name in self.skip_models
-            ):
-                continue
-
-            yield model_name
+    def iter_models(self, args):
+        for model_name in self.iter_model_names(args):
+            for device in args.devices:
+                try:
+                    yield self.load_model(
+                        device,
+                        model_name,
+                        batch_size=args.batch_size,
+                    )
+                except NotImplementedError:
+                    continue  # bad benchmark implementation
 
     def validate_model(self, model, example_inputs):
         """
@@ -1230,6 +1226,15 @@ class BenchmarkRunner:
     def optimizer_step(self):
         if self.optimizer is not None:
             self.optimizer.step()
+
+    def get_benchmark_indices(self, length):
+        start = self._args.partition_id * (length // self._args.total_partitions)
+        end = (
+            (self._args.partition_id + 1) * (length // self._args.total_partitions)
+            if self._args.partition_id < self._args.total_partitions - 1
+            else length
+        )
+        return start, end
 
     def check_accuracy(
         self, name, model, example_inputs, optimize_ctx, experiment, tag
