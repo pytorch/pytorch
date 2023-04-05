@@ -1133,11 +1133,11 @@ class BuiltinVariable(VariableTracker):
 
     # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(self, tx, a):
-        if isinstance(a, DynamicShapeVariable):
-            return DynamicShapeVariable.create(
+        if isinstance(a, SymNodeVariable):
+            return SymNodeVariable.create(
                 tx,
                 (operator.neg)(a.as_proxy()),
-                dyn_shape=None,
+                sym_num=None,
             )
         # None no-ops this handler and lets the driving function proceed
         return None
