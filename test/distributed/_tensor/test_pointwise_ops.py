@@ -23,7 +23,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
 )
 
-
 def no_op():
     return None
 
