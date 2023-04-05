@@ -822,7 +822,7 @@ class TestTransformers(NNTestCase):
         # Mask check disabled results in sparisty fastpath, independently of the mask
         _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
         _test_fastpath(model, not_aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
-    
+
     @parametrize("device", device_list)
     def test_multiheadattention_fastpath_attn_mask(self, device):
         with torch.no_grad():
