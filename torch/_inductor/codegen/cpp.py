@@ -52,16 +52,16 @@ DTYPE_TO_CPP = {
 }
 
 DTYPE_TO_ATEN = {
-    torch.float32: "at::ScalarType::Float",
-    torch.float64: "at::ScalarType::Double",
-    torch.float16: "at::ScalarType::Half",
-    torch.int64: "at::ScalarType::Long",
-    torch.int32: "at::ScalarType::Int",
-    torch.int16: "at::ScalarType::Short",
-    torch.int8: "at::ScalarType::Char",
-    torch.uint8: "at::ScalarType::Byte",
-    torch.bool: "at::ScalarType::Bool",
-    torch.bfloat16: "at::ScalarType::BFloat16",
+    torch.float32: "at::kFloat",
+    torch.float64: "at::kDouble",
+    torch.float16: "at::kHalf",
+    torch.int64: "at::kLong",
+    torch.int32: "at::kInt",
+    torch.int16: "at::kShort",
+    torch.int8: "at::kChar",
+    torch.uint8: "at::kByte",
+    torch.bool: "at::kBool",
+    torch.bfloat16: "at::kBFloat16",
 }
 
 DEVICE_TO_ATEN = {
@@ -2422,10 +2422,8 @@ class KernelGroup:
         )
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        kernel_decl_name = kernel_name if V.graph.aot_mode else "kernel"
-
-        if not V.graph.aot_mode or self.count == 1:
-            code.writeline(cpp_prefix())
+        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
+        code.writeline(cpp_prefix())
 
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
@@ -2442,11 +2440,10 @@ class KernelGroup:
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
-        if V.graph.aot_mode:
-            codecache_def.splice(code)
-        else:
+        if not V.graph.cpp_wrapper:
             codecache_def.writeline("async_compile.cpp('''")
-            codecache_def.splice(code)
+        codecache_def.splice(code)
+        if not V.graph.cpp_wrapper:
             codecache_def.writeline("''')")
 
         codecache_str = codecache_def.getvalue()
@@ -2454,7 +2451,6 @@ class KernelGroup:
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
         wrapper.define_kernel(kernel_name, codecache_str)
-        wrapper.load_kernel(kernel_name, code, arg_types)
         # generate the code to call this
         wrapper.generate_kernel_call(kernel_name, call_args)
 
