@@ -64,7 +64,7 @@ class CPPTimer:
         return self._timeit_module.timeit(number)
 
 
-class Timer(object):
+class Timer:
     """Helper class for measuring execution time of PyTorch statements.
 
     For a full tutorial on how to use this class, see:

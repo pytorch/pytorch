@@ -128,7 +128,7 @@ def parse_args():
     )
     parser.add_argument(
         "--backend",
-        choices=torch._dynamo.list_backends(),
+        choices=torch._dynamo.list_backends(exclude_tags=None),
         default="inductor",
         help="train/evaluate model with a given backend (default: inductor)",
     )

@@ -145,8 +145,10 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
 #ifdef __GNUC__
   #define PREFETCH(location) __builtin_prefetch(location)
 #else
+#ifndef PREFETCH
   // no prefetching
   #define PREFETCH(location) ;
+#endif
 #endif
 
 // abort if byte order is undefined

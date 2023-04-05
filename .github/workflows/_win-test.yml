@@ -34,6 +34,7 @@ jobs:
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+      keep-going: ${{ steps.filter.outputs.keep-going }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -62,6 +63,45 @@ jobs:
         shell: bash
         run: |
           git config --global core.symlinks true
+
+      - name: Clean up leftover processes on non-ephemeral Windows runner
+        shell: powershell
+        continue-on-error: true
+        run: |
+          # This needs to be run before checking out PyTorch to avoid locking the working directory.
+          # Below is the list of commands that could lock $GITHUB_WORKSPACE gathered from sysinternals
+          # handle tool
+          $processes = "python", "ninja", "cl", "nvcc", "cmd"
+          Foreach ($process In $processes) {
+            Try {
+              # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/stop-process
+              Get-Process -Name $process -ErrorAction Stop | Stop-Process -Force
+            }
+            Catch {
+              Write-Output "No leftover $process process, continuing"
+              Write-Output $_
+            }
+          }
+
+          # Try it again https://stackoverflow.com/questions/40585754/powershell-wont-terminate-hung-process
+          # for hung processes
+          Foreach ($process In $processes) {
+            Try {
+              (Get-WmiObject -Class Win32_Process -Filter "Name LIKE '${process}%'").terminate()
+            }
+            Catch {
+              Write-Output $_
+            }
+          }
+
+          Try {
+            # Print all the processes for debugging
+            Wmic Path Win32_Process Get Caption,Processid,Commandline | Format-List
+          }
+          Catch {
+            # Better to write out whatever exception thrown to help debugging any potential issue
+            Write-Output $_
+          }
 
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -118,6 +158,7 @@ jobs:
           PYTHON_VERSION: 3.8
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
+          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VS_VERSION: "16.8.6"
@@ -151,11 +192,16 @@ jobs:
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
 
+          pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
+          # shellcheck disable=SC2046
+          python3 -mpip install $(echo *.whl)[opt-einsum]
+          popd
+
           .ci/pytorch/win-test.sh
 
       - name: Print remaining test logs
         shell: bash
-        if: always()
+        if: always() && steps.test.conclusion
         run: |
           cat test/**/*.log || true
 
@@ -184,6 +230,15 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
+
+      - name: Uninstall PyTorch
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          # This step removes PyTorch installed by the test to give a clean slate
+          # to the next job
+          python3 -mpip uninstall -y torch
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win

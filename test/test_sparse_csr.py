@@ -9,7 +9,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff, parametrize,
-     subtest, skipIfTorchDynamo)
+     subtest, skipIfTorchDynamo, skipIfRocm, IS_FBCODE, IS_REMOTE_GPU)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan)
@@ -41,9 +41,7 @@ def _check_cusparse_triangular_solve_available():
 
 def _check_cusparse_spgemm_available():
     # cusparseSpGEMM was added in 11.0
-    version = _get_torch_cuda_version()
-    min_supported_version = (11, 0)
-    return version >= min_supported_version
+    return not TEST_WITH_ROCM
 
 def _check_cusparse_sddmm_available():
     version = _get_torch_cuda_version()
@@ -1461,7 +1459,61 @@ class TestSparseCSR(TestCase):
         expected = ref(c, a, b, alpha, beta)
 
         self.assertEqual(actual, out)
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected, lambda msg: f"{msg}\na={a}\nc={c}\nb={b}\nalpha={alpha} beta={beta}")
+
+    @parametrize("block_size", [16, 32, 64])
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [])
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
+        from functools import partial
+
+        from torch._inductor.utils import has_triton
+        from torch.sparse._triton_ops import bsr_dense_mm
+
+        if not has_triton():
+            self.skipTest("Triton is not available.")
+
+        # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
+
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [(), (2,)]
+        size = [128, 256, 0]
+
+        # Whether to make inputs orthogonal so that the product is zero
+        make_orthogonal = [True, False]
+
+        for bd, bs, m, n, k, is_ortho in itertools.product(batches, batches, size, size, size, make_orthogonal):
+            bsr = tensor(bs + (m, k))
+            # NOTE: do not get confused, it will be transposed
+            dense = tensor(bd + (n, k))
+
+            if is_ortho:
+                bsr = torch.cat((bsr, torch.zeros_like(bsr)), dim=-1)
+                dense = torch.cat((torch.zeros_like(dense), dense), dim=-1)
+
+            bsr = bsr.to_sparse_bsr(block_size)
+
+            res_tri = bsr_dense_mm(bsr, dense.transpose(-2, -1))
+            res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
+            self.assertEqual(res_tri, res_dense)
+
+            # check whether bsr_dense_mm handles different grid sizes
+            # None means max possible grid size which is CUDA-dependent.
+            grid_size = (None, 2, 4)
+            grid_gen = itertools.product(grid_size, repeat=3)
+            for is_sparse_rowspace, grid in itertools.product((True, False), grid_gen):
+                res_tri = bsr_dense_mm(
+                    bsr,
+                    dense.transpose(-2, -1),
+                    max_grid=grid,
+                    is_sparse_rowspace_mode=is_sparse_rowspace
+                )
+                self.assertEqual(res_tri, res_dense)
 
     # TODO: block_size 1 is broken
     @parametrize("block_size", [2, 3])
@@ -1492,7 +1544,7 @@ class TestSparseCSR(TestCase):
                 if out is not None:
                     # the ref takes no out kwarg
                     assert isinstance(out, torch.Tensor)
-                    # tranpose inplace to propogate out to checking context
+                    # transpose inplace to propagate out to checking context
                     out.transpose_(-2, -1)
                     return f(tt(c), tt(b), tt(a), alpha=alpha, beta=beta, out=out)
                 else:
@@ -1531,7 +1583,7 @@ class TestSparseCSR(TestCase):
                     return t.cpu().resolve_conj().numpy()
 
             res = _npref_block_addmm_addmv(
-                *map(lambda t: prep_input(t), (c, a, b)),
+                *(prep_input(t) for t in (c, a, b)),
                 alpha,
                 beta
             )
@@ -1579,13 +1631,15 @@ class TestSparseCSR(TestCase):
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @parametrize("noncontiguous", [True, False])
-    @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_addmv(self, device, dtype, index_dtype, block_size, noncontiguous):
         # TODO: Explicitly disable block size 1 support
         # if (TEST_WITH_ROCM or not TEST_CUSPARSE_GENERIC) and block_size == 1:
         #     return
+        def ref_block_addmv(c, a, b, alpha, beta):
+            return _npref_block_addmm_addmv(c, a.to_dense(), b, alpha, beta)
+
         for (m, k) in itertools.product([2, 5], repeat=2):
             nnz = random.randint(0, m * k)
             if not noncontiguous:
@@ -1600,7 +1654,20 @@ class TestSparseCSR(TestCase):
                                             a_data, (m * block_size, k * block_size), check_invariants=False)
             b = make_tensor((k * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
             c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
-            self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
+            self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device, ref=ref_block_addmv)
+
+    @parametrize("matrix_shape", [(3, 3), (5, 7), (11, 9)], name_fn=lambda x: "shape_{}x{}".format(*x))
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @onlyCPU
+    def test_addmv(self, device, dtype, matrix_shape):
+        mat = torch.randn(matrix_shape, dtype=dtype, device=device)
+        mat[mat.real < 0] = 0
+        sparse_mat = mat.to_sparse_csr()
+        mvec = torch.randn((mat.size(1),), dtype=dtype, device=device)
+        avec = torch.randn((mat.size(0),), dtype=torch.float64, device=device)
+        ref_output = torch.addmv(avec, mat, mvec)
+        output = torch.addmv(avec, sparse_mat, mvec)
+        self.assertEqual(ref_output, output)
 
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
@@ -2046,14 +2113,14 @@ class TestSparseCSR(TestCase):
             res_sparse_sparse = fn(y, x)
             res_dense_sparse = fn(y.to_dense(), x)
             res_sparse_dense = fn(y, x.to_dense())
-            expected = fn(y.to_dense(), x.to_dense()).to_sparse_csr()
+            expected = fn(y.to_dense(), x.to_dense())
             self.assertEqual(res_sparse_sparse, expected)
             # TODO: While result of mul(dense, csr) is csr, it is not fully compressed.
             # That means it may contain materialized zeros, since the dense argument
             # is converted according to the sparsity pattern of csr. In the future
             # we might require the result to be fully compressed.
-            self.assertEqual(res_dense_sparse.to_dense(), expected.to_dense())
-            self.assertEqual(res_sparse_dense.to_dense(), expected.to_dense())
+            self.assertEqual(res_dense_sparse, expected)
+            self.assertEqual(res_sparse_dense, expected)
 
             # Grad comparison
             x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
@@ -2142,12 +2209,28 @@ class TestSparseCSR(TestCase):
             S1 = self.genSparseCSRTensor([m, n], nnz1, dtype=dtype, device=device, index_dtype=index_dtype)
             S2 = self.genSparseCSRTensor([m, n], nnz2, dtype=dtype, device=device, index_dtype=index_dtype)
             S3 = self.genSparseCSRTensor([m, n], nnz3, dtype=dtype, device=device, index_dtype=index_dtype)
+            sparse_args = [S1, S2, S3]
+            dense_args = [t.to_dense() for t in sparse_args]
+            arg_idx = list(range(len(sparse_args)))
+            out_idx = arg_idx + [None]
 
-            expected = torch.add(S1.to_dense(), S2.to_dense(), alpha=alpha)
-            actual = torch.add(S1, S2, alpha=alpha, out=S3)
+            for idx1, idx2, idx3 in itertools.product(arg_idx, arg_idx, out_idx):
+                s1 = sparse_args[idx1]
+                s2 = sparse_args[idx2]
+                s3 = None if idx3 is None else sparse_args[idx3]
+                d1 = dense_args[idx1]
+                d2 = dense_args[idx2]
+                d3 = None if idx3 is None else dense_args[idx3]
 
-            self.assertEqual(actual.to_dense(), expected)
-            self.assertEqual(S3.to_dense(), expected)
+                expected = torch.add(d1, d2, alpha=alpha, out=d3)
+                actual = torch.add(s1, s2, alpha=alpha, out=s3)
+                self.assertEqual(actual.crow_indices().dtype, index_dtype)
+                self.assertEqual(actual.col_indices().dtype, index_dtype)
+                self.assertEqual(actual, expected)
+                self.assertEqual(s3, d3)
+                if s3 is not None:
+                    self.assertEqual(s3.crow_indices().dtype, index_dtype)
+                    self.assertEqual(s3.col_indices().dtype, index_dtype)
 
         for index_dtype in [torch.int32, torch.int64]:
             for m, n in itertools.product([3, 5], [3, 5]):
@@ -2322,7 +2405,7 @@ class TestSparseCSR(TestCase):
             output.backward(covector)
 
             # Compute dense result and compare with sparse result
-            c1, a1, b1 = map(lambda x: x.detach().to_dense().requires_grad_(True), [c, a, b])
+            c1, a1, b1 = (x.detach().to_dense().requires_grad_(True) for x in [c, a, b])
             dense_output = sample.kwargs['alpha'] * (a1 @ b1) * torch.ones_like(c).to_dense() + sample.kwargs['beta'] * c1
             self.assertEqual(output, dense_output)
             dense_covector = covector.to_dense()
@@ -2394,6 +2477,101 @@ class TestSparseCSR(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to have strided layout"):
             torch.sparse.sampled_addmm(a_sparse, a, a_sparse)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @precisionOverride({torch.bfloat16: 0.01})
+    def test_sparse_mm_reduce_sum(self, device, dtype):
+        def run_test(m, n, k, nnz, train):
+            sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
+            dense = sparse.to_dense()
+
+            mat = torch.randn(k, n, dtype=dtype)
+            ref_mat = mat.clone()
+
+            if train:
+                sparse.requires_grad_()
+                mat.requires_grad_()
+                dense.requires_grad_()
+                ref_mat.requires_grad_()
+
+            ref_out = torch.mm(dense, ref_mat)
+            out = torch.sparse.mm(sparse, mat, 'sum')
+
+            self.assertEqual(out, ref_out)
+
+            if train:
+                ref_out.sum().backward()
+                out.sum().backward()
+
+                grad_input = sparse.grad
+                ref_grad_input = dense.grad
+                grad_mat = mat.grad
+                ref_grad_mat = ref_mat.grad
+
+                self.assertEqual(grad_input.to_dense(), ref_grad_input)
+                self.assertEqual(grad_mat, ref_grad_mat)
+
+        run_test(4, 5, 4, 10, False)
+        run_test(4, 4, 4, 16, True)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    def test_sparse_mm_reduce(self, device, dtype):
+        def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
+            csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            mat = torch.randn(n, k, dtype=dtype)
+            ref_mat = mat.clone()
+            ref_values = csr.values().clone()
+
+            out_int32 = index_dtype == torch.int32
+            coo_indices = torch._convert_indices_from_csr_to_coo(
+                csr.crow_indices(),
+                csr.col_indices(),
+                out_int32=out_int32)
+            row, col = coo_indices[0], coo_indices[1]
+
+            def ref(row, col, val, mat):
+                out = torch.zeros([m, k], dtype=dtype)
+                weight = mat.index_select(0, col)
+                src = weight.mul(val.view(-1, 1))
+                index = row.view(-1, 1).expand_as(weight)
+                index = index.to(dtype=torch.int64)
+                # scatter_reduce expect index to be int64
+                out.scatter_reduce_(0, index, src, reduce=reduce_type, include_self=False)
+                return out
+
+            if train:
+                csr.requires_grad_()
+                mat.requires_grad_()
+                ref_values.requires_grad_()
+                ref_mat.requires_grad_()
+
+            ref_out = ref(row, col, ref_values, ref_mat)
+            out = torch.sparse.mm(csr, mat, reduce_type)
+            self.assertEqual(out, ref_out)
+
+            if train and dtype is not torch.bfloat16:
+                ref_out.sum().backward()
+                out.sum().backward()
+
+                grad_values = csr.grad.values()
+                grad_weight = mat.grad
+                ref_grad_values = ref_values.grad
+                ref_grad_weight = ref_mat.grad
+                self.assertEqual(grad_values, ref_grad_values)
+                self.assertEqual(grad_weight, ref_grad_weight)
+
+        for train in [False, True]:
+            for index_dtype in [torch.int32, torch.int64]:
+                for reduce_type in ["sum", "mean", "amax", "amin"]:
+                    # by setting nnz < M, create empty rows
+                    run_test(3, 4, 11, 1, reduce_type, index_dtype, train)
+                    run_test(3, 4, 11, 6, reduce_type, index_dtype, train)
+                    run_test(3, 4, 11, 12, reduce_type, index_dtype, train)
+                    # we are doing blocking with 4x vector length in the kernel,
+                    # so need to test when K > 4x vector length
+                    run_test(4, 7, 33, 13, reduce_type, index_dtype, train)
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -2815,7 +2993,7 @@ class TestSparseCSR(TestCase):
             n_batch = len(shape) - n_dense - 2
             sparse_shape = shape[n_batch: n_batch + 2]
             if layout in (torch.sparse_bsr, torch.sparse_bsc):
-                # for blocked all combinations of 2,1 shoudl be valid blocksizes
+                # for blocked all combinations of 2,1 should be valid blocksizes
                 run_test(shape, 0, index_dtype, n_dense, blocksize=(2, 2))
                 run_test(shape, max(sparse_shape), index_dtype, n_dense, blocksize=(2, 2))
                 run_test(shape, sparse_shape[0] * sparse_shape[1], index_dtype, n_dense, blocksize=(2, 2))

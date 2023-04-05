@@ -5,6 +5,7 @@ import pytest
 import torch
 from torch.distributions import biject_to, constraints, transform_to
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import run_tests
 
 
 EXAMPLES = [
@@ -124,5 +125,5 @@ def test_transform_to(constraint_fn, args, is_cuda):
     assert torch.allclose(y, y2), "Error in transform_to({}) pseudoinverse".format(constraint)
 
 
-if __name__ == '__main__':
-    pytest.main([__file__])
+if __name__ == "__main__":
+    run_tests()

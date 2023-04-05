@@ -262,9 +262,8 @@ inline void free_impl(PtrInfo::iterator& it) {
 
     if (C10_UNLIKELY(capture_underway)) {
       // See Note [Avoid dangling free streams during CUDA graph capture]
-      capture_free_streams.insert(UsageStream(
-          dummy_unifying_free_stream.stream,
-          dummy_unifying_free_stream.device));
+      capture_free_streams.emplace(
+          dummy_unifying_free_stream.stream, dummy_unifying_free_stream.device);
     }
   }
 
@@ -330,6 +329,18 @@ void mallocAsync(void** devPtr, int device, size_t size, cudaStream_t stream) {
   CUDAGuard g(device);
 
   std::lock_guard<std::mutex> lk(general_mutex);
+
+  if (!capture_underway &&
+      ungraphed_ptrs_defer_free_until_no_capture.size() > 0) {
+    // See Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
+    for (const auto ptr : ungraphed_ptrs_defer_free_until_no_capture) {
+      auto it = ptr_info.find(ptr);
+      TORCH_INTERNAL_ASSERT(it != ptr_info.end(), "ptr not found in ptr_info");
+      free_impl(it);
+    }
+
+    ungraphed_ptrs_defer_free_until_no_capture.clear();
+  }
 
   lazy_init_device(device);
 
@@ -621,6 +632,23 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
+  std::shared_ptr<AllocatorState> getCheckpointState(int device, MempoolId_t id)
+      override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support getCheckpointState. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
+  CheckpointDelta setCheckpointPoolState(
+      int device,
+      std::shared_ptr<AllocatorState> pps) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support setCheckpointPoolState. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   // Collects stats for device.
   // If device hasn't been used yet, returns 0s without creating a context.
   DeviceStats getDeviceStats(int device) override {
@@ -723,9 +751,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   // CUDAGraph interactions
-  void notifyCaptureBegin(
+  void beginAllocateStreamToPool(
       int device,
-      CaptureId_t graph_id,
+      cudaStream_t stream,
       MempoolId_t mempool_id) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
@@ -736,7 +764,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = true;
   }
 
-  void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) override {
+  void endAllocateStreamToPool(int device, cudaStream_t) override {
     assertValidDevice(device);
 
     std::lock_guard<std::mutex> lk(general_mutex);
@@ -763,30 +791,14 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
 
     capture_free_streams.clear();
-  }
-
-  void notifyCaptureEnded(int device, CaptureId_t graph_id) override {
-    assertValidDevice(device);
-
-    std::lock_guard<std::mutex> lk(general_mutex);
-
     TORCH_CHECK(
         capture_underway,
         "CudaMallocAsync::notifyCaptureEnded called, "
         "but CudaMallocAsync::capture_underway is false.");
     capture_underway = false;
-
-    // See Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
-    for (const auto ptr : ungraphed_ptrs_defer_free_until_no_capture) {
-      auto it = ptr_info.find(ptr);
-      TORCH_INTERNAL_ASSERT(it != ptr_info.end(), "ptr not found in ptr_info");
-      free_impl(it);
-    }
-
-    ungraphed_ptrs_defer_free_until_no_capture.clear();
   }
 
-  void notifyCaptureDestroy(int device, MempoolId_t mempool_id) override {
+  void releasePool(int device, MempoolId_t mempool_id) override {
     // Q: Do we need to do anything special here, like clear long-lived
     //    pointers created during the original capture (for example,
     //    tensors intended as the graph's I/O surface) that might still

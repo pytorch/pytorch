@@ -14,7 +14,7 @@
 using ::testing::HasSubstr;
 
 /**
- * Device kernel that takes mulitple integer parameters as arguments and
+ * Device kernel that takes multiple integer parameters as arguments and
  * will always trigger a device side assertion.
  */
 __global__ void cuda_multiple_vars_always_fail_assertion_kernel(
@@ -93,7 +93,7 @@ void cuda_device_assertions_catches_stream() {
 
 TEST(CUDATest, cuda_device_assertions_catches_stream) {
 #ifdef TORCH_USE_CUDA_DSA
-  c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled = true;
+  c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled_at_runtime = true;
   cuda_device_assertions_catches_stream();
 #else
   GTEST_SKIP() << "CUDA device-side assertions (DSA) was not enabled at compile time.";

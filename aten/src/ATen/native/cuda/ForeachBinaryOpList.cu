@@ -13,6 +13,7 @@
 #include <ATen/ops/_foreach_sub_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
+#include <ATen/ops/_foreach_pow_native.h>
 
 #include <ATen/ops/empty_like_native.h>
 #endif
@@ -58,6 +59,7 @@ void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2, const Sca
                                                    /* res_arg_index */ 0>(),
                           Op<opmath_t>(),
                           alpha.to<opmath_t>());
+    increment_version(tensors1);
 }
 
 template<template<class> class Op>
@@ -82,9 +84,23 @@ std::vector<Tensor> all_types_half_bfloat16(TensorList tensors1, TensorList tens
 }
 
 template<template<class> class Op>
+void all_types_complex_half_bfloat16_(TensorList tensors1, TensorList tensors2, const Scalar& alpha = 1) {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list_cuda_", [&]() {
+        foreach_tensor_list_op_<scalar_t, Op>(tensors1, tensors2, alpha);
+    });
+}
+
+template<template<class> class Op>
 void all_types_half_bfloat16_(TensorList tensors1, TensorList tensors2, const Scalar& alpha = 1) {
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list_cuda_", [&]() {
         foreach_tensor_list_op_<scalar_t, Op>(tensors1, tensors2, alpha);
+    });
+}
+
+template<template<class> class Op>
+std::vector<Tensor> all_types_complex_half_bfloat16(TensorList tensors1, TensorList tensors2, const Scalar& alpha = 1) {
+    return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list_cuda", [&]() {
+        return foreach_tensor_list_op<scalar_t, Op>(tensors1, tensors2, alpha);
     });
 }
 
@@ -132,5 +148,9 @@ FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, mul, std::multiplie
 FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*division_op*/ true);
 FOREACH_BINARY_OP_LIST(all_types_half_bfloat16, clamp_max, minimum, /*division_op*/ false);
 FOREACH_BINARY_OP_LIST(all_types_half_bfloat16, clamp_min, maximum, /*division_op*/ false);
+// NOTE(crcrpar): [Why is foreach_pow's division_op=true?]
+// To push integer inputs to slow path. This is because with integer type inputs the fast path behaves differently
+// from the slow one. Need to investigate later.
+FOREACH_BINARY_OP_LIST(all_types_complex_half_bfloat16, pow, power_functor, /*division_op*/ true);
 
 } // namespace at::native

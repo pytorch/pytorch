@@ -39,6 +39,8 @@ from torchgen.api.autograd import (
 )
 
 from torchgen.api.types import (
+    ArrayRefCType,
+    BaseCppType,
     BaseCType,
     Binding,
     DispatcherSignature,
@@ -185,6 +187,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fliplr",
     "flipud",
     "rot90",
+    "nanmean",
+    "nansum",
     "transpose",
     "permute",
     "squeeze",
@@ -245,6 +249,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "log10",
     "log1p",
     "log2",
+    "logaddexp",
     "logcumsumexp",
     "reciprocal",
     "tan",
@@ -259,6 +264,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fill_",
     "exp",
     "exp2",
+    "expm1",
     "nonzero",
     "mean",
     "std_mean",
@@ -376,7 +382,6 @@ GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
     "coalesce",
     "values",
     "_sparse_coo_tensor_with_dims_and_tensors",
-    "sparse_mask_helper_cuda",
     "_sparse_addmm",
 }
 
@@ -546,6 +551,12 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # _nested_tensor_size() should never actually be called with requires_grad=True tensor
     "_nested_tensor_size",
     "_nested_tensor_strides",
+    "_nested_tensor_storage_offsets",
+    # Functional collectives keep an internal ref through the Work object
+    "all_reduce",
+    "all_gather_into_tensor",
+    "reduce_scatter_tensor",
+    "wait_tensor",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -710,7 +721,7 @@ FW_DERIVATIVE_SETTER_TENSOR_LIST = CodeTemplate(
 if (${out_arg}_new_fw_grad_opt.has_value()) {
   auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value();
   TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
-  for (auto i=0; i<${out_arg}.size(); ++i) {
+  for (const auto i : c10::irange(${out_arg}.size())) {
     if (${out_arg}_new_fw_grad[i].defined() && ${out_arg}[i].defined()) {
       // The hardcoded 0 here will need to be updated once we support multiple levels.
       ${out_arg}[i]._set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
@@ -753,7 +764,6 @@ def gen_variable_type(
     template_path: str,
     used_keys: Set[str],
 ) -> None:
-
     """VariableType.h and VariableType.cpp body
 
     This is the at::Type subclass for differentiable tensors. The
@@ -969,10 +979,10 @@ def emit_body(
         """Find arguments that have derivative definitions"""
         if info is None or not info.has_derivatives:
             return differentiable_inputs
-        names = set(name for d in info.derivatives for name in d.var_names)
+        names = {name for d in info.derivatives for name in d.var_names}
         differentiable = [arg for arg in differentiable_inputs if arg.name in names]
         if len(differentiable) != len(names):
-            missing = names - set(arg.name for arg in differentiable)
+            missing = names - {arg.name for arg in differentiable}
             raise RuntimeError(
                 f"Missing arguments for derivatives: {missing} in {info.name}"
             )
@@ -1004,7 +1014,7 @@ def emit_body(
             f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
         )
 
-    if requires_derivative and not len(fw_derivatives) == 0:
+    if requires_derivative and len(fw_derivatives) > 0:
         assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(
             differentiable_outputs
         ), (
@@ -1223,6 +1233,10 @@ def emit_body(
                 expr = f"std::string({expr})"
             elif type == OptionalCType(BaseCType(stringT)):
                 expr = f"{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt"
+            elif type == ArrayRefCType(
+                elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
+            ):
+                expr = expr + ".vec()"
             guard = guard_for(arg)
             if guard is None:
                 if stmts_prepend:

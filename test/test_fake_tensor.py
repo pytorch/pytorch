@@ -15,6 +15,7 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
 )
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
 from torch import nn
 import unittest
@@ -22,6 +23,8 @@ import torch._prims as prims
 import contextlib
 import weakref
 import copy
+import torch._functorch.config
+from unittest.mock import patch
 
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -456,7 +459,7 @@ class FakeTensorTest(TestCase):
 
         class ModuleNew(torch.nn.Module):
             def __init__(self):
-                super(ModuleNew, self).__init__()
+                super().__init__()
                 self.a = torch.rand([10, 2])
                 self.b = self.a
                 self.c = self.a[0]
@@ -484,6 +487,17 @@ class FakeTensorTest(TestCase):
             ten = torch.zeros(2, dtype=torch.int32) * 2.0
             self.assertEqual(ten.dtype, torch.float)
             self.checkType(ten, "cpu", [2])
+
+    def test_allow_meta(self):
+        def run_meta():
+            with FakeTensorMode():
+                x = torch.rand([4], device="meta")
+                return x + x
+
+        self.checkType(run_meta(), "meta", [4])
+
+        with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
+            self.assertRaises(Exception, run_meta)
 
 
 class FakeTensorConstHandling(TestCase):
@@ -540,7 +554,7 @@ class FakeTensorConstHandling(TestCase):
             return tensors[0].new_full(batch_shape, 0.0)
 
         with self.assertRaises(torch._subclasses.fake_tensor.DataDependentOutputException):
-            with torch._subclasses.fake_tensor.FakeTensorMode(throw_on_data_dependent_ops=True):
+            with torch._subclasses.fake_tensor.FakeTensorMode():
                 a = torch.randn(3, 800, 1199)
                 b = torch.randn(3, 800, 800)
                 inputs = [a, b]
@@ -570,6 +584,11 @@ class FakeTensorConstHandling(TestCase):
             self.assertNotConst(y)
             y[0] = 1
             self.assertNotConst(x)
+
+    def test_constant_propagate_through_functions(self):
+        with FakeTensorMode():
+            y = torch.div(4, 4, rounding_mode='trunc')
+            self.assertConst(y)
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
@@ -768,6 +787,37 @@ class FakeTensorOperatorInvariants(TestCase):
         for ref_o, meta_o in zip(ref_out, meta_out):
             self.assertEqual(ref_o.size(), meta_o.size())
 
+    @skipIfRocm
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_conv_c1_backward(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, arg1, arg2, arg3):
+                torch.ops.aten.convolution_backward.default(
+                    arg1,
+                    arg2,
+                    arg3,
+                    [1],
+                    [1, 1],
+                    [1, 1],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                    [True, True, False],
+                )
+
+        args_new = [
+            ((16, 1, 128, 128), (16384, 16384, 128, 1), torch.float16, "cuda"),
+            ((16, 64, 128, 128), (1048576, 1, 8192, 64), torch.float16, "cuda"),
+            ((1, 64, 3, 3), (576, 9, 3, 1), torch.float16, "cuda"),
+        ]
+        args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args_new]
+
+        with torch._subclasses.CrossRefFakeMode():
+            Repro()(*args)
 
     def test_no_dispatch_with_like_function(self):
         class CountingMode(TorchDispatchMode):
@@ -843,6 +893,33 @@ class FakeTensorPropTest(TestCase):
                     # AssertionError: tensor's device must be `meta`, got cpu instead
                     failed = True
                 self.assertTrue(failed)
+
+
+    def test_fake_tensor_prop_on_nn_module_with_optional_args(self):
+        class OptionalArgumentInBetween(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(4, 3)
+                self.layer2 = torch.nn.Linear(3, 2)
+
+            def forward(self, value, another_value=None, another_optional_value=None):
+                # Mimic huggingface's `forward` methods which have several optional arguments.
+                # For example, GPT accepts forward(self, input_ids, None, attention_mask, ...).
+                # To apply FakeTensorProp, its from_real_tensor(...) needs to accept None.
+                if another_value is None:
+                    another_value = torch.rand_like(value)
+                if another_optional_value is None:
+                    another_optional_value = torch.rand_like(value)
+                value = value + another_value + another_optional_value
+                return value * value
+
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, allow_fallback_kernels=False)
+        with fake_mode:
+            model = OptionalArgumentInBetween()
+            value = torch.randn(5, 4)
+            another_optional_value = torch.randn(5, 4)
+            graph_model = torch.fx.symbolic_trace(model, (value, None, another_optional_value))
+            FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
 instantiate_parametrized_tests(FakeTensorTest)
 

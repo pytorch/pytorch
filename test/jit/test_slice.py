@@ -133,7 +133,7 @@ class TestSlice(JitTestCase):
         self.assertEqual(scripted_fn(torch.tensor(1)), (2, 3))
         tuple_graph = scripted_fn.graph
         slices = tuple_graph.findAllNodes("prim::TupleConstruct")
-        num_outputs = set(len(x.output().type().elements()) for x in slices)
+        num_outputs = {len(x.output().type().elements()) for x in slices}
         # there should be only one tupleSlice with length of 2
         self.assertTrue(num_outputs == {2})
         self.run_pass('lower_all_tuples', tuple_graph)

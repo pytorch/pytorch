@@ -5,6 +5,9 @@ import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import ReduceOp
 from unittest import skip, SkipTest
+import operator
+from functools import reduce
+import threading
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -141,9 +144,34 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         res_num = ((0 + self.world_size - 1) * self.world_size) / 2
         self.assertEqual(output, torch.ones(3, 3) * res_num)
 
-        # Test unimplemented error
-        with self.assertRaisesRegex(NotImplementedError, "only supports SUM on threaded pg for now"):
-            dist.all_reduce(output, op=ReduceOp.MAX)
+    def test_all_reduce_ops(self):
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.PRODUCT)
+        expected = reduce(operator.mul, range(1, self.world_size + 1))
+        self.assertEqual(expected, tensor.item())
+
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.MIN)
+        self.assertEqual(1, tensor.item())
+
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.MAX)
+        self.assertEqual(self.world_size, tensor.item())
+
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.BAND)
+        expected = reduce(operator.and_, range(1, self.world_size + 1))
+        self.assertEqual(expected, tensor.item())
+
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.BOR)
+        expected = reduce(operator.or_, range(1, self.world_size + 1))
+        self.assertEqual(expected, tensor.item())
+
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.BXOR)
+        expected = reduce(operator.xor, range(1, self.world_size + 1))
+        self.assertEqual(expected, tensor.item())
 
     def test_assert_equal_on_rank(self):
         # RNG is shared across threads. So instead of asserting on all threads
@@ -171,6 +199,26 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         else:
             self.assertEqual(output, torch.ones(3, 3) * 5)
 
+    def test_using_pg_from_another_thread(self):
+        def stuff_in_other_thread(pg):
+            x = torch.rand(4, requires_grad=True)
+            dist.all_reduce(x, group=pg)
+
+        t = threading.Thread(target=stuff_in_other_thread, args=(dist.group.WORLD,))
+        t.start()
+        t.join()
+
+    def test_gather(self):
+        if dist.get_rank() == 0:
+            gather_list = [torch.empty(3, 3) for _ in range(self.world_size)]
+        else:
+            gather_list = None
+        input_tensor = torch.ones(3, 3) * dist.get_rank()
+
+        dist.gather(input_tensor, gather_list)
+        if dist.get_rank() == 0:
+            for i in range(self.world_size):
+                self.assertEqual(gather_list[i], torch.ones(3, 3) * i)
 
 if __name__ == "__main__":
     run_tests()

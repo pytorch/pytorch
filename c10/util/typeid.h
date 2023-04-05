@@ -422,7 +422,7 @@ class C10_API TypeMeta final {
     return data().name_;
   }
 
-  friend bool operator==(const TypeMeta lhs, const TypeMeta rhs) noexcept;
+  friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
 
   template <typename T>
   bool Match() const noexcept {
@@ -597,10 +597,10 @@ C10_EXPORT constexpr uint16_t TypeMeta::_typeMetaData<
 inline TypeMeta::TypeMeta() noexcept
     : index_(_typeMetaData<detail::_Uninitialized>()) {}
 
-inline bool operator==(const TypeMeta lhs, const TypeMeta rhs) noexcept {
+inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return (lhs.index_ == rhs.index_);
 }
-inline bool operator!=(const TypeMeta lhs, const TypeMeta rhs) noexcept {
+inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 

@@ -258,6 +258,14 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
   AT_DISPATCH_SWITCH(                                        \
       TYPE, NAME, AT_DISPATCH_CASE_FLOATING_TYPES_AND_HALF(__VA_ARGS__))
 
+#define AT_DISPATCH_CASE_REDUCED_FLOATING_TYPES(...)  \
+  AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::BFloat16, __VA_ARGS__)
+
+#define AT_DISPATCH_REDUCED_FLOATING_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                       \
+      TYPE, NAME, AT_DISPATCH_CASE_REDUCED_FLOATING_TYPES(__VA_ARGS__))
+
 #define AT_DISPATCH_CASE_FLOATING_TYPES_AND(SCALARTYPE, ...) \
   AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)               \
   AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)
@@ -280,6 +288,21 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       NAME,                                    \
       AT_DISPATCH_CASE_FLOATING_TYPES_AND2(    \
           SCALARTYPE1, SCALARTYPE2, __VA_ARGS__))
+
+#define AT_DISPATCH_CASE_FLOATING_TYPES_AND3(   \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, ...) \
+  AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)  \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)    \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)    \
+  AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)
+
+#define AT_DISPATCH_FLOATING_TYPES_AND3(                    \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                       \
+      TYPE,                                                 \
+      NAME,                                                 \
+      AT_DISPATCH_CASE_FLOATING_TYPES_AND3(                 \
+          SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, __VA_ARGS__))
 
 #define AT_DISPATCH_CASE_COMPLEX_TYPES(...)                    \
   AT_DISPATCH_CASE(at::ScalarType::ComplexDouble, __VA_ARGS__) \

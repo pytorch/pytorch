@@ -36,7 +36,7 @@ class CNNModelHelper(ModelHelper):
         }
         if ws_nbytes_limit:
             cnn_arg_scope['ws_nbytes_limit'] = ws_nbytes_limit
-        super(CNNModelHelper, self).__init__(
+        super().__init__(
             skip_sparse_optim=skip_sparse_optim,
             name="CNN" if name is None else name,
             init_params=init_params,
