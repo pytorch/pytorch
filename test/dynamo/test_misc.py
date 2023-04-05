@@ -3797,7 +3797,7 @@ def fn():
             if not torch._dynamo.config.dynamic_shapes:
                 self.assertExpectedInline(
                     guard_failure[0],
-                    """___check_type_id(L['k'], 7665024) and L['k'] == 3""",
+                    """L['k'] == 3""",
                 )
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
@@ -3906,7 +3906,7 @@ def fn():
         self.assertTrue(guard_failure is not None)
         self.assertExpectedInline(
             guard_failure[0],
-            """___check_type_id(L['x'], 81438416) and len(L['x']) == 10""",
+            """len(L['x']) == 10""",
         )
 
     def test_restore_graphstate(self):

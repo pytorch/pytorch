@@ -36,7 +36,6 @@ from .utils import (
     HAS_NUMPY,
     istype,
     np,
-    orig_code_map,
     tensor_always_has_static_shape,
     tensor_static_reason_to_message,
     tuple_iterator_getitem,
@@ -603,13 +602,14 @@ class GuardBuilder(GuardBuilderBase):
             self.__class__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
-        code_str = " and ".join(code_list)
-        code_part = CodePart(guard.origin, code_str, getframeinfo(caller)[2])
+        caller_fn = getframeinfo(caller)[2]
         del caller
-        if shape_env:
-            self.shape_env_code.append(code_part)
-        else:
-            self.code.append(code_part)
+        for code in code_list:
+            code_part = CodePart(guard.origin, code, caller_fn)
+            if shape_env:
+                self.shape_env_code.append(code_part)
+            else:
+                self.code.append(code_part)
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
@@ -767,7 +767,11 @@ class CheckFunctionManager:
             if isinstance(guard, DuplicateInputs):
                 source_a = guard.input_source_a
                 source_b = guard.input_source_b
-                code_part = f"{source_a.name()} is {source_b.name()}"
+                code_part = CodePart(
+                    source_a,
+                    f"{source_a.name()} is {source_b.name()}",
+                    "DuplicateInputs",
+                )
                 code_parts.append(code_part)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
@@ -779,11 +783,11 @@ class CheckFunctionManager:
         for code_part in unique(code_parts):
             part_map[id(code_part)] = code_part
             code += f"      passing = {code_part.code} \n"
-            code += f"      if not passing: \n"
+            code += "      if not passing: \n"
             code += f"          code_part = part_map[{id(code_part)}] \n"
             code += "          code_part.scope = {'L': L, '___check_tensors_verbose':___check_tensors_verbose} \n"
-            code += f"          return (False, code_part) \n"
-        code += f"      return (True, None)"
+            code += "          return (False, code_part) \n"
+        code += "      return (True, None)"
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
