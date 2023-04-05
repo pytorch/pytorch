@@ -689,6 +689,12 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 Config({"XBLOCK": 64, "RBLOCK": 128}, num_warps=16, num_stages=2),
                 # improve 1.143x for https://gist.github.com/shunting314/ac92b583c52c46e2f2e65540d0e75c2c
                 Config({"XBLOCK": 64, "RBLOCK": 8}, num_warps=8, num_stages=2),
+                # improve 1.152x for https://gist.github.com/shunting314/10c52fc9bf7ba5044b75a3d7b2ecb6a7 
+                Config({"XBLOCK": 1, "RBLOCK": 256}, num_warps=8, num_stages=1),
+                # improve 1.396x for https://gist.github.com/shunting314/9bf9ee7c0200966d5858d5efca0adc9c
+                Config({"XBLOCK": 1, "RBLOCK": 1024}, num_warps=32, num_stages=1),
+                # improve 1.031x for https://gist.github.com/shunting314/f3fac6407e4d379e0aa111484aae0ad1
+                Config({"XBLOCK": 1, "RBLOCK": 1024}, num_warps=16, num_stages=2),
             ],
             meta=meta,
             filename=filename,
