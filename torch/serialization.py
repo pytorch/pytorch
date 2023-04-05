@@ -1078,7 +1078,7 @@ def _get_restore_location(map_location):
         def restore_location(storage, location):
             location = map_location.get(location, location)
             return default_restore_location(storage, location)
-    elif isinstance(map_location, str):
+    elif isinstance(map_location, (str, bytes)):
         def restore_location(storage, location):
             return default_restore_location(storage, map_location)
     elif isinstance(map_location, torch.device):
