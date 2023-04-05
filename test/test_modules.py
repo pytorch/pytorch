@@ -498,7 +498,7 @@ class TestModule(TestCase):
         # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
         # nicer way for eval mode only.
         # See https://github.com/pytorch/pytorch/issues/79161
-        rnn_modules = set([torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM])
+        rnn_modules = {torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM}
         if (module_info.module_cls in rnn_modules
                 and not training
                 and 'cuda' in device

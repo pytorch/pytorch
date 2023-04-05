@@ -26,12 +26,14 @@
  *
  ******************************************************************************/
 
+#include <cstdint>
 #include <tuple>
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
@@ -67,7 +69,7 @@ void set_params_fprop(FMHA_fprop_params &params,
     Data_type data_type = !(q.dtype() == at::kBFloat16) ? DATA_TYPE_FP16 : DATA_TYPE_BF16;
 
     // Reset the parameters
-    memset(&params, 0, sizeof(params));
+    params = {};
 
     params.is_bf16 = q.dtype() == at::kBFloat16;
 
@@ -191,8 +193,10 @@ void run_fmha_fwd(Launch_params<FMHA_fprop_params> &launch_params) {
         run_fmha_fwd_hdim128(launch_params);
     }
 }
-
-at::Tensor
+// The tensor `out` will get populated the output attention
+// First return value is softmax_logsumexp
+// Second return value is the random generator state
+std::tuple<at::Tensor, uint64_t, uint64_t, at::Tensor>
 mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
         const at::Tensor &k,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
         const at::Tensor &v,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -205,16 +209,13 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         const float softmax_scale,
         const bool zero_tensors,
         const bool is_causal,
-        const int num_splits,
-        c10::optional<at::Generator> gen_) {
-    // return_softmax is a parameter for flash attention
-    // but for the in core api though we are removing this parameter.
-    constexpr bool return_softmax = false;
-
+        const bool return_softmax,
+        const int num_splits) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
     bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-    TORCH_CHECK(is_sm8x || is_sm75);
+    bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
+    TORCH_CHECK(is_sm90 || is_sm8x || is_sm75);
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     bool is_dropout = p_dropout > 0.0;
     Launch_params<FMHA_fprop_params> launch_params(dprops, stream, is_dropout, return_softmax);
@@ -281,13 +282,14 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     auto softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
     // auto softmax_lse = torch::full({batch_size, num_heads, max_seqlen_k}, -std::numeric_limits<float>::infinity(), opts.dtype(at::kFloat));
 
+    at::Tensor flash_softmax;
+    if (return_softmax) {flash_softmax = at::empty({ batch_size, num_heads, max_seqlen_q, max_seqlen_k }, opts); }
+
     if( zero_tensors ) {
         out.zero_();
         softmax_lse.fill_(-std::numeric_limits<float>::infinity());
+        if (return_softmax) {flash_softmax.zero_();}
     }
-
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        gen_, at::cuda::detail::getDefaultCUDAGenerator());
 
     set_params_fprop(launch_params.params,
                      batch_size,
@@ -299,7 +301,7 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
                      cu_seqlens_q.data_ptr(),
                      cu_seqlens_k.data_ptr(),
                      loop ? o_tmp.data_ptr() : nullptr,
-                     nullptr,
+                     return_softmax ? flash_softmax.data_ptr() : nullptr,
                      softmax_lse.data_ptr(),
                      p_dropout,
                      softmax_scale,
@@ -311,15 +313,25 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     // We use a custom RNG that increases the offset by batch_size * nheads * 32.
     int64_t counter_offset = launch_params.params.b * launch_params.params.h * 32;
 
+    // We want to checkpoint and save the RNG state for backward if dropout
+    // We get the default generator and return the seed and offset which will
+    // be used in the backward function
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+    uint64_t seed{0}, offset{0};
     if( is_dropout ) {
+        TORCH_CHECK(at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None,
+        "scaled_dot_product_flash_attention does not support dropout with cuda graph capture mode enabled");
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
-        launch_params.params.philox_args = gen->philox_cuda_state(counter_offset);
+        // generator_state = at::Tensor::wrap_tensor_impl(gen -> get_state());
+        at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
+        std::tie(seed, offset) = at::cuda::philox::unpack(philox_state);
+        launch_params.params.philox_args = philox_state;
     }
 
     run_fmha_fwd(launch_params);
 
-    return softmax_lse;
+    return {softmax_lse, seed, offset, flash_softmax};
 }
 
 void run_fmha_bwd(FMHA_dgrad_params &params, cudaStream_t stream, const bool configure) {
@@ -351,21 +363,22 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         const bool zero_tensors,
         const bool is_causal,
         const int num_splits,
-        c10::optional<at::Generator> gen_
+        const uint64_t philox_seed,
+        const uint64_t philox_offset
 ) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
     bool is_sm80 = dprops->major == 8 && dprops->minor == 0;
     bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-    TORCH_CHECK(is_sm8x || is_sm75);
+    bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
+    TORCH_CHECK(is_sm90 || is_sm8x || is_sm75);
     auto launch = &run_fmha_bwd;
 
-    bool is_dropout = p_dropout > 0.0;
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     auto q_dtype = q.dtype();
 
-    TORCH_CHECK(q_dtype == at::kHalf || (is_sm8x && q_dtype == at::kBFloat16));
+    TORCH_CHECK(q_dtype == at::kHalf || ((is_sm8x || is_sm90) && q_dtype == at::kBFloat16));
     TORCH_CHECK(k.dtype() == q_dtype);
     TORCH_CHECK(v.dtype() == q_dtype);
     TORCH_CHECK(out.dtype() == q_dtype);
@@ -406,7 +419,7 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_CHECK(batch_size > 0);
     TORCH_CHECK((head_size % 8 == 0) && (head_size <= 128));
     if (head_size > 64) {  // TODO: eventually we should support SM86 and SM70 with d=128 as well
-        TORCH_CHECK(is_sm80);
+        TORCH_CHECK(is_sm80 || is_sm90);
     }
 
     CHECK_SHAPE(q, total_q, num_heads, head_size);
@@ -480,18 +493,12 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
             dq_tmp.zero_();
         }
     }
-
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        gen_, at::cuda::detail::getDefaultCUDAGenerator());
-
-    // We use a custom RNG that increases the offset by batch_size * nheads * 32.
-    int64_t counter_offset = params.b * params.h * 32;
-
-    if( is_dropout ) {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(gen->mutex_);
-        params.philox_args = gen->philox_cuda_state(counter_offset);
-    }
+    bool is_dropout = p_dropout > 0.0;
+    TORCH_CHECK(
+        !is_dropout || at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None,
+        "scaled_dot_product_flash_attention does not support dropout with cuda graph capture mode enabled");
+    at::PhiloxCudaState philox_args{philox_seed, philox_offset};
+    params.philox_args = philox_args;
 
     launch(params, stream, /*configure=*/false);
 

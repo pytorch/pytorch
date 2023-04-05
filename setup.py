@@ -175,6 +175,9 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
+#   NVFUSER_SOURCE_DIR
+#     specify nvfuser root directory
+#
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
 #
@@ -822,12 +825,7 @@ def configure_extension_build():
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
         # /EHsc is about standard C++ exception handling
-        # /DNOMINMAX removes builtin min/max functions
-        # /wdXXXX disables warning no. XXXX
-        extra_compile_args = ['/MD', '/FS', '/EHsc', '/DNOMINMAX',
-                              '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
-                              '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
-                              '/wd4275']
+        extra_compile_args = ['/MD', '/FS', '/EHsc']
     else:
         extra_link_args = []
         extra_compile_args = [
@@ -836,7 +834,6 @@ def configure_extension_build():
             '-Wno-strict-overflow',
             '-Wno-unused-parameter',
             '-Wno-missing-field-initializers',
-            '-Wno-write-strings',
             '-Wno-unknown-pragmas',
             # This is required for Python 2 declarations that are deprecated in 3.
             '-Wno-deprecated-declarations',
@@ -926,19 +923,17 @@ def configure_extension_build():
                   include_dirs=[],
                   library_dirs=library_dirs,
                   extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
-    C_flatbuffer = Extension("torch._C_flatbuffer",
-                             libraries=main_libraries,
-                             sources=["torch/csrc/stub_with_flatbuffer.c"],
-                             language='c',
-                             extra_compile_args=main_compile_args + extra_compile_args,
-                             include_dirs=[],
-                             library_dirs=library_dirs,
-                             extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
-    extensions.append(C_flatbuffer)
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
+    if cmake_cache_vars['USE_ROCM']:
+        triton_req_file = os.path.join(cwd, ".github", "requirements", "triton-requirements-rocm.txt")
+        if os.path.exists(triton_req_file):
+            with open(triton_req_file) as f:
+                triton_req = f.read().strip()
+                extra_install_requires.append(triton_req)
+
     if cmake_cache_vars['BUILD_CAFFE2']:
         extensions.append(
             Extension(
@@ -1013,20 +1008,25 @@ def print_box(msg):
 def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
-        'typing_extensions',
+        'filelock',
+        'typing-extensions',
         'sympy',
         'networkx',
+        'jinja2',
     ]
 
     extras_require = {
         'opt-einsum': ['opt-einsum>=3.3']
     }
     if platform.system() == 'Linux':
-        triton_pin_file = os.path.join(cwd, ".github", "ci_commit_pins", "triton.txt")
-        if os.path.exists(triton_pin_file):
+        triton_pin_file = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", "triton.txt")
+        triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
+        if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
             with open(triton_pin_file) as f:
                 triton_pin = f.read().strip()
-                extras_require['dynamo'] = ['pytorch-triton==2.0.0+' + triton_pin[:10], 'jinja2']
+            with open(triton_version_file) as f:
+                triton_version = f.read().strip()
+            extras_require['dynamo'] = ['pytorch-triton==' + triton_version + '+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1057,7 +1057,6 @@ def main():
         'bin/*',
         'test/*',
         '_C/*.pyi',
-        '_C_flatbuffer/*.pyi',
         'cuda/*.pyi',
         'optim/*.pyi',
         'autograd/*.pyi',
@@ -1093,6 +1092,7 @@ def main():
         'include/ATen/hip/detail/*.cuh',
         'include/ATen/hip/detail/*.h',
         'include/ATen/hip/impl/*.h',
+        'include/ATen/miopen/*.h',
         'include/ATen/detail/*.h',
         'include/ATen/native/*.h',
         'include/ATen/native/cpu/*.h',
@@ -1146,6 +1146,9 @@ def main():
         'include/torch/csrc/distributed/c10d/*.h',
         'include/torch/csrc/distributed/c10d/*.hpp',
         'include/torch/csrc/distributed/rpc/*.h',
+        'include/torch/csrc/distributed/autograd/context/*.h',
+        'include/torch/csrc/distributed/autograd/functions/*.h',
+        'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
         'include/torch/csrc/jit/generated/*.h',
@@ -1204,6 +1207,16 @@ def main():
         'utils/model_dump/code.js',
         'utils/model_dump/*.mjs',
     ]
+    if get_cmake_cache_vars()['BUILD_NVFUSER']:
+        torch_package_data.extend([
+            'share/cmake/nvfuser/*.cmake',
+            'include/nvfuser/*.h',
+            'include/nvfuser/kernel_db/*.h',
+            'include/nvfuser/multidevice/*.h',
+            'include/nvfuser/ops/*.h',
+            'include/nvfuser/python_frontend/*.h',
+            'include/nvfuser/scheduler/*.h',
+        ])
 
     if get_cmake_cache_vars()['BUILD_CAFFE2']:
         torch_package_data.extend([

@@ -1,7 +1,5 @@
 #include <c10/core/GradMode.h>
 
-#include <stdexcept>
-
 namespace c10 {
 
 bool GradMode::is_enabled() {

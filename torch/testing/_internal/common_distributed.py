@@ -30,8 +30,8 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     IS_SANDCASTLE,
     retry_on_connect_failures,
-    sandcastle_skip,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle,
+    skip_but_pass_in_sandcastle_if,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
@@ -286,7 +286,7 @@ def with_dist_debug_levels(levels):
 
 
 def requires_gloo():
-    return sandcastle_skip_if(
+    return skip_but_pass_in_sandcastle_if(
         not c10d.is_gloo_available(),
         "c10d was not compiled with the Gloo backend",
     )
@@ -294,11 +294,11 @@ def requires_gloo():
 
 def requires_nccl_version(version, msg):
     if not c10d.is_nccl_available():
-        return sandcastle_skip(
+        return skip_but_pass_in_sandcastle(
             "c10d was not compiled with the NCCL backend",
         )
     else:
-        return sandcastle_skip_if(
+        return skip_but_pass_in_sandcastle_if(
             torch.cuda.nccl.version() < version,
             "Requires NCCL version greater than or equal to: {}, found: {}, reason: {}".format(
                 version, torch.cuda.nccl.version(), msg
@@ -307,19 +307,19 @@ def requires_nccl_version(version, msg):
 
 
 def requires_nccl():
-    return sandcastle_skip_if(
+    return skip_but_pass_in_sandcastle_if(
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
     )
 
 def requires_ucc():
-    return sandcastle_skip_if(
+    return skip_but_pass_in_sandcastle_if(
         not c10d.is_ucc_available(),
         "c10d was not compiled with the UCC backend",
     )
 
 def requires_mpi():
-    return sandcastle_skip_if(
+    return skip_but_pass_in_sandcastle_if(
         not c10d.is_mpi_available(),
         "c10d was not compiled with the MPI backend",
     )
@@ -339,7 +339,7 @@ def skip_if_rocm(func):
 
 
 def skip_if_win32():
-    return sandcastle_skip_if(
+    return skip_but_pass_in_sandcastle_if(
         sys.platform == "win32",
         "This unit test case is not supported on Windows platform",
     )
@@ -630,15 +630,7 @@ class MultiProcessTestCase(TestCase):
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
-        # Enable DDP + ReplicatedTensor
-        from torch.nn.parallel._replicated_tensor_ddp_utils import (
-            _set_ddp_with_replicated_tensor,
-        )
-
-        _set_ddp_with_replicated_tensor(True)
-
         self = cls(test_name)
-
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
@@ -1025,8 +1017,10 @@ class MultiThreadedTestCase(TestCase):
         # every thread have the same value. This would be relevant when we use op db tests, where it
         # needs those states to be set i.e. using instantiate_device_type_tests()
         # TODO: figure out a better way to do this
-        self._tls.precision = TestCase._precision
-        self._tls.rel_tol = TestCase._rel_tol
+        if hasattr(self, "_tls"):
+            self._tls = threading.local()
+            self._tls.precision = TestCase._precision
+            self._tls.rel_tol = TestCase._rel_tol
 
         self.run_test_with_threaded_pg(test_name, rank, world_size)
 
@@ -1195,11 +1189,13 @@ def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
         c10d.init_process_group("nccl", rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
-    yield
-    torch._dynamo.reset()
-    torch._dynamo.utils.counters.clear()
-    if init_pg:
-        c10d.destroy_process_group()
+    try:
+        yield
+    finally:
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        if init_pg:
+            c10d.destroy_process_group()
 
 
 class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
@@ -1261,11 +1257,6 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
-        # Don't enable DDP + ReplicatedTensor, as that breaks Dynamo+DDP
-        # TODO(whc) why is ReplicatedTensor defaulted=True in MultiProcessTestCase, and should we support it?
-        # from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
-        # _set_ddp_with_replicated_tensor(True)
-
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
         self.rank = rank

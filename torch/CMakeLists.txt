@@ -44,9 +44,6 @@ set(TORCH_PYTHON_SRCS
     )
 append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 
-list(APPEND TORCH_PYTHON_SRCS
-    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp)
-
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
 if(BUILD_TEST)
@@ -109,13 +106,7 @@ elseif(APPLE)
 else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
-      -Wno-write-strings
       -Wno-strict-aliasing)
-endif()
-
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
-      -Wno-writable-strings)
 endif()
 
 if(USE_ITT)
@@ -132,6 +123,7 @@ if(USE_CUDA)
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
     if(USE_CUDNN)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cudnn)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
     endif()
 
@@ -147,7 +139,6 @@ if(USE_ROCM)
       __HIP_PLATFORM_HCC__
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
-    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
 endif()
 
 if(USE_EXPERIMENTAL_CUDNN_V8_API)
@@ -284,6 +275,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
 endif()
 
+if(NOT MSVC)
+  # cudaProfilerInitialize must go away
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations")
+endif()
+
 # coreml
 if(USE_COREML_DELEGATE)
   list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/backend.cpp)
@@ -327,9 +323,6 @@ set_source_files_properties(
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-  set_source_files_properties(
-    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp
-    PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
 endif()
 
@@ -386,9 +379,9 @@ add_custom_command(
     "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
   COMMAND
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
-      --is_debug=${TORCH_VERSION_DEBUG}
-      --cuda_version=${CUDA_VERSION}
-      --hip_version=${HIP_VERSION}
+      --is-debug=${TORCH_VERSION_DEBUG}
+      --cuda-version=${CUDA_VERSION}
+      --hip-version=${HIP_VERSION}
   DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )

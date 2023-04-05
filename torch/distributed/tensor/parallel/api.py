@@ -40,9 +40,11 @@ def parallelize_module(  # type: ignore[return]
 ) -> nn.Module:
     """
     The API to apply Tensor Parallelism (TP) in PyTorch. We parallelize module
-    or sub_modules based on a parallelize_plan which contains the parallel_style
-    which indicates how user want the module or sub_module to be parallelized.
-    User can also specify different parallel_style per module fully qualifed name (FQN).
+    or sub_modules based on a parallelize_plan. The parallelize_plan contains
+    :class:`ParallelStyle`, which indicates how user wants the module or sub_module
+    to be parallelized.
+
+    User can also specify different parallel style per module fully qualified name (FQN).
     The API supports 2D parallelism natively by accepting an n-dimension device_mesh
     and users just need to specify the dimension where we perform tensor parallelism on.
 
@@ -66,7 +68,7 @@ def parallelize_module(  # type: ignore[return]
 
     Example::
         >>> # xdoctest: +SKIP("distributed")
-        >>> from torch.distributed._tensor.parallel import parallelize_module, PairwiseParallel
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PairwiseParallel
         >>>
         >>> # Define the module.
         >>> m = Model(...)
@@ -83,15 +85,13 @@ def parallelize_module(  # type: ignore[return]
 
     if isinstance(parallelize_plan, ParallelStyle):
         # RowwiseParallel or ColwiseParallel
-        if isinstance(parallelize_plan, ColwiseParallel) or isinstance(
-            parallelize_plan, RowwiseParallel
-        ):
+        if isinstance(parallelize_plan, (ColwiseParallel, RowwiseParallel)):
             return _parallelize_linear(module, device_mesh, parallelize_plan)
         # PairwiseParallel
         if _is_mha_for_pairwise_parallel(module):
             return _parallelize_multihead_attn(module, device_mesh)
         elif _is_mlp_for_pairwise_parallel(module):
-            return _parallelize_mlp(module, device_mesh)
+            return _parallelize_mlp(module, device_mesh, parallelize_plan)
         else:
             for n, m in module.named_children():
                 module.register_module(
@@ -101,7 +101,12 @@ def parallelize_module(  # type: ignore[return]
     elif isinstance(parallelize_plan, dict):
         for module_path, parallelize_style in parallelize_plan.items():
             sub_module = module.get_submodule(module_path)
-            module.register_module(  # type: ignore[call-arg] # pyre-ignore[20]
+            parent_module = module
+            if "." in module_path:
+                parent_module_path = ".".join(module_path.split(".")[:-1])
+                parent_module = module.get_submodule(parent_module_path)
+                module_path = module_path.split(".")[-1]
+            parent_module.register_module(  # type: ignore[call-arg] # pyre-ignore[20]
                 module_path,
                 parallelize_module(  # type: ignore[arg-type]
                     sub_module, device_mesh, parallelize_style  # type: ignore[arg-type] # pyre-ignore[6]
@@ -126,9 +131,7 @@ def _is_mha_for_pairwise_parallel(module: nn.Module) -> bool:
     Return:
         A boolean object which specifies whether the module is MHA supported by Pairwise parallel or not.
     """
-    return isinstance(module, TensorParallelMultiheadAttention) or isinstance(
-        module, nn.MultiheadAttention
-    )
+    return isinstance(module, (TensorParallelMultiheadAttention, nn.MultiheadAttention))
 
 
 def _is_mlp_for_pairwise_parallel(module: nn.Module) -> bool:

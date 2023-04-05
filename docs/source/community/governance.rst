@@ -61,6 +61,7 @@ contributors and other interested parties understand the
 future direction of the project and can participate in discussion.
 
 Responsibilities of the maintainer includes:
+
 * Triaging high priority issues of the module
 * Triaging and reviewing and landing high priority pull requests of the module
 * Supporting public documentation related to the module
@@ -129,8 +130,8 @@ The Process for Nomination
 
 * Each module has its own process. Please contact module maintainers for more information.
   However, if there is no process identified, you can file a request to the core
-  maintainers by submitting a proposal form (coming soon). Core maintainers are
-  meeting every three months.
+  maintainers by submitting `this form <https://share.hsforms.com/1fh3SpHFMR2ihEBQ2orgN8A4tvhy>`__.
+  Core maintainers are meeting every three months.
 * If you are submitting a request to the core maintainers, the information in your request
   must include the following items:
 

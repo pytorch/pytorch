@@ -12,10 +12,11 @@ from torch.distributed._tensor.api import (
 )
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import einop_rule, pointwise_rule
-from torch.distributed._tensor.ops.utils import register_prop_rule, normalize_dim
+from torch.distributed._tensor.ops.utils import normalize_dim, register_prop_rule
 
 
 aten = torch.ops.aten
+
 
 # NOTE: the default propagation rule should apply for
 # any operator that does not return a DTensor, i.e.
@@ -39,8 +40,6 @@ def prop_create_like(op_schema: OpSchema) -> OutputSharding:
         placements=tuple(
             Replicate() if isinstance(p, _Partial) else p for p in input_spec.placements
         ),
-        ndim=input_spec.ndim,
-        shape=input_spec.shape,
     )
     return OutputSharding(output_spec=output_spec)
 
@@ -59,25 +58,30 @@ def no_shard_prop_rule(op_schema: OpSchema) -> OutputSharding:
                 f"with `Shard`, but found placements: "
                 f"{tensor_spec.placements}",
             )
-    # otherwise default prop the first arg spec
-    return OutputSharding(tensor_spec)
+    # otherwise default prop as None as it would not return
+    # a DTensor
+    return OutputSharding(None)
 
 
 def new_factory_rule(op_schema: OpSchema) -> OutputSharding:
     # this op would benefit from backward sharding propagation!
     # Since we cannot do that yet, just return replicated
     input = op_schema.args_schema[0]
-    size = torch.Size(cast(Sequence[int], op_schema.args_schema[1]))
     assert isinstance(input, DTensorSpec)
 
     return OutputSharding(
         output_spec=DTensorSpec(
             mesh=input.mesh,
             placements=[Replicate()] * input.mesh.ndim,
-            shape=size,
-            ndim=len(size),
+            tensor_meta=input.tensor_meta,
         )
     )
+
+
+@register_prop_rule([aten.equal.default, aten.is_same_size.default])
+def non_tensor_prop_rule(op_schema: OpSchema) -> OutputSharding:
+    # simply return None as it does not return DTensor
+    return OutputSharding(output_spec=None)
 
 
 default_prop_ops = [
@@ -86,7 +90,6 @@ default_prop_ops = [
     aten.contiguous.default,
     aten.copy_.default,
     aten.detach.default,
-    aten.is_same_size.default,
     aten.new_empty_strided.default,
 ]
 
@@ -138,8 +141,7 @@ def prop_bucketize(op_schema: OpSchema) -> OutputSharding:
                         DTensorSpec(
                             mesh=boundaries.mesh,
                             placements=[Replicate()] * len(boundaries.placements),
-                            ndim=boundaries.ndim,
-                            shape=boundaries.shape,
+                            tensor_meta=boundaries.tensor_meta,
                         ),
                     ),
                     kwargs_schema=op_schema.kwargs_schema,
@@ -158,16 +160,12 @@ def unshard_tensor_dim(
     )
 
 
-def is_tensor_dim_sharded(
-    spec: DTensorSpec, dim: int
-) -> bool:
+def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
     """Return True if tensor dim is sharded"""
     return (dim < spec.ndim) and spec.dim_map[dim] >= 0
 
 
-def _prop_all_but_dim(
-    op_schema: OpSchema, dim: int, out_shape: torch.Size
-) -> OutputSharding:
+def _prop_all_but_dim(op_schema: OpSchema, dim: int) -> OutputSharding:
     """
     Considering an op that takes its input as first argument, forwards all shardings
     except for the given dimension.
@@ -179,8 +177,6 @@ def _prop_all_but_dim(
     output_spec = DTensorSpec(
         mesh=input_spec.mesh,
         placements=output_placements,
-        shape=out_shape,
-        ndim=input_spec.ndim,
     )
 
     if input_spec.placements == output_placements:
@@ -189,8 +185,7 @@ def _prop_all_but_dim(
         suggested_input_spec = DTensorSpec(
             mesh=input_spec.mesh,
             placements=output_placements,
-            ndim=input_spec.ndim,
-            shape=input_spec.shape,
+            tensor_meta=input_spec.tensor_meta,
         )
         out = OutputSharding(
             output_spec=None,
@@ -235,15 +230,7 @@ def prop_slice(op_schema: OpSchema) -> OutputSharding:
     if start == 0 and end == input_spec.shape[dim] and step == 1:
         return OutputSharding(output_spec=input_spec)
 
-    # shape propagation
-    slice_len = (end - start + step - 1) // step
-    out_shape = torch.Size(
-        tuple(input_spec.shape[0:dim])
-        + (slice_len,)
-        + tuple(input_spec.shape[dim + 1 :])
-    )
-
-    return _prop_all_but_dim(op_schema, dim=dim, out_shape=out_shape)
+    return _prop_all_but_dim(op_schema, dim=dim)
 
 
 @register_prop_rule(aten.slice_scatter.default)
@@ -284,8 +271,6 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
             output_spec=DTensorSpec(
                 mesh=input.mesh,
                 placements=input.placements,
-                shape=input.shape,
-                ndim=input.ndim,
             )
         )
     else:
@@ -299,14 +284,12 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
                         DTensorSpec(
                             mesh=input.mesh,
                             placements=input_suggestion,
-                            shape=input.shape,
-                            ndim=input.ndim,
+                            tensor_meta=input.tensor_meta,
                         ),
                         DTensorSpec(
                             mesh=src.mesh,
                             placements=input_suggestion,
-                            shape=src.shape,
-                            ndim=src.ndim,
+                            tensor_meta=src.tensor_meta,
                         ),
                     )
                     + op_schema.args_schema[2:],
@@ -397,7 +380,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         assert isinstance(indices_output_spec, DTensorSpec)
         indices_spec = indices_output_spec
 
-    lookup_dims = set(v[0] for v in valid_indices_spec)
+    lookup_dims = {v[0] for v in valid_indices_spec}
 
     need_reshard_on_values = tuple(
         (isinstance(vp, Shard) and (vp.dim in lookup_dims or isinstance(ip, Shard)))
@@ -405,9 +388,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     )
 
     if not need_reshard_on_indices and not any(need_reshard_on_values):
-
         value_placements = values_spec.placements
-        value_shape = values_spec.shape
 
         all_dims_consecutive = all(
             b[0] - a[0] == 1
@@ -439,18 +420,10 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
             place(vp, ip)
             for vp, ip in zip(values_spec.placements, indices_spec.placements)
         )
-        value_shape = torch.Size(
-            tuple(value_shape[:insert_dim])
-            + tuple(indices_spec.shape)
-            + tuple(value_shape[insert_dim + len(valid_indices_spec) :])
-        )
-
         result = OutputSharding(
             output_spec=DTensorSpec(
                 mesh=values_spec.mesh,
                 placements=value_placements,
-                shape=value_shape,
-                ndim=len(value_shape),
             )
         )
         return result
@@ -467,8 +440,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
                                 Replicate() if need_reshard_on_values[i] else v
                                 for i, v in enumerate(values_spec.placements)
                             ],
-                            ndim=values_spec.ndim,
-                            shape=values_spec.shape,
+                            tensor_meta=values_spec.tensor_meta,
                         ),
                         multi_indices_spec,
                     ),
@@ -489,7 +461,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
         ndim = max(ndim, spec.ndim)
 
     dim = 0  # default dim = 0
-    if (len(op_schema.args_schema) > 1):
+    if len(op_schema.args_schema) > 1:
         dim = cast(int, op_schema.args_schema[1])
     dim = normalize_dim(dim, ndim)
 
@@ -504,8 +476,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
                 DTensorSpec(
                     mesh=spec.mesh,
                     placements=unshard_tensor_dim(spec.placements, dim=dim),
-                    shape=spec.shape,
-                    ndim=spec.ndim,
+                    tensor_meta=spec.tensor_meta,
                 )
             )
         else:
@@ -522,7 +493,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
     einop_notation_list = []
 
     l = len(tensor_list_specs)
-    free_dim = alphabet[l:l + ndim - 1]
+    free_dim = alphabet[l : l + ndim - 1]
     for i, spec in enumerate(tensor_list_specs):
         if spec.ndim == ndim:
             # rewrite concat dim
@@ -541,13 +512,10 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
             args_schema=tuple(tensor_list_specs),
             kwargs_schema={},
         ),
-        linearity=False
+        linearity=False,
     )
 
-    if (
-        (output_sharding.output_spec is not None) and
-        need_reshard
-    ):
+    if (output_sharding.output_spec is not None) and need_reshard:
         output_sharding.output_spec = None
         output_sharding.schema_suggestions = [
             OpSchema(
@@ -567,17 +535,6 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
         else:
             return output_sharding
 
-    # change output shape
-    new_size = 0
-    for spec in tensor_list_specs:
-        if dim < spec.ndim:
-            new_size += spec.shape[dim]
-    assert isinstance(output_sharding.output_spec, DTensorSpec)
-    output_sharding.output_spec.shape = torch.Size(
-        tuple(output_sharding.output_spec.shape[:dim])
-        + (new_size,)
-        + tuple(output_sharding.output_spec.shape[dim + 1 :])
-    )
     return output_sharding
 
 
@@ -598,3 +555,66 @@ def _update_schema_suggestion_for_cat(
         )
     ]
     return output_sharding
+
+
+@register_prop_rule([aten.split.Tensor, aten.split_with_sizes.default])
+def split_rule(op_schema: OpSchema) -> OutputSharding:
+    output_spec_list: List[DTensorSpec] = []
+    input_spec = cast(DTensorSpec, op_schema.args_schema[0])
+    ndim = input_spec.ndim
+    split_size_or_sections = op_schema.args_schema[1]
+    dim = cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
+    dim = normalize_dim(dim, ndim)
+
+    # TODO: tensor to split cannot have _Partial
+    # in its placements for now. Will need to
+    # support in future.
+    if input_spec.sums:
+        raise NotImplementedError(
+            f"splitting distributed tensor with "
+            f"_Partial placement is not implemented!\n"
+            f"DTensorSpec={input_spec}"
+        )
+
+    # TODO: just like slice op, split replicates before
+    # splitting on a sharded dimension
+    need_reshard = False
+    if is_tensor_dim_sharded(input_spec, dim=dim):
+        need_reshard = True
+        input_spec = DTensorSpec(
+            mesh=input_spec.mesh,
+            placements=unshard_tensor_dim(input_spec.placements, dim=dim),
+            tensor_meta=input_spec.tensor_meta,
+        )
+
+    if need_reshard:
+        return OutputSharding(
+            None,
+            schema_suggestions=[
+                OpSchema(
+                    func_schema=op_schema.func_schema,
+                    args_schema=(input_spec,) + op_schema.args_schema[1:],
+                    kwargs_schema=op_schema.kwargs_schema,
+                ),
+            ],
+        )
+
+    def size_split(N, i):
+        # Last chunk will be smaller if the tensor size N
+        # along the given dimension dim is not divisible by i.
+        assert i > 0
+        return [i] * (N // i) + ([N % i] if N % i != 0 else [])
+
+    output_size_list = (
+        size_split(input_spec.shape[dim], split_size_or_sections)
+        if isinstance(split_size_or_sections, int)
+        else split_size_or_sections
+    )
+    output_spec_list = [
+        DTensorSpec(
+            mesh=input_spec.mesh,
+            placements=input_spec.placements,
+        )
+        for _ in range(len(output_size_list))
+    ]
+    return OutputSharding(output_spec_list)

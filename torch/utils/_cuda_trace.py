@@ -1,7 +1,7 @@
 import logging
 from typing import Callable, Generic, List
 
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec  # Python 3.10+
 
 logger = logging.getLogger(__name__)
 P = ParamSpec("P")

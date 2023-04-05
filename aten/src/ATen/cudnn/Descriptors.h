@@ -135,7 +135,7 @@ class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
   // padding).  If 't' is lower-dimensional than 'pad', the remaining
   // dimensions (on the right) are padded with ones.  This doesn't
   // affect the underlying data layout.  This is particularly useful for
-  // dealing with a pecularity of the CuDNN API, which is that broadcasting in CuDNN is
+  // dealing with a peculiarity of the CuDNN API, which is that broadcasting in CuDNN is
   // done in two steps: first, the client code is expected to pad out
   // (the dimensions) input tensors to be the same dimension as the
   // target broadcast, and then second, CuDNN takes of actually
@@ -245,7 +245,7 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
     // NB: seed doesn't matter when dropout = 0, because no random number
     // initialization actually takes place when there is no dropout.
     // NB: Empirically, cudnnSetDropoutDescriptor is cheap when
-    // dropoot == 0
+    // dropout == 0
     AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, 0 /* dropout */, nullptr, 0 /* state_size */, 0 /* seed */));
   }
 };

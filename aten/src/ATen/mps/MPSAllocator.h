@@ -1,35 +1,22 @@
 //  Copyright © 2022 Apple Inc.
 
+#pragma once
+
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSStream.h>
 #include <cstdio>
 #include <mutex>
 #include <set>
+#include <unordered_set>
 #include <mach/vm_page_size.h>
 #include <c10/util/flat_hash_map.h>
 
 // this implementation is based on CUDACachingAllocator.
 // It utilizes Metal Heaps to improve the performance with buffer allocation.
+// Do not include this header. Use MPSAllocatorInterface.h instead.
 // TODO: Unify the logic with CUDACachingAllocator and remove redundant code.
 namespace at {
 namespace mps {
-
-class IMpsAllocatorCallback {
- public:
-  enum class EventType {
-    ALLOCATED, // buffer got allocated to be used immediately
-    RECYCLED,  // buffer pulled from free list to be reused
-    FREED,     // buffer put to free list for future recycling
-    RELEASED,  // buffer memory released
-  };
-  virtual ~IMpsAllocatorCallback() = default;
-  virtual void executeMPSAllocatorCallback(void* ptr, EventType event) = 0;
-};
-
-// MPS allocator will execute every registered callback when a block of memory is freed.
-C10_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
-#define REGISTER_MPS_ALLOCATOR_CALLBACK(name, ...) \
-  C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__);
-
 namespace HeapAllocator {
 
 #define MB(x) round_page(x * 1048576UL)
@@ -255,42 +242,67 @@ public:
     m_small_pool_private(m_device, UsageFlags::SMALL   | UsageFlags::PRIVATE | UsageFlags::HAZARD),
     // no Hazard Tracking required for the Scalar pool (synchronized manually)
     m_scalar_pool(m_device, UsageFlags::SMALL | UsageFlags::SHARED | UsageFlags::SCALAR),
-    m_total_allocated_memory(0), m_max_buffer_size([m_device maxBufferLength]),
-    m_stream(getDefaultMPSStream())
+    m_total_allocated_memory(0), m_current_allocated_memory(0),
+    m_max_buffer_size([m_device maxBufferLength]), m_stream(getDefaultMPSStream())
   {
     init_allocator();
   }
 
   // interface exposed to at::Allocator
   id<MTLBuffer> malloc(size_t size, uint32_t usage);
+  // frees a buffer and returns it into buffer pool
   void free(void* ptr);
+  // releases all the cached buffers and their associated heaps
   void emptyCache();
-  // interface exposed to internal MPS operations
+  // returns true if buffer was allocated from the shared pool
   bool isSharedBuffer(void* ptr);
-  ssize_t getRequestedBufferSize(void* ptr);
+  // get the requested unaligned size of an MTLBuffer
+  ssize_t getUnalignedBufferSize(void* ptr);
+  // set the shape of a base tensor from a view tensor
   void setBufferShape(void* ptr, const IntArrayRef& shape);
+  // retrieve the shape of a base tensor from a view tensor
   IntArrayRef getBufferShape(void* ptr);
+  // allocate a buffer from a specialized pool to import CPU scalars into GPU
   id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
   // this indicates how far (in Megabytes) the current total allocations are from the
   // low watermark limit which is used to detect if we're under memory pressure
   // This returns zero if we've reached the low watermark limit
   ssize_t getLowWatermarkValue();
-
-  bool getDebugVerbosity() const { return m_debug_verbosity; }
-  size_t getMaxTotalAllowedSize() const { return m_max_total_allowed_size; }
+  // (see m_low_watermark_ratio for description)
+  void setLowWatermarkRatio(double ratio);
+  // (see m_high_watermark_ratio for description)
+  void setHighWatermarkRatio(double ratio);
+  // (see m_low_watermark_limit for description)
   size_t getLowWatermarkLimit() const { return m_low_watermark_limit; }
+  // (see m_max_total_allowed_size for description)
+  size_t getHighWatermarkLimit() const { return m_max_total_allowed_size; }
+  // (see m_total_allocated_memory for description)
+  size_t getTotalAllocatedMemory() const { return m_total_allocated_memory; }
+  // (see m_current_allocated_memory for description)
+  size_t getCurrentAllocatedMemory() const { return m_current_allocated_memory; }
+  // total GPU memory allocated in the process by Metal driver; including
+  // implicit allocations from MPS/MPSGraph frameworks and MPSHeapAllocatorImpl.
+  size_t getDriverAllocatedMemory() const { return current_allocated_size(); }
+  // (see enum DebugVerbosity for description)
+  uint32_t getDebugVerbosity() const { return m_debug_verbosity; }
+  // returns the device that we allocate from
   inline id<MTLDevice> Device() const { return m_device; }
+
+  // TODO: make a common function to do size unit conversions in PyTorch.
+  inline std::string format_size(uint64_t size) const;
 
 private:
   // (see m_high_watermark_ratio for description)
   constexpr static double default_high_watermark_ratio = 1.7;
+  // we set the allowed upper bound to twice the size of recommendedMaxWorkingSetSize.
+  constexpr static double default_high_watermark_upper_bound = 2.0;
   // (see m_low_watermark_ratio for description)
   // on unified memory, we could allocate beyond the recommendedMaxWorkingSetSize
   constexpr static double default_low_watermark_ratio_unified  = 1.4;
   constexpr static double default_low_watermark_ratio_discrete = 1.0;
 
   const id<MTLDevice> m_device;
-  std::mutex m_mutex;
+  std::recursive_mutex m_mutex;
   // allocated buffers by device pointer
   ska::flat_hash_map<void*, BufferBlock*> m_allocated_buffers;
   // unallocated cached buffers larger than 1 MB
@@ -299,21 +311,26 @@ private:
   BufferPool m_small_pool_shared, m_small_pool_private;
   // small cached buffers to import scalar values into MPS stream
   BufferPool m_scalar_pool;
-  // total memory allocated by HeapAllocator
+  // total memory allocated by HeapAllocator (including blocks in pools)
   size_t m_total_allocated_memory;
+  // currently active memory allocations in use (i.e., blocks not in pools)
+  size_t m_current_allocated_memory;
   // max buffer size allowed by Metal
   size_t m_max_buffer_size;
   // maximum total size allowed to be allocated
   size_t m_max_total_allowed_size;
-  // high watermark ratio is a hard limit for the total allowed allocations (between 0 and 1)
-  // 0 means unlimited (would spill to disk or system failure if OOM)
-  // 1 is maximum allowed by device.recommendedMaxWorkingSetSize
-  // (e.g., value 0.95 means we allocate up to 95% of total memory; beyond that allocations fail)
+  // high watermark ratio is a hard limit for the total allowed allocations
+  // 0. : disables high watermark limit (may cause system failure if system-wide OOM occurs)
+  // 1. : recommended maximum allocation size (i.e., device.recommendedMaxWorkingSetSize)
+  // >1.: allows limits beyond the device.recommendedMaxWorkingSetSize
+  // e.g., value 0.95 means we allocate up to 95% of recommended maximum
+  // allocation size; beyond that, the allocations would fail with OOM error.
   double m_high_watermark_ratio;
   // low watermark ratio is a soft limit to attempt limiting memory allocations up to the lower watermark
   // level by garbage collection or committing command buffers more frequently (a.k.a, adaptive commit).
   // Value between 0 to m_high_watermark_ratio (setting 0.0 disables adaptive commit and garbage collection)
-  // (e.g., value 0.9 means we 'attempt' to limit allocations up to 90% of total memory)
+  // e.g., value 0.9 means we 'attempt' to limit allocations up to 90% of recommended maximum
+  // allocation size.
   double m_low_watermark_ratio;
   // low watermark size limit (in Bytes) at the time we initialize the allocator
   size_t m_low_watermark_limit;
@@ -355,37 +372,14 @@ private:
   // total allocated size instead of manually tracking in MPSAllocator
   size_t current_allocated_size() const { return [m_device currentAllocatedSize]; }
 
-  void trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {
+  bool trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {
     for (const auto& name : MPSAllocatorCallbacksRegistry()->Keys()) {
-      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block->buffer, event);
+      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block ? buffer_block->buffer : nullptr, event);
     }
-  }
-
-  // TODO: make a common function to do size unit conversions in PyTorch.
-  static std::string format_size(uint64_t size) {
-    std::ostringstream os;
-    os.precision(2);
-    os << std::fixed;
-    if (size <= 1024UL) { os << size << " bytes"; }
-    else if (size <= 1048576UL) { os << ((float) size / 1024.0) << " KB"; }
-    else if (size <= 1073741824UL) { os << ((float) size / 1048576.0) << " MB"; }
-    else { os << ((float) size / 1073741824.0) << " GB"; }
-    return os.str();
+    return true;
   }
 };
 
 } // namespace HeapAllocator
-
-// interface exposed to internal MPS operations
-
-// get the requested non-aligned size of an MTL buffer
-ssize_t get_requested_buffer_size(void* ptr);
-// retrieve the shape of a base tensor from a view tensor
-IntArrayRef get_buffer_shape(void* ptr);
-// set the shape of a base tensor from a view tensor
-void set_buffer_shape(void* ptr, const IntArrayRef& shape);
-// allocate a buffer from a specialized pool to import CPU scalars into GPU
-DataPtr allocate_scalar_buffer(void* value, size_t size);
-
 } // namespace mps
 } // namespace at

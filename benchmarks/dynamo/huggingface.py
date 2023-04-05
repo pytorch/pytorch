@@ -364,7 +364,7 @@ EXTRA_MODELS = {
 
 class HuggingfaceRunner(BenchmarkRunner):
     def __init__(self):
-        super(HuggingfaceRunner, self).__init__()
+        super().__init__()
         self.suite_name = "huggingface"
 
     def load_model(
@@ -373,7 +373,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         model_name,
         batch_size=None,
     ):
-
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
@@ -513,7 +512,6 @@ def refresh_model_names_and_batch_sizes():
     lm_seen = set()
     family_seen = set()
     for cls_name in hf_fx._SUPPORTED_MODELS:
-
         if "For" not in cls_name:
             continue
 
@@ -582,10 +580,14 @@ def refresh_model_names_and_batch_sizes():
             log.warning(f"Failed to find suitable batch size for {model_name}")
 
 
-if __name__ == "__main__":
+def huggingface_main():
     # Code to refresh model names and batch sizes
     # if "--find-batch-sizes" not in sys.argv:
     #     refresh_model_names_and_batch_sizes()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(HuggingfaceRunner())
+
+
+if __name__ == "__main__":
+    huggingface_main()

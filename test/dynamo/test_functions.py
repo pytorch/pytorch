@@ -24,6 +24,9 @@ e = torch.nn.Linear(10, 10)
 flag = True
 
 
+clip01 = functools.partial(torch.clip, min=0.0, max=1.0)
+
+
 def constant3(a, b):
     return a - b + (1.0 + 2)
 
@@ -89,6 +92,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_is_not_null(a, b):
         if a is not None and b is not None:
             return a + b
+
+    @make_test
+    def test_functools_partial(a, b):
+        return clip01(a + b)
+
+    @make_test
+    def test_itertools_product(a, b):
+        v = a
+        for x, i in itertools.product([a, b], [1, 2]):
+            v = v + x * i
+        return v
 
     @make_test
     def test_constant1(a, b, c):
@@ -397,6 +411,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.ones_like(x.T)
 
     @make_test
+    def test_mT(x):
+        return torch.ones_like(x.mT)
+
+    @make_test
     def test_is_sparse(x):
         if not x.is_sparse:
             return x + 1
@@ -563,6 +581,51 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test(self)
 
     @make_test
+    def test_call_dict1(x):
+        d1 = dict()
+        d1["x"] = x + 1
+        d2 = collections.OrderedDict()
+        d2["x"] = x + 2
+        return d1["x"] + d2["x"] + 1
+
+    @make_test
+    def test_call_dict2(x):
+        d1 = dict()
+        d1["x"] = x
+        d2 = collections.OrderedDict(d1)
+        if isinstance(d2, collections.OrderedDict):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_call_dict3(x):
+        my_list = [("a", x), ("b", x + 1), ("c", x + 2)]
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = collections.OrderedDict(my_list)
+        d2["c"] = x + 20
+        return d1["a"] + d2["c"] + 1
+
+    @make_test
+    def test_call_dict4(x):
+        my_list = (("a", x), ("b", x + 1), ("c", x + 2))
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = collections.OrderedDict(my_list)
+        d2["c"] = x + 20
+        return d1["a"] + d2["c"] + 1
+
+    @make_test
+    def test_call_dict5(x):
+        my_list = iter([("a", x), ("b", x + 1), ("c", x + 2)])
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = collections.OrderedDict(my_list)
+        d2["c"] = x + 20
+        return d1["a"] + d2["c"] + 1
+
+    @make_test
     def test_min_max(a, b):
         c = a + b
         a = a.sum()
@@ -640,6 +703,35 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a + b + next(iter(reversed(tmp)))
 
     @make_test
+    def test_list_sorted1(x):
+        tmp = [1, 10, 3, 0]
+        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+
+    @make_test
+    def test_list_sorted2(x):
+        y = [
+            ("john", "A", 8),
+            ("jane", "B", 5),
+            ("dave", "B", 10),
+        ]
+        return (
+            x + 1,
+            sorted(y),
+            sorted(y, key=lambda student: student[2]),
+            sorted(y, key=lambda student: student[2], reverse=True),
+        )
+
+    @make_test
+    def test_tuple_sorted(x):
+        tmp = (1, 10, 3, 0)
+        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+
+    @make_test
+    def test_dict_sorted(x):
+        tmp = {1: "D", 10: "B", 3: "E", 0: "F"}
+        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+
+    @make_test
     def test_list_clear(a, b):
         tmp = [a + 1, a + 2]
         tmp.clear()
@@ -653,6 +745,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a, b = list(itertools.islice(itertools.chain(tmp1, tmp2), 1, 3))
         c = next(itertools.islice(tmp1, 1, None))
         return a - b / c
+
+    @make_test
+    def test_namedtuple(a, b):
+        mytuple = collections.namedtuple("mytuple", ["x", "y", "xy"])
+        tmp = mytuple(a, b, a + b)
+        return mytuple(tmp.x, tmp[1], tmp.xy + b)
 
     @make_test
     def test_is_quantized(a, b):
@@ -778,9 +876,6 @@ def global_func_with_default_tensor_args(
 
 
 class ModuleWithDefaultTensorArgsMethod(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))):
         x.add_(1)
         kw_x.add_(1)
@@ -796,6 +891,7 @@ class WrapperModule(torch.nn.Module):
         return self.m()
 
 
+@unittest.skipIf(torch.backends.mps.is_available(), "not applicable to mps")
 class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_func_default_tensor_args(self):
         """
