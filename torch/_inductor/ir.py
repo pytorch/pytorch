@@ -2795,12 +2795,14 @@ class ExternKernelAlloc(ExternKernel):
         kernel=None,
         cpp_kernel=None,
         ordered_kwargs_for_cpp_kernel=(),
+        cpp_constant_args=(),
     ):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
         self.cpp_kernel = cpp_kernel
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
+        self.cpp_constant_args = cpp_constant_args
         self.name = V.graph.register_buffer(self)
         if kernel is not None:
             self.kernel = kernel
@@ -3051,6 +3053,13 @@ class MultiOutput(ExternKernel):
 
     def should_allocate(self):
         return False
+
+
+def _string(shape: tuple):
+    from .codegen.wrapper import CppWrapperCodeGen
+
+    cpp_wrapper_codegen = CppWrapperCodeGen()
+    return cpp_wrapper_codegen.codegen_shape_tuple(shape)
 
 
 def _prepare_convolution_fusion_create(
@@ -3430,13 +3439,36 @@ class LinearUnary(ExternKernelAlloc):
         inputs,
         constant_args=(),
         kernel="torch.ops.mkldnn._linear_pointwise",
+        cpp_kernel="mkldnn::_linear_pointwise",
+        cpp_constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
+        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
+        self.cpp_kernel_key = "linear_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& input_t,
+                const at::Tensor& weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                c10::string_view attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
+        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            args = self.cpp_wrapper_codegen_args()
+        else:
+            args = self.codegen_args()
+
+        wrapper.generate_fusion_ops_code(
+            self.get_name(),
+            self.kernel,
+            self.cpp_kernel,
+            args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
         )
 
     @classmethod
@@ -3450,11 +3482,17 @@ class LinearUnary(ExternKernelAlloc):
 
         inputs = [x, w]
         constant_args = [attr, scalars, algorithm]
+        cpp_constant_args = [
+            f'"{attr}"',
+            _string(scalars) if scalars else "{-1}",
+            f'"{algorithm}"',
+        ]
         if b is not None:
             b = cls.require_stride1(cls.realize_input(b))
             inputs.append(b)
         else:
             constant_args.insert(0, b)
+            cpp_constant_args.insert(0, "at::Tensor()")
 
         return LinearUnary(
             layout=FlexibleLayout(
@@ -3464,6 +3502,7 @@ class LinearUnary(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
+            cpp_constant_args=cpp_constant_args,
             kernel=kernel,
         )
 
@@ -4012,123 +4051,6 @@ class CollectiveKernel(ExternKernel):
         self.codegen_collective(wrapper, output_name, input_names)
 
         wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
-
-
-class MultiOutputNoSizeAssert(MultiOutput):
-    """
-    Extract partial output from a multi-output OP.
-        Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emiting this.
-    """
-
-    def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
-        )
-
-
-class ForceInPlace(ExternKernel):
-    """
-    Helper OP to encode an in/out argument that tries to make it inplace whenever possible.
-    Wrap the input of your inplace op to enable this behavior.
-
-    TODO: We should test whether wait_tensor can be a victim of reordering and lead to data races.
-    """
-
-    def codegen(self, wrapper):
-        input_name = self.inputs[0].codegen_reference()
-        output_name = self.get_name()
-        if not wrapper.did_reuse(self, self.inputs[0]):
-            wrapper.writeline(f"{output_name}.copy_({input_name}) #no reuse")
-
-    def __init__(self, layout, input):
-        input = self.realize_input(input)
-        super().__init__(None, layout, self.unwrap_storage([input]), ())
-        self.name = V.graph.register_buffer(self)
-
-    def should_allocate(self):
-        return True
-
-
-class AllReduceCoalesced(ExternKernel):
-    def __init__(self, layout, inputs, constant_args, reduce_op):
-        super().__init__(None, layout, inputs, constant_args)
-        self.reduce_op = reduce_op
-        self.name = V.graph.register_buffer(self)
-
-    def should_allocate(self):
-        return False
-
-    @classmethod
-    def create(
-        cls,
-        inputs: List["TensorBox"],
-        reduce_op: str,
-        tag: str,
-        ranks: List[int],
-        group_size: int,
-    ):
-        res = []
-
-        def wrap_input(var):
-            nonlocal res
-            op = ForceInPlace(
-                FlexibleLayout(var.get_device(), var.get_dtype(), var.get_size()), var
-            )
-            res.append(op)
-            return TensorBox.create(op)
-
-        inputs = list(map(wrap_input, inputs))
-
-        layout = MultiOutputLayout(inputs[0].get_device())
-
-        packed = AllReduceCoalesced(
-            layout=layout,
-            inputs=inputs,
-            constant_args=[tag, ranks, group_size],
-            reduce_op=reduce_op,
-        )
-        for i, in_t in enumerate(inputs):
-            res.append(
-                MultiOutputNoSizeAssert(
-                    FlexibleLayout(
-                        in_t.get_device(), in_t.get_dtype(), in_t.get_size()
-                    ),
-                    packed,
-                    f"[{i}]",
-                )
-            )
-        return res
-
-    def codegen(self, wrapper):
-        wrapper.add_import_once("import torch.distributed as dist")
-        wrapper.add_import_once(
-            "from torch.distributed._functional_collectives import _str_to_reduce_op, _register_tensor_work"
-        )
-        wrapper.add_import_once(
-            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
-        )
-
-        output_name = self.get_name()
-        tag, ranks, group_size = self.constant_args
-
-        wrapper.writeline(
-            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
-        )
-
-        inputs = []
-        for inp in self.inputs:
-            inputs.append(inp.codegen_reference())
-
-        wrapper.writeline(f"{output_name} = [{','.join(inputs)}] ")
-
-        wrapper.writeline(
-            f"{output_name}_work = dist.all_reduce_coalesced("
-            f"{output_name}, "
-            f"op=_str_to_reduce_op('{str(self.reduce_op)}'), "
-            f"group={output_name}_pg, "
-            "async_op=True)"
-        )
-        wrapper.writeline(f"_register_tensor_work({inputs[0]}, {output_name}_work)")
 
 
 class AllReduce(CollectiveKernel):
