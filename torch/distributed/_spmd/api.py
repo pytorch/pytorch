@@ -2,10 +2,18 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
-from functools import partial, wraps
-from typing import Any, Callable, cast, Dict, Optional, Sequence, Tuple, Type, Union
-
-from functorch import make_fx
+from functools import wraps, partial
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+    cast,
+)
 
 import torch
 import torch.distributed as dist
@@ -18,8 +26,14 @@ from torch.distributed._spmd.distribute import (
     Schema,
 )
 from torch.distributed._spmd.distributed_graph import DistributedGraph
-from torch.distributed._tensor import DeviceMesh, Placement, Replicate, Shard
+from torch.distributed._tensor import (
+    DeviceMesh,
+    Placement,
+    Replicate,
+    Shard,
+)
 from torch.nn.utils import stateless
+from functorch import make_fx
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
 
@@ -55,7 +69,9 @@ class SPMD(nn.Module):
         self._compiled_m: Optional[nn.Module] = None
         self._dist_graph = DistributedGraph(orig_module=module)
 
-    def forward(self, *args: Tuple[object], **kwargs: Dict[str, object]) -> object:
+    def forward(
+        self, *args: Tuple[object], **kwargs: Dict[str, object]
+    ) -> object:
         if self._compiled_m is None:
             self._compiled_m = distribute(
                 self._dist_graph,
@@ -99,7 +115,9 @@ class Override(ABC):
         pass
 
     @abstractmethod
-    def transform(self, gm: fx.GraphModule, schema_map: Dict[str, Schema]) -> fx.Graph:
+    def transform(
+        self, gm: fx.GraphModule, schema_map: Dict[str, Schema]
+    ) -> fx.Graph:
         r"""
         Given a DTensor-expanded graph and shardig schema for every node,
         conduct additional transformation for the sub-graph from the :class:`nn.Module`
@@ -151,7 +169,9 @@ def _dtensor_expand(
             schemas.append(replicate_schema)
 
     for p in pytree.tree_flatten(params_and_buffers)[0]:
-        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
+        assert isinstance(
+            p, torch.Tensor
+        ), f"expecting Tensor but got {type(p)}"
         inps.append(p)
         schemas.append(replicate_schema)
 
@@ -334,7 +354,9 @@ def _compile(
             assert opt is None, "Only support single Optimizer for now"
             opt = arg
 
-    assert mod is not None, "Couldn't find nn.Module instances from the arguments."
+    assert (
+        mod is not None
+    ), "Couldn't find nn.Module instances from the arguments."
 
     # 2. Override target submodules (e.g., MoE) with dummy replacements
     if module_override:
@@ -343,7 +365,9 @@ def _compile(
         for typ, override in module_override.items():
             for name, submodule in mod.named_modules():
                 if isinstance(submodule, typ):
-                    accessor.swap_submodule(name, override.replacement(submodule))
+                    accessor.swap_submodule(
+                        name, override.replacement(submodule)
+                    )
 
     # 3. Trace statelss version of the train_step
     params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
@@ -412,7 +436,9 @@ COMPILED_OBJECT_KEY = "_compiled_obj"
 
 def compile(
     module_override: Optional[Dict[Type[Any], Override]] = None,
-    gm_transformation: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
+    gm_transformation: Optional[
+        Callable[[fx.GraphModule], fx.GraphModule]
+    ] = None,
 ):
     r"""
     Compile and optimize a callable, which can be a train step within a training
