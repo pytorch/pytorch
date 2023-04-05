@@ -216,7 +216,6 @@ class SubgraphMatcher:
                 return False
 
             for a1, a2 in zip(args1, args2):
-                print(a1, a2)
                 if isinstance(a1, Node) and isinstance(a2, Node):
                     matched = self._match_nodes(a1, a2, match)
                 elif isinstance(a1, (list, tuple)) and isinstance(a2, (list, tuple)):
@@ -224,7 +223,6 @@ class SubgraphMatcher:
                 else:
                     matched = self.ignore_literals or self._match_literals(a1, a2, match)
 
-                breakpoint()
                 if not matched:
                     return False
 
