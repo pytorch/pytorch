@@ -589,6 +589,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         """
         Multihead self-attention should take fast path when both attention mask (mask type 0)
         and key padding mask (mask type 1) are provided at the same time on CPU and CUDA
+        Edit: giving attention_mask now disables fast path, so we alter test behavior to accomodate
         """
         if device not in ['cpu', 'cuda']:
             self.skipTest("Fastpath only runs on CPU and CUDA.")
@@ -603,13 +604,32 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
             attn_mask = torch.randint(0, 2, (src_len, src_len)).bool().to(device)
             key_padding_mask = torch.randint(0, 2, (batch_size, src_len)).bool().to(device)
 
+            # Only key padding mask => fastpath
+            with mock.patch('torch._native_multi_head_attention') as fastpath_mock:
+                # Compute attention on the fast path
+                mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, device=device).eval()
+                mta_model.training = False
+                mta_model(query, key, value, attn_mask=None, key_padding_mask=key_padding_mask)
+                # If mock was called, fastpath was taken
+                self.assertTrue(fastpath_mock.called)
+
+            # Only attention mask => no fastpath
+            with mock.patch('torch._native_multi_head_attention') as fastpath_mock:
+                # Compute attention on the fast path
+                mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, device=device).eval()
+                mta_model.training = False
+                mta_model(query, key, value, attn_mask=attn_mask, key_padding_mask=None)
+                # If mock was called, fastpath was taken
+                self.assertFalse(fastpath_mock.called)
+
+            # Both key padding mask and attention mask => no fastpath
             with mock.patch('torch._native_multi_head_attention') as fastpath_mock:
                 # Compute attention on the fast path
                 mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, device=device).eval()
                 mta_model.training = False
                 mta_model(query, key, value, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
                 # If mock was called, fastpath was taken
-                self.assertTrue(fastpath_mock.called)
+                self.assertFalse(fastpath_mock.called)
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
