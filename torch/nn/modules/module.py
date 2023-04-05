@@ -77,6 +77,7 @@ class _WrappedHook:
         return result
 
     def __setstate__(self, state: Dict):
+        self.__dict__.update(state)
         self.hook = state["hook"]
         self.with_module = state["with_module"]
 
@@ -2433,4 +2434,20 @@ class Module:
         return replica
 
     def compile(self, *args, **kwargs):
+        """
+        Compiles the module's forward function with the given arguments and
+        keyword arguments in place. 
+        The compiled function is stored in the ``_compiled_call_impl``
+        attribute. The compiled function can be called with the same arguments
+        and keyword arguments as the original module's forward function.
+        The primary benefit of this API is it allows you to easily
+        ``torch.save()`` and `torch.load()` an ``OptimizedModule``
+        
+        Args:
+            *args: Arguments to ``torch.compile`` the module's forward function with.
+            **kwargs: Keyword arguments to ``torch.compile`` the module's forward function with.
+
+        Returns:
+            Module: self
+        """
         self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
