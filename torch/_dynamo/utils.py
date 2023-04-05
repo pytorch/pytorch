@@ -382,7 +382,9 @@ def is_typing(value):
     if sys.version_info < (3, 9):
         return isinstance(value, typing._GenericAlias)
     else:
-        return isinstance(value, typing._SpecialGenericAlias)
+        return isinstance(
+            value, (typing._SpecialGenericAlias, typing._UnionGenericAlias)
+        )
 
 
 def is_numpy_int_type(value):
