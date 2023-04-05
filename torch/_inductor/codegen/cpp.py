@@ -2451,7 +2451,6 @@ class KernelGroup:
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
         wrapper.define_kernel(kernel_name, codecache_str)
-        wrapper.load_kernel(kernel_name, code, arg_types)
         # generate the code to call this
         wrapper.generate_kernel_call(kernel_name, call_args)
 
