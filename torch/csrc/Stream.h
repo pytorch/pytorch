@@ -1,8 +1,8 @@
 #ifndef THP_STREAM_INC
 #define THP_STREAM_INC
 
-#include <torch/csrc/python_headers.h>
 #include <c10/macros/Export.h>
+#include <torch/csrc/python_headers.h>
 
 struct THPStream {
   PyObject_HEAD int64_t stream_id;
