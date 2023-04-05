@@ -252,7 +252,7 @@ class TorchVariable(VariableTracker):
                 elif self.value is torch.is_complex:
                     return ConstantVariable(input_arg.dtype.is_complex, **options)
                 else:
-                    raise AssertionError()
+                    raise AssertionError(f"calling {self.value}")
         elif (
             self.value is torch.numel
             and isinstance(args[0], TensorVariable)
