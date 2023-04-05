@@ -24,7 +24,9 @@ namespace detail {
 struct ListImpl final : public c10::intrusive_ptr_target {
   using list_type = std::vector<IValue>;
 
-  explicit TORCH_API ListImpl(list_type list_, TypePtr elementType_);
+  explicit ListImpl(list_type list_, TypePtr elementType_)
+  : list(std::move(list_))
+  , elementType(std::move(elementType_)) {}
 
   list_type list;
 
@@ -478,7 +480,9 @@ namespace impl {
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
 
-const IValue* ptr_to_first_element(const GenericList& list);
+inline const IValue* ptr_to_first_element(const GenericList& list) {
+  return &list.impl_->list[0];
+}
 
 }
 }

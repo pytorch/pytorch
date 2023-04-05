@@ -18,9 +18,9 @@ def define_targets(rules):
         ]),
         copts = ["-Wno-deprecated-declarations"],
         deps = [
+            "@com_google_googletest//:gtest_main",
             "//c10/core:base",
             "//c10/util:base",
-            "@com_google_googletest//:gtest_main",
         ],
     )
 
@@ -30,8 +30,8 @@ def define_targets(rules):
         srcs = ["util/typeid_test.cpp"],
         copts = ["-Wno-deprecated-declarations"],
         deps = [
-            "//c10/util:typeid",
             "@com_google_googletest//:gtest_main",
+            "//c10/util:typeid",
         ],
     )
 
@@ -49,9 +49,9 @@ def define_targets(rules):
             ":Macros",
             ":complex_math_test_common",
             ":complex_test_common",
-            "//c10/macros",
-            "//c10/util:base",
             "@com_google_googletest//:gtest_main",
+            "//c10/macros:macros",
+            "//c10/util:base",
         ],
     )
 
@@ -59,35 +59,35 @@ def define_targets(rules):
         name = "util/ssize_test",
         srcs = ["util/ssize_test.cpp"],
         deps = [
-            "//c10/util:ssize",
             "@com_google_googletest//:gtest_main",
+            "//c10/util:ssize",
         ],
     )
 
     rules.cc_library(
         name = "Macros",
-        testonly = True,
         hdrs = ["util/Macros.h"],
+        testonly = True,
         visibility = ["//:__subpackages__"],
     )
 
     rules.cc_library(
         name = "complex_math_test_common",
-        testonly = True,
         hdrs = ["util/complex_math_test_common.h"],
         deps = [
-            "//c10/util:base",
             "@com_google_googletest//:gtest",
+            "//c10/util:base",
         ],
+        testonly = True,
     )
 
     rules.cc_library(
         name = "complex_test_common",
-        testonly = True,
         hdrs = ["util/complex_test_common.h"],
         deps = [
-            "//c10/macros",
-            "//c10/util:base",
             "@com_google_googletest//:gtest",
+            "//c10/macros:macros",
+            "//c10/util:base",
         ],
+        testonly = True,
     )

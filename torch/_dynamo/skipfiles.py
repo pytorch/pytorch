@@ -150,16 +150,6 @@ if HAS_PRIMS_REFS:
 
 SKIP_DIRS_RE = None
 
-is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
-# Skip fbcode paths(including torch.package paths) containing
-# one of the following strings.
-FBCODE_SKIP_DIRS = {
-    "torchrec/distributed",
-    "torchrec/fb/distributed",
-    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
-}
-FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
-
 
 def _recompile_re():
     global SKIP_DIRS_RE
@@ -192,8 +182,6 @@ def check(filename, allow_torch=False):
         return False
     if allow_torch and is_torch(filename):
         return False
-    if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
-        return True
     return bool(SKIP_DIRS_RE.match(filename))
 
 

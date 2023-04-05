@@ -4,10 +4,10 @@ from typing import Callable, cast, Optional, Sequence
 # Import all builtin dist tensor ops
 import torch
 import torch.distributed._tensor.ops
-from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
 from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
 from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
+from torch.distributed._tensor._utils import compute_local_shape
 
 # All public APIs from dtensor package
 __all__ = [

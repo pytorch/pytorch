@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
-from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.utils._pytree import tree_map_only
+from torch.distributed._tensor.placement_types import DTensorSpec
 
 
 # Common type aliases
@@ -15,7 +15,7 @@ OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
 
 def _rebuild_tensor_from_dtensor_meta(arg) -> object:
-    """ "
+    """"
     This is used to propagate tensor metadata, must be under fake mode
     """
     assert arg.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
@@ -23,9 +23,8 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
         arg.tensor_meta.shape,
         arg.tensor_meta.stride,
         dtype=arg.tensor_meta.dtype,
-        requires_grad=arg.tensor_meta.requires_grad,
+        requires_grad=arg.tensor_meta.requires_grad
     )
-
 
 @dataclass
 class OpSchema:
@@ -115,9 +114,7 @@ class OpSchema:
             by sharding propagation rules to generate fake args for the operator
             to run the local tensor operator and get the output spec.
         """
-        return tree_map_only(
-            DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.args_schema
-        )
+        return tree_map_only(DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.args_schema)
 
     def gen_fake_kwargs(self) -> KwargsType:
         """
@@ -125,9 +122,7 @@ class OpSchema:
             by sharding propagation rules to generate fake kwargs for the operator
             to run the local tensor operator and get the output spec.
         """
-        return tree_map_only(
-            DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.kwargs_schema
-        )
+        return tree_map_only(DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.kwargs_schema)
 
 
 @dataclass

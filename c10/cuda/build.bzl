@@ -20,18 +20,6 @@ def define_targets(rules):
                 "CUDAMacros.h",
             ],
         ),
-        defines = ["USE_CUDA"],
-        linkstatic = True,
-        local_defines = ["C10_BUILD_MAIN_LIB"],
-        target_compatible_with = rules.requires_cuda_enabled(),
-        visibility = ["//visibility:public"],
-        deps = [
-            ":Macros",
-            "//c10/core:base",
-            "//c10/macros",
-            "//c10/util:base",
-            "@cuda",
-        ],
         # This library uses registration. Don't let registered
         # entities be removed.
         alwayslink = True,

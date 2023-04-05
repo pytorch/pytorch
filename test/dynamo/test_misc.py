@@ -438,7 +438,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )(compare_shapes)
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
-        self.assertExpectedInline(guard_failure.reason, """L['a'].size()[0] == 3""")
+        self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -3795,7 +3795,7 @@ def fn():
         else:
             self.assertTrue(guard_failure is not None)
             if not torch._dynamo.config.dynamic_shapes:
-                self.assertExpectedInline(guard_failure[0], """L['k'] == 3""")
+                self.assertEqual(guard_failure[0], "k == 3")
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_guard_failure_fn_shape_control(self):
@@ -3829,9 +3829,9 @@ def fn():
 
         self.assertTrue(guard_failure is not None)
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] == 2""")
+            self.assertEqual(guard_failure[0], "x.size()[0] == 2")
         else:
-            self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] < 3""")
+            self.assertEqual(guard_failure[0], "x.size()[0] < 3")
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -3860,17 +3860,17 @@ def fn():
 
         if torch._dynamo.config.dynamic_shapes:
             if torch._dynamo.config.assume_static_by_default:
-                self.assertExpectedInline(
+                self.assertEqual(
                     guard_failure[0],
-                    """L['x'].size()[0] == 2""",
+                    "x.size()[0] == 2",
                 )
             else:
                 self.assertTrue(guard_failure is None)
         else:
             self.assertTrue(guard_failure is not None)
-            self.assertExpectedInline(
+            self.assertEqual(
                 guard_failure[0],
-                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
+                "tensor 'x' size mismatch at index 0. expected 2, actual 3",
             )
 
     def test_guard_failure_fn_tensor_iter(self):
@@ -3901,7 +3901,7 @@ def fn():
 
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
-        self.assertExpectedInline(guard_failure[0], """len(L['x']) == 10""")
+        self.assertEqual(guard_failure[0], "len(x) == 10")
 
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
@@ -4775,9 +4775,9 @@ def fn():
             _ = compiled(new_shape_input)
 
             base_checker().check("Recompile Reasons").check("'forward'").check(
-                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
+                "tensor 'input' size mismatch at index 0. expected 2, actual 3"
             ).check(
-                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
+                "tensor 'input' size mismatch at index 0. expected 3, actual 4"
             ).run(
                 prof.report()
             )
