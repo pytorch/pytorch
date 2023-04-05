@@ -256,6 +256,7 @@ class TestPythonRegistration(TestCase):
         self.assertEqual(torch.ops.foo.sum(x), x)
 
         del my_lib2
+        del my_lib1
 
     def test_create_new_library2(self) -> None:
         my_lib1 = Library("foo", "DEF")
@@ -285,8 +286,6 @@ class TestPythonRegistration(TestCase):
         self.assertEqual(torch.ops.foo.sum(x), x)
 
         del my_lib2
-        del my_lib1
-
         del my_lib1
 
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
