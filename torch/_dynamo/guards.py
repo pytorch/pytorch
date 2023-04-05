@@ -1,5 +1,6 @@
 import builtins
 import collections
+import importlib
 import itertools
 import logging
 import math
@@ -64,6 +65,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
+        ("__load_module", lambda name: importlib.import_module(name)),
     ]
 )
 
@@ -175,9 +177,10 @@ class GuardBuilder(GuardBuilderBase):
             name = guard.name
         base = strip_getattr_getitem(strip_function_call(name))
         if base not in self.argnames:
-            if re.match(r"^\d+$", base):
-                log.warning(f"invalid var name: {guard}")
-            self.argnames.append(base)
+            if re.match(r"[a-zA-Z0-9_]+", base):
+                if re.match(r"^\d+$", base):
+                    log.warning(f"invalid var name: {guard}")
+                self.argnames.append(base)
 
         return name
 

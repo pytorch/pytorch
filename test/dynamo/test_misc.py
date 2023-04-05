@@ -1163,6 +1163,26 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_inplace_resize_on_graph_input(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # graph break when calling resize_() on graph input
+        def f1(x):
+            x.resize_(6)
+            x.mul_(2)
+            return x
+
+        @torch.compile(backend=cnts)
+        def f2(x):
+            x.resize_(6)
+            x.mul_(2)
+            return x
+
+        x = torch.ones(4)
+        y = torch.ones(4)
+        self.assertTrue(same(f1(x).shape, f2(y).shape))
+        self.assertEqual(cnts.frame_count, 0)
+
     def test_dict_mutation_side_effect(self):
         def fn(d):
             d["c"] = d["a"] + d.pop("b")

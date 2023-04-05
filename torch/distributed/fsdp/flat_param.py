@@ -75,6 +75,13 @@ or a submodule chosen by the provided wrapping policy.
 # special cases such as for high CPU overhead or for intentionally bypassing
 # checks in the overrides, we may use 'unsafe'.
 _FSDP_USE_UNSAFE_SETATTR = "FSDP_USE_UNSAFE_SETATTR"
+# Environment variable toggling whether to check for parameter/gradient
+# writeback in case their storages change after FSDP initialization
+# We should check by default since it prevents silent correctness errors, but
+# since such changes are atypical, we may want to skip the check to save CPU
+# overhead, especially since the check happens in the pre-forward and
+# pre-backward each iteration.
+_FSDP_SKIP_WRITEBACK_CHECK = "FSDP_SKIP_WRITEBACK_CHECK"
 
 
 # Some value to set padding in tensors to for debuggability
@@ -412,6 +419,16 @@ class FlatParamHandle:
                 f"Cannot construct a {self.__class__.__name__} with an empty parameter list"
             )
         self._init_setattr_fns()
+        self._skip_writeback_check = (
+            os.environ.get(_FSDP_SKIP_WRITEBACK_CHECK, "") == "1"
+        )
+        if self._skip_writeback_check:
+            _warn_skip_writeback_check(
+                log,
+                f"Since {_FSDP_SKIP_WRITEBACK_CHECK}=1, FSDP will not check "
+                "for parameter or gradient writeback. Changing parameter or "
+                "gradient storages may lead to silent correctness errors.",
+            )
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
         self.device = device
@@ -1057,7 +1074,7 @@ class FlatParamHandle:
         matches the dtype of the expected unsharded parameter.
         """
         ret = False
-        if self._use_orig_params:
+        if self._use_orig_params and not self._skip_writeback_check:
             ret = self._writeback_orig_params()
         if (
             self.uses_sharded_strategy
@@ -2383,6 +2400,13 @@ def _construct_padding_tensor(
         )
         * _FLAT_PARAM_PADDING_VALUE
     )
+
+
+# Use `lru_cache(1)` to only log the warning once (assuming the fixed warning
+# messasge is passed in)
+@functools.lru_cache(1)
+def _warn_skip_writeback_check(log: logging.Logger, warning: str):
+    log.warning(warning)
 
 
 # A handles key represents the group of `FlatParamHandle`s involved in a given
