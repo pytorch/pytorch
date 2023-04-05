@@ -2031,11 +2031,12 @@ class ShapeAsConstantBuffer(IRNode):
     def codegen_reference(self):
         from torch._inductor.codegen.wrapper import pexpr
 
-        return pexpr(V.graph.sizevars.simplify(self.shape))
-
-    # wrap scalar to 0-d tensor for cpp wrapper
-    def cpp_wrapper_codegen_reference(self):
-        return f"torch::tensor({self.codegen_reference()})"
+        expr = pexpr(V.graph.sizevars.simplify(self.shape))
+        if V.graph.cpp_wrapper:
+            # wrap scalar to 0-d tensor for cpp wrapper
+            return f"torch::tensor({expr})"
+        else:
+            return expr
 
 
 @dataclasses.dataclass
