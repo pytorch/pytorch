@@ -10,7 +10,7 @@ from .common import amp_definitely_not_available
 
 __all__ = ["OptState", "GradScaler"]
 
-class _MultiDeviceReplicator(object):
+class _MultiDeviceReplicator:
     """
     Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.
     """
@@ -42,7 +42,7 @@ def _refresh_per_optimizer_state():
     return {"stage": OptState.READY, "found_inf_per_device": {}}
 
 
-class GradScaler(object):
+class GradScaler:
     _scale: Optional[torch.Tensor]
     _grows_tracker: Optional[torch.Tensor]
     _per_optimizer_states: Dict[int, Dict[str, Any]]
@@ -145,8 +145,8 @@ class GradScaler(object):
 
     def _lazy_init_scale_growth_tracker(self, dev):
         assert self._growth_tracker is None, "_growth_tracker initialized before _scale"
-        self._scale = torch.full((1,), self._init_scale, dtype=torch.float32, device=dev)
-        self._growth_tracker = torch.full((1,), self._init_growth_tracker, dtype=torch.int32, device=dev)
+        self._scale = torch.full((), self._init_scale, dtype=torch.float32, device=dev)
+        self._growth_tracker = torch.full((), self._init_growth_tracker, dtype=torch.int32, device=dev)
 
     def scale(self, outputs):
         """
@@ -183,7 +183,7 @@ class GradScaler(object):
                 return val * stash[0].get(val.device)
             elif isinstance(val, abc.Iterable):
                 iterable = map(apply_scale, val)
-                if isinstance(val, list) or isinstance(val, tuple):
+                if isinstance(val, (list, tuple)):
                     return type(val)(iterable)
                 else:
                     return iterable
@@ -279,14 +279,16 @@ class GradScaler(object):
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
         assert self._scale is not None
         inv_scale = self._scale.double().reciprocal().float()
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
+        found_inf = torch.full((), 0.0, dtype=torch.float32, device=self._scale.device)
 
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(optimizer, inv_scale, found_inf, False)
         optimizer_state["stage"] = OptState.UNSCALED
 
     def _maybe_opt_step(self, optimizer, optimizer_state, *args, **kwargs):
         retval = None
-        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+        # NOTE(crcrpar): Gradients could be inf/nan after `GradScaler.unscale_(optimizer)`
+        # especially when gradient clipping is applied.
+        if not sum(v.item() for v in self._check_inf_per_device(optimizer).values()):
             retval = optimizer.step(*args, **kwargs)
         return retval
 
@@ -564,8 +566,8 @@ class GradScaler(object):
     def _check_inf_per_device(self, optimizer):
         _scale, _ = self._check_scale_growth_tracker("_check_inf_per_device")
 
-        dummy_inv_scale = torch.full((1,), 1.0, dtype=torch.float32, device=_scale.device)
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=_scale.device)
+        dummy_inv_scale = torch.full((), 1.0, dtype=torch.float32, device=_scale.device)
+        found_inf = torch.full((), 0.0, dtype=torch.float32, device=_scale.device)
 
         self._per_optimizer_states[id(optimizer)]["found_inf_per_device"] = \
             self._unscale_grads_(optimizer, dummy_inv_scale, found_inf, True)

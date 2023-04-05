@@ -67,8 +67,7 @@ def run_command(
     try:
         return subprocess.run(
             args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
     finally:
         end_time = time.monotonic()

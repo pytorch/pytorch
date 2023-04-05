@@ -20,6 +20,7 @@
 #include <cmath>
 #include <type_traits>
 #include <bitset>
+#include <climits>
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/native/Math.h>
@@ -70,6 +71,19 @@ struct is_floating_point:
       std::is_same<T, at::Half>::value ||
       std::is_same<T, at::BFloat16>::value> {
 };
+
+template<typename T>
+constexpr bool is_floating_point_v = is_floating_point<T>::value;
+
+template <typename T>
+struct is_reduced_floating_point:
+    std::integral_constant<bool,
+      std::is_same<T, at::Half>::value ||
+      std::is_same<T, at::BFloat16>::value> {
+};
+
+template <typename T>
+constexpr bool is_reduced_floating_point_v = is_reduced_floating_point<T>::value;
 
 template<size_t n> struct int_of_size;
 
@@ -255,14 +269,14 @@ public:
     return ret;
   }
   template <typename other_t_abs = T,
-            typename std::enable_if<!is_floating_point<other_t_abs>::value && !c10::is_complex<other_t_abs>::value, int>::type = 0>
+            typename std::enable_if<!is_floating_point_v<other_t_abs> && !c10::is_complex<other_t_abs>::value, int>::type = 0>
   Vectorized<T> abs() const {
     // other_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_abs, T>::value, "other_t_abs must be T");
     return map([](T x) -> T { return x < static_cast<T>(0) ? -x : x; });
   }
   template <typename float_t_abs = T,
-            typename std::enable_if<is_floating_point<float_t_abs>::value, int>::type = 0>
+            typename std::enable_if<is_floating_point_v<float_t_abs>, int>::type = 0>
   Vectorized<T> abs() const {
     // float_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<float_t_abs, T>::value, "float_t_abs must be T");
@@ -359,7 +373,7 @@ public:
   }
   template <
     typename U = T,
-    typename std::enable_if_t<is_floating_point<U>::value, int> = 0>
+    typename std::enable_if_t<is_floating_point_v<U>, int> = 0>
   Vectorized<T> copysign(const Vectorized<T> &sign) const {
     Vectorized<T> ret;
     for (size_type i = 0; i < size(); i++) {
@@ -390,7 +404,7 @@ public:
   }
   template <
     typename U = T,
-    typename std::enable_if_t<is_floating_point<U>::value, int> = 0>
+    typename std::enable_if_t<is_floating_point_v<U>, int> = 0>
   Vectorized<T> fmod(const Vectorized<T>& q) const {
     // U is for SFINAE purposes only. Make sure it is not changed.
     static_assert(std::is_same<U, T>::value, "U must be T");
@@ -803,17 +817,30 @@ inline Vectorized<T> operator~(const Vectorized<T>& a) {
 }
 
 template <class T> Vectorized<T> inline operator<<(const Vectorized<T> &a, const Vectorized<T> &b) {
+  constexpr T max_shift = sizeof(T) * CHAR_BIT;
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] << b[i];
+    T shift = b[i];
+    if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+      c[i] = 0;
+    } else {
+      c[i] = static_cast<std::make_unsigned_t<T>>(a[i]) << shift;
+    }
   }
   return c;
 }
 
 template <class T> Vectorized<T> inline operator>>(const Vectorized<T> &a, const Vectorized<T> &b) {
+  // right shift value to retain sign bit for signed and no bits for unsigned
+  constexpr T max_shift = sizeof(T) * CHAR_BIT - std::is_signed_v<T>;
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] >> b[i];
+    T shift = b[i];
+    if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+      c[i] = a[i] >> max_shift;
+    } else {
+      c[i] = a[i] >> shift;
+    }
   }
   return c;
 }

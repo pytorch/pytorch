@@ -32,7 +32,7 @@ class Seq(torch.nn.Module):
 
 class Conv_Bn_Relu(torch.nn.Module):
     def __init__(self, in_channels, out_channels, **kwargs):
-        super(Conv_Bn_Relu, self).__init__()
+        super().__init__()
         self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
         self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001)
         self.relu = torch.nn.ReLU()
@@ -198,6 +198,19 @@ class NormalizeIRTests(torch._dynamo.test_case.TestCase):
         optimized_fn = torch._dynamo.optimize("aot_eager")(fn)
         res = optimized_fn(a, b)
         self.assertTrue(same(ref, res))
+
+
+class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
+    def test_default_mps_to_aot_eager(self):
+        model = Seq().to("mps")
+        example_input = torch.randn(1, 10).to("mps")
+
+        # Not sure yet if there's a better way to test this
+        a = torch.compile(model, backend="inductor")(example_input)
+        torch._dynamo.reset()
+        b = torch.compile(model, backend="aot_eager")(example_input)
+        self.assertTrue(torch.equal(a, b))
 
 
 if __name__ == "__main__":

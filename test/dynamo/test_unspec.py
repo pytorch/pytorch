@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import functools
 import random
 import unittest
 
@@ -10,47 +9,8 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
 
-try:
-    from . import test_modules, test_repros
-except ImportError:
-    import test_modules
-    import test_repros
 
-
-def make_unspec_fn(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        with torch._dynamo.config.patch("specialize_int_float", False):
-            return fn(*args, **kwargs)
-
-    return _fn
-
-
-def make_unspec_cls(cls):
-    class UnspecTest(cls):
-        pass
-
-    UnspecTest.__name__ = f"Unspec{cls.__name__}"
-
-    for name in dir(cls):
-        if name.startswith("test_"):
-            fn = getattr(cls, name)
-            if not callable(fn):
-                continue
-            new_name = f"{name}_unspec"
-            fn = make_unspec_fn(fn)
-            fn.__name__ = new_name
-            setattr(UnspecTest, name, None)
-            setattr(UnspecTest, new_name, fn)
-
-    return UnspecTest
-
-
-UnspecReproTests = make_unspec_cls(test_repros.ReproTests)
-UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
-
-
-@torch._dynamo.config.patch("specialize_int_float", False)
+@torch._dynamo.config.patch(dynamic_shapes=True)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
@@ -238,6 +198,19 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             ref = fn(x, y)
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
+
+    def test_shape_graph_break(self):
+        from torch._dynamo.comptime import comptime
+
+        def fn(x):
+            x_shape = x.size()
+            comptime.graph_break()
+            return x + torch.randn(x_shape)
+
+        x = torch.randn(20)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_fn(x)
 
 
 if __name__ == "__main__":

@@ -300,10 +300,11 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 // Flag to just run a frame normally
 #define SKIP_CODE ((void*)0x1)
 
-static PyObject* noargs = NULL; /* cached empty tuple */
-static PyObject* dotzerokey = NULL; /* ".0" */
 static PyObject* guard_fail_hook = NULL;
 static PyObject* guard_error_hook = NULL;
+static PyObject* profiler_start_hook = NULL;
+static PyObject* profiler_end_hook = NULL;
+static PyObject* guard_profiler_name_str = NULL; /* cached py str */
 
 size_t extra_index = -1;
 
@@ -332,6 +333,9 @@ static PyObject* _custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback);
+static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
+                                        PyFrameObject *frame, int throw_flag) = NULL;
+
 #if PY_VERSION_HEX >= 0x03090000
 static PyObject* custom_eval_frame_shim(
     PyThreadState* tstate,
@@ -354,7 +358,12 @@ inline static PyObject* eval_frame_default(
   if (tstate == NULL) {
     tstate = PyThreadState_GET();
   }
-  return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
+  if (previous_eval_frame) {
+    return previous_eval_frame(tstate, frame, throw_flag);
+  }
+  else {
+    return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
+  }
 #else
   return _PyEval_EvalFrameDefault(frame, throw_flag);
 #endif
@@ -364,8 +373,10 @@ inline static void enable_eval_frame_shim(PyThreadState* tstate) {
 #if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       &custom_eval_frame_shim) {
-    _PyInterpreterState_SetEvalFrameFunc(
-        tstate->interp, &custom_eval_frame_shim);
+    DEBUG_CHECK(previous_eval_frame == NULL);
+    previous_eval_frame = _PyInterpreterState_GetEvalFrameFunc(tstate->interp);
+    _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                         &custom_eval_frame_shim);
   }
 #else
   if (tstate->interp->eval_frame != &custom_eval_frame_shim) {
@@ -378,9 +389,11 @@ inline static void enable_eval_frame_shim(PyThreadState* tstate) {
 inline static void enable_eval_frame_default(PyThreadState* tstate) {
 #if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
-      &_PyEval_EvalFrameDefault) {
-    _PyInterpreterState_SetEvalFrameFunc(
-        tstate->interp, &_PyEval_EvalFrameDefault);
+      previous_eval_frame) {
+    DEBUG_CHECK(previous_eval_frame != NULL);
+    _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                         previous_eval_frame);
+    previous_eval_frame = NULL;
   }
 #else
   if (tstate->interp->eval_frame != &_PyEval_EvalFrameDefault) {
@@ -452,23 +465,23 @@ inline static void set_extra(PyCodeObject* code, CacheEntry* extra) {
   _PyCode_SetExtra((PyObject*)code, extra_index, extra);
 }
 
-#ifdef TORCHDYNAMO_DEBUG
 inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
   DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
   return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
-#endif
 
 static PyObject* call_guard_fail_hook(
     PyObject* hook,
     CacheEntry* e,
+    size_t index,
     PyObject* f_locals) {
   // call debugging logic when a guard fails
   PyObject* args = PyTuple_Pack(
-      4,
+      5,
       e->check_fn,
       e->code,
       f_locals,
+      PyLong_FromSize_t(index),
       (e->next == NULL ? Py_True : Py_False));
   if (args == NULL) return NULL;
   PyObject* result = PyObject_CallObject(hook, args);
@@ -476,30 +489,41 @@ static PyObject* call_guard_fail_hook(
   return result;
 }
 
+static PyObject* call_profiler_start_hook(PyObject* name_str) {
+  if (profiler_start_hook == NULL) return NULL;
+  if (name_str == NULL) return NULL;
+  PyObject* args = PyTuple_Pack(1, name_str);
+  if (args == NULL) return NULL;
+  PyObject* result = PyObject_CallObject(profiler_start_hook, args);
+  Py_DECREF(args);
+  return result;
+}
+
+static void call_profiler_end_hook(PyObject* record) {
+  // 'record' obj is the return value of calling _start_hook()
+  if (profiler_end_hook == NULL) return;
+  if (record == NULL) return;
+  PyObject* args = PyTuple_Pack(1, record);
+  if (args == NULL) return;
+  PyObject* result = PyObject_CallObject(profiler_end_hook, args);
+  Py_XDECREF(result);
+  Py_DECREF(args);
+}
+
 // Return value: borrowed reference
 // Is either Py_None or a PyCodeObject
-static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev) {
+static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev, size_t index) {
   if (e == NULL) {
     // NB: intentionally not using Py_RETURN_NONE, to return borrowed ref
     return Py_None;
   }
   PyObject *f_locals = frame->f_locals;
-  PyObject* dotzero = PyDict_GetItem(f_locals, dotzerokey);
-  PyObject* valid = NULL;
-  if (unlikely(dotzero != NULL)) {
-    // .0 is a special variable name used for implicit args
-    PyObject* args = PyTuple_Pack(1, dotzero);
-    if (args == NULL) return NULL;
-    valid = PyObject_Call(e->check_fn, args, f_locals);
-    Py_DECREF(args);
-  } else {
-    valid = PyObject_Call(e->check_fn, noargs, f_locals);
-  }
+  PyObject* valid = PyObject_CallOneArg(e->check_fn, f_locals);
   if (unlikely(valid == NULL)) {
     if (guard_error_hook != NULL) {
       PyObject *type, *value, *traceback;
       PyErr_Fetch(&type, &value, &traceback);
-      PyObject* r = call_guard_fail_hook(guard_error_hook, e, f_locals);
+      PyObject* r = call_guard_fail_hook(guard_error_hook, e, index, f_locals);
       if (r == NULL) {
         return NULL;
       }
@@ -522,13 +546,13 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     return (PyObject*)e->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
-    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, f_locals);
+    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, index, f_locals);
     if (r == NULL) {
       return NULL;
     }
     Py_DECREF(r);
   }
-  return lookup(e->next, frame, e);
+  return lookup(e->next, frame, e, index + 1);
 }
 
 static long cache_size(CacheEntry* e) {
@@ -554,27 +578,71 @@ inline static PyObject* eval_custom_code(
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
+  #if IS_PYTHON_3_11_PLUS
+  DEBUG_CHECK(ncells == frame->f_code->co_ncellvars);
+  DEBUG_CHECK(nfrees == frame->f_code->co_nfreevars);
+  #else
   DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
+  #endif
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
   PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
   #if IS_PYTHON_3_11_PLUS
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
+  Py_XINCREF(frame->f_func->func_closure);
+  shadow->f_func->func_closure = frame->f_func->func_closure;
   #else
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
   #endif
   if (shadow == NULL) {
+    Py_DECREF(shadow_obj);
     return NULL;
   }
 
   #if IS_PYTHON_3_11_PLUS
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
+
+  // copy from old fastlocals to new fastlocals:
+  // for i, name in enumerate(localsplusnames_new):
+  //   name_to_idx[name] = i
+  // for i, name in enumerate(localsplusnames_old):
+  //   fastlocals_new[name_to_idx[name]] = fastlocals_old[i]
+  PyObject* name_to_idx = PyDict_New();
+  if (name_to_idx == NULL) {
+    DEBUG_TRACE0("unable to create localsplus name dict");
+    Py_DECREF(shadow_obj);
+    return NULL;
+  }
+
+  for (Py_ssize_t i = 0; i < code->co_nlocalsplus; i++) {
+    PyObject *name = PyTuple_GET_ITEM(code->co_localsplusnames, i);
+    PyObject *idx = PyLong_FromSsize_t(i);
+    if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
+      Py_DECREF(shadow_obj);
+      Py_DECREF(name_to_idx);
+      return NULL;
+    }
+  }
+
+  for (Py_ssize_t i = 0; i < frame->f_code->co_nlocalsplus; i++) {
+    PyObject *name = PyTuple_GET_ITEM(frame->f_code->co_localsplusnames, i);
+    PyObject *idx = PyDict_GetItem(name_to_idx, name);
+    Py_ssize_t new_i = PyLong_AsSsize_t(idx);
+    if (name == NULL || idx == NULL || (new_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
+      Py_DECREF(shadow_obj);
+      Py_DECREF(name_to_idx);
+      return NULL;
+    }
+    Py_XINCREF(fastlocals_old[i]);
+    fastlocals_new[new_i] = fastlocals_old[i];
+  }
+
+  Py_DECREF(name_to_idx);
   #else
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
-  #endif
 
   for (Py_ssize_t i = 0; i < nlocals_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
@@ -585,9 +653,10 @@ inline static PyObject* eval_custom_code(
     Py_XINCREF(fastlocals_old[nlocals_old + i]);
     fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
+  #endif
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
-  Py_DECREF(shadow);
+  Py_DECREF(shadow_obj);
   return result;
 }
 
@@ -614,14 +683,48 @@ static PyObject* _custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback) {
+  #if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
-      "begin %s %s %i %i %i %i",
+      "begin %s %s %i %i",
+      name(frame),
+      PyUnicode_AsUTF8(frame->f_code->co_filename),
+      frame->f_code->co_firstlineno,
+      _PyInterpreterFrame_LASTI(frame));
+  #else
+  DEBUG_TRACE(
+      "begin %s %s %i %i %i",
       name(frame),
       PyUnicode_AsUTF8(frame->f_code->co_filename),
       frame->f_lineno,
       frame->f_lasti,
-      frame->f_iblock,
-      frame->f_executing);
+      frame->f_iblock);
+  #endif
+
+  if (throw_flag) {
+    // When unwinding generators, eval frame is called with throw_flag ==
+    // true.  Frame evaluation is supposed to continue unwinding by propagating
+    // the exception.  Dynamo doesn't really know how to do this, nor does it
+    // really want to do this, because there's unlikely any code to capture
+    // (you're going to immediately quit out of the frame, perhaps running
+    // some unwinding logic along the way).  So we just run the default
+    // handler in this case.
+    //
+    // NB: A previous version of this patch returned NULL.  This is wrong,
+    // because returning NULL is *different* from unwinding an exception.
+    // In particular, you will not execute things like context manager
+    // __exit__ if you just return NULL.
+    //
+    // NB: It's /conceivable/ that you might want to actually still call the
+    // Dynamo callback when throw_flag == TRUE, to give Dynamo a chance to
+    // do any stack unwinding code.  But this is not really useful because
+    // (1) Dynamo doesn't actually know how to do stack unwinding, so it would
+    // immediately skip the frame, and (2) even if it did, this would only
+    // be profitable if there was tensor code in the unwinding code.  Seems
+    // unlikely.
+    DEBUG_TRACE("throw %s", name(frame));
+    return eval_frame_default(tstate, frame, throw_flag);
+  }
+
   CacheEntry* extra = get_extra(frame->f_code);
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", name(frame));
@@ -640,7 +743,11 @@ static PyObject* _custom_eval_frame(
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", name(frame));
-    PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+    PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
+    PyObject* maybe_cached_code = lookup(extra, frame, NULL, 0);
+    call_profiler_end_hook(hook_record);
+    Py_XDECREF(hook_record);
+
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
       return NULL;
@@ -662,7 +769,10 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+  PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
+  PyObject* maybe_cached_code = lookup(extra, frame, NULL, 0);
+  call_profiler_end_hook(hook_record);
+  Py_XDECREF(hook_record);
   if (maybe_cached_code == NULL) {
     // Python error
     return NULL;
@@ -684,6 +794,10 @@ static PyObject* _custom_eval_frame(
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
     // testing
+    // NB: we intentionally DO NOT re-enable custom behavior to prevent
+    // cascading failure from internal exceptions.  The upshot is if
+    // Dynamo barfs, that's it for Dynamo, even if you catch the exception
+    // inside the torch.compile block we won't try to Dynamo anything else.
     return NULL;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", name(frame));
@@ -840,6 +954,37 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+static PyObject* clear_profiler_hooks(PyObject* dummy, PyObject* args) {
+  Py_XDECREF(profiler_start_hook);
+  profiler_start_hook = NULL;
+  Py_XDECREF(profiler_end_hook);
+  profiler_end_hook = NULL;
+  Py_XDECREF(guard_profiler_name_str);
+  guard_profiler_name_str = NULL;
+  Py_RETURN_NONE;
+}
+
+static PyObject* set_profiler_hooks(PyObject* dummy, PyObject* args) {
+  PyObject* start = NULL;
+  PyObject* end = NULL;
+  if (!PyArg_ParseTuple(args, "OO", &start, &end)) {
+    return NULL;
+  }
+  Py_XDECREF(profiler_start_hook);
+  Py_XDECREF(profiler_end_hook);
+  if (start == Py_None || end == Py_None) {
+    clear_profiler_hooks(NULL, NULL);
+  } else {
+    profiler_start_hook = start;
+    profiler_end_hook = end;
+    Py_INCREF(profiler_start_hook);
+    Py_INCREF(profiler_end_hook);
+  }
+  Py_XDECREF(guard_profiler_name_str);
+  guard_profiler_name_str = Py_BuildValue("s", "TorchDynamo Cache Lookup");
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
@@ -847,6 +992,8 @@ static PyMethodDef _methods[] = {
     {"skip_code", skip_code, METH_VARARGS, NULL},
     {"set_guard_fail_hook", set_guard_fail_hook, METH_VARARGS, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_VARARGS, NULL},
+    {"set_profiler_hooks", set_profiler_hooks, METH_VARARGS, NULL},
+    {"clear_profiler_hooks", clear_profiler_hooks, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -865,8 +1012,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   Py_INCREF(Py_None);
   eval_frame_callback_set(Py_None);
 
-  noargs = PyTuple_New(0);
-  dotzerokey = PyUnicode_InternFromString(".0");
   PyObject* module = PyModule_Create(&_module);
 
 #if IS_PYTHON_3_11_PLUS

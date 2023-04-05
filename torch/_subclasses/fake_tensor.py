@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import logging
 import os
 import weakref
 from dataclasses import dataclass
@@ -11,8 +12,14 @@ from weakref import ReferenceType
 import torch
 from torch._guards import Source
 from torch._ops import OpOverload
-from torch._prims_common import is_float_dtype, is_integer_dtype
+from torch._prims_common import (
+    elementwise_dtypes,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    is_float_dtype,
+    is_integer_dtype,
+)
 from torch._subclasses.meta_utils import MetaConverter
+from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -20,8 +27,12 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
-from torch.utils._stats import count
+from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
+
+DimList = List
+
+log = logging.getLogger(__name__)
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
@@ -30,6 +41,22 @@ TensorWeakRef = Any
 aten = torch._ops.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
+
+RECURSION_COUNT = 0
+
+
+# Small helper that increments recursion count, and
+# resets it when the object goes out of scope.  Useful
+# if you don't want to increase indentation which is
+# what a context manager would do.
+class IncrementRecursionCount:
+    def __init__(self):
+        global RECURSION_COUNT
+        RECURSION_COUNT += 1
+
+    def __del__(self):
+        global RECURSION_COUNT
+        RECURSION_COUNT -= 1
 
 
 @dataclass
@@ -44,6 +71,11 @@ class DynamicOutputShapeException(RuntimeError):
 
 @dataclass
 class DataDependentOutputException(RuntimeError):
+    func: OpOverload
+
+
+@dataclass
+class UnsupportedOperatorException(RuntimeError):
     func: OpOverload
 
 
@@ -142,7 +174,7 @@ def tree_flatten_only(ty: Type[T], pytree: PyTree):
 # multiple tensors into fake tensors which share the same view/storage
 # structure. Like `MetaConverter`, it uses `WeakIdRef` to
 # hold a weak reference for all memoized tensors.
-class FakeTensorConverter(object):
+class FakeTensorConverter:
     @property
     def tensor_memo(self):
         return self.meta_converter.tensor_memo
@@ -218,6 +250,8 @@ class FakeTensorConverter(object):
         ignore_subclass=False,
         *,
         source=None,
+        dynamic_dims: Optional[DimList[DimDynamic]] = None,
+        constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -251,6 +285,8 @@ class FakeTensorConverter(object):
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_dims=dynamic_dims,
+            constraint_dims=constraint_dims,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -286,6 +322,8 @@ class FakeTensorConverter(object):
         shape_env=None,
         ignore_subclass=False,
         source=None,
+        dynamic_dims=None,
+        constraint_dims=None,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -294,6 +332,8 @@ class FakeTensorConverter(object):
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_dims=dynamic_dims,
+            constraint_dims=constraint_dims,
         )
 
 
@@ -373,7 +413,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
-    and func != aten.index.Tensor
+    and func not in [aten.index.Tensor, aten.nonzero.default]
 )
 def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
@@ -381,7 +421,7 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
 
 @register_op_impl(lambda func: func is torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
-    if fake_mode.shape_env is None:
+    if fake_mode.shape_env is None or not fake_mode.shape_env.allow_scalar_outputs:
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
     if is_float_dtype(arg.dtype):
@@ -390,6 +430,38 @@ def local_scalar_dense(fake_mode, func, arg):
         return fake_mode.shape_env.create_unbacked_symint()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
+
+
+@register_op_impl(lambda func: func is torch.ops.aten.nonzero.default)
+def nonzero(fake_mode, func, arg):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    if arg.nonzero_memo is None:
+        import sys
+
+        from torch.fx.experimental.symbolic_shapes import constrain_range
+
+        nnz = fake_mode.shape_env.create_unbacked_symint()
+
+        # This is unsound, but it works well in practice
+        # See https://docs.google.com/document/d/1lFRYAJo5nrfxRhwIzGnfi2pbLpU6T4ytSRSuLJ5qebI/edit#
+        # TODO: Add a config knob to turn off this unsound behavior
+        #
+        # NB: If numel < 2, the bounds here might be COMPLETELY
+        # disjoint with what can actually occur.  But this is fine:
+        # remember, the hypothesis is that if your later code works
+        # with N >= 2, it will work with N = 1 and N = 0.
+        constrain_range(nnz, min=2, max=sys.maxsize - 1)
+
+        arg._nonzero_memo = nnz
+        arg._nonzero_memo_vc = arg._version
+
+    return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -425,10 +497,17 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
 # index tensors with cuda self
 @register_op_impl(aten.index.Tensor)
 def index_tensor(fake_mode, func, *args, **kwargs):
-    # dynamic shape op if indices are bool/uint8
-    check_no_bool_index_tensors(func, *args, **kwargs)
+    from torch._meta_registrations import meta_index_Tensor
 
-    return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    out_device = new_kwargs["input"].device
+    # ensure nonzero call goes to fake tensor
+    with fake_mode:
+        out = meta_index_Tensor(*args, **kwargs)
+        return out.to(out_device)
 
 
 # takes in multiple-devices, dont default to default device handling
@@ -467,7 +546,15 @@ def conv(fake_mode, func, *args, **kwargs):
     with fake_mode:
         # if the input is unsqueezed is done in Convolution.cpp we get segfault
         k = kwargs["weight"].ndim
-        if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+        batch = kwargs["input"].shape[0]
+
+        from torch.fx.experimental.symbolic_shapes import has_hint
+
+        if not has_hint(batch):
+            # TODO: We can make this a little more faithful with best effort
+            # channels last detection (but only if it's statically obvious!)
+            mem_fmt = None
+        elif k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
             mem_fmt = None
         else:
             if func is aten.convolution.default:
@@ -509,6 +596,189 @@ def conv(fake_mode, func, *args, **kwargs):
             )
 
 
+FAST_OP_IMPLEMENTATIONS = {}
+
+
+# Unlike register_op_impl, these don't do the slow iteration for
+# run_impl_check, and these run BEFORE decompositions
+def register_fast_op_impl(func: OpOverload):
+    def impl_decorator(op_impl):
+        FAST_OP_IMPLEMENTATIONS[func] = op_impl
+        return op_impl
+
+    return impl_decorator
+
+
+# infer_size_impl in ExpandUtils
+def infer_size(a, b):
+    dimsA = len(a)
+    dimsB = len(b)
+    ndim = max(dimsA, dimsB)
+    expandedSizes = [0] * ndim
+    for i in range(ndim - 1, -1, -1):
+        offset = ndim - 1 - i
+        dimA = dimsA - 1 - offset
+        dimB = dimsB - 1 - offset
+        sizeA = a[dimA] if dimA >= 0 else 1
+        sizeB = b[dimB] if dimB >= 0 else 1
+        if not (sizeA == sizeB or sizeA == 1 or sizeB == 1):
+            raise RuntimeError(
+                f"The size of tensor a ({sizeA}) "
+                f"must match the size of tensor b ({sizeB}) "
+                f"at non-singleton dimension {i})"
+            )
+        expandedSizes[i] = sizeB if sizeA == 1 else sizeA
+    return tuple(expandedSizes)
+
+
+def make_fast_binary_impl(slow_ref):
+    def fast_binary_impl(mode, *args, **kwargs):
+        def slow(msg):
+            count_label(f"slow {msg}")
+            with mode:
+                return slow_ref(*args, **kwargs)
+
+        count_label("attempt fast")
+
+        # Fast path (based off of TensorIterator fast path).
+        # Unfortunately, there is no way to easily deduplicate
+        # this with either the TensorIterator C++ implementation
+        # (which we don't want to SymIntify, and also the algorithm
+        # here is slightly different from TensorIterator to allow
+        # for broadcasting), nor the PrimTorch implementation
+        # (which does not actually implement a fast path.)
+
+        operands = args
+
+        # compute_shape
+        has_scalars = False
+        has_tensors = False
+        final_shape = None
+        for op in operands:
+            shape = op.shape if isinstance(op, torch.Tensor) else ()
+            if len(shape) == 0:
+                has_scalars = True
+            else:
+                has_tensors = True
+            if final_shape is None:
+                final_shape = shape
+            # TODO: Minor optimization: track if the shapes
+            # were equal so you can skip the equality check
+            # below if unnecessary
+            final_shape = infer_size(final_shape, shape)
+        assert final_shape is not None
+
+        # Do some extra safety checks to see if the output
+        # stride is obvious
+        for op in operands:
+            if isinstance(op, torch.Tensor) and op.shape == final_shape:
+                break
+        else:
+            return slow("both tensors nontrivially broadcast")
+
+        # compute_types
+        cpu = torch.device("cpu")
+        common_device = cpu
+        common_dtype = None
+        output_dtype = None
+        has_different_input_dtypes = False
+        for op in operands:
+            if not isinstance(op, torch.Tensor):
+                # Use elementwise_dtypes for the tricky case
+                has_different_input_dtypes = True
+                continue
+            if common_device == cpu and not op.device.type == "cpu":
+                common_device = op.device
+            # Slightly simplified here as target_dtype cannot vary
+            if common_dtype is None:
+                common_dtype = op.dtype
+            elif common_dtype != op.dtype:
+                has_different_input_dtypes = True
+
+        if has_different_input_dtypes:
+            # compute promotion
+            # TODO: we don't need the compute type
+            _, common_dtype = elementwise_dtypes(
+                *operands, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            )
+
+        # check all tensors on same device
+        # cpu scalars are assumed allow
+        current_cpu_scalars_on_non_cpu = 0
+        max_cpu_scalars_on_non_cpu = 1  # hard coded atm
+        for op in operands:
+            if not isinstance(op, torch.Tensor):
+                continue
+            if common_device != cpu and op.dim() == 0 and op.device == cpu:
+                if current_cpu_scalars_on_non_cpu >= max_cpu_scalars_on_non_cpu:
+                    return slow("error")
+                current_cpu_scalars_on_non_cpu += 1
+            elif op.device != common_device:
+                return slow("error")
+
+        # compute_fast_setup_type
+        is_contiguous = True
+        is_channels_last = True
+        # TODO: is_non-overlapping_and_dense (not bound from Python
+        # no inplace, no out, everything defined
+        for op in operands:
+            if not isinstance(op, torch.Tensor):
+                continue
+            is_contiguous = is_contiguous and op.is_contiguous(
+                memory_format=torch.contiguous_format
+            )
+            is_channels_last = is_channels_last and op.is_contiguous(
+                memory_format=torch.channels_last
+            )
+        if is_contiguous:
+            # do contiguous
+            count_label("fast is_contiguous")
+            return FakeTensor(
+                mode,
+                torch.empty(
+                    final_shape,
+                    dtype=common_dtype,
+                    device="meta",
+                    memory_format=torch.contiguous_format,
+                ),
+                device=common_device,
+            )
+        if is_channels_last:
+            count_label("fast channels_last")
+            # do channels last
+            return FakeTensor(
+                mode,
+                torch.empty(
+                    final_shape,
+                    dtype=common_dtype,
+                    device="meta",
+                    memory_format=torch.channels_last,
+                ),
+                device=common_device,
+            )
+
+        return slow("no contiguity match")
+
+    return fast_binary_impl
+
+
+@functools.lru_cache(None)
+def get_fast_op_impls():
+    import torch._refs
+
+    register_fast_op_impl(torch.ops.aten.add.Tensor)(
+        make_fast_binary_impl(torch._refs.add)
+    )
+    register_fast_op_impl(torch.ops.aten.sub.Tensor)(
+        make_fast_binary_impl(torch._refs.sub)
+    )
+    register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
+    register_fast_op_impl(torch.ops.aten.div.Tensor)(
+        make_fast_binary_impl(torch._refs.div)
+    )
+    return FAST_OP_IMPLEMENTATIONS
+
+
 @contextlib.contextmanager
 def in_kernel_invocation_manager(fake_mode):
     # See: note [Fake Tensor Dispatch Keys]
@@ -527,6 +797,13 @@ def in_kernel_invocation_manager(fake_mode):
         del guard
 
 
+# Return if the function allows Python numbers to bind to Tensors
+def should_allow_numbers_as_tensors(func: OpOverload):
+    return torch._C._should_allow_numbers_as_tensors(
+        func.name().split("::")[-1].split(".")[0]
+    )
+
+
 class FakeTensorConfig:
     debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", False)
 
@@ -543,6 +820,26 @@ class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]
+
+    # This memorizes the unbacked SymInt representing the number of nonzero
+    # elements in this tensor.  This is helpful if you do something like
+    # x[mask] and y[mask]; mask.nonzero() gets repeatedly called and should
+    # give a consistent unbacked SymInt.  It needs to be invalidated in the
+    # same way constant is.
+    # TODO: Generalize this as needed, e.g., into a trie of memos
+    _nonzero_memo: Optional[torch.SymInt]
+    _nonzero_memo_vc: Optional[int]
+
+    @property
+    def nonzero_memo(self):
+        if self._nonzero_memo is None:
+            return None
+        # Version counter based tracking isn't 100% sound but it's close
+        # enough
+        if self._nonzero_memo_vc != self._version:
+            self._nonzero_memo = None
+            return None
+        return self._nonzero_memo
 
     @property
     def device(self):
@@ -590,6 +887,9 @@ class FakeTensor(torch.Tensor):
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
+        self._nonzero_memo = None  # type: ignore[attr-defined]
+        self._nonzero_memo_vc = None  # type: ignore[attr-defined]
+
         if FakeTensorConfig.debug:
             import traceback
 
@@ -713,12 +1013,7 @@ class FakeTensor(torch.Tensor):
         # some functions that allow Python numbers to bind to Tensors
         # if we have failed to find a device, and we're running one of these operators,
         # we must have scalar only inputs
-        if (
-            torch._C._should_allow_numbers_as_tensors(
-                func.name().split("::")[-1].split(".")[0]
-            )
-            and common_device is None
-        ):
+        if should_allow_numbers_as_tensors(func) and common_device is None:
             # ops with scalar only inputs always have result on cpu
             has_scalar_only_inputs = True
             common_device = torch.device("cpu")
@@ -774,6 +1069,13 @@ class FakeTensorMode(TorchDispatchMode):
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        try:
+            return self.dispatch(func, types, args, kwargs)
+        except TypeError:
+            log.exception("fake tensor raised TypeError")
+            raise
+
+    def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:
@@ -782,6 +1084,12 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+
+        if log.getEffectiveLevel() <= logging.DEBUG:
+            log.debug(
+                f"{' ' * RECURSION_COUNT}FakeTensorMode.__torch_dispatch__: {func}"
+            )
+            incr = IncrementRecursionCount()
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
@@ -803,11 +1111,23 @@ class FakeTensorMode(TorchDispatchMode):
 
         converter = self.fake_tensor_converter
 
-        # If this is a lift, the input tensor is guaranteed to be a
-        # constant, so we keep a copy of the original argument along so
-        # we can query it if we're asked to item() it at some later point
-        if func in self.lift_fns:
-            out = func(*args, **kwargs)
+        # To constant propagate through these functions:
+        # 1, If this is a lift, the input tensor is guaranteed to be a
+        #    constant, so we keep a copy of the original argument along so
+        #    we can query it if we're asked to item() it at some later point
+        # 2, Some functions that allow Python numbers to bind to Tensors, e.g, torch.div
+        if func in self.lift_fns or (
+            should_allow_numbers_as_tensors(func)
+            and not has_symbolic_sizes
+            and not flat_arg_fake_tensors
+        ):
+            assert all(
+                t.constant is not None for t in flat_arg_fake_tensors
+            ), "f{func} should not have fake inputs without constants"
+            const_args, const_kwargs = pytree.tree_map_only(
+                FakeTensor, lambda t: t.constant, (args, kwargs)
+            )
+            out = func(*const_args, **const_kwargs)
             if self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
                 # compute here
@@ -833,6 +1153,7 @@ class FakeTensorMode(TorchDispatchMode):
             assert (
                 len(kwargs) == 0 and len(args) == 1 and type(args[0]) is torch.Tensor
             ), f"{args} {kwargs}"
+
             return converter(self, args[0])
 
         args, kwargs = self.validate_and_convert_non_fake_tensors(
@@ -886,6 +1207,12 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
+        # Try for fastpath
+        if has_symbolic_sizes:
+            fast_impl = get_fast_op_impls().get(func)
+            if fast_impl is not None:
+                return fast_impl(self, *args, **kwargs)
+
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
 
@@ -936,8 +1263,8 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
-            if not self.allow_fallback_kernels:
-                raise not_implemented_error
+            if has_symbolic_sizes or not self.allow_fallback_kernels:
+                raise UnsupportedOperatorException(func)
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)
@@ -1037,6 +1364,7 @@ class FakeTensorMode(TorchDispatchMode):
         if torch.Tag.view_copy in func.tags:  # type: ignore[attr-defined]
             return True
         return func in [
+            aten.empty.memory_format,
             aten.empty_strided.default,
             aten.as_strided_scatter.default,
             aten.as_strided.default,
@@ -1082,20 +1410,27 @@ class FakeTensorMode(TorchDispatchMode):
     def from_tensor(
         self,
         tensor,
+        *,
         static_shapes=False,
         ignore_subclass=False,
         source: Optional[Source] = None,
+        dynamic_dims: Optional[DimList[DimDynamic]] = None,
+        constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
+        shape_env = self.shape_env
         if static_shapes:
-            return self.fake_tensor_converter(
-                self, tensor, ignore_subclass=ignore_subclass, source=source
-            )
+            assert (
+                dynamic_dims is None
+            ), "cannot set both static_shapes and dynamic_dims"
+            shape_env = None
         return self.fake_tensor_converter(
             self,
             tensor,
-            shape_env=self.shape_env,
+            shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_dims=dynamic_dims,
+            constraint_dims=constraint_dims,
         )
 
 

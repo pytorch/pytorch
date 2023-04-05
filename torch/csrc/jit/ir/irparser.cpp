@@ -189,16 +189,40 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       str += L.cur().text();
       if (str.find('j') != std::string::npos) {
         r.k = AttributeKind::c;
-        auto imag = c10::stod(str.substr(0, str.size() - 1));
+        double imag = 0.0f;
+        try {
+          imag = c10::stod(str.substr(0, str.size() - 1));
+        } catch (const std::invalid_argument& e) {
+          throw ErrorReport(token.range)
+              << "Number cannot be converted to double";
+        } catch (const std::out_of_range& e) {
+          throw ErrorReport(token.range)
+              << "Number is too long to be represented in type double";
+        }
         r.c = c10::complex<double>(0, imag);
       } else if (
           str.find('.') != std::string::npos ||
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
-        r.f = c10::stod(str);
+        try {
+          r.f = c10::stod(str);
+        } catch (const std::invalid_argument& e) {
+          throw ErrorReport(token.range)
+              << "Number cannot be converted to double";
+        } catch (const std::out_of_range& e) {
+          throw ErrorReport(token.range)
+              << "Number is too long to be represented in type double";
+        }
       } else {
         r.k = AttributeKind::i;
-        r.i = c10::stoll(str);
+        try {
+          r.i = c10::stoll(str);
+        } catch (const std::invalid_argument& e) {
+          throw ErrorReport(token.range)
+              << "Number cannot be converted to integer";
+        } catch (const std::out_of_range& e) {
+          throw ErrorReport(token.range) << "Number is too big";
+        }
       }
       L.next();
       return r;
@@ -496,7 +520,7 @@ void IRParser::parseOperator(Block* b) {
   const FunctionSchema* schema = n->maybeSchema();
 
   // Register outputs.
-  int idx = 0;
+  unsigned idx = 0;
   for (const VarWithType& v : outs) {
     vmap[v.name] = n->outputs()[idx];
     if (schema && !schema->is_varret()) {

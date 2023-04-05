@@ -51,7 +51,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> multihead_attn = nnqa.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
 
@@ -66,10 +66,10 @@ class MultiheadAttention(nn.MultiheadAttention):
                  kdim: int = None, vdim: int = None, batch_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(MultiheadAttention, self).__init__(embed_dim, num_heads, dropout,
-                                                 bias, add_bias_kv,
-                                                 add_zero_attn, kdim, vdim, batch_first,
-                                                 **factory_kwargs)
+        super().__init__(embed_dim, num_heads, dropout,
+                         bias, add_bias_kv,
+                         add_zero_attn, kdim, vdim, batch_first,
+                         **factory_kwargs)
         self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)
         self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias, **factory_kwargs)
         self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias, **factory_kwargs)
@@ -77,8 +77,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore[assignment]
 
         # Functionals
-        self.q_scaling_product = torch.nn.quantized.FloatFunctional()
-        # note: importing torch.nn.quantized at top creates a circular import
+        self.q_scaling_product = torch.ao.nn.quantized.FloatFunctional()
+        # note: importing torch.ao.nn.quantized at top creates a circular import
 
         # Quant/Dequant
         self.quant_attn_output = torch.ao.quantization.QuantStub()

@@ -888,14 +888,14 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       VLOG(2) << "Adding extra init tensor: " << t.name();
       TensorShape shape;
       shape.mutable_dims()->CopyFrom(t.dims());
+      auto dims_size = shape.dims_size();
       auto ret = shape_hints_onnx_.emplace(t.name(), std::move(shape));
       shape_hints_max_bs->emplace(
           std::piecewise_construct,
           std::forward_as_tuple(ret.first->first),
           std::forward_as_tuple(
               std::vector<TensorBoundShape::DimType>(
-                  // NOLINTNEXTLINE(bugprone-use-after-move)
-                  shape.dims_size(), TensorBoundShape_DimType_CONSTANT),
+                  dims_size, TensorBoundShape_DimType_CONSTANT),
               ret.first->second));
 
       // Feed into workspace as CPU Tensors

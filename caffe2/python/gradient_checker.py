@@ -69,7 +69,7 @@ def _assert_close(value1, value2, threshold, err_msg=''):
     return np.mean(delta), max(delta)
 
 
-class NetGradientChecker(object):
+class NetGradientChecker:
     @staticmethod
     def CompareNets(nets, outputs, outputs_with_grad_ids,
                     inputs_with_grads, input_values=None,

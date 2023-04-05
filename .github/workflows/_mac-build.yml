@@ -44,6 +44,11 @@ on:
           An option JSON description of what test configs to run later on. This
           is moved here from the Linux test workflow so that we can apply filter
           logic using test-config labels earlier and skip unnecessary builds
+      sccache-use-gha:
+        required: false
+        type: boolean
+        default: false
+        description: If true, use the Github cache as the storage option for sccache instead of S3.
 
     outputs:
       test-matrix:
@@ -71,6 +76,7 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+      SCCACHE_USE_GHA: ${{ inputs.sccache-use-gha }}  # this is placed here instead of the sccache step to appease actionlint
     outputs:
       build-outcome: ${{ steps.build.outcome }}
     steps:
@@ -106,10 +112,15 @@ jobs:
           environment-file: ${{ inputs.environment-file }}
 
       - name: Install macOS homebrew dependencies
-        run: |
-          # Install dependencies
-          brew install libomp
-          brew link --force libomp
+        uses: nick-fields/retry@v2.8.2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            # Install dependencies
+            brew install libomp
+            brew link --force libomp
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
         uses: nick-fields/retry@v2.8.2
@@ -119,10 +130,17 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 90
           command: |
-            sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            if [[ "${SCCACHE_USE_GHA}" == "true" ]]; then
+              sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v0.4.0-pre.7 --output /usr/local/bin/sccache
+              echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> "${GITHUB_ENV}"
+              echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "${GITHUB_ENV}"
+              echo "SCCACHE_GHA_ENABLED=on" >> "${GITHUB_ENV}"
+            else
+              sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+              echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+              echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
+            fi
             sudo chmod +x /usr/local/bin/sccache
-            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
-            echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
 
       - name: Get workflow job id
         id: get-job-id

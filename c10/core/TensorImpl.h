@@ -19,6 +19,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
@@ -217,6 +218,18 @@ is_channels_last_3d
 is_non_overlapping_and_dense
 #endif
 
+/**
+ * This structure is intended to hold additional metadata of the specific device
+ *backend
+ **/
+struct C10_API BackendMeta : intrusive_ptr_target {
+  virtual ~BackendMeta(){};
+  virtual intrusive_ptr<BackendMeta> clone(
+      const intrusive_ptr<BackendMeta>& ptr) const {
+    return ptr;
+  }
+};
+
 struct C10_API ExtraMeta {
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
@@ -229,6 +242,7 @@ struct C10_API ExtraMeta {
   SymBool is_channels_last_3d_{false};
   SymBool is_non_overlapping_and_dense_{true};
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
+  intrusive_ptr<c10::BackendMeta> backend_meta_;
 
   ExtraMeta() = default;
 
@@ -243,7 +257,8 @@ struct C10_API ExtraMeta {
       SymBool is_channels_last,
       SymBool is_channels_last_3d,
       SymBool is_non_overlapping_and_dense,
-      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
+      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
+      intrusive_ptr<c10::BackendMeta> backend_meta)
       : sizes_(std::move(sizes)),
         strides_(std::move(strides)),
         numel_(std::move(numel)),
@@ -255,7 +270,8 @@ struct C10_API ExtraMeta {
         is_channels_last_(std::move(is_channels_last)),
         is_channels_last_3d_(std::move(is_channels_last_3d)),
         is_non_overlapping_and_dense_(std::move(is_non_overlapping_and_dense)),
-        named_tensor_meta_(std::move(named_tensor_meta)) {}
+        named_tensor_meta_(std::move(named_tensor_meta)),
+        backend_meta_(backend_meta) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
     return std::make_unique<ExtraMeta>(
@@ -269,7 +285,8 @@ struct C10_API ExtraMeta {
         is_channels_last_,
         is_channels_last_3d_,
         is_non_overlapping_and_dense_,
-        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr);
+        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr,
+        backend_meta_ ? backend_meta_->clone(backend_meta_) : nullptr);
   }
 };
 
@@ -331,9 +348,9 @@ struct C10_API VariableVersion {
   // doesn't allocate the intrusive_ptr.
   // Example use cases are:
   //  - Inference tensors don't track version counter, so they'll just always
-  //    have disbaled VariableVersion.
+  //    have disabled VariableVersion.
   //  - In SavedVariable class we override version_counter_ inside its
-  //  construtor
+  //  constructor
   //    so that we can use the cheap constructor there.
   enum Disabled { DISABLED };
   // It's okay to return true even for inference tensor which
@@ -386,6 +403,15 @@ struct C10_API VariableVersion {
     if (version_counter_) {
       ++version_counter_->version_;
     }
+  }
+
+  void set_version(int64_t i) {
+    TORCH_CHECK(
+        version_counter_,
+        "Tried to call torch.autograd._unsafe_set_version() on a tensor "
+        "that does not have a version counter. Was it created in inference mode?");
+    TORCH_CHECK(i >= 0, "Cannot set a version_counter to a value below 0: ", i);
+    version_counter_->version_ = i;
   }
 
   // Inference tensor doesn't have version counter so it shouldn't be
@@ -1532,12 +1558,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Computing an offset into an empty tensor would be UB, since an empty
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
-    if (is_empty()) {
+    char* const data = static_cast<char*>(storage_.data());
+    if (data == nullptr) {
       return nullptr;
     }
-    return static_cast<void*>(
-        static_cast<char*>(storage_.data()) +
-        data_type_.itemsize() * storage_offset_);
+    return static_cast<void*>(data + data_type_.itemsize() * storage_offset_);
   }
 
   /**
@@ -1566,6 +1591,27 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Cannot report itemsize of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
     return data_type_.itemsize();
+  }
+
+  void set_backend_meta(intrusive_ptr<c10::BackendMeta> backend_meta) {
+    if (!extra_meta_) {
+      extra_meta_ = std::make_unique<ExtraMeta>();
+    }
+    extra_meta_->backend_meta_ = std::move(backend_meta);
+  }
+
+  c10::BackendMeta* get_backend_meta() {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->backend_meta_.get();
+  }
+
+  intrusive_ptr<c10::BackendMeta> get_backend_meta_intrusive_ptr() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->backend_meta_;
   }
 
  protected:
@@ -1887,7 +1933,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            BackendComponent::CUDABit,
            BackendComponent::MPSBit,
            BackendComponent::HIPBit,
-           BackendComponent::XPUBit});
+           BackendComponent::XPUBit,
+           BackendComponent::HPUBit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };
@@ -2095,7 +2142,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * If the existing data does not match the desired type, it will be deleted
    * and a new storage will be created.
    */
-  inline void* raw_mutable_data(const caffe2::TypeMeta meta) {
+  inline void* raw_mutable_data(const caffe2::TypeMeta& meta) {
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(

@@ -192,7 +192,7 @@ class TestOnnxDiagnostics(common_utils.TestCase):
             self._sample_rule,
             sample_level,
         ):
-            diagnostics.context.diagnose(self._sample_rule, sample_level)
+            diagnostics.export_context().diagnose(self._sample_rule, sample_level)
 
     def test_diagnostics_records_python_call_stack(self):
         diagnostic = diagnostics.ExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip

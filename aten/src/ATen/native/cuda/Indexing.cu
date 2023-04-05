@@ -248,6 +248,9 @@ static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
   // computes the stride as if tensor were contiguous
   auto sizes = tensor.sizes();
   std::vector<int64_t> stride(tensor.dim());
+  if (stride.empty()) {
+    return stride;
+  }
   stride[tensor.dim() - 1] = 1;
   std::partial_sum(sizes.rbegin(), sizes.rend() - 1, stride.rbegin() + 1, std::multiplies<int64_t>());
   return stride;
@@ -331,6 +334,8 @@ int64_t largestIndex(const Tensor &self) {
 }
 
 void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
+  TORCH_CHECK(!indices.empty() || is_expandable_to(value.sizes(), self.sizes()), "shape mismatch: value tensor of shape ", value.sizes(),
+             " cannot be broadcast to indexing result of shape ", self.sizes());
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
@@ -1187,6 +1192,8 @@ void index_select_out_cuda_impl(
 
   TORCH_CHECK(
       index.dim() <= 1, "Index is supposed to be an empty tensor or a vector");
+  TORCH_CHECK(
+      !(self.dim() == 0 && numIndices != 1), "index_select(): Index to scalar can have only 1 value, got ", numIndices, " value(s)");
   TORCH_CHECK(dim < selfDims, "Indexing dim is out of bounds");
 
   std::vector<int64_t> newSize = self.sizes().vec();
@@ -1365,13 +1372,12 @@ Tensor index_select_quantized_cuda(const Tensor& self, int64_t dim, const Tensor
 
 namespace {
 
-template <typename mask_t>
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kBool, kHalf, kBFloat16, kComplexHalf, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
         gpu_kernel(
-            iter, [value_] GPU_LAMBDA(scalar_t self, mask_t mask) -> scalar_t {
+            iter, [value_] GPU_LAMBDA(scalar_t self, bool mask) -> scalar_t {
               if (mask) {
                 return value_;
               }
@@ -1380,10 +1386,10 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
       });
 }
 
-template <typename scalar_t, typename mask_t>
+template <typename scalar_t>
 void cuda_masked_fill_kernel_quantized(TensorIterator& iter, scalar_t quantized_val) {
     gpu_kernel(
-        iter, [quantized_val] GPU_LAMBDA(scalar_t self, mask_t mask) -> scalar_t {
+        iter, [quantized_val] GPU_LAMBDA(scalar_t self, bool mask) -> scalar_t {
           if (mask) {
             return quantized_val;
           }
@@ -1392,18 +1398,14 @@ void cuda_masked_fill_kernel_quantized(TensorIterator& iter, scalar_t quantized_
 }
 
 void masked_fill_kernel_quantized(TensorIterator& iter, const Scalar& value, double scale, int zero_point) {
+  TORCH_CHECK(iter.input_dtype(1) == at::ScalarType::Bool, "masked_fill only supports boolean masks, ",
+    "but got dtype ", iter.input_dtype(1));
   AT_DISPATCH_QINT_TYPES(
       iter.common_dtype(), "masked_fill_", [&]() {
         float float_val = value.to<float>();
         const auto quantized_val = quantize_val<scalar_t>(scale, zero_point, float_val);
-        auto mask_dtype = iter.input_dtype(0);
 
-        if (mask_dtype == at::ScalarType::Bool) {
-            cuda_masked_fill_kernel_quantized<scalar_t, bool>(iter, quantized_val);
-        }
-        else {
-            cuda_masked_fill_kernel_quantized<scalar_t, uint8_t>(iter, quantized_val);
-        }
+        cuda_masked_fill_kernel_quantized<scalar_t>(iter, quantized_val);
     });
 }
 
@@ -1414,8 +1416,8 @@ REGISTER_CUDA_DISPATCH(masked_fill_kernel_quantized_stub, &masked_fill_kernel_qu
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& value) {
   TORCH_CHECK(self.device() == mask.device(), "expected self and mask to be on the same device, but got mask on ",
     mask.device(), " and self on ", self.device());
-  TORCH_CHECK(mask.scalar_type() == kByte || mask.scalar_type() == kBool,
-    "expected mask dtype to be Bool but got ", mask.scalar_type());
+  TORCH_CHECK(mask.scalar_type() == kBool,
+    "masked_fill only supports boolean masks, but got dtype ", mask.scalar_type());
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
@@ -1436,13 +1438,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .add_input(*b_mask)
       .build();
 
-  if (b_mask->dtype() == at::ScalarType::Byte) {
-    TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-    masked_fill_kernel<uint8_t>(iter, value);
-  } else {
-    masked_fill_kernel<bool>(iter, value);
-  }
+  masked_fill_kernel(iter, value);
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
