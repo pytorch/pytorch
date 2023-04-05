@@ -256,6 +256,37 @@ class TestPythonRegistration(TestCase):
         self.assertEqual(torch.ops.foo.sum(x), x)
 
         del my_lib2
+
+    def test_create_new_library2(self) -> None:
+        my_lib1 = Library("foo", "DEF")
+
+        my_lib1.define("sum(Tensor self) -> Tensor")
+
+        # Example 1
+        @torch.library.impl(my_lib1, "sum", "CPU")
+        def my_sum(*args, **kwargs):
+            return args[0]
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.ops.foo.sum(x), x)
+
+        my_lib2 = Library("foo", "IMPL")
+
+        # Example 2
+        @torch.library.impl(my_lib2, torch.ops.foo.sum.default, "ZeroTensor")
+        def my_sum_zt(*args, **kwargs):
+            if args[0]._is_zerotensor():
+                return torch._efficientzerotensor(args[0].shape)
+            else:
+                return args[0]
+
+        y = torch._efficientzerotensor(3)
+        self.assertTrue(torch.ops.foo.sum(y)._is_zerotensor())
+        self.assertEqual(torch.ops.foo.sum(x), x)
+
+        del my_lib2
+        del my_lib1
+
         del my_lib1
 
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
