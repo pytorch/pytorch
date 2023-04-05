@@ -446,7 +446,7 @@ def _convert_to_distributed(
         if node.op == OP.PLACEHOLDER:
             assert i < len(
                 inps
-            ), f"got more placeholer nodes ({i + 1}) than inputs ({len(inps)})"
+            ), f"got more placeholder nodes ({i + 1}) than inputs ({len(inps)})"
 
             # our example inputs are local shards. Create DTensors from them.
             node_to_obj[node] = DTensor.from_local(
@@ -492,11 +492,14 @@ def _convert_to_distributed(
                     return arg
 
             args = tree_map(_remap_arg, node.args)
-            assert (
-                len(args) >= 2
-            ), f"Expected number of args for call function to be at least 2, found {len(args)}"
-            # TODO(anj): Why do we assume this is only 2?
-            node_to_obj[node] = node.target(args[0], args[1])
+            if node.target == torch.ops.aten.sym_numel:
+                node_to_obj[node] = args[0].numel()
+            else:
+                assert (
+                    len(args) >= 2
+                ), f"Expected number of args for call function to be at least 2, found {len(args)} {node}"
+                # TODO(anj): Why do we assume this is only 2?
+                node_to_obj[node] = node.target(args[0], args[1])
         else:
             raise ValueError(f"Unrecognized node.op type {node.op}")
 
