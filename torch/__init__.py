@@ -1675,7 +1675,7 @@ class _WrappedTritonKernel(object):
         return res
 
 
-if torch.cuda.is_available():
+def _register_triton_kernels():
     from torch.sparse._triton_ops import bsr_dense_mm
 
     if bsr_dense_mm is not None:
@@ -1685,6 +1685,10 @@ if torch.cuda.is_available():
             _WrappedTritonKernel(lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs)),
             "SparseCsrCUDA"
         )
+
+
+if torch.cuda.is_available():
+    torch.cuda._lazy_call(_register_triton_kernels)
 
 from . import _logging
 _logging._init_logs()
