@@ -5530,6 +5530,20 @@ class CommonTemplate:
                 with TestRefMode():
                     fn_compiled(inps)
 
+                # do an extra run to make sure we are deallocating on warmup and record
+                if self.device == "cuda":
+                    inps.extend(
+                        [
+                            torch.rand([5, 5]).to(self.device),
+                            torch.rand([5, 5]).to(self.device),
+                        ]
+                    )
+                    inp_refs.extend([weakref.ref(inp) for inp in inps])
+                    matmul_seen = False
+
+                    with TestRefMode():
+                        fn_compiled(inps)
+
                 # for some reason, TorchDispatch doesnt capture the
                 # cuda mm call (even without cudagraphs)
                 if self.device == "cpu":

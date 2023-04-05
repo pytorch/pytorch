@@ -818,62 +818,68 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{name}({', '.join(call_args)});"
 
     def generate_return(self, output_refs):
-        self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
+        self.wrapper_call.writeline(
+            f"return std::vector<at::Tensor>({{{', '.join(output_refs)}}});\n}}"
+        )
 
     def generate_end(self, result):
-        if not V.graph.aot_mode:
-            result.writeline("'''\n)")
-            # Generate load_inline to jit compile the generated cpp code and to use it in Python
-            shared = codecache.get_shared()
-            warning_all_flag = codecache.get_warning_all_flag()
-            cpp_flags = codecache.cpp_flags()
-            ipaths, lpaths, libs, macros = codecache.get_include_and_linking_paths(vec_isa=codecache.pick_vec_isa())
-            optimization_flags = codecache.optimization_flags()
-            use_custom_generated_macros = codecache.use_custom_generated_macros()
+        if V.graph.aot_mode:
+            return
 
-            extra_cflags = f"{cpp_flags} {optimization_flags} {warning_all_flag} {macros} {use_custom_generated_macros}"
-            extra_ldflags = f"{shared} {lpaths} {libs}"
-            extra_include_paths = f"{ipaths}"
+        result.writeline("'''\n)")
+        # Generate load_inline to jit compile the generated cpp code and to use it in Python
+        shared = codecache.get_shared()
+        warning_all_flag = codecache.get_warning_all_flag()
+        cpp_flags = codecache.cpp_flags()
+        ipaths, lpaths, libs, macros = codecache.get_include_and_linking_paths(
+            vec_isa=codecache.pick_vec_isa()
+        )
+        optimization_flags = codecache.optimization_flags()
+        use_custom_generated_macros = codecache.use_custom_generated_macros()
 
-            # get the hash of the wrapper code to name the extension
-            wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
-            result.splice(
-                f"""
-                module = load_inline(
-                    name='inline_extension_{wrapper_call_hash}',
-                    cpp_sources=[cpp_wrapper_src],
-                    functions=['{self.call_func_name}'],
-                    extra_cflags=['{extra_cflags}'],
-                    extra_ldflags=['{extra_ldflags}'],
-                    extra_include_paths=['{extra_include_paths}'])
-                """
-            )
+        extra_cflags = f"{cpp_flags} {optimization_flags} {warning_all_flag} {macros} {use_custom_generated_macros}"
+        extra_ldflags = f"{shared} {lpaths} {libs}"
+        extra_include_paths = f"{ipaths}"
 
-            # unwrap output tensor back to python scalar
-            if all(x for x in self.output_is_tensor.values()):
-                # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
-                return_str = "return f(args_tensor)"
-            else:
-                outputs = [
-                    f"outputs[{i}]" if self.output_is_tensor[i] else f"outputs[{i}].item()"
-                    for i in range(len(V.graph.graph_outputs))
-                ]
-                outputs_str = f"[{', '.join(outputs)}]"
-                return_str = f"""
-                        outputs = f(args_tensor)
-                        return {outputs_str}
-                """
-            # Wrap the func to support setting result._boxed_call = True
-            result.splice(
-                f"""
-                def _wrap_func(f):
-                    def g(args):
-                        args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]
-                        {return_str}
-                    return g
-                call = _wrap_func(module.{self.call_func_name})
-                """
-            )
+        # get the hash of the wrapper code to name the extension
+        wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
+        result.splice(
+            f"""
+            module = load_inline(
+                name='inline_extension_{wrapper_call_hash}',
+                cpp_sources=[cpp_wrapper_src],
+                functions=['{self.call_func_name}'],
+                extra_cflags=['{extra_cflags}'],
+                extra_ldflags=['{extra_ldflags}'],
+                extra_include_paths=['{extra_include_paths}'])
+            """
+        )
+
+        # unwrap output tensor back to python scalar
+        if all(x for x in self.output_is_tensor.values()):
+            # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
+            return_str = "return f(args_tensor)"
+        else:
+            outputs = [
+                f"outputs[{i}]" if self.output_is_tensor[i] else f"outputs[{i}].item()"
+                for i in range(len(V.graph.graph_outputs))
+            ]
+            outputs_str = f"[{', '.join(outputs)}]"
+            return_str = f"""
+                    outputs = f(args_tensor)
+                    return {outputs_str}
+            """
+        # Wrap the func to support setting result._boxed_call = True
+        result.splice(
+            f"""
+            def _wrap_func(f):
+                def g(args):
+                    args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]
+                    {return_str}
+                return g
+            call = _wrap_func(module.{self.call_func_name})
+            """
+        )
 
     def generate_extern_kernel_out(
         self, output_view, codegen_reference, args, kernel, cpp_kernel
