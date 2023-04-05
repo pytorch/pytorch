@@ -157,7 +157,7 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
     return skip_dec
 
 
-def skipDynamicFXTest(reason: str = ""):
+def skip_dynamic_fx_test(reason: str):
     """Skip dynamic exporting test.
 
     Args:
@@ -170,7 +170,10 @@ def skipDynamicFXTest(reason: str = ""):
     def skip_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            raise unittest.SkipTest(f"Skip verify test for FX. {reason}")
+            if self.dynamic_shapes:
+                raise unittest.SkipTest(
+                    f"Skip verify dynamic shapes test for FX. {reason}"
+                )
 
         return wrapper
 

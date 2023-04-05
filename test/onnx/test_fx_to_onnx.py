@@ -5,7 +5,8 @@ import pytorch_test_common
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.onnx._internal import diagnostics, fx as fx_onnx
+from torch.onnx import dynamo_export, ExportOptions
+from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.testing._internal import common_utils
 
@@ -48,7 +49,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         self.diag_ctx = diagnostics.engine.create_diagnostic_context(
             "test_fx_export", version=torch.__version__
         )
-        self.opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
+        self.export_options = ExportOptions()
 
     def tearDown(self):
         diagnostics.engine.dump(
@@ -62,9 +63,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             z = y.relu()
             return (y, z)
 
-        _ = fx_onnx.export(func, torch.randn(1, 1, 2), opset_version=self.opset_version)
+        _ = dynamo_export(
+            func, torch.randn(1, 1, 2), export_options=self.export_options
+        )
 
-    @unittest.skip("MaxPool2D Op is not supported at the time.")
+    @unittest.skip(
+        "max_pool2d is not supported in ATen Lib: https://github.com/microsoft/onnx-script/issues/585"
+    )
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
@@ -88,7 +93,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        _ = fx_onnx.export(MNISTModel(), tensor_x, opset_version=self.opset_version)
+        _ = dynamo_export(MNISTModel(), tensor_x, export_options=self.export_options)
 
     def test_trace_only_op_with_evaluator(self):
         model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
@@ -104,8 +109,8 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     torch.argmax(input, dim=1, keepdim=True),
                 )
 
-        _ = fx_onnx.export(
-            ArgminArgmaxModel(), model_input, opset_version=self.opset_version
+        _ = dynamo_export(
+            ArgminArgmaxModel(), model_input, export_options=self.export_options
         )
 
     def test_multiple_outputs_op_with_evaluator(self):
@@ -115,7 +120,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return torch.sum(values)
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
-        _ = fx_onnx.export(TopKModel(), x, opset_version=self.opset_version)
+        _ = dynamo_export(TopKModel(), x, export_options=self.export_options)
 
     def test_unsupported_indices_fake_tensor_generated_with_op_level_debug(self):
         class EmbedModelWithoutPaddingIdx(torch.nn.Module):
@@ -126,7 +131,12 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         x = torch.randint(4, (4, 3, 2))
         embedding_matrix = torch.rand(10, 3)
 
-        _ = fx_onnx.export(model, x, embedding_matrix, op_level_debug=True)
+        _ = dynamo_export(
+            model,
+            x,
+            embedding_matrix,
+            export_options=ExportOptions(op_level_debug=True),
+        )
         assert_has_diagnostics(
             diagnostics.engine,
             diagnostics.rules.fx_node_to_onnx,
@@ -147,7 +157,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return self.conv2(input)
 
         x = torch.randn(20, 16, 50, 50)
-        _ = fx_onnx.export(TraceModel(), x, op_level_debug=True)
+        _ = dynamo_export(
+            TraceModel(), x, export_options=ExportOptions(op_level_debug=True)
+        )
         assert_has_diagnostics(
             diagnostics.engine,
             diagnostics.rules.fx_node_to_onnx,

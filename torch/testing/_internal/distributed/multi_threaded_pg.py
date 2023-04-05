@@ -279,6 +279,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
+    def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+        tensor_list = list(torch.chunk(output_tensor, self._world_size))
+        return self.allgather([tensor_list], [input_tensor], opts)
+
     def broadcast(self, tensor_list, opts=BroadcastOptions()):
         coll = ProcessLocalGroup._start_coll(Broadcast(opts.rootRank), self)
         res = coll.join(self._rank, tensor_list)

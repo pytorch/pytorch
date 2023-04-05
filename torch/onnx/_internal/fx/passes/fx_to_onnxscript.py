@@ -20,12 +20,8 @@ from torch._subclasses import fake_tensor
 
 from torch.onnx import _type_utils
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import (
-    diagnostics,
-    function_dispatcher,
-    op_validation,
-    options,
-)
+from torch.onnx._internal.exporter import ResolvedExportOptions
+from torch.onnx._internal.fx import diagnostics, function_dispatcher, op_validation
 from torch.utils import _pytree
 
 
@@ -321,7 +317,7 @@ def _export_fx_node_to_onnxscript(
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
-    export_options: options.ExportOptions,
+    options: ResolvedExportOptions,
     node_with_fixed_shape: torch.fx.Node,
 ):
     # Record stack trace of node in diagnostic.
@@ -449,7 +445,7 @@ def _export_fx_node_to_onnxscript(
             output
         )
         if (
-            export_options.op_level_debug
+            options.op_level_debug
             and not isinstance(node.target, torch._ops.OpOverloadPacket)
             and not isinstance(node.target, types.BuiltinFunctionType)
         ):
@@ -517,7 +513,7 @@ def _export_fx_node_to_onnxscript(
 def export_fx_to_onnxscript(
     fx_module_with_metadata: torch.fx.GraphModule,
     static_reference_graph: torch.fx.Graph,
-    export_options: options.ExportOptions,
+    options: ResolvedExportOptions,
 ):
     """
     Export a torch.fx.GraphModule to a TorchScript graph with ONNX symbols.
@@ -559,7 +555,7 @@ def export_fx_to_onnxscript(
             fx_name_to_onnxscript_value,
             tracer,
             fx_module_with_metadata,
-            export_options,
+            options,
             node_fixed_shape,
         )
 
