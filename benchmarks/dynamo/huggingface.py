@@ -369,6 +369,10 @@ class HuggingfaceRunner(BenchmarkRunner):
         model_names = list(BATCH_SIZE_KNOWN_MODELS.keys()) + list(EXTRA_MODELS.keys())
         self.model_names = sorted(set(model_names))
 
+    @property
+    def skip_models(self):
+        return SKIP
+
     def load_model(
         self,
         device,

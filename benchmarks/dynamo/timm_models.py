@@ -182,7 +182,11 @@ class TimmRunnner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
-        self.model_name = sorted(TIMM_MODELS.keys())
+        self.model_names = sorted(TIMM_MODELS.keys())
+
+    @property
+    def skip_models(self):
+        return SKIP
 
     def load_model(
         self,
