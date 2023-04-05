@@ -75,7 +75,7 @@ class Override(ABC):
     This is useful when any part of the model is not traceable or if you prefer
     to not trace it due to any reason. More specifically, users can implement
     :meth:`torch.distributed._spmd.Override.replacement` to replace an original
-    submodule with the return new submodule. The new submodule contrains
+    submodule with the return new submodule. The new submodule contains
     operations that users preferred to be traced, which simply be a dummy
     placeholder operator. After tracing, users can implement
     :meth:`torch.distributed._spmd.Override.transform` to transform the traced
@@ -101,7 +101,7 @@ class Override(ABC):
     @abstractmethod
     def transform(self, gm: fx.GraphModule, schema_map: Dict[str, Schema]) -> fx.Graph:
         r"""
-        Given a DTensor-expanded graph and shardig schema for every node,
+        Given a DTensor-expanded graph and sharding schema for every node,
         conduct additional transformation for the sub-graph from the :class:`nn.Module`
         returned by :meth:`torch.distributed._spmd.Override.replacement` if
         necessary.
