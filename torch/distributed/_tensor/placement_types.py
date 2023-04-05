@@ -180,6 +180,7 @@ class Shard(Placement):
         This function all_gather all shards and return a tensor that
         is replicated on the previously sharded mesh dimension
         """
+        # size: global_size
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
         # TODO: what should happen if rank is not in the mesh?

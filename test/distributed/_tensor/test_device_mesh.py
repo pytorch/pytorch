@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
+    skip_if_lt_x_gpu,
 )
 
 
@@ -137,10 +138,60 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertNotEqual(hash(mesh2), hash(mesh3))
 
 
+import torch.distributed as dist
+from torch.distributed._tensor import (
+    distribute_tensor,
+    zeros
+)
+
+
+class MyTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
+    @with_comms
+    def test_split(self) -> None:
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        global_tensor = torch.ones(5, device=self.device_type)
+        shard_placement = Shard(0)
+        print(f"mesh: {mesh}, mesh.size(): {mesh.size()}")
+        splitted_list, _ = shard_placement._split_tensor(
+            global_tensor, mesh.size(), with_padding=True, contiguous=True
+        )
+
+    @with_comms
+    def test_shard_tensor(self) -> None:
+        tensor = torch.arange(0, 5, dtype=torch.float32)
+        mesh = DeviceMesh(
+            device_type=self.device_type,
+            mesh=range(dist.get_world_size()),
+        )
+        sharded_dt = distribute_tensor(
+            tensor, mesh, placements=[Shard(0)]
+        )
+        print(f"rank:{dist.get_rank()}, sharded_dt:{sharded_dt}")
+        # mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        # global_tensor = torch.ones(5, device=self.device_type)
+        # print(f"self.device_type:{self.device_type}, global_tensor:{global_tensor}")
+        # shard_placement = Shard(0)
+        # local_tensor = shard_placement._shard_tensor(global_tensor, mesh, 0)
+        # print(f"rank:{dist.get_rank()}, local_tensor:{local_tensor}")
+
+
+    # @with_comms
+    # def test_replicate(self) -> None:
+    #     mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+    #     tensor_to_shard = zeros(5, device_mesh=mesh, placements=[Shard(0)])
+    #     print(f"rank:{dist.get_rank()}, tensor_to_shard:{tensor_to_shard}")
+
+
+
+
 class DeviceMeshCollectiveTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return 4
 
     @with_comms
     def test_all_reduce_1d(self):
@@ -157,6 +208,35 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
         mesh.broadcast(local_tensor, mesh_dim=0)
         self.assertEqual(local_tensor, torch.zeros(3, 3))
+
+    @with_comms
+    def test_split(self) -> None:
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        global_tensor = torch.ones(5, device=self.device_type)
+        shard_placement = Shard(0)
+        print(f"mesh: {mesh}, mesh.size(): {mesh.size()}")
+        splitted_list, _ = shard_placement._split_tensor(
+            global_tensor, mesh.size(), with_padding=True, contiguous=True
+        )
+
+
+
+    @with_comms
+    def test_shard_tensor(self) -> None:
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        global_tensor = torch.ones(5, device=self.device_type)
+        shard_placement = Shard(0)
+        local_tensor = shard_placement._shard_tensor(global_tensor, mesh, 0)
+        print(f"rank:{dist.get_rank()}, local_tensor:{local_tensor}")
+
+
+    # @with_comms
+    # def test_replicate(self) -> None:
+    #     mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+    #     tensor_to_shard = zeros(5, device_mesh=mesh, placements=[Shard(0)])
+    #     print(f"rank:{dist.get_rank()}, tensor_to_shard:{tensor_to_shard}")
+
+
 
     @with_comms
     def test_scatter_1d(self):
