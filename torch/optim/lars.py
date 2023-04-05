@@ -82,6 +82,8 @@ class LARS(Optimizer):
             grads = []
             momentum_buffer_list = []
 
+            self._init_group(group, params_with_grad, grads, momentum_buffer_list)
+
             lars(
                 params_with_grad,
                 grads,
