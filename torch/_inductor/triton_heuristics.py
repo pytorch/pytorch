@@ -138,7 +138,9 @@ class CachingAutotuner(KernelInterface):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
-        if config.triton.store_cubin:
+        launcher.store_cubin = config.triton.store_cubin
+        # store this global varible to avoid the high overhead of reading it when calling run
+        if launcher.store_cubin:
             launcher.fn = self.fn
             launcher.bin = binary
 
@@ -214,10 +216,10 @@ class CachingAutotuner(KernelInterface):
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid)
 
-        if config.triton.store_cubin:
+        (launcher,) = self.launchers
+        if launcher.store_cubin:
             self.save_cuda_kernel(grid, stream, self.launchers[0])
 
-        (launcher,) = self.launchers
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
