@@ -10,11 +10,12 @@ class ToyModel(torch.nn.Module):
     def __init__(self):
         super(ToyModel, self).__init__()
         self.linear = torch.nn.Linear(10, 10)
+        self.relu = torch.nn.ReLU()
 
     def forward(self, x):
-        return self.linear(x)
+        return self.relu(self.linear(x))
 
-class TorchCompileTests(unittest.TestCase):
+class InPlaceCompilationTests(unittest.TestCase):
     def test_compilation(self):
         model = ToyModel()
         cnt = CompileCounter()

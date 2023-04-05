@@ -77,7 +77,6 @@ class _WrappedHook:
         return result
 
     def __setstate__(self, state: Dict):
-        self.__dict__.update(state)
         self.hook = state["hook"]
         self.with_module = state["with_module"]
 
@@ -1585,6 +1584,7 @@ class Module:
         return state
 
     def __setstate__(self, state):
+        self.__dict__.update(state)
 
         # Support loading old checkpoints that don't have the following attrs:
         if '_forward_pre_hooks' not in self.__dict__:
