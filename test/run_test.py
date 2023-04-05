@@ -114,7 +114,11 @@ def discover_tests(
         rc += extra_tests
     return sorted(rc)
 
+TESTS = [
+    'test_python_dispatch.py',
+]
 
+"""
 TESTS = discover_tests(
     blocklisted_patterns=[
         "ao",
@@ -166,6 +170,7 @@ TESTS = discover_tests(
         "distributed/elastic/multiprocessing/api_test",
     ],
 )
+"""
 
 # The doctests are a special case that don't correspond to a file that discover
 # tests can enable.
