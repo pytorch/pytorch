@@ -583,6 +583,14 @@ class BuiltinVariable(VariableTracker):
                 ),
                 **options,
             )
+
+        if self.fn is round:
+            if len(args) > 0 and isinstance(args[0], SymNodeVariable):
+                raise UserError(
+                    UserErrorType.STANDARD_LIBRARY,
+                    "Calling round() on symbolic value is not supported. "
+                    "You can use floor() to implement this functionality",
+                )
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, *args):
