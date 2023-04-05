@@ -5273,6 +5273,7 @@ class TestCudaComm(TestCase):
         self.assertTrue(x)
 
     def test_allocator_fuzz(self):
+        # fuzz
         state = random.getstate()
         random.seed(123)
         N = 10000
