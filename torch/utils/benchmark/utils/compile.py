@@ -196,7 +196,10 @@ if HAS_TABULATE:
                     speedup = eager_time / running_time
                     table.append([
                         ("Training" if optimizer else "Inference"),
-                        backend, "-", f"{compilation_time} ms " or "-", f"{running_time} ms ", f"{int(round(speedup * 100, 0))}%" or "-"
+                        backend, "-",
+                        f"{compilation_time} ms " or "-",
+                        f"{running_time} ms ",
+                        f"{int(round(speedup * 100, 0))}%" or "-"
                     ])
 
 
