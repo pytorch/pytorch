@@ -18,7 +18,6 @@ class ToyModel(torch.nn.Module):
 class InPlaceCompilationTests(unittest.TestCase):
 
     def test_compilation(self):
-        # Test that compilation actually occured
         model = ToyModel()
         cnt = CompileCounter()
         model.compile(backend=cnt)
