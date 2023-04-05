@@ -185,15 +185,26 @@ class TensorProperty(enum.Enum):
     STORAGE_OFFSET = 2
 
 
+class NestedTensorProperty(enum.Enum):
+    NESTED_SIZES = 0
+    NESTED_STRIDES = 1
+    STORAGE_OFFSETS = 2
+
+
 @dataclasses.dataclass
 class TensorPropertySource(Source):
     base: Source
-    prop: TensorProperty
-    idx: Optional[int] = None  # None for STORAGE_OFFSET
+    prop: Union[TensorProperty, NestedTensorProperty]
+    idx: Optional[int] = None  # None for STORAGE_OFFSET and NT properties
 
     def __post_init__(self):
         assert self.base is not None
-        if self.prop is TensorProperty.STORAGE_OFFSET:
+        if self.prop in (
+            TensorProperty.STORAGE_OFFSET,
+            NestedTensorProperty.NESTED_SIZES,
+            NestedTensorProperty.NESTED_STRIDES,
+            NestedTensorProperty.STORAGE_OFFSETS,
+        ):
             assert self.idx is None
         else:
             assert self.idx is not None
@@ -210,33 +221,13 @@ class TensorPropertySource(Source):
         elif self.prop is TensorProperty.STRIDE:
             return f"{self.base.name()}.stride()[{self.idx}]"
         elif self.prop is TensorProperty.STORAGE_OFFSET:
-            assert self.idx is None
             return f"{self.base.name()}.storage_offset()"
-        else:
-            raise AssertionError(f"unhandled {self.prop}")
-
-
-@dataclasses.dataclass
-class NestedTensorPropertySource(Source):
-    base: Source
-    prop: TensorProperty
-
-    def __post_init__(self):
-        assert self.base is not None
-
-    def reconstruct(self, codegen):
-        raise NotImplementedError()
-
-    def guard_source(self):
-        return self.base.guard_source()
-
-    def name(self):
-        if self.prop is TensorProperty.SIZE:
-            return f"{self.base.name()}._nested_tensor_size().size(0)"
-        elif self.prop is TensorProperty.STRIDE:
-            return f"{self.base.name()}._nested_tensor_strides().size(0)"
-        elif self.prop is TensorProperty.STORAGE_OFFSET:
-            return f"{self.base.name()}._nested_tensor_storage_offsets().size(0)"
+        elif self.prop is NestedTensorProperty.NESTED_SIZES:
+            return f"{self.base.name()}._nested_tensor_size()"
+        elif self.prop is NestedTensorProperty.NESTED_STRIDES:
+            return f"{self.base.name()}._nested_tensor_strides()"
+        elif self.prop is NestedTensorProperty.STORAGE_OFFSETS:
+            return f"{self.base.name()}._nested_tensor_storage_offsets()"
         else:
             raise AssertionError(f"unhandled {self.prop}")
 
