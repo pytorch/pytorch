@@ -18,8 +18,8 @@ from torch.distributed._tensor.placement_types import (
 class EinsumDims:
     contracting_dims: List[str]
     batch_dims: List[str]
-    lhs_free_dims: List[str]
-    rhs_free_dims: List[str]
+    lhs_out_only_dims: List[str]
+    rhs_out_only_dims: List[str]
 
     @classmethod
     def parse_equation(cls, equation: str) -> Tuple[List[str], str]:
@@ -52,7 +52,7 @@ class EinsumDims:
         all_dim_chars = sorted(dim_char_set)
 
         # parse input and output dimensions
-        lhs_free_dims, rhs_free_dims = [], []
+        lhs_out_only_dims, rhs_out_only_dims = [], []
         batch_dims, contracting_dims = [], []
 
         for dim_char in all_dim_chars:
@@ -71,17 +71,17 @@ class EinsumDims:
                     ), "free dimension only supported for two inputs!"
                     lhs, rhs = input_dims
                     if dim_char in lhs:
-                        lhs_free_dims.append(dim_char)
+                        lhs_out_only_dims.append(dim_char)
                     elif dim_char in rhs:
-                        rhs_free_dims.append(dim_char)
+                        rhs_out_only_dims.append(dim_char)
                     else:
                         raise RuntimeError("Invalid dimension character")
 
         return cls(
             contracting_dims=contracting_dims,
             batch_dims=batch_dims,
-            lhs_free_dims=lhs_free_dims,
-            rhs_free_dims=rhs_free_dims,
+            lhs_out_only_dims=lhs_out_only_dims,
+            rhs_out_only_dims=rhs_out_only_dims,
         )
 
 
@@ -104,7 +104,8 @@ def gen_einsum_strategies(
     for mesh_dim in range(mesh.ndim):
         mesh_dim_strategies = []
 
-        # always have replicate all
+        # placement list stores placements of [output, input1, input2, ...]
+        # first we always have replicate all for inputs and output
         placement_list: List[Placement] = [Replicate()] * (len(input_dims) + 1)
         mesh_dim_strategies.append(placement_list)
 
@@ -133,8 +134,10 @@ def gen_einsum_strategies(
             mesh_dim_strategies.append(placement_list)
 
         # split lhs free dim
-        for lhs_dim in edims.lhs_free_dims:
+        for lhs_dim in edims.lhs_out_only_dims:
             lhs_free_dim = output_dim.index(lhs_dim)
+            # this means split the lhs input and output
+            # i.e. S(0), R -> S(0)
             lhs_placement_list: List[Placement] = [
                 Shard(lhs_free_dim),
                 Shard(lhs_free_dim),
@@ -143,7 +146,7 @@ def gen_einsum_strategies(
             mesh_dim_strategies.append(lhs_placement_list)
 
         # split rhs free dim
-        for rhs_dim in edims.rhs_free_dims:
+        for rhs_dim in edims.rhs_out_only_dims:
             rhs_free_dim = output_dim.index(rhs_dim)
             rhs_placement_list: List[Placement] = [
                 Shard(rhs_free_dim),
@@ -164,7 +167,11 @@ def gen_einsum_strategies(
     # generate strategies for entire mesh
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
 
-    # TODO: filter out invalid strategies
+    # TODO: filter out invalid strategies, at this point we generate
+    # all possible strategies without considering the whether the tensor
+    # dim could be sharded or not, we would need to filter out invalid
+    # strategies base on the actual tensor shape
+    # (i.e. for Shard, tensor dim size must > mesh size)
     all_strategies = []
     for startegy_comb in strategy_combs:
         spec_list = []

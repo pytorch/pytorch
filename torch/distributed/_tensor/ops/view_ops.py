@@ -525,7 +525,7 @@ def propagate_shape_and_sharding(
             _, in_dim = get_dim_size(cmd.input_dim)
             out_size = cmd.group_shape[cmd.split_id]
             if cmd.split_id == 0 and in_dim is not None:
-                # we need to check that the input dimension is divisble
+                # we need to check that the input dimension is divisible
                 # by the size of the submesh we're sharding it on
                 # NOTE: it would be possible to shard the same input dimension
                 # on more than one mesh dimension. In that case, the dimension
