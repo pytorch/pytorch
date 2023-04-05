@@ -1557,6 +1557,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_typing_union_and_optional(self):
+        def fn(x):
+            a = torch.jit.annotate(typing.Dict[str, typing.Optional[torch.Tensor]], {})
+            b = torch.jit.annotate(
+                typing.Dict[str, typing.Union[torch.Tensor, None]], {}
+            )
+            return a, b, x + 1
+
+        x = torch.randn(3)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
     def test_optimize_on_module(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
