@@ -35,6 +35,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 python -m pip install pytest-rerunfailures==10.3
+python -m pip install pytest-timeout==2.1.0
 
 run_tests() {
     # Run nvidia-smi if available

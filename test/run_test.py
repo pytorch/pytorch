@@ -54,6 +54,7 @@ except ImportError:
 
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
+TEST_WITH_SLOW = os.getenv("PYTORCH_TEST_WITH_SLOW", "0") == "1"
 
 
 # Note [ROCm parallel CI testing]
@@ -463,7 +464,7 @@ def run_test(
         and not RERUN_DISABLED_TESTS
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
-        and os.getenv('PYTORCH_TEST_WITH_SLOW', '0') != '1'
+        and not TEST_WITH_SLOW
     )
     timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
@@ -810,7 +811,7 @@ def get_pytest_args(options):
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
-        rerun_options = ["-x", "--reruns=2", "--sw"]
+        rerun_options = ["-x", "--reruns=2", "--sw", "--timeout=60"]
 
     pytest_args = [
         "--use-pytest",
