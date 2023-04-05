@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
-from torch.distributed.checkpoint._fsspec import FsspecReader, FsspecWriter
+from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.testing._internal.common_distributed import (
