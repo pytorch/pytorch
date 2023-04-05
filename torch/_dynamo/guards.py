@@ -824,7 +824,7 @@ def guard_fail_hook(
     """
     called whenever a guard fails.
     """
-    first = cache_size == 0
+    first = cache_size == 1
     last = cache_size == config.cache_size_limit
     global stashed_first_fail_reason
     # Don't waste time computing the fail reason for guards we aren't going to report out.
