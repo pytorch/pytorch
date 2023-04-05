@@ -11,6 +11,7 @@ import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
     IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
+from torch.testing._internal.common_utils import skipIfRocm
 import torch
 from torch import Tensor
 import functools
@@ -36,7 +37,7 @@ from common_utils import (
     is_valid_inplace_sample_input,
     loop,
     loop2,
-    expectedFailureIf
+    expectedFailureIf,
 )
 from torch.testing._internal.autograd_function_db import (
     autograd_function_db
@@ -318,6 +319,14 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.layer_norm', decorator=skipIfRocm),
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.scaled_dot_product_attention', decorator=skipIfRocm),
 }
 
 aliasing_ops = {
@@ -465,6 +474,13 @@ class TestOperators(TestCase):
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: https://github.com/pytorch/pytorch/issues/91280
+
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 
         # --- Non-Contiguous Failures! ---
         # This is expected to fail as the operator
@@ -772,7 +788,8 @@ class TestOperators(TestCase):
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op
         xfail("pca_lowrank"),  # calls random op
-        xfail("put"),  # vmap: inplace into a regular tensor
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('linalg.pinv', 'hermitian', decorator=skipIfRocm),
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
         xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
@@ -864,7 +881,6 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),  # dynamic
         xfail('nn.functional.fractional_max_pool2d'),  # random
         xfail('nn.functional.fractional_max_pool3d'),  # random
-        xfail('take'),  # dynamic
         xfail('pca_lowrank', ''),  # randomness
         xfail('svd_lowrank', ''),  # randomness
         xfail('to_sparse', ''),  # non-dense output
@@ -999,6 +1015,12 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
 
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
         # ----------------------------------------------------------------------
     }
 
@@ -1048,8 +1070,6 @@ class TestOperators(TestCase):
         xfail('lu'),
         xfail('cumprod'),
         xfail('masked_fill'),
-        xfail('copysign'),
-        xfail('complex'),
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
@@ -1066,7 +1086,6 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr', ''),
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
-        xfail('polar'),  # complex fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.smooth_l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
@@ -1117,8 +1136,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('view_as_complex'),
-        xfail('complex'),
-        xfail('copysign'),
         xfail('cummax'),
         xfail('cummin'),
         xfail('fill'),
@@ -1531,6 +1548,8 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('native_dropout_backward'),
+        decorate('linalg.svd', decorator=skipIfRocm),  # https://github.com/pytorch/pytorch/issues/97256
+        decorate('svd', decorator=skipIfRocm),  # Flaky tensor-likes are not close error on ROCm, adjust tolerance?
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1755,6 +1774,15 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d'),  # contiguous call
         xfail('to_sparse'),  # dispatch key issue
 
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('xlogy', decorator=skipIfRocm),
+
         # numerical inconsistencies, look like bugs
         skip('matrix_exp', dtypes=(torch.float32,), device_type='cuda'),  # fails on linux, passes on windows
         skip('ldexp', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but mac
@@ -1914,7 +1942,7 @@ class TestOperators(TestCase):
     # Usually testing the composition of two transforms is sufficient to convince
     # ourselves that an operator is correctly implemented. For the following cases,
     # we want to be extra sure, so we send those through some three-transform tests:
-    # - autograd.Function. The mechanism is via PyDispatcher/PyOperator, not the
+    # - autograd.Function. The mechanism is via PyDispatcher/HigherOrderOperator, not the
     #   regular PyTorch dispatcher, so it's good to exercise more caution.
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_vmapvjpvmap', {
@@ -2172,6 +2200,22 @@ class TestOperators(TestCase):
                 result = jvpvjpvmap_fn(*new_args)
                 self.assertEqual(result, expected)
 
+    def test_data_write_errors_under_transform(self, device):
+        t = torch.randn(3, 3, device=device)
+
+        def fn(t):
+            t.data = torch.randn(3, 3)
+            return t.sum()
+
+        msg = "mutating directly with `.data` inside functorch transform"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            grad(fn)(t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vjp(fn, t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            jvp(fn, (t,), (torch.randn_like(t),))
 
 
 only_for = ("cpu", "cuda")

@@ -1,7 +1,9 @@
 import contextlib
+
 import dataclasses
 import enum
 import logging
+import traceback
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -27,6 +29,8 @@ class GuardSource(enum.Enum):
     CONSTANT = 4
     RANDOM_VALUE = 5
     SHAPE_ENV = 6
+    LOCAL_FSDP_MODULE = 7
+    GLOBAL_FSDP_MODULE = 8
 
     def select(self, locals_, globals_):
         # SHAPE_ENV counts as locals, because the guard expressions
@@ -38,19 +42,38 @@ class GuardSource(enum.Enum):
         if self in (
             GuardSource.LOCAL,
             GuardSource.LOCAL_NN_MODULE,
+            GuardSource.LOCAL_FSDP_MODULE,
             GuardSource.SHAPE_ENV,
             GuardSource.RANDOM_VALUE,
         ):
             return locals_
-        if self in (GuardSource.GLOBAL, GuardSource.GLOBAL_NN_MODULE):
+        if self in (
+            GuardSource.GLOBAL,
+            GuardSource.GLOBAL_NN_MODULE,
+            GuardSource.GLOBAL_FSDP_MODULE,
+        ):
             return globals_
         raise NotImplementedError(str(self))
 
+    def is_fsdp_module(self) -> bool:
+        return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
+
     def is_nn_module(self) -> bool:
-        return self in (GuardSource.GLOBAL_NN_MODULE, GuardSource.LOCAL_NN_MODULE)
+        return (
+            self
+            in (
+                GuardSource.GLOBAL_NN_MODULE,
+                GuardSource.LOCAL_NN_MODULE,
+            )
+            or self.is_fsdp_module()
+        )
 
     def is_local(self):
-        return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
+        return self in (
+            GuardSource.LOCAL,
+            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.LOCAL_FSDP_MODULE,
+        )
 
 
 """
@@ -161,6 +184,9 @@ class Guard:
     def is_nn_module(self):
         return self.source.is_nn_module()
 
+    def is_fsdp_module(self):
+        return self.source.is_fsdp_module()
+
     def is_local(self):
         return self.source.is_local()
 
@@ -211,11 +237,11 @@ input_pos_a and input_pos_b are input positions we have deduped.
 
 @dataclasses.dataclass
 class DuplicateInputs(GuardEnvExpr):
-    input_pos_a: int
-    input_pos_b: int
+    input_source_a: "Source"
+    input_source_b: "Source"
 
     def __post_init__(self):
-        assert self.input_pos_a != self.input_pos_b
+        assert self.input_source_a != self.input_source_b
 
 
 """
@@ -327,6 +353,7 @@ class TracingContext:
         self.guards_context = GuardsContext()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
+        self.loc_in_frame = None
 
     @staticmethod
     @contextlib.contextmanager
@@ -340,6 +367,19 @@ class TracingContext:
             yield
         finally:
             tc.frame_summary_stack.pop()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_loc(filename, lineno, frame_name):
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "Loc context manager must be called within an ongoing trace."
+        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
+        try:
+            yield
+        finally:
+            tc.loc_in_frame = None
 
 
 """

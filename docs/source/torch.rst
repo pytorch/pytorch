@@ -713,6 +713,8 @@ Optimizations
 
     compile
 
+`torch.compile documentation <https://pytorch.org/docs/master/compile/index.html>`__
+
 Operator Tags
 ------------------------------------
 .. autoclass:: Tag

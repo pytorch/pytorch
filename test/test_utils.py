@@ -145,7 +145,7 @@ class TestCheckpoint(TestCase):
         # checkpointed
         chunks = 2
         modules = list(model.children())
-        out = checkpoint_sequential(modules, chunks, input_var)
+        out = checkpoint_sequential(modules, chunks, input_var, use_reentrant=True)
         with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
@@ -256,7 +256,7 @@ class TestCheckpoint(TestCase):
             state = torch.get_rng_state()
 
             out = phase1(inp)
-            out = checkpoint(run_fn, out)
+            out = checkpoint(run_fn, out, use_reentrant=True)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
@@ -284,7 +284,7 @@ class TestCheckpoint(TestCase):
             state = torch.cuda.get_rng_state()
 
             out = phase1(inp)
-            out = checkpoint(run_fn, out)
+            out = checkpoint(run_fn, out, use_reentrant=True)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
@@ -320,7 +320,7 @@ class TestCheckpoint(TestCase):
             return tensor1 + tensor2
 
         input_var = torch.randn(1, 100, requires_grad=True)
-        out = checkpoint(run_fn, input_var, None)
+        out = checkpoint(run_fn, input_var, None, use_reentrant=True)
         out.sum().backward()
 
     def test_checkpoint_non_tensor_inputs_outputs(self):
@@ -335,7 +335,7 @@ class TestCheckpoint(TestCase):
         t2 = torch.rand(10, requires_grad=True)
         t3 = torch.rand(10)
         scale = random.randint(0, 10)
-        res = checkpoint(foo, t1, t2, scale, t3)
+        res = checkpoint(foo, t1, t2, scale, t3, use_reentrant=True)
         self.assertEqual(scale, res[0])
         self.assertEqual((t1 + t2 * t3) * scale, res[1])
         self.assertEqual(None, res[2])
@@ -373,7 +373,7 @@ class TestCheckpoint(TestCase):
         t2 = random.random()
         t3 = random.random()
         scale = random.randint(0, 10)
-        res = checkpoint(foo, t1, t2, scale, t3)
+        res = checkpoint(foo, t1, t2, scale, t3, use_reentrant=True)
         self.assertEqual(scale, res[0])
         self.assertEqual((t1 + t2 * t3) * scale, res[1])
         self.assertEqual(None, res[2])
@@ -388,7 +388,7 @@ class TestCheckpoint(TestCase):
             return tensor1, tensor2
         input_var = torch.randn(1, 4, requires_grad=True)
         input_var2 = torch.randn(1, 4, requires_grad=False)
-        out = checkpoint(run_fn, input_var, input_var2)
+        out = checkpoint(run_fn, input_var, input_var2, use_reentrant=True)
         out[0].sum().backward()
 
         def run_fn2(tensor1, tensor2):
@@ -399,7 +399,7 @@ class TestCheckpoint(TestCase):
             RuntimeError,
             r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
         ):
-            out = checkpoint(run_fn2, input_var, input_var2)
+            out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
@@ -449,16 +449,16 @@ class TestCheckpoint(TestCase):
         non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
 
         # In a retain_grad backward, buffers get preserved
-        retain_stats = _do_test(lambda fn: fn(x).backward(retain_graph=True), False)
+        _unused_retain_stats = _do_test(lambda fn: fn(x).backward(retain_graph=True), False)
 
         # In a regular backward with checkpoint, buffers get eagerly freed
         checkpoint_non_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(), True)
 
-        # In a retain_grad backward with checkpoint, buffers get preserved
-        checkpoint_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(retain_graph=True), False)
+        # In a retain_grad backward with checkpoint, buffers get eagerly freed
+        checkpoint_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(retain_graph=True), True)
 
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
-        self.assertEqual(retain_stats, checkpoint_retain_stats)
+        self.assertEqual(non_retain_stats, checkpoint_retain_stats)
 
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
@@ -784,6 +784,26 @@ class DummyXPUModule:
     def is_available():
         return True
 
+    @staticmethod
+    def is_autocast_enabled():
+        return True
+
+    @staticmethod
+    def get_autocast_dtype():
+        return torch.float16
+
+    @staticmethod
+    def set_autocast_enabled(enable):
+        pass
+
+    @staticmethod
+    def set_autocast_dtype(dtype):
+        pass
+
+    @staticmethod
+    def get_amp_supported_dtype():
+        return [torch.float16]
+
 
 class TestExtensionUtils(TestCase):
     def test_external_module_register(self):
@@ -805,6 +825,26 @@ class TestExtensionUtils(TestCase):
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module('xpu', DummyXPUModule)
+
+    def test_external_module_and_backend_register(self):
+        torch.utils.rename_privateuse1_backend('foo')
+        with self.assertRaisesRegex(RuntimeError, "has already been set"):
+            torch.utils.rename_privateuse1_backend('dummmy')
+
+        custom_backend_name = torch._C._get_privateuse1_backend_name()
+        self.assertEqual(custom_backend_name, 'foo')
+
+        with self.assertRaises(AttributeError):
+            torch.foo.is_available()
+
+        with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
+            with torch.autocast(device_type=custom_backend_name):
+                pass
+        torch._register_device_module('foo', DummyXPUModule)
+
+        torch.foo.is_available()
+        with torch.autocast(device_type=custom_backend_name):
+            pass
 
 
 class TestDeviceUtils(TestCase):

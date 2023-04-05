@@ -10,6 +10,7 @@
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
+#include <ATen/detail/XPUHooksInterface.h>
 #include <c10/core/QEngine.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/CallOnce.h>
@@ -95,6 +96,9 @@ class TORCH_API Context {
   }
   static bool hasXLA() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
+  }
+  static bool hasXPU() {
+    return detail::getXPUHooks().hasXPU();
   }
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
@@ -369,6 +373,10 @@ static inline bool hasMPS() {
 
 static inline bool hasORT() {
   return globalContext().hasORT();
+}
+
+static inline bool hasXPU() {
+  return globalContext().hasXPU();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.

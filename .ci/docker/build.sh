@@ -146,6 +146,7 @@ case "$image" in
     DB=yes
     VISION=yes
     CONDA_CMAKE=yes
+    ONNX=yes
     ;;
   pytorch-linux-focal-py3-clang7-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.7
@@ -340,6 +341,7 @@ docker build \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
+       --build-arg "ONNX=${ONNX}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

@@ -618,7 +618,7 @@
   result: auto_element_wise
 
 - name: expm1(Tensor self) -> Tensor
-  self: grad * (result + 1)
+  self: grad * (result.conj() + 1)
   result: auto_element_wise
 
 # TODO: this derivative is not SymInt safe, need sum_to support
@@ -1490,8 +1490,12 @@
   result: auto_linear
 
 - name: split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
+      result: auto_linear
+    AutogradNestedTensor:
+      self: _nested_split_with_sizes_backward(grads, split_sizes, dim, self)
 
 - name: unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
@@ -1673,10 +1677,10 @@
 
 # DO NOT define a backward for to_dense
 # See [Note: Sometimes view derivatives]
-# - name: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+# - name: to_dense(Tensor self, ScalarType? dtype=None, *, bool? masked_grad=None) -> Tensor
 #
-- name: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
-  self: to_dense_backward(grad, self)
+- name: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
+  self: to_dense_backward(grad, self, masked_grad)
 
 - name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
@@ -1819,7 +1823,7 @@
     Default:
       self: at::_sparse_coo_tensor_unsafe_symint(self.indices(), grad, self.sym_sizes())._coalesced_(true)
     AutogradNestedTensor:
-      self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_offsets())
+      self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_storage_offsets())
 
 # Why is _values() not differentiable?
 # See NOTE [ Sparse: autograd and API ]
@@ -2168,7 +2172,10 @@
   output_differentiability: [True, False]
 
 - name: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
-  input, weight, bias: linear_backward(input, grad, weight, grad_input_mask)
+  input, weight, bias: "grad.defined() ? linear_backward(input, grad, weight, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+
+- name: linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  self, grad_output, weight: linear_double_backward(grads, self, grad_output, weight)
 
 #mps
 - name: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
@@ -2569,7 +2576,7 @@
   output_differentiability: [True, True, True, False, False, False]
   input, hx, params: "lstm_mps_backward(grads[0], grads[1], grads[2], result3, result4, input, result5, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first)"
 
-- name: lstm_mps_backward(Tensor grad_y, Tensor? grad_hy, Tensor? grad_cy, Tensor z_state, Tensor cell_state_fwd, Tensor input, Tensor layersOutputs, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor[], Tensor[])
+- name: lstm_mps_backward(Tensor? grad_y, Tensor? grad_hy, Tensor? grad_cy, Tensor z_state, Tensor cell_state_fwd, Tensor input, Tensor layersOutputs, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor[], Tensor[])
 
 
 
@@ -2659,7 +2666,7 @@
   self: at::_nested_from_padded(grad, self._nested_tensor_size())
   padding: non_differentiable
 
-- name:  _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, int[] offsets) -> Tensor(a)
+- name:  _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, Tensor offsets) -> Tensor(a)
   self: grad.values()
   nested_size: non_differentiable
   nested_strides: non_differentiable
@@ -2667,11 +2674,11 @@
 # Transformers
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False, *, float? scale=None) -> (Tensor, Tensor)
   output_differentiability: [True, False]
-  query, key, value: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, result0, result1, is_causal, at::_chunk_grad_outputs_efficient_attention(query, key, value, is_causal), scale)
+  query, key, value: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, result0, result1, is_causal, false, scale)
 
 - name: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False, *, float? scale=None) -> (Tensor, Tensor)
   output_differentiability: [True, False]
-  query, key, value: _efficient_attention_backward(grad, query, key, value, result0, result1, causal, at::_chunk_grad_outputs_efficient_attention(query, key, value, causal), scale)
+  query, key, value: _efficient_attention_backward(grad, query, key, value, result0, result1, causal, false, scale)
 # Returns ouput, softmax_logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, rng_state
 
 - name: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor ouput, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, int philox_seed, int philox_offset, Tensor debug_attn_mask)
@@ -2999,6 +3006,9 @@
 
 - name: all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor
   shard: non_differentiable
+
+- name: reduce_scatter_tensor(Tensor input, str reduceOp, int scatter_dim, str tag, int[] ranks, int group_size) -> Tensor
+  input: non_differentiable
 
 - name: wait_tensor(Tensor self) -> Tensor
   self: non_differentiable

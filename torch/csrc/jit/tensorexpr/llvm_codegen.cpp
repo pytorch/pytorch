@@ -47,13 +47,16 @@
 #include <llvm/Target/TargetMachine.h>
 #endif
 
-#include <llvm/Transforms/IPO/AlwaysInliner.h>
-#include <llvm/Transforms/IPO/PassManagerBuilder.h>
-#include <llvm/Transforms/Scalar.h>
-
 #if LLVM_VERSION_MAJOR >= 11
 #include <llvm/Support/TypeSize.h>
 #endif
+
+#if LLVM_VERSION_MAJOR < 15
+#include <llvm/Transforms/IPO/PassManagerBuilder.h>
+#endif
+
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
+#include <llvm/Transforms/Scalar.h>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
@@ -1117,7 +1120,7 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
     value_ = irb_.CreateLShr(value_, toVec(shift_len, lans));
     value_ = irb_.CreateTrunc(value_, llvmTypeToVec(ShortTy_, lans));
     value_ = irb_.CreateBitOrPointerCast(value_, llvmTypeToVec(ShortTy_, lans));
-    // If the the value is NaN, return BF16 NaN.
+    // If the value is NaN, return BF16 NaN.
     value_ = irb_.CreateSelect(mask, value_, toVec(bf16_nan, lans));
     return;
   }

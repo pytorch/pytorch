@@ -13,7 +13,7 @@ namespace torch {
 namespace jit {
 
 // This pass only does optimizations which requires Alias Analysis
-// It is seprated out from Peephole Pass so that Peephole does not have
+// It is separated out from Peephole Pass so that Peephole does not have
 // maintain alias db correctness throughout the pass.
 struct PeepholeOptimizeAliasSensitiveImpl {
   PeepholeOptimizeAliasSensitiveImpl(

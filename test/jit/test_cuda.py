@@ -589,3 +589,18 @@ class TestCUDA(JitTestCase):
             is_stream_s, a_load, b_load, c_load = load_model()
             self.assertTrue(is_stream_s)
             self.assertEqual(torch.cat((a_load, b_load), 0), c_load)
+
+    # Make sure that cuda._exchange_device doesn't get DCE'ed
+    @unittest.skipIf(not TEST_CUDA, "Cuda not available")
+    def test__exchange_device_op(self):
+        def fn(device: int, tensor):
+            torch.cuda._exchange_device(device)
+            return tensor.cos().relu()
+
+        fn_s = torch.jit.script(fn)
+        # Just check the graph, don't run it. Otherwise, we'd  need to
+        # run this test on a multi-gpu CI runner, which is overkill.
+        g = fn_s.graph
+        FileCheck().check("cuda::_exchange_device(").run(g)
+        torch._C._jit_pass_inline(g)
+        FileCheck().check("cuda::_exchange_device(").run(g)

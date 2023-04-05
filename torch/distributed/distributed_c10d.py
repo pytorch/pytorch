@@ -124,6 +124,32 @@ logger = logging.getLogger(__name__)
 global _c10d_error_logger
 _c10d_error_logger = _get_or_create_logger()
 
+def exception_handler(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as error:
+            if is_initialized():
+                error_msg_dict = {
+                    "func_name": f"{func.__name__}",
+                    "args": f"{args}, {kwargs}",
+                    "backend": f"{get_backend(kwargs.get('group'))}",
+                    "world_size": f"{get_world_size(kwargs.get('group'))}",
+                    "global_rank": f"{get_rank()}",
+                    "local_rank": f"{get_rank(kwargs.get('group'))}",
+                    "error": f"{error}",
+                }
+            else:
+                error_msg_dict = {
+                    "func_name": f"{func.__name__}",
+                    "args": f"{args}, {kwargs}",
+                    "error": f"{error}",
+                }
+            _c10d_error_logger.debug(error_msg_dict)
+            raise
+    return wrapper
+
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
 
 
@@ -262,7 +288,7 @@ class BackendConfig:
                 self.device_backend_map[device] = Backend(backend)
 
     def __repr__(self):
-        # string with all the device:backend pairs separared by commas
+        # string with all the device:backend pairs separated by commas
         return ",".join(f"{device}:{backend}" for device, backend in self.device_backend_map.items())
 
     def get_device_backend_map(self):
@@ -316,7 +342,7 @@ class _World:
     Container class for c10d process group state.
     This is used during registration and lookup of PG state.
 
-    .. warning:: This is an experimental API inteded to expose the inner workings
+    .. warning:: This is an experimental API intended to expose the inner workings
        of c10d and is subject to change..
     """
     def __init__(self):
@@ -450,13 +476,13 @@ def _store_based_barrier(rank, store, timeout):
     """
     store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _world.group_count)
     store.add(store_key, 1)
-    logger.info("Added key: {} to store for rank: {}".format(store_key, rank))
+    logger.info("Added key: %s to store for rank: %s", store_key, rank)
 
     # Now wait for all workers to check in with the store.
     world_size = get_world_size()
     # Use 'add' instead of 'get' since for some store implementations 'add'
     # doesn't work well with 'get'. Ideally the store implementations should
-    # be fixed, but for backward compatiblity reasons it is risky to change
+    # be fixed, but for backward compatibility reasons it is risky to change
     # the store implementations. Once, we completely migrate away from these
     # legacy stores, we can use 'get' here instead.
     worker_count = store.add(store_key, 0)
@@ -470,9 +496,8 @@ def _store_based_barrier(rank, store, timeout):
         if timedelta(seconds=(time.time() - log_time)) > timedelta(seconds=10):
             logger.info(
                 "Waiting in store based barrier to initialize process group for "
-                "rank: {}, key: {} (world_size={}, worker_count={}, timeout={})".format(
-                    rank, store_key, world_size, worker_count, timeout
-                )
+                "rank: %s, key: %s (world_size=%s, worker_count=%s, timeout=%s)",
+                rank, store_key, world_size, worker_count, timeout
             )
             log_time = time.time()
 
@@ -773,7 +798,7 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
     assert pg_store is not None
     return pg_store[0]
 
-
+@exception_handler
 def init_process_group(
     backend: Union[str, Backend] = None,
     init_method: Optional[str] = None,
@@ -800,7 +825,7 @@ def init_process_group(
     Args:
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            ``nccl``, and ``ucc``. If the backend is not provied, then both a ``gloo``
+            ``nccl``, and ``ucc``. If the backend is not provided, then both a ``gloo``
             and ``nccl`` backend will be created, see notes below for how multiple
             backends are managed. This field can be given as a lowercase string
             (e.g., ``"gloo"``), which can also be accessed via
@@ -1071,7 +1096,7 @@ def _new_process_group_helper(
         # Set sequence numbers for gloo and nccl backends.
         if backend_str in [Backend.GLOO, Backend.NCCL]:
             backend_class._set_sequence_number_for_group()
-        # If the type is a sublcass of ProcessGroup then return this process group immediately
+        # If the type is a subclass of ProcessGroup then return this process group immediately
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
         if issubclass(type(backend_class), ProcessGroup):
@@ -1306,7 +1331,7 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
             group_src_rank = get_group_rank(pg, src)
             return pg.recv([tensor], group_src_rank, tag)
 
-
+@exception_handler
 def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> None:
     """
     Sends a tensor synchronously.
@@ -1338,7 +1363,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         group_dst_rank = get_group_rank(group, dst)
         group.send([tensor], group_dst_rank, tag).wait()
 
-
+@exception_handler
 def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
     """
     Receives a tensor synchronously.
@@ -1483,33 +1508,6 @@ def batch_isend_irecv(p2p_op_list):
             if ret is not None:
                 reqs.append(ret)
     return reqs
-
-
-def exception_handler(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as error:
-            if is_initialized():
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "backend": f"{get_backend(kwargs.get('group'))}",
-                    "world_size": f"{get_world_size(kwargs.get('group'))}",
-                    "global_rank": f"{get_rank()}",
-                    "local_rank": f"{get_rank(kwargs.get('group'))}",
-                    "error": f"{error}",
-                }
-            else:
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "error": f"{error}",
-                }
-            _c10d_error_logger.debug(error_msg_dict)
-            raise
-    return wrapper
 
 
 @exception_handler
@@ -2171,7 +2169,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         _warn_not_in_group("gather_object")
         return
 
-    # Ensure object_gather_list is specified appopriately.
+    # Ensure object_gather_list is specified appropriately.
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
     current_device = _get_pg_device(group)
@@ -3093,7 +3091,7 @@ def all_to_all_single(
     Complex tensors are supported.
 
     Args:
-        output (Tensor): Gathered cancatenated output tensor.
+        output (Tensor): Gathered concatenated output tensor.
         input (Tensor): Input tensor to scatter.
         output_split_sizes: (list[Int], optional): Output split sizes for dim 0
             if specified None or empty, dim 0 of ``output`` tensor must divide
@@ -3326,7 +3324,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
     else:
         work.wait()
 
-
+@exception_handler
 def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
 
     """
@@ -3717,7 +3715,8 @@ def new_subgroups(
         if rank in ranks_in_subgroup:
             cur_subgroup = subgroup
             logger.info(
-                "Rank {} is assigned to subgroup {}".format(rank, ranks_in_subgroup)
+                "Rank %s is assigned to subgroup %s",
+                rank, ranks_in_subgroup
             )
 
     return cur_subgroup, subgroups
@@ -3829,7 +3828,7 @@ def new_subgroups_by_enumeration(
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:
                 cur_subgroup = subgroup
-                logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
+                logger.info("Rank %s is assigned to subgroup %s", rank, ranks)
 
     return cur_subgroup, subgroups
 
