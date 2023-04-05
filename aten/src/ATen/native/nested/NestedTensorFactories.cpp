@@ -13,22 +13,19 @@ TensorOptions verify_empty_parameters(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  TensorOptions options_ =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-          pin_memory);
+  TensorOptions options_ = TensorOptions()
+                               .dtype(dtype)
+                               .layout(layout)
+                               .device(device)
+                               .pinned_memory(pin_memory)
+                               .memory_format(optional_memory_format);
 
-  TORCH_CHECK(
-      !(options_.has_memory_format() && optional_memory_format.has_value()),
-      "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-      "the redundant setter.");
-  TensorOptions options = self.options().merge_in(options_).merge_memory_format(
-      optional_memory_format);
-
+  TensorOptions options = self.options().merge_in(options_);
   auto memory_format =
       options_.memory_format_opt().value_or(MemoryFormat::Preserve);
   TORCH_CHECK(
-      memory_format == MemoryFormat::Preserve,
-      "empty_like_nested only supports memory format Preserve, but got ",
+      memory_format == MemoryFormat::Preserve || memory_format == MemoryFormat::Contiguous,
+      "empty_like_nested only supports memory format Preserve or Contiguous, but got ",
       memory_format,
       " instead.");
 
@@ -50,12 +47,24 @@ Tensor empty_like_nested(
   auto self_nt = get_nested_tensor_impl(self);
   // Since we clone sizes, strides, and offsets it should be safe to use
   // get_unsafe_storage_as_tensor for the call to empty like.
-  Tensor new_buffer = at::empty_like(self_nt->get_unsafe_storage_as_tensor(), options);
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
+  if (memory_format == MemoryFormat::Contiguous) {
+    Tensor new_buffer = at::empty_like(
+        self_nt->get_unsafe_storage_as_tensor(), options);
+    auto nested_size = self_nt->get_nested_sizes().clone();
+    auto tensor = wrap_buffer(new_buffer, nested_size);
+    return tensor;
+  }
+  // The fall through path must be Preserve
+  TORCH_CHECK(
+      memory_format == MemoryFormat::Preserve,
+      "memory format option is only supported by strided tensors");
+  Tensor new_buffer =
+      at::empty_like(self_nt->get_unsafe_storage_as_tensor(), options);
   auto nested_size = self_nt->get_nested_sizes().clone();
   auto nested_strides = self_nt->get_nested_strides().clone();
   auto offsets = self_nt->get_storage_offsets().clone();
-  auto tensor = detail::make_tensor_base<NestedTensorImpl>(
-      new_buffer, nested_size, nested_strides, offsets);
+  auto tensor = wrap_buffer(new_buffer, nested_size, nested_strides, offsets);
   return tensor;
 }
 
