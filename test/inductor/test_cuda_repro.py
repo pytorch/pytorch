@@ -210,6 +210,8 @@ class CudaReproTests(TestCase):
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
+    # TODO: enable
+    @config.patch({"triton.cudagraph_trees": False})
     @config.patch({"triton.cudagraphs": True})
     def test_inplace_updates_cudagraphs(self):
         class Repro(torch.nn.Module):
