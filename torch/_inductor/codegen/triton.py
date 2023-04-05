@@ -1040,10 +1040,12 @@ class TritonKernel(Kernel):
         else:
             load_buffer = self.loads
 
-        result_var = self.cse.generate(
-            load_buffer, line, append_broadcast=append_broadcast
-        )
+        result_var = self.cse.generate(load_buffer, line)
         result_var.mask_vars = mask_vars
+
+        if append_broadcast:
+            line = f"tl.broadcast_to({result_var}, {append_broadcast})"
+            result_var = self.cse.generate(load_buffer, line)
 
         if not self.inside_reduction or "rmask" not in mask:
             self.outside_loop_vars.add(result_var)
