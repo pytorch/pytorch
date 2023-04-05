@@ -821,7 +821,7 @@ torch.cuda.synchronize()
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
     def test_max_pool2d_nhwc(self, device, dtype):

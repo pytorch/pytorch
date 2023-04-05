@@ -10,14 +10,14 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDNN
-from torch.testing._internal.common_dtype import floating_types, floating_and_complex_types_and
+from torch.testing._internal.common_dtype import floating_types, floating_and_complex_types_and, get_all_fp_dtypes
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
     skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipCUDAVersionIn)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -583,12 +583,54 @@ def module_inputs_torch_nn_AdaptiveMaxPool3d(module_info, device, dtype, require
                     desc='tuple_nonatomic')]
 
 
+def module_inputs_torch_nn_BatchNorm1d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(10,),
+                    forward_input=FunctionInput(make_input((4, 10))),
+                    desc='affine'),
+        ModuleInput(constructor_input=FunctionInput(5,),
+                    forward_input=FunctionInput(make_input((4, 5, 3))),
+                    desc='3d_input'),
+        ModuleInput(constructor_input=FunctionInput(10, 1e-3, None),
+                    forward_input=FunctionInput(make_input((4, 10))),
+                    desc='affine_simple_average'),
+        ModuleInput(constructor_input=FunctionInput(10, 1e-3, 0.3, False),
+                    forward_input=FunctionInput(make_input((4, 10))),
+                    desc='not_affine'),
+        ModuleInput(constructor_input=FunctionInput(10, 1e-3, 0.3, True, False),
+                    forward_input=FunctionInput(make_input((4, 10))),
+                    desc='not_tracking_stats'),
+        ModuleInput(constructor_input=FunctionInput(5, 1e-3, 0.3, False),
+                    forward_input=FunctionInput(make_input((4, 5, 3))),
+                    desc='3d_input_not_affine'),
+        ModuleInput(constructor_input=FunctionInput(5, 1e-3, 0.3, False),
+                    forward_input=FunctionInput(make_input((0, 5, 9))),
+                    desc='zero_batch')]
+
+
 def module_inputs_torch_nn_BatchNorm2d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
         ModuleInput(constructor_input=FunctionInput(3,),
-                    forward_input=FunctionInput(make_input((2, 3, 6, 6))))]
+                    forward_input=FunctionInput(make_input((2, 3, 6, 6)))),
+        ModuleInput(constructor_input=FunctionInput(3, 1e-3, None),
+                    forward_input=FunctionInput(make_input((2, 3, 6, 6))),
+                    desc='2d_simple_average'),
+        ModuleInput(constructor_input=FunctionInput(3, 1e-3, 0.8),
+                    forward_input=FunctionInput(make_input((2, 3, 6, 6))),
+                    desc='momentum'),
+        ModuleInput(constructor_input=FunctionInput(3, 1e-3, 0.8, False),
+                    forward_input=FunctionInput(make_input((2, 3, 6, 6))),
+                    desc='not_affine'),
+        ModuleInput(constructor_input=FunctionInput(3, 1e-3, 0.8, True, False),
+                    forward_input=FunctionInput(make_input((2, 3, 6, 6))),
+                    desc='not_tracking_stats'),
+        ModuleInput(constructor_input=FunctionInput(5, 1e-3, 0.3, False),
+                    forward_input=FunctionInput(make_input((0, 5, 2, 2))),
+                    desc='zero_batch')]
 
 
 def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -596,7 +638,22 @@ def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad
 
     return [
         ModuleInput(constructor_input=FunctionInput(3,),
-                    forward_input=FunctionInput(make_input((2, 3, 4, 4, 4))))]
+                    forward_input=FunctionInput(make_input((2, 3, 4, 4, 4)))),
+        ModuleInput(constructor_input=FunctionInput(3, 1e-3, None),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 4, 4))),
+                    desc='3d_simple_average'),
+        ModuleInput(constructor_input=FunctionInput(3, 1e-3, 0.7),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 4, 4))),
+                    desc='momentum'),
+        ModuleInput(constructor_input=FunctionInput(3, 1e-3, 0.7, False),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 4, 4))),
+                    desc='not_affine'),
+        ModuleInput(constructor_input=FunctionInput(3, 1e-3, 0.7, True, False),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 4, 4))),
+                    desc='not_tracking_stats'),
+        ModuleInput(constructor_input=FunctionInput(5, 1e-3, 0.3, False),
+                    forward_input=FunctionInput(make_input((0, 5, 2, 2, 2))),
+                    desc='zero_batch')]
 
 
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -812,8 +869,207 @@ def module_inputs_torch_nn_SiLU(module_info, device, dtype, requires_grad, train
                     desc='no_batch_dim'),
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input((5, 6, 7))),
-                    reference_fn=lambda m, p, x, *_: x * torch.sigmoid(x),
-                    desc='scalar')]
+                    reference_fn=lambda m, p, x, *_: x * torch.sigmoid(x))]
+
+
+def module_inputs_torch_nn_Softmax(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(1),
+                    forward_input=FunctionInput(make_input((10, 20))),
+                    reference_fn=lambda m, p, i: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20))),
+        ModuleInput(constructor_input=FunctionInput(0),
+                    forward_input=FunctionInput(make_input(())),
+                    reference_fn=lambda m, p, i: torch.exp(i).div(torch.exp(i).sum(0, True)),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(-1),
+                    forward_input=FunctionInput(make_input((4, 5))),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
+
+
+def module_inputs_torch_nn_Softmax2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((1, 3, 10, 20))),
+                    reference_fn=lambda m, p, i: torch.exp(i).div(torch.exp(i).sum(1, False))),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((3, 4, 5))),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
+
+
+def module_inputs_torch_nn_LogSoftmax(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(1),
+                    forward_input=FunctionInput(make_input((10, 20))),
+                    reference_fn=lambda m, p, i: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_()),
+        ModuleInput(constructor_input=FunctionInput(1),
+                    forward_input=FunctionInput(make_input((1, 3, 10, 20))),
+                    reference_fn=lambda m, p, i: torch.exp(i).div_(torch.exp(i).sum(1, False)).log_(),
+                    desc='multiparam'),
+        ModuleInput(constructor_input=FunctionInput(0),
+                    forward_input=FunctionInput(make_input(())),
+                    reference_fn=lambda m, p, i: torch.exp(i).div_(torch.exp(i).sum(0, False)).log_(),
+                    desc='multiparam_scalar'),
+        ModuleInput(constructor_input=FunctionInput(-1),
+                    forward_input=FunctionInput(make_input((4, 5))),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
+
+
+def module_inputs_torch_nn_Softmin(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(1),
+                    forward_input=FunctionInput(make_input((10, 20)))),
+        ModuleInput(constructor_input=FunctionInput(1),
+                    forward_input=FunctionInput(make_input((2, 3, 5, 10))),
+                    desc='multidim'),
+        ModuleInput(constructor_input=FunctionInput(0),
+                    forward_input=FunctionInput(make_input(())),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(-1),
+                    forward_input=FunctionInput(make_input((3, 4, 10))),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
+
+
+def module_inputs_torch_nn_Softplus(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((10, 20))),
+                    reference_fn=lambda m, p, i: torch.log(1 + torch.exp(i))),
+        ModuleInput(constructor_input=FunctionInput(2),
+                    forward_input=FunctionInput(make_input((10, 20))),
+                    reference_fn=lambda m, p, i: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
+                    desc='beta'),
+        ModuleInput(constructor_input=FunctionInput(2, -100),
+                    forward_input=FunctionInput(make_input((10, 20))),
+                    reference_fn=(
+                        lambda m, p, i: ((i * 2) > -100).type_as(i) * i
+                        + ((i * 2) <= -100).type_as(i) * 1. / 2. * torch.log(1 + torch.exp(2 * i))),
+                    desc='beta_threshold'),
+        ModuleInput(constructor_input=FunctionInput(2, -100),
+                    forward_input=FunctionInput(make_input(())),
+                    reference_fn=(
+                        lambda m, p, i: ((i * 2) > -100).type_as(i) * i
+                        + ((i * 2) <= -100).type_as(i) * 1. / 2. * torch.log(1 + torch.exp(2 * i))),
+                    desc='beta_threshold_scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
+
+
+def module_inputs_torch_nn_Softshrink(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((3, 2, 5)))),
+        ModuleInput(constructor_input=FunctionInput(1,),
+                    forward_input=FunctionInput(make_input((3, 2, 5))),
+                    desc='lambda'),
+        ModuleInput(constructor_input=FunctionInput(1,),
+                    forward_input=FunctionInput(make_input(())),
+                    desc='lambda_scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
+
+
+def module_inputs_torch_nn_Softsign(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((3, 2, 5))),
+                    reference_fn=lambda m, p, i: i.div(1 + torch.abs(i))),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(())),
+                    reference_fn=lambda m, p, i: i.div(1 + torch.abs(i)),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
+
+
+def module_inputs_torch_nn_Tanh(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5)))),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(())),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
+
+
+
+def module_inputs_torch_nn_Tanhshrink(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5)))),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(())),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
+
+
+def module_inputs_torch_nn_Threshold(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(2., 1.),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5))),
+                    desc='threshold_value'),
+        ModuleInput(constructor_input=FunctionInput(2., 10.),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5))),
+                    desc='large_value'),
+        ModuleInput(constructor_input=FunctionInput(2., 1.),
+                    forward_input=FunctionInput(make_input(())),
+                    desc='threshold_value_scalar'),
+        ModuleInput(constructor_input=FunctionInput(2., 1.),
+                    forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
+
+
+def module_inputs_torch_nn_Mish(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((5, 6, 7))),
+                    reference_fn=lambda m, p, i: i * torch.tanh(F.softplus(i))),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(())),
+                    reference_fn=lambda m, p, i: i * torch.tanh(F.softplus(i)),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    reference_fn=no_batch_dim_reference_fn,
+                    desc='no_batch_dim')]
 
 
 def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -865,6 +1121,75 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
     return samples
 
 
+def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(3, 6, 1e-3),
+            forward_input=FunctionInput(make_input(((4, 6, 5)))),
+            desc='1d_affine'),
+        ModuleInput(
+            constructor_input=FunctionInput(3, 12, 1e-3),
+            forward_input=FunctionInput(make_input(((4, 12)))),
+            desc='1d_affine_GN'),
+        ModuleInput(
+            constructor_input=FunctionInput(1, 6, 1e-3),
+            forward_input=FunctionInput(make_input((150, 6))),
+            desc='1d_affine_large_batch'),
+        ModuleInput(
+            constructor_input=FunctionInput(5, 5, 1e-3, False),
+            forward_input=FunctionInput(make_input((4, 5, 5))),
+            desc='1d_no_affine_IN'),
+        ModuleInput(
+            constructor_input=FunctionInput(1, 10, 1e-3, False),
+            forward_input=FunctionInput(make_input((4, 10))),
+            desc='1d_no_affine_LN'),
+        ModuleInput(
+            constructor_input=FunctionInput(3, 6, 1e-3),
+            forward_input=FunctionInput(make_input((4, 6, 2, 3))),
+            desc='2d_affine'),
+        ModuleInput(
+            constructor_input=FunctionInput(3, 6, 1e-3),
+            forward_input=FunctionInput(make_input((4, 6, 28, 28))),
+            desc='2d_affine_large_feature'),
+        ModuleInput(
+            constructor_input=FunctionInput(3, 51, 1e-5, False),
+            forward_input=FunctionInput(make_input((2, 51, 28, 28))),
+            desc='2d_no_affine_large_feature'),
+        ModuleInput(
+            constructor_input=FunctionInput(3, 3, 1e-3, False),
+            forward_input=FunctionInput(make_input((4, 3, 2, 3))),
+            desc='2d_no_affine_IN'),
+        ModuleInput(
+            constructor_input=FunctionInput(1, 3, 1e-3, False),
+            forward_input=FunctionInput(make_input((4, 3, 2, 3))),
+            desc='2d_no_affine_LN'),
+    ]
+
+
+def module_inputs_torch_nn_Hardshrink(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(2.),
+            forward_input=FunctionInput(make_input((4, 3, 2, 4))),
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(2.),
+            forward_input=FunctionInput(make_input(())),
+            desc='scalar',
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input(4)),
+            reference_fn=no_batch_dim_reference_fn,
+            desc='no_batch_dim',
+        )
+    ]
+
+
 def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -879,6 +1204,119 @@ def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, 
             constructor_input=FunctionInput(),
             forward_input=FunctionInput(make_input((2, 3, 2, 5))),
             desc='4d_input')
+    ]
+
+
+def module_inputs_torch_nn_Hardtanh(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input((3, 2, 5))),
+            reference_fn=lambda m, p, i: i.clamp(-1, 1),
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input(())),
+            reference_fn=lambda m, p, i: i.clamp(-1, 1),
+            desc='scalar',
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input(4)),
+            reference_fn=no_batch_dim_reference_fn,
+            desc='no_batch_dim',
+        )
+    ]
+
+
+def module_inputs_torch_nn_InstanceNormNd(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    lazy = kwargs.get('lazy', False)
+    N = kwargs['N']
+    num_features, eps, momentum, affine, track_running_stats = 3, 1e-3, 0.3, False, True
+    input_no_batch_shape_dict = {1: (3, 15), 2: (3, 6, 6), 3: (3, 4, 4, 4)}
+    input_no_batch_shape = input_no_batch_shape_dict[N]
+    input_batch_shape = (4,) + input_no_batch_shape
+
+    return [
+        ModuleInput(
+            constructor_input=(
+                FunctionInput(eps, momentum) if lazy else FunctionInput(num_features, eps, momentum)
+            ),
+            forward_input=FunctionInput(make_input((input_batch_shape)))),
+        ModuleInput(
+            constructor_input=(
+                FunctionInput(eps, momentum, affine, track_running_stats) if lazy else
+                FunctionInput(num_features, eps, momentum, affine, track_running_stats)
+            ),
+            forward_input=FunctionInput(make_input((input_batch_shape))),
+            desc='tracking_stats'),
+        ModuleInput(
+            constructor_input=(
+                FunctionInput(eps, momentum) if lazy else FunctionInput(num_features, eps, momentum)
+            ),
+            forward_input=FunctionInput(make_input(input_no_batch_shape)),
+            reference_fn=no_batch_dim_reference_fn,
+            desc='tracking_stats_no_batch_dim'),
+        ModuleInput(
+            constructor_input=(
+                FunctionInput(eps, momentum, affine, track_running_stats) if lazy else
+                FunctionInput(num_features, eps, momentum, affine, track_running_stats)
+            ),
+            forward_input=FunctionInput(make_input(input_no_batch_shape)),
+            reference_fn=no_batch_dim_reference_fn,
+            desc='no_batch_dim')
+    ]
+
+def module_inputs_torch_nn_LayerNorm(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3),
+            forward_input=FunctionInput(make_input(((4, 5, 5)))),
+            desc='1d_elementwise_affine'),
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3, False),
+            forward_input=FunctionInput(make_input(((4, 5, 5)))),
+            desc='1d_no_elementwise_affine'),
+        ModuleInput(
+            constructor_input=FunctionInput([2, 2, 5], 1e-3),
+            forward_input=FunctionInput(make_input((4, 2, 2, 5))),
+            desc='3d_elementwise_affine'),
+        ModuleInput(
+            constructor_input=FunctionInput([2, 2, 5], 1e-3, False),
+            forward_input=FunctionInput(make_input((4, 2, 2, 5))),
+            desc='3d_no_elementwise_affine'),
+        ModuleInput(
+            constructor_input=FunctionInput([56, 56, 56], 1e-5, False),
+            forward_input=FunctionInput(make_input((4, 56, 56, 56))),
+            desc='3d_no_affine_large_feature'),
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3),
+            forward_input=FunctionInput(make_input((0, 5))),
+            desc='1d_empty_elementwise_affine'),
+    ]
+
+
+def module_inputs_torch_nn_LocalResponseNorm(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(3,),
+            forward_input=FunctionInput(make_input(((1, 5, 7)))),
+            desc='1d'),
+        ModuleInput(
+            constructor_input=FunctionInput(2,),
+            forward_input=FunctionInput(make_input(((1, 5, 7, 7)))),
+            desc='2d_uneven_pad'),
+        ModuleInput(
+            constructor_input=FunctionInput(1, 1., 0.5, 2.),
+            forward_input=FunctionInput(make_input((1, 5, 7, 7, 7))),
+            desc='3d_custom_params'),
     ]
 
 
@@ -926,6 +1364,30 @@ def module_inputs_torch_nn_Sigmoid(module_info, device, dtype, requires_grad, tr
             forward_input=FunctionInput(make_input((2, 3, 3, 4, 5))),
             desc='channels_last_3d_mem_format'
         )
+    ]
+
+
+def module_inputs_torch_nn_LogSigmoid(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input(())),
+            reference_fn=lambda m, p, i: i.sigmoid().log(),
+            desc='scalar'
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input((2, 3, 4))),
+            reference_fn=lambda m, p, i: i.sigmoid().log(),
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input(4)),
+            reference_fn=no_batch_dim_reference_fn,
+            desc='no_batch_dim',
+        ),
     ]
 
 
@@ -1323,6 +1785,8 @@ def module_inputs_torch_nn_LSTM(module_info, device, dtype, requires_grad, train
 
     return samples
 
+
+
 def module_inputs_torch_nn_ReflectionPad1d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -1585,17 +2049,62 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
+    ModuleInfo(torch.nn.BatchNorm1d,
+               train_and_eval_differ=True,
+               module_inputs_func=module_inputs_torch_nn_BatchNorm1d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
+                   # RuntimeError: tried to get Double out of SymInt
+                   DecorateInfo(
+                       unittest.expectedFailure, 'TestEagerFusionModuleInfo',
+                       'test_aot_autograd_symbolic_module_exhaustive',
+                       active_if=lambda p: p['training']
+                   ),
+                   # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
+                   DecorateInfo(
+                       unittest.expectedFailure, 'TestEagerFusionModuleInfo',
+                       'test_aot_autograd_module_exhaustive',
+                       active_if=lambda p: p['training']
+                   ))
+               ),
     ModuleInfo(torch.nn.BatchNorm2d,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
+                   # RuntimeError: tried to get Double out of SymInt
+                   DecorateInfo(
+                       unittest.expectedFailure, 'TestEagerFusionModuleInfo',
+                       'test_aot_autograd_symbolic_module_exhaustive',
+                       active_if=lambda p: p['training']
+                   ),
+                   # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
+                   DecorateInfo(
+                       unittest.expectedFailure, 'TestEagerFusionModuleInfo',
+                       'test_aot_autograd_module_exhaustive',
+                       active_if=lambda p: p['training']
+                   ))
                ),
     ModuleInfo(torch.nn.BatchNorm3d,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm3d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
+                   # RuntimeError: tried to get Double out of SymInt
+                   DecorateInfo(
+                       unittest.expectedFailure, 'TestEagerFusionModuleInfo',
+                       'test_aot_autograd_symbolic_module_exhaustive',
+                       active_if=lambda p: p['training']
+                   ),
+                   # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
+                   DecorateInfo(
+                       unittest.expectedFailure, 'TestEagerFusionModuleInfo',
+                       'test_aot_autograd_module_exhaustive',
+                       active_if=lambda p: p['training']
+                   ))
                ),
     ModuleInfo(torch.nn.CELU,
                module_inputs_func=module_inputs_torch_nn_CELU,
@@ -1942,11 +2451,69 @@ module_db: List[ModuleInfo] = [
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
+    ModuleInfo(torch.nn.GroupNorm,
+               module_inputs_func=module_inputs_torch_nn_GroupNorm,
+               dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=False),
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # Tracking at https://github.com/pytorch/pytorch/issues/98089
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
+                   # No channels_last support for GroupNorm currently.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), "TestModule", "test_grad",
+                                active_if=TEST_WITH_ROCM, device_type='cuda'),)
+               ),
+    ModuleInfo(torch.nn.Hardshrink,
+               module_inputs_func=module_inputs_torch_nn_Hardshrink,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
+               ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                supports_gradgrad=False),
+    ModuleInfo(torch.nn.Hardtanh,
+               module_inputs_func=module_inputs_torch_nn_Hardtanh,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
+               ),
+    ModuleInfo(torch.nn.InstanceNorm1d,
+               module_inputs_func=partial(module_inputs_torch_nn_InstanceNormNd, N=1),
+               train_and_eval_differ=True,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # No channels_last support for InstanceNorm1d currently.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
+    ModuleInfo(torch.nn.InstanceNorm2d,
+               module_inputs_func=partial(module_inputs_torch_nn_InstanceNormNd, N=2),
+               train_and_eval_differ=True,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # No channels_last support for InstanceNorm2d currently.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
+    ModuleInfo(torch.nn.InstanceNorm3d,
+               module_inputs_func=partial(module_inputs_torch_nn_InstanceNormNd, N=3),
+               train_and_eval_differ=True,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # No channels_last support for InstanceNorm3d currently.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
+    ModuleInfo(torch.nn.LocalResponseNorm,
+               module_inputs_func=module_inputs_torch_nn_LocalResponseNorm,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.LayerNorm,
+               module_inputs_func=module_inputs_torch_nn_LayerNorm,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # No channels_last support for LayerNorm currently.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
     # TransformerEncoder takes the same inputs as TransformerEncoderLayer
     ModuleInfo(torch.nn.TransformerEncoder,
                train_and_eval_differ=True,
@@ -1962,6 +2529,11 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
+               decorators=[
+                   DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                                'TestModule', 'test_non_contiguous_tensors',
+                                device_type='cpu', active_if=IS_WINDOWS),
+               ],
                skips=(
                    # No channels_last support for TransformerEncoderLayer currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
@@ -2035,8 +2607,74 @@ module_db: List[ModuleInfo] = [
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
+    ModuleInfo(torch.nn.LogSigmoid,
+               module_inputs_func=module_inputs_torch_nn_LogSigmoid,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.SiLU,
                module_inputs_func=module_inputs_torch_nn_SiLU,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.Softmax,
+               module_inputs_func=module_inputs_torch_nn_Softmax,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.Softmax2d,
+               module_inputs_func=module_inputs_torch_nn_Softmax2d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # no channels last support for Softmax2d currently
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
+    ModuleInfo(torch.nn.LogSoftmax,
+               module_inputs_func=module_inputs_torch_nn_LogSoftmax,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # no channels last support for LogSoftmax currently
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
+    ModuleInfo(torch.nn.Softmin,
+               module_inputs_func=module_inputs_torch_nn_Softmin,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # no channels last support for Softmin currently
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
+    ModuleInfo(torch.nn.Softplus,
+               module_inputs_func=module_inputs_torch_nn_Softplus,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.Softshrink,
+               module_inputs_func=module_inputs_torch_nn_Softshrink,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.Softsign,
+               module_inputs_func=module_inputs_torch_nn_Softsign,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.Tanh,
+               module_inputs_func=module_inputs_torch_nn_Tanh,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.Tanhshrink,
+               module_inputs_func=module_inputs_torch_nn_Tanhshrink,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.Threshold,
+               module_inputs_func=module_inputs_torch_nn_Threshold,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.Mish,
+               module_inputs_func=module_inputs_torch_nn_Mish,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
