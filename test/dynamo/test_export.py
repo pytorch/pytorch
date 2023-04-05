@@ -2275,6 +2275,32 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
 
+    @config.patch(dynamic_shapes=True)
+    def test_export_persist_assert(self):
+        def f(x):
+            assert x.shape[0] > 4
+            return x.cos() + x.sin()
+
+        gm, guard = torch._dynamo.export(
+            f, torch.randn(5, 4, 6), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        print(gm.graph)
+
+        def has_aten_op(gm, op):
+            for node in gm.graph.nodes:
+                if node.target == op:
+                    return True
+            return False
+
+        self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.default))
+
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.default))
+
+        gm(torch.randn(3, 4, 5))
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
