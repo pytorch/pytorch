@@ -254,7 +254,6 @@ Minor release process takes around 6-7 weeks to complete.
 4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger new build and produce new release candidate. Announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
 5. General Availability
 
-
 ### Triage
 
 > Main POC: Triage Reviewers
@@ -285,7 +284,7 @@ Only following issues are accepted:
     * *NOTE*: Ideally this should be ~2-3 weeks after a regression has been identified to allow other regressions to be identified
 2. Patch Release Managers will work with the authors of the regressions / fixes to cherry pick their change into the related release branch (i.e. `release/1.9` for `1.9.1`)
     * *NOTE*: Patch release managers should notify authors of the regressions to post a cherry picks for their changes. It is up to authors of the regressions to post a cherry pick. if cherry pick is not posted the issue will not be included in the release.
-3. If cherry picking deadline is missed by cherry pick author, patch release managers will not accept any requests after the fact. We are over communicating the timelines and process with the community to avoid such issues.
+3. If cherry picking deadline is missed by cherry pick author, patch release managers will not accept any requests after the fact.
 
 ### Building Binaries / Promotion to Stable
 
