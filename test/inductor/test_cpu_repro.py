@@ -344,6 +344,9 @@ class CPUReproTests(TestCase):
             "randn",
             "isnan",
             "rand",
+            "bitwise_and",
+            "bitwise_or",
+            "bitwise_xor",
         ]
         union = {*cpp_vec_op_list, *diff}
         self.assertTrue(set(cpp_op_list).issubset(union))

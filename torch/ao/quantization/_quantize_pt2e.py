@@ -2,11 +2,14 @@ from torch.fx import GraphModule
 
 from ._pt2e.prepare import prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
+from .fx.prepare import prepare as fx_prepare
 from ._pt2e.utils import (
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_decomposed_linear,
 )
-from torch.ao.quantization.quantizer import Quantizer
+from torch.ao.quantization import QConfigMapping
+from torch.ao.quantization.backend_config import BackendConfig
+from torch.ao.quantization._pt2e.quantizer import Quantizer
 
 from typing import Tuple, Any, Dict
 
@@ -30,7 +33,7 @@ def prepare_pt2e(
     # to be quantized before fusion
     # TODO: (maybe) rewrite this with subgraph_rewriter
     _fuse_conv_bn_(model)
-    model = prepare(
+    model = fx_prepare(
         model,
         qconfig_mapping,
         False,  # is_qat

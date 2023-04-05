@@ -1,6 +1,6 @@
 from abc import ABC
 from abc import abstractmethod
-from torch.ao.quantization.backend_config import BackendConfig
+import torch
 
 __all__ = [
     "Quantizer",
