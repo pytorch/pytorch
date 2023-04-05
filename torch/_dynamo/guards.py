@@ -713,12 +713,6 @@ class CheckFunctionManager:
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
 
-        # local_code_to_source_map = dict(zip(local_builder.code, local_builder.sources))
-        # global_code_to_source_map = dict(zip(global_builder.code, global_builder.sources))
-        # code_to_source_map = {**local_code_to_source_map, **global_code_to_source_map}
-        # code_parts = (
-        #     ["___guarded_code.valid"] + local_builder.code + global_builder.code
-        # )
         validation_code_part = CodePart(None, "___guarded_code.valid", None)
         code_parts = []
         code_parts.append(validation_code_part)
