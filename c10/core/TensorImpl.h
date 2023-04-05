@@ -1534,7 +1534,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
-    return storage_.unsafe_data<T>() + storage_offset_;
+    return static_cast<T*>(storage_.data()) + storage_offset_;
   }
 
   /**
@@ -1571,7 +1571,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* unsafe_data() const {
-    return storage_.unsafe_data<T>() + storage_offset_;
+    return static_cast<T*>(storage_.data()) + storage_offset_;
   }
 
   /**
