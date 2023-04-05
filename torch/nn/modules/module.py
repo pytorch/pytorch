@@ -1495,6 +1495,12 @@ class Module:
                 tracing_state.pop_scope()
         return result
 
+    def _wrapped_call_impl(self, *args, **kwargs):
+        if self._compiled_call_impl:
+            return self._compiled_call_impl(*args, **kwargs)
+        else:
+            return self._call_impl(*args, **kwargs)
+        
     def _call_impl(self, *args, **kwargs):
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
@@ -1576,7 +1582,7 @@ class Module:
 
         return result
 
-    __call__ : Callable[..., Any] = _call_impl if not _compiled_call_impl else _compiled_call_impl
+    __call__ : Callable[..., Any] = _wrapped_call_impl
 
     def __getstate__(self):
         state = self.__dict__.copy()

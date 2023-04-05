@@ -16,10 +16,12 @@ class ToyModel(torch.nn.Module):
         return self.relu(self.linear(x))
 
 class InPlaceCompilationTests(unittest.TestCase):
+
     def test_compilation(self):
+        # CompileCounter is not working for in place API but works normally
         model = ToyModel()
         cnt = CompileCounter()
-        # opt_mod = torch._dynamo.optimize(cnt)(model)
+        print(cnt.frame_count)
         model.compile(backend=cnt)
         x = torch.randn(10, 10)
         model(x)
