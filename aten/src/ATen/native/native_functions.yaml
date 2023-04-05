@@ -1834,6 +1834,11 @@
     CUDA: cudnn_convolution_add_relu
   autogen: cudnn_convolution_add_relu.out
 
+- func: cudnn_mha(Tensor self, Tensor qkv_weight, Tensor out_weight, Tensor qkv_bias, Tensor out_bias, int input_size, int seq_length, int batch_size, int output_size, int head_size, int num_heads) -> Tensor
+  dispatch:
+    CUDA: cudnn_mha
+  autogen: cudnn_mha.out
+
 # NB: input is special cased in a way I don't quite understand
 - func: cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output
   dispatch:
@@ -14298,6 +14303,11 @@
   device_check: NoCheck
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
+  tags: nondeterministic_seeded
+
+- func: _cudnn_mha(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor ouput, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+  dispatch:
+    CUDA: _cudnn_mha
   tags: nondeterministic_seeded
 
 - func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)

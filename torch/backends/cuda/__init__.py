@@ -212,6 +212,7 @@ class SDPBackend(IntEnum):
     MATH = 0
     FLASH_ATTENTION = 1
     EFFICIENT_ATTENTION = 2
+    CUDNN_MHA = 3
 
 
 def flash_sdp_enabled():
