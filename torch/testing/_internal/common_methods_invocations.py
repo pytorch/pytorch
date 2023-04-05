@@ -16580,7 +16580,7 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.complex64, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=[torch.chalf, torch.complex64, torch.cdouble])),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.complex32, torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
