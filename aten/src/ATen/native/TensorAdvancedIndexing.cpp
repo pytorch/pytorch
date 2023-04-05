@@ -1523,19 +1523,13 @@ void _scatter_via_index_put(
   int64_t dim,
   const Tensor& index,
   const Tensor& src,
-  const Tensor& mut_out) {
+  const Tensor& mut_out,
+  bool accumulate) {
   if (self.dim() == 1) {
-    // TODO: Pretty sure these checks can be removed, since they're done in
-    // `scatter_meta_impl`, which I think is always called before this
-    TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "
-      "but their dims are ", index.dim(), " and ", src.dim(), ", respectively");
-    TORCH_CHECK(index.numel() == src.numel(), "index and src should have same number of elements for 1D tensors, "
-      "but got ", index.numel(), " versus ", src.numel());
-    TORCH_CHECK(dim == 0, "dim should be zero for 1D self tensor, but got ", dim);
     torch::List<c10::optional<Tensor>> indices;
     indices.reserve(1);
     indices.push_back(index);
-    mut_out.index_put_(indices, src, true);
+    mut_out.index_put_(indices, src, accumulate);
   } else {
     Tensor mut_out_contig = mut_out.contiguous();
 
@@ -1610,7 +1604,7 @@ void _scatter_via_index_put(
     indices.reserve(1);
     indices.push_back(index_flat);
 
-    mut_out_flat.index_put_(indices, src_flat, true);
+    mut_out_flat.index_put_(indices, src_flat, accumulate);
 
     if (!mut_out.is_contiguous()) {
       mut_out.copy_(mut_out_flat.reshape(mut_out.sizes()));
@@ -1639,12 +1633,30 @@ void scatter_impl(
 
   if (index.numel() == 0) return;
 
+  auto op = ReductionType::SUM;
+  bool deterministic = globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA;
+
   if (reduce.has_value()) {
-    auto op = get_operator_enum(reduce.value(), use_new_options);
+    op = get_operator_enum(reduce.value(), use_new_options);
     if (!reduce_includes_self) {
       // scatter inits for reduction to appropriate indices (used by scatter_reduce.two)
       scatter_reduce_exclude_self_helper(mut_out, dim, index, op);
     }
+    // _scatter_via_index_put can only handle sum and mean reduction type
+    deterministic = deterministic && (op == ReductionType::SUM || op == ReductionType::MEAN);
+  }
+
+  // Scalar src should already be deterministic
+  if (deterministic && std::is_same_v<T, Tensor>) {
+    // both runtime and compile check are required
+    if constexpr (std::is_same_v<T, Tensor>) {
+      bool accumulate = reduce.has_value();
+      _scatter_via_index_put(self, dim, index, src, mut_out, accumulate);
+      return;
+    }
+  }
+
+  if (reduce.has_value()) {
     reduce_stub(self.device().type(), mut_out, dim, index, src, op);
   } else {
     fill_stub(self.device().type(), mut_out, dim, index, src);
@@ -1717,7 +1729,7 @@ TORCH_IMPL_FUNC(scatter_add)
   // See Note [Enabling Deterministic Operations]
   // Avoid gpuAtomicAdd for CUDA if deterministic mode is turned on
   if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA) {
-    _scatter_via_index_put(self, dim, index, src, mut_out);
+    _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/true);
   } else {
     if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
       scatter_add_expanded_index_stub(self.device().type(), mut_out, index, src);
