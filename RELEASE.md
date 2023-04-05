@@ -21,6 +21,7 @@
 - [Patch Releases](#patch-releases)
   - [Patch Release Criteria](#patch-release-criteria)
   - [Patch Release Process](#patch-release-process)
+    - [Patch Rlease Process Description](#patch-release-process-description)
     - [Triage](#triage)
     - [Issue Tracker for Patch releases](#issue-tracker-for-patch-releases)
     - [Building a release schedule / cherry picking](#building-a-release-schedule--cherry-picking)
@@ -41,6 +42,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | Stable CUDA | Experimental CUDA |
 | --- | --- | --- | --- |
+| 2.0.1 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
 | 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
 | 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
 | 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
@@ -237,6 +239,22 @@ Patch releases should be considered if a regression meets the following criteria
 
 ## Patch Release Process
 
+### Patch Rlease Process Description
+
+> Main POC: Patch Release Managers, Triage Reviewers
+
+Patch releases should follow these high-level phases. This process starts immediately after the previous release has completed.
+Minor release process takes around 6-7 weeks to complete.
+
+1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2-3 weeks after the release completion.
+2. Patch Release: Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed and following decisions are made:
+ - Should the new patch Release be created
+ - Timeline execution for the patch Release
+3. Cherry picking phase. Starts after the decision is made to create patch Release. At this point a new Issue tracker for patch release is created, and announcement is made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the regressions are asked to create cherry picks. This process normally takes 2 weeks.
+4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger new build and produce new release candidate. Announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
+5. General Availability
+
+
 ### Triage
 
 > Main POC: Triage Reviewers
@@ -266,6 +284,8 @@ Only following issues are accepted:
 1. After regressions / fixes have been triaged Patch Release Managers will work together and build /announce a schedule for the patch release
     * *NOTE*: Ideally this should be ~2-3 weeks after a regression has been identified to allow other regressions to be identified
 2. Patch Release Managers will work with the authors of the regressions / fixes to cherry pick their change into the related release branch (i.e. `release/1.9` for `1.9.1`)
+    * *NOTE*: Patch release managers should notify authors of the regressions to post a cherry picks for their changes. It is up to authors of the regressions to post a cherry pick. if cherry pick is not posted the issue will not be included in the release.
+3. If cherry picking deadline is missed by cherry pick author, patch release managers will not accept any requests after the fact. We are over communicating the timelines and process with the community to avoid such issues.
 
 ### Building Binaries / Promotion to Stable
 
