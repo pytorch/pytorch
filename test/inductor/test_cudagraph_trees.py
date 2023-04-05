@@ -483,6 +483,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.curr_node().expected_dead_indices_after_graph,
                 [(0, 1), (0, 2), (0, 3)],
             )
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
         def test_separate_recordings(self):
             def foo_unopt(x, y):
@@ -600,6 +601,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             streams = {seg["stream"] for seg in get_all_cudagraph_segments()}
             self.assertEqual(len(streams), 1)
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
         def test_forward_generation(self):
             def foo(x):
@@ -620,14 +622,16 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(self.get_manager().forwards_with_pending_backwards, 2)
 
             out2.sum().backward()
-
             self.assertEqual(self.get_manager().forwards_with_pending_backwards, 0)
 
             del out
             del out2
 
+            foo2_opt(foo_opt(ones)).sum().backward()
+
             out = foo_opt(ones.detach())
             self.assertEqual(self.get_manager().forwards_with_pending_backwards, 0)
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
 
 if __name__ == "__main__":
