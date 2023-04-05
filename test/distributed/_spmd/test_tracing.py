@@ -17,7 +17,7 @@ from torch.distributed._spmd.api import (
     SPMD,
 )
 from torch.distributed._spmd.comm_tensor import CommTensor
-from torch.distributed._tensor import DeviceMesh, Replicate
+from torch.distributed._tensor import DeviceMesh, Replicate, DTensor, Shard, distribute_module, distribute_tensor
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec
@@ -672,7 +672,6 @@ class CoverageTest(DTensorTestBase):
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()
-            return [p.grad for p in mod.parameters()]
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
 
@@ -690,12 +689,8 @@ class CoverageTest(DTensorTestBase):
         ddp_opt.step()
         ddp_opt.zero_grad()
 
-        if self.rank == 0:
-            print("====== ", list(mod.parameters()))
-            print("====== ", list(ddp_mod.parameters()))
-
         # test parameter parity
-        grads = train_step(mod, opt, inp)
+        train_step(mod, opt, inp)
 
         ddp_mod(ddp_inp).sum().backward()
         # FIXME(@mrshenli): DDP by default divides grads by world size, but
@@ -705,16 +700,13 @@ class CoverageTest(DTensorTestBase):
                 p.grad *= self.world_size
         ddp_opt.step()
 
-        if self.rank == 0:
-            print("====== ", grads)
-            print("====== ", [p.grad for p in ddp_mod.parameters()])
-
         for p1, p2 in zip(mod.parameters(), ddp_mod.parameters()):
             self.assertEqual(p1, p2)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_log_softmax(self):
+        torch.manual_seed(0)
         mod = nn.Sequential(
             nn.Linear(10, 10),
             nn.Softmax(dim=1),
