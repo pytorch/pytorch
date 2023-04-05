@@ -1195,6 +1195,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1241,6 +1242,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             the eval_frame entrypoint to Module.__call__?
         """
 
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_inner(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
