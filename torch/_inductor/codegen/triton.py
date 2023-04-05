@@ -662,6 +662,8 @@ class TritonKernel(Kernel):
         """
         if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
+        if dynamo_config.dynamic_shapes:
+            return False
         threshold = {
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
