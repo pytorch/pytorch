@@ -7195,7 +7195,7 @@ class TestNLLLoss(TestCaseMPS):
         for dtype in [torch.bool, torch.int8, torch.uint8, torch.int32, torch.float16, torch.float32]:
             x = torch.empty(10, 10, dtype=dtype, device='mps')
             x.random_()
-            self.assertNotEqual(x.abs().max().item(), 0)
+            self.assertNotEqual(x.max().item(), 0)
 
     # Test exponential
     def test_exponential(self):
