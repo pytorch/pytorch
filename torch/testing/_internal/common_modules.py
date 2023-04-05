@@ -2516,12 +2516,14 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.FractionalMaxPool2d,
                module_inputs_func=module_inputs_torch_nn_FractionalMaxPool2d,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.FractionalMaxPool3d,
                module_inputs_func=module_inputs_torch_nn_FractionalMaxPool3d,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
@@ -2696,6 +2698,7 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.MaxPool3d,
                module_inputs_func=module_inputs_torch_nn_MaxPool3d,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
