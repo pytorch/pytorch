@@ -489,15 +489,11 @@ class CSE:
         buffer: IndentedBuffer,
         expr: typing.Union[str, CSEVariable],
         write=True,
-        append_broadcast=None,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
-        if append_broadcast:
-            assert isinstance(append_broadcast, str)
-            cache_key = expr + append_broadcast
         if cache_key not in self.cache:
             var = self.newvar()
             self.cache[cache_key] = var
