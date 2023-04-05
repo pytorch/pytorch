@@ -852,7 +852,12 @@ class OpInfo:
     is_factory_function: bool = False
 
     def __post_init__(self):
-        self._original_opinfo_args = asdict(self).copy()
+        try:
+            self._original_opinfo_args = asdict(self).copy()
+        except TypeError:
+            # Not all OpInfos are pickleable.
+            # E.g. CustomOp is not. This attribute is only used for refs.
+            self._original_opinfo_args = None
 
         assert self.dtypes is not None, "OpInfo for {0} has no dtypes!".format(
             self.name
