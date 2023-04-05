@@ -54,6 +54,7 @@ from .utils import (
     dynamo_timed,
     format_graph_code,
     format_graph_tabular,
+    nnmodule_has_hooks,
     same,
 )
 from .variables.base import VariableTracker
@@ -378,26 +379,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
 
-    @staticmethod
-    def module_has_hooks(mod, only_check_unsupported=False):
-        supported_hooks = [
-            "_forward_pre_hooks",
-            "_forward_hooks",
-        ]
-        unsupported_hooks = [
-            "_backward_pre_hooks",
-            "_backward_hooks",
-            "_state_dict_pre_hooks",
-            "_state_dict_hooks",
-            "_load_state_dict_pre_hooks",
-            "_load_state_dict_post_hooks",
-        ]
-        check_hooks = unsupported_hooks
-        if not only_check_unsupported:
-            check_hooks += supported_hooks
-
-        return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
-
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
@@ -429,9 +410,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if self.module_has_hooks(target, only_check_unsupported=True):
+            if nnmodule_has_hooks(target):
+                # if module has any type of hooks, we need to start guarding on them
                 torch._logging.warning_once(
-                    log, "nn.Module hooks are not fully supported, they may be ignored"
+                    log,
+                    "nn.Module hooks are not fully supported, see docs/source/compile/hooks_support.rst for limitations and status.",
                 )
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
