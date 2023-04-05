@@ -171,19 +171,11 @@ class TestInductorConfig(TestCase):
     def test_api_options(self):
         reduce_overhead_opts = torch._inductor.list_mode_options("reduce-overhead")
         self.assertEqual(reduce_overhead_opts["triton.cudagraphs"], True)
-        self.assertEqual(reduce_overhead_opts.get("max_autotune", False), False)
 
         max_autotune_opts = torch._inductor.list_mode_options("max-autotune")
+        self.assertEqual(max_autotune_opts["epilogue_fusion"], True)
         self.assertEqual(max_autotune_opts["max_autotune"], True)
         self.assertEqual(max_autotune_opts["triton.cudagraphs"], True)
-
-        max_autotune_no_cudagraphs_opts = torch._inductor.list_mode_options(
-            "max-autotune-no-cudagraphs"
-        )
-        self.assertEqual(max_autotune_no_cudagraphs_opts["max_autotune"], True)
-        self.assertEqual(
-            max_autotune_no_cudagraphs_opts.get("triton.cudagraphs", False), False
-        )
 
     def test_invalid_backend(self):
         self.assertRaises(

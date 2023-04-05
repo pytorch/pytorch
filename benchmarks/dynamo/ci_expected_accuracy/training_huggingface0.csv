@@ -13,7 +13,7 @@ DebertaV2ForMaskedLM,0
 DistilBertForMaskedLM,7
 DistilBertForQuestionAnswering,7
 DistillGPT2,7
-ElectraForCausalLM,7
+ElectraForCausalLM,11
 ElectraForQuestionAnswering,7
 GPT2ForSequenceClassification,9
 LayoutLMForMaskedLM,7
@@ -25,13 +25,13 @@ MobileBertForMaskedLM,4
 MobileBertForQuestionAnswering,4
 PLBartForCausalLM,7
 PLBartForConditionalGeneration,7
-PegasusForCausalLM,7
-PegasusForConditionalGeneration,4
+PegasusForCausalLM,10
+PegasusForConditionalGeneration,16
 RobertaForCausalLM,7
 RobertaForQuestionAnswering,7
-Speech2Text2ForCausalLM,7
+Speech2Text2ForCausalLM,10
 T5ForConditionalGeneration,7
 T5Small,7
 TrOCRForCausalLM,7
 XLNetLMHeadModel,7
-YituTechConvBert,7
+YituTechConvBert,11

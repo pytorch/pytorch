@@ -38,6 +38,7 @@ class DTensorInitOpsTest(DTensorTestBase):
 
 
 class DTensorConstructorTest(DTensorTestBase):
+
     @property
     def world_size(self):
         return 4

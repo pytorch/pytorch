@@ -471,7 +471,7 @@ def _run_weight_observers(observed: GraphModule, backend_config: BackendConfig) 
             continue
         for node_arg in node.args:
             # node_arg is weight
-            if node_arg and node_arg_is_weight(node, node_arg):
+            if node_arg and node_arg_is_weight(node, node_arg, backend_config):
                 weight_observer_nodes = collect_producer_nodes(node_arg)
                 if weight_observer_nodes is None:
                     continue

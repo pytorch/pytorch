@@ -760,9 +760,6 @@ size_t StaticModule::prepareStaticNodeInfos(
   return node_idx - node_start;
 }
 
-BlockInfo::BlockInfo(uint32_t input_idx, Block& block)
-    : input_idx_(input_idx), block_(block) {}
-
 void BlockInfo::set_nodes(
     std::vector<StaticNodeInfo> nodes,
     const c10::FastMap<Node*, bool>& node_has_out_variant) {

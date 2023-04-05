@@ -61,7 +61,7 @@ namespace {
     template <typename T>
     class FunctionalTests : public ::testing::Test {};
     template <typename T>
-    class FunctionalTestsReducedFloat : public ::testing::Test {};
+    class FunctionalBF16Tests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
@@ -69,7 +69,7 @@ namespace {
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
-    using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
+    using BFloatTestedTypes = ::testing::Types<vBFloat16>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
     TYPED_TEST_SUITE(Arithmetics, FloatIntTestedTypes);
     TYPED_TEST_SUITE(Comparison, RealFloatIntTestedTypes);
@@ -98,7 +98,7 @@ namespace {
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
     TYPED_TEST_SUITE(FunctionalTests, RealFloatIntTestedTypes);
-    TYPED_TEST_SUITE(FunctionalTestsReducedFloat, ReducedFloatTestedTypes);
+    TYPED_TEST_SUITE(FunctionalBF16Tests, BFloatTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1284,11 +1284,11 @@ namespace {
         for (const auto i : c10::irange(N)) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
         cmp(y, ref_y);
     }
-      TYPED_TEST(FunctionalTestsReducedFloat, Reduce) {
+      TYPED_TEST(FunctionalBF16Tests, Reduce) {
       using vec = TypeParam;
       // Can't use ValueType<TypeParam> here:
       // Vectorized<BFloat16>::value_type returns uint16_t on AVX2/AVX512
-      using VT = UholdType<TypeParam>;
+      using VT = c10::BFloat16;
       using RT = float; // reference
       constexpr auto R = 2LL; // residual
       constexpr auto N = vec::size() * 2 + R;
@@ -1350,9 +1350,9 @@ namespace {
             << "\nmap3_reduce_all, Length: " << len << "; fp32: " << y1 << "; bf16: " << RT(y2);
       }
     }
-    TYPED_TEST(FunctionalTestsReducedFloat, Map) {
+    TYPED_TEST(FunctionalBF16Tests, Map) {
       using vec = TypeParam;
-      using VT = UholdType<TypeParam>;
+      using VT = c10::BFloat16;
       using RT = float; // reference
       constexpr auto R = 2LL; // residual
       constexpr auto N = vec::size() * 2 + R;
