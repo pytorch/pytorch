@@ -45,13 +45,11 @@ Tensor empty_like_nested(
   auto options = verify_empty_parameters(
       self, dtype, layout, device, pin_memory, optional_memory_format);
   auto self_nt = get_nested_tensor_impl(self);
-  // Since we clone sizes, strides, and offsets it should be safe to use
-  // get_unsafe_storage_as_tensor for the call to empty like.
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
   if (memory_format == MemoryFormat::Contiguous) {
-    Tensor new_buffer = at::empty_like(
-        self_nt->get_unsafe_storage_as_tensor(), options);
     auto nested_size = self_nt->get_nested_sizes().clone();
+    int64_t buffer_size = get_numel_from_nested_size_tensor(nested_size);
+    Tensor new_buffer = at::empty({buffer_size}, options);
     auto tensor = wrap_buffer(new_buffer, nested_size);
     return tensor;
   }
@@ -59,6 +57,8 @@ Tensor empty_like_nested(
   TORCH_CHECK(
       memory_format == MemoryFormat::Preserve,
       "memory format option is only supported by strided tensors");
+  // Since we clone sizes, strides, and offsets it should be safe to use
+  // get_unsafe_storage_as_tensor for the call to empty_like.
   Tensor new_buffer =
       at::empty_like(self_nt->get_unsafe_storage_as_tensor(), options);
   auto nested_size = self_nt->get_nested_sizes().clone();
