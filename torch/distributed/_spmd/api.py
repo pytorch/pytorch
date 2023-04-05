@@ -390,32 +390,24 @@ DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
 
 
 def _dedup_collectives(gm: fx.GraphModule) -> fx.GraphModule:
-    # deduplicate collectives
-    node_to_node: Dict[fx.Node, fx.Node] = {}
     args_to_node: Dict[Tuple[Any, ...], fx.Node] = {}
-
-    nodes_to_erase: List[fx.Node] = []
 
     for node in gm.graph.nodes:
         # replace all args with the results from the first unique comm op
-        args, spec = pytree.tree_flatten(node.args)
-        unique_args = [node_to_node.get(a, a) for a in args]
-        node.args = pytree.tree_unflatten(unique_args, spec)
+        args, _ = pytree.tree_flatten(node.args)
 
         if node.target in DEDUP_TARGETS:
-            args_key = (node.target, *unique_args)
+            args_key = (node.target, *args)
             unique_node = args_to_node.get(args_key, None)
             if unique_node is None:
                 # first time seeing this combination, remember it
                 args_to_node[args_key] = node
             else:
                 # the current node is a duplicate, replace it
-                node_to_node[node] = unique_node
-                nodes_to_erase.append(node)
+                node.replace_all_uses_with(unique_node)
+                gm.graph.erase_node(node)
 
-    # erase all duplicated nodes
-    for node in nodes_to_erase:
-        gm.graph.erase_node(node)
+    gm.recompile()
 
     return gm
 
@@ -531,6 +523,9 @@ def _compile(
     # TODO(@mrshenli): @yifuwang has a suggestion of conducting expansion and
     # dedup at tracer-level to avoid multiple graph passes.
     gm = _dedup_collectives(gm)
+
+    if torch.distributed.get_rank() == 0:
+        gm.graph.print_tabular()
 
     # 7. Replace previously inserted dummy ones with real graphs.
     if module_override:

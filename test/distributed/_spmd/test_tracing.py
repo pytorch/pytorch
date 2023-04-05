@@ -545,7 +545,10 @@ class TraceTrainStepTest(DTensorTestBase):
                 return orig_submodule
 
             def transform(
-                self, gm: fx.GraphModule, schema_map: Dict[str, Schema]
+                self,
+                gm: fx.GraphModule,
+                schema_map: Dict[str, Schema],
+                flat_state: List[torch.Tensor],
             ) -> fx.Graph:
                 # check dedup is successful, where there should only be 1 allreduce
                 self.outer.assertEqual(
