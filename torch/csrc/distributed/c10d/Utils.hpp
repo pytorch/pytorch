@@ -477,10 +477,6 @@ size_t computeLengthsAndOffsets(
   size_t offset = 0;
   for(const auto i : c10::irange(group_size)) {
     size_t length = tensors[i].numel();
-    TORCH_INTERNAL_ASSERT(
-        length <= std::numeric_limits<int>::max() &&
-            offset <= std::numeric_limits<int>::max(),
-        "Length or offset larger than INT_MAX not supported");
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
     offset += length;
