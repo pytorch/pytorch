@@ -6,7 +6,6 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <type_traits>
 
 namespace at::native {
 namespace mps {
