@@ -291,12 +291,12 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   Py_INCREF(Py_None);
   THPObjectPtr _event_sync_required(Py_None);
   Py_INCREF(Py_None);
-  if (storage.data()) {
+  if (storage.data<uint8_t>()) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t base_size;
     void* base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(
-        storage.data(), &base_size);
-    ptrdiff_t offset_bytes = (char*)storage.data() - (char*)base_ptr;
+        storage.data<uint8_t>(), &base_size);
+    ptrdiff_t offset_bytes = (char*)storage.data<uint8_t>() - (char*)base_ptr;
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaIpcMemHandle_t handle;
