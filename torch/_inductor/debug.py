@@ -8,23 +8,16 @@ import os.path
 import pstats
 import shutil
 import subprocess
-import sys
 from typing import Any, List
 from unittest.mock import patch
 
-from functorch.compile import (
-    config as functorch_config,
-    draw_graph,
-    get_aot_graph_name,
-    get_graph_being_compiled,
-)
+from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 
 import torch
 from torch import fx as fx
 
-from torch._dynamo import config as dynamo_config
 from torch._dynamo.debug_utils import save_graph_repro, wrap_compiler_debug
-from torch._dynamo.utils import get_debug_dir, init_logging
+from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -177,22 +170,12 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 @contextlib.contextmanager
 def enable_aot_logging():
     compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
-    debug_graphs = functorch_config.debug_graphs
-    debug_joint_graphs = functorch_config.debug_joint
 
     import torch._functorch.aot_autograd
 
     log = logging.getLogger(torch._functorch.aot_autograd.__name__)
 
     stack = contextlib.ExitStack()
-    stack.enter_context(patch("functorch.compile.config.log_level", logging.DEBUG))
-    # if user has specified they want to see graphs via either env var
-    # add stream to std out
-    if debug_graphs or debug_joint_graphs:
-        stdout_handler = logging.StreamHandler(sys.stdout)
-        log.addHandler(stdout_handler)
-        stack.callback(lambda: log.removeHandler(stdout_handler))
-
     if not compile_debug:
         try:
             yield
@@ -203,10 +186,8 @@ def enable_aot_logging():
     # Enable all graphs to be logged to a file by setting the flags to True
     # and the log level of the file logger to DEBUG
     stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
-    stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
-    stack.enter_context(patch("functorch.compile.config.debug_joint", True))
 
-    path = os.path.join(get_debug_dir(), "aot_torchinductor")
+    path = os.path.join(get_debug_dir(), "torchinductor")
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -245,7 +226,7 @@ class DebugContext:
         for n in DebugContext._counter:
             dirname = os.path.join(
                 get_debug_dir(),
-                "aot_torchinductor",
+                "torchinductor",
                 f"{folder_name}.{n}",
             )
             if not os.path.exists(dirname):
@@ -290,17 +271,15 @@ class DebugContext:
             config.trace.upload_tar(tar_file)
 
     def __enter__(self):
-        log = logging.getLogger("torch._inductor")
-        if not log.handlers:
-            init_logging()
-
         if config.debug:
+            log = logging.getLogger("torch._dynamo")
+            prev_level = log.level
+            log.setLevel(logging.DEBUG)
 
             def reset_log_level(level):
-                dynamo_config.log_level = level
+                log.setLevel(level)
 
-            self._stack.callback(reset_log_level, dynamo_config.log_level)
-            dynamo_config.log_level = logging.DEBUG
+            self._stack.callback(reset_log_level, prev_level)
 
         self._stack.enter_context(V.set_debug_handler(self))
 

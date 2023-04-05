@@ -98,7 +98,7 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
 
 namespace detail {
 
-TORCH_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
+C10_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
 
 } // namespace detail
 

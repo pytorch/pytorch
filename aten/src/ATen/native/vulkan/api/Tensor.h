@@ -101,6 +101,16 @@ class vTensor final {
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
       const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
 
+  // Copy Constructor and Assignment; Ideally copying  would be disabled
+  // (see the reasoning for move assignment below) but it is required for
+  // compatibility with OpaqueTensorImpl
+  vTensor(const vTensor& other) = default;
+  vTensor& operator=(const vTensor& other) = default;
+
+  // Move Constructor and assignment
+  vTensor(vTensor&& other) = default;
+  vTensor& operator=(vTensor&& other) = default;
+
   // Used for passing buffer sizes and strides data to shaders
   struct BufferMetadata {
     api::utils::uvec4 sizes;
@@ -269,15 +279,15 @@ class vTensor final {
     return c10::multiply_integers(sizes());
   }
 
+  inline size_t nbytes() const {
+    return c10::elementSize(dtype()) * numel();
+  }
+
   /*
    * Returns numel but based on gpu_sizes_ instead of sizes_
    */
   inline size_t gpu_numel() const {
     return view_->buffer_length_;
-  }
-
-  inline size_t nbytes() const {
-    return c10::elementSize(dtype()) * numel();
   }
 
   /*

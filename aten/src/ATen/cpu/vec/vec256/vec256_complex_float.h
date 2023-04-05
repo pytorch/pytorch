@@ -275,7 +275,7 @@ public:
     return scaled_values.exp();
   }
   Vectorized<c10::complex<float>> expm1() const {
-    AT_ERROR("not supported for complex numbers");
+    return map(std::expm1);
   }
   Vectorized<c10::complex<float>> sin() const {
     return map(std::sin);

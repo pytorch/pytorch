@@ -203,7 +203,7 @@ class C10_CUDA_API CUDAStream {
  * isHighPriority to true, or a stream for a specific device by setting device
  * (defaulting to the current CUDA stream.)
  */
-TORCH_API CUDAStream
+C10_API CUDAStream
 getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
 
 /**
@@ -213,7 +213,7 @@ getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
  * want to operate on a non-torch allocated stream for data exchange or similar
  * purposes
  */
-TORCH_API CUDAStream
+C10_API CUDAStream
 getStreamFromExternal(cudaStream_t ext_stream, DeviceIndex device_index);
 
 /**
@@ -222,7 +222,7 @@ getStreamFromExternal(cudaStream_t ext_stream, DeviceIndex device_index);
  * where most computation occurs when you aren't explicitly using
  * streams.
  */
-TORCH_API CUDAStream getDefaultCUDAStream(DeviceIndex device_index = -1);
+C10_API CUDAStream getDefaultCUDAStream(DeviceIndex device_index = -1);
 
 /**
  * Get the current CUDA stream, for the passed CUDA device, or for the
@@ -231,7 +231,7 @@ TORCH_API CUDAStream getDefaultCUDAStream(DeviceIndex device_index = -1);
  * be different if someone called 'setCurrentCUDAStream' or used 'StreamGuard'
  * or 'CUDAStreamGuard'.
  */
-TORCH_API CUDAStream getCurrentCUDAStream(DeviceIndex device_index = -1);
+C10_API CUDAStream getCurrentCUDAStream(DeviceIndex device_index = -1);
 
 /**
  * Set the current stream on the device of the passed in stream to be
@@ -243,7 +243,7 @@ TORCH_API CUDAStream getCurrentCUDAStream(DeviceIndex device_index = -1);
  * (which will switch both your current device and current stream in the way you
  * expect, and reset it back to its original state afterwards).
  */
-TORCH_API void setCurrentCUDAStream(CUDAStream stream);
+C10_API void setCurrentCUDAStream(CUDAStream stream);
 
 C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
 

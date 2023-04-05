@@ -92,6 +92,11 @@ Tensor _nested_from_padded_backward(
     const Tensor& grad,
     const Tensor& input,
     const bool do_transform_0213);
+std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
+    const variable_list& grads,
+    const Tensor& self,
+    const Tensor& grad_output,
+    const Tensor& weight);
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -125,15 +130,15 @@ at::Tensor pow_backward_exponent(
     const at::Tensor& exponent,
     at::Tensor result);
 at::Tensor angle_backward(at::Tensor grad, const at::Tensor& self);
-at::Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st);
-at::Tensor div_tensor_self_backward(
-    Tensor grad,
-    Tensor other,
-    ScalarType self_st);
+template <typename T>
+at::Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st);
+template <typename T>
+at::Tensor div_tensor_self_backward(Tensor grad, T other, ScalarType self_st);
 at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other);
+template <typename T>
 at::Tensor div_tensor_self_backward(
     Tensor grad,
-    Tensor other,
+    T other,
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode);
 at::Tensor div_tensor_other_backward(
@@ -320,21 +325,21 @@ at::Tensor var_backward(
     at::Tensor grad,
     const at::Tensor& self,
     at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction,
+    const c10::optional<c10::Scalar>& correction,
     bool keepdim);
 at::Tensor var_jvp(
     const at::Tensor& self_t,
     const at::Tensor& self_p,
     const at::Tensor& result,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<c10::Scalar>& correction,
     bool keepdim);
 at::Tensor std_backward(
     const at::Tensor& result,
     const at::Tensor& grad,
     const at::Tensor& self,
     at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction,
+    const c10::optional<c10::Scalar>& correction,
     bool keepdim);
 Tensor mean_backward(
     const Tensor& grad,
@@ -347,7 +352,7 @@ Tensor var_mean_backward(
     const Tensor& gmean,
     const Tensor& self,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<c10::Scalar>& correction,
     bool keepdim);
 Tensor std_mean_backward(
     const Tensor& gstd,
@@ -355,7 +360,7 @@ Tensor std_mean_backward(
     const Tensor& self,
     const Tensor& std,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<c10::Scalar>& correction,
     bool keepdim);
 at::Tensor masked_scatter_backward(
     const at::Tensor& grad,
@@ -387,6 +392,11 @@ at::Tensor split_with_sizes_backward(
     int64_t dim,
     c10::SymIntArrayRef sizes,
     const at::TensorOptions& options);
+at::Tensor _nested_split_with_sizes_backward(
+    const std::vector<torch::autograd::Variable>& grads,
+    c10::SymIntArrayRef split_sizes,
+    int64_t dim,
+    const Tensor& self);
 at::Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymInt split_size,

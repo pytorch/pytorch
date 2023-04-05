@@ -38,6 +38,9 @@ class C10_API DataPtr {
   void* get() const {
     return ptr_.get();
   }
+  void* mutable_get() {
+    return ptr_.get();
+  }
   void* get_context() const {
     return ptr_.get_context();
   }
@@ -265,5 +268,10 @@ C10_API void reportOutOfMemoryToProfiler(
     size_t total_allocated,
     size_t total_reserved,
     Device device);
+
+// used to hold traceback information in allocators
+struct GatheredContext {
+  virtual ~GatheredContext() = default;
+};
 
 } // namespace c10

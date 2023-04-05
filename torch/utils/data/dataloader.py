@@ -13,7 +13,7 @@ import queue
 import threading
 import warnings
 
-from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
+from typing import Any, Callable, Iterable, TypeVar, Generic, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
 import torch
@@ -22,7 +22,6 @@ import torch.multiprocessing as multiprocessing
 import torch.utils.data.graph_settings
 
 from torch._utils import ExceptionWrapper
-from torch._six import string_classes
 
 from . import (
     IterDataPipe,
@@ -35,7 +34,7 @@ from . import (
     Dataset,)
 
 from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
-from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES
+from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
 
 from . import _utils
 
@@ -69,7 +68,7 @@ get_worker_info = _utils.worker.get_worker_info
 logger = logging.getLogger(__name__)
 
 
-class _DatasetKind(object):
+class _DatasetKind:
     Map = 0
     Iterable = 1
 
@@ -84,13 +83,7 @@ class _DatasetKind(object):
 class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
-
-    Args:
-        data_source (Dataset): dataset to sample from
     """
-
-    def __init__(self):
-        super(_InfiniteConstantSampler, self).__init__(None)
 
     def __iter__(self):
         while True:
@@ -181,8 +174,8 @@ class DataLoader(Generic[T_co]):
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
-        pin_memory_device (str, optional): the data loader will copy Tensors
-            into device pinned memory before returning them if pin_memory is set to true.
+        pin_memory_device (str, optional): the device to pin memory to if ``pin_memory`` is
+            ``True``.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -224,8 +217,8 @@ class DataLoader(Generic[T_co]):
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
-                 shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
-                 batch_sampler: Union[Sampler[Sequence], Iterable[Sequence], None] = None,
+                 shuffle: Optional[bool] = None, sampler: Union[Sampler[int], Iterable[int], None] = None,
+                 batch_sampler: Union[Sampler[List[int]], Iterable[List[int]], None] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
@@ -396,15 +389,14 @@ class DataLoader(Generic[T_co]):
     def multiprocessing_context(self, multiprocessing_context):
         if multiprocessing_context is not None:
             if self.num_workers > 0:
-                if isinstance(multiprocessing_context, string_classes):
+                if isinstance(multiprocessing_context, str):
                     valid_start_methods = multiprocessing.get_all_start_methods()
                     if multiprocessing_context not in valid_start_methods:
                         raise ValueError(
                             ('multiprocessing_context option '
                              'should specify a valid start method in {!r}, but got '
                              'multiprocessing_context={!r}').format(valid_start_methods, multiprocessing_context))
-                    # error: Argument 1 to "get_context" has incompatible type "Union[str, bytes]"; expected "str"  [arg-type]
-                    multiprocessing_context = multiprocessing.get_context(multiprocessing_context)  # type: ignore[arg-type]
+                    multiprocessing_context = multiprocessing.get_context(multiprocessing_context)
 
                 if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
                     raise TypeError(('multiprocessing_context option should be a valid context '
@@ -423,13 +415,13 @@ class DataLoader(Generic[T_co]):
             raise ValueError('{} attribute should not be set after {} is '
                              'initialized'.format(attr, self.__class__.__name__))
 
-        super(DataLoader, self).__setattr__(attr, val)
+        super().__setattr__(attr, val)
 
     # We quote '_BaseDataLoaderIter' since it isn't defined yet and the definition can't be moved up
     # since '_BaseDataLoaderIter' references 'DataLoader'.
     def __iter__(self) -> '_BaseDataLoaderIter':
         # When using a single worker the returned iterator should be
-        # created everytime to avoid reseting its state
+        # created everytime to avoid resetting its state
         # However, in the case of a multiple workers iterator
         # the iterator is only created once in the lifetime of the
         # DataLoader object so that workers can be reused
@@ -546,7 +538,7 @@ class DataLoader(Generic[T_co]):
                 pass
         if max_num_worker_suggest is None:
             # os.cpu_count() could return Optional[int]
-            # get cpu count first and check None in order to satify mypy check
+            # get cpu count first and check None in order to satisfy mypy check
             cpu_count = os.cpu_count()
             if cpu_count is not None:
                 max_num_worker_suggest = cpu_count
@@ -565,7 +557,7 @@ class DataLoader(Generic[T_co]):
                 cpuset_checked))
 
 
-class _BaseDataLoaderIter(object):
+class _BaseDataLoaderIter:
     def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
         self._shared_seed = None
@@ -661,7 +653,7 @@ class _BaseDataLoaderIter(object):
 
 class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
     def __init__(self, loader):
-        super(_SingleProcessDataLoaderIter, self).__init__(loader)
+        super().__init__(loader)
         assert self._timeout == 0
         assert self._num_workers == 0
 
@@ -734,7 +726,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #
     #      First of all, `__del__` is **not** guaranteed to be called when
     #      interpreter exits. Even if it is called, by the time it executes,
-    #      many Python core library resources may alreay be freed, and even
+    #      many Python core library resources may already be freed, and even
     #      simple things like acquiring an internal lock of a queue may hang.
     #      Therefore, in this case, we actually need to prevent `__del__` from
     #      being executed, and rely on the automatic termination of daemonic
@@ -979,7 +971,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #        NOTE: (c) is better placed after (b) because it may leave corrupted
     #              data in `worker_result_queue`, which `pin_memory_thread`
     #              reads from, in which case the `pin_memory_thread` can only
-    #              happen at timeing out, which is slow. Nonetheless, same thing
+    #              happen at timing out, which is slow. Nonetheless, same thing
     #              happens if a worker is killed by signal at unfortunate times,
     #              but in other cases, we are better off having a non-corrupted
     #              `worker_result_queue` for `pin_memory_thread`.
@@ -993,7 +985,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #     down.
 
     def __init__(self, loader):
-        super(_MultiProcessingDataLoaderIter, self).__init__(loader)
+        super().__init__(loader)
 
         self._prefetch_factor = loader.prefetch_factor
 
@@ -1052,6 +1044,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
             if self._pin_memory_device == "xpu":
                 current_device = torch.xpu.current_device()  # type: ignore[attr-defined]
+            elif self._pin_memory_device == torch._C._get_privateuse1_backend_name():
+                custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name())
+                current_device = custom_device_mod.current_device()
             else:
                 current_device = torch.cuda.current_device()  # choose cuda for default
             pin_memory_thread = threading.Thread(

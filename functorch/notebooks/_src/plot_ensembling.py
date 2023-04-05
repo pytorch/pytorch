@@ -24,7 +24,7 @@ torch.manual_seed(0)
 # Here's a simple CNN
 class SimpleCNN(nn.Module):
     def __init__(self):
-        super(SimpleCNN, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)
         self.fc1 = nn.Linear(9216, 128)

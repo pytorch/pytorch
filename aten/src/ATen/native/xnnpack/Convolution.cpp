@@ -236,6 +236,7 @@ ContextConv2D create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
+      nullptr,                                                        // xnn_caches_t
       &convolution_op);                                               // operator
   } else {
     for (const auto i : c10::irange(4)) {
@@ -264,6 +265,7 @@ ContextConv2D create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
+      nullptr,                                                        // xnn_caches_t
       &convolution_op);                                               // operator
   }
 

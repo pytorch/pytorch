@@ -11,7 +11,7 @@ from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
     is_rerun_disabled_tests,
     unzip,
-    upload_to_s3,
+    upload_workflow_stats_to_s3,
 )
 from tools.stats.upload_test_stats import process_xml_element
 
@@ -46,7 +46,7 @@ def process_report(
         parsed_test_case = process_xml_element(test_case)
 
         # Under --rerun-disabled-tests mode, a test is skipped when:
-        # * it's skipped explicitly inside PyToch code
+        # * it's skipped explicitly inside PyTorch code
         # * it's skipped because it's a normal enabled test
         # * or it's falky (num_red > 0 and num_green > 0)
         # * or it's failing (num_red > 0 and num_green == 0)
@@ -116,8 +116,7 @@ def get_test_reports(
         for path in artifact_paths:
             unzip(path)
 
-        for report in Path(".").glob("**/*.xml"):
-            yield report
+        yield from Path(".").glob("**/*.xml")
 
 
 def get_disabled_test_name(test_id: str) -> Tuple[str, str, str, str]:
@@ -219,7 +218,7 @@ def save_results(
             f"  {disabled_test_name} from {filename}, failing {num_red}/{num_red + num_green}"
         )
 
-    upload_to_s3(
+    upload_workflow_stats_to_s3(
         workflow_id,
         workflow_run_attempt,
         "rerun_disabled_tests",

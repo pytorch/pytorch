@@ -1,5 +1,6 @@
 import os
 import textwrap
+from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
@@ -28,13 +29,20 @@ class TorchRuntimeError(TorchDynamoException):
     pass
 
 
+class InvalidBackend(TorchDynamoException):
+    def __init__(self, name):
+        super().__init__(
+            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
+        )
+
+
 class ResetRequired(TorchDynamoException):
     def __init__(self):
-        super(ResetRequired, self).__init__(
+        super().__init__(
             textwrap.dedent(
                 """
                 Must call `torch._dynamo.reset()` before changing backends.  Detected two calls to
-                `torch._dynamo.optimize(...)` with a different backend compiler arguments.
+                `torch.compile()` with a different backend compiler arguments.
                 """
             )
         )
@@ -44,13 +52,13 @@ class BackendCompilerFailed(TorchDynamoException):
     def __init__(self, backend_fn, inner_exception):
         self.backend_name = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
-        msg = f"{self.backend_name} raised {type(inner_exception).__name__}: {inner_exception}"
+        msg = f"backend={self.backend_name!r} raised:\n{type(inner_exception).__name__}: {inner_exception}"
         super().__init__(msg)
 
 
 class Unsupported(TorchDynamoException):
     def __init__(self, msg):
-        super(Unsupported, self).__init__(msg)
+        super().__init__(msg)
         self.real_stack = []
         self.msg = msg
         self.category = None
@@ -64,6 +72,27 @@ class Unsupported(TorchDynamoException):
     def add_to_stats(self, category="unimplemented"):
         self.category = category
         counters[category][self.msg] += 1
+
+
+class RecompileError(TorchDynamoException):
+    pass
+
+
+class UserErrorType(Enum):
+    DYNAMIC_CONTROL_FLOW = auto()
+
+
+class UserError(Unsupported):
+    def __init__(self, error_type: UserErrorType, msg):
+        """
+        Type of errors that would be valid in Eager, but not supported in TorchDynamo.
+        The error message should tell user about next actions.
+
+        error_type: Type of user error
+        msg: Actionable error message
+        """
+        super().__init__(msg)
+        self.error_type = error_type
 
 
 def unimplemented(msg: str):
@@ -103,16 +132,23 @@ def augment_exc_message(exc, msg="\n"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  torch._dynamo.replay('{exc.record_filename}').\n"
 
-    if not config.verbose:
-        msg += "\nSet torch._dynamo.config.verbose=True for more information\n"
+    if not config.verbose and hasattr(exc, "real_stack"):
+        msg += "\nSet torch._dynamo.config.verbose=True or TORCHDYNAMO_VERBOSE=1 for more information\n"
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
     ):
-        msg += (
-            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
-            "this script to find the smallest traced graph which reproduces this error.\n"
-        )
+        if hasattr(exc.inner_exception, "buck_command"):
+            msg += (
+                f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
+                f"this buck command to find the smallest traced graph "
+                f"which reproduces this error: {exc.inner_exception.buck_command}\n"
+            )
+        else:
+            msg += (
+                f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
+                "this script to find the smallest traced graph which reproduces this error.\n"
+            )
 
     if not config.suppress_errors:
         msg += (
@@ -149,12 +185,17 @@ def filter_stack(stack):
 
 
 def format_error_msg(exc, code, record_filename=None, frame=None):
-
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = format_bytecode(
-            "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
+        msg = str(
+            format_bytecode(
+                "WON'T CONVERT",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                code,
+            )
         )
         msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
         msg += format_exc()

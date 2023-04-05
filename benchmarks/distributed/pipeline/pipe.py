@@ -43,7 +43,7 @@ class EmbeddingLayer(nn.Embedding):
 
 class PositionalEncodingLayer(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=5000):
-        super(PositionalEncodingLayer, self).__init__()
+        super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
         pe = torch.zeros(max_len, d_model)
@@ -99,7 +99,7 @@ class TransformerLMSequential(nn.Sequential):
             layers.append(TransformerDecoderLayer(ninp, nhead, nhid, dropout))
 
         layers.append(LinearLayer(ninp, ntokens, initrange))
-        super(TransformerLMSequential, self).__init__(*layers)
+        super().__init__(*layers)
 
 
 def make_model(args, device, ntokens):

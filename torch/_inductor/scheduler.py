@@ -14,9 +14,9 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
-from .dependencies import StarDep
+from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, has_triton
+from .utils import cache_on_self, cmp, free_symbol_has, has_triton
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -96,8 +96,8 @@ class BaseSchedulerNode:
     def update_mutated_names(self, renames: Dict[str, str]):
         self.set_read_writes(self.read_writes.rename(renames))
 
-    def add_mutation_dep(self, name):
-        self.set_read_writes(self.read_writes.with_read(name))
+    def add_mutation_dep(self, dep):
+        self.set_read_writes(self.read_writes.with_read(dep))
 
     def set_users(self, users: List["NodeUser"]):
         # deduplicate
@@ -138,6 +138,38 @@ class BaseSchedulerNode:
             if dep.name not in self.scheduler.available_buffer_names
         }
 
+    def prune_redundant_deps(self, name_to_fused_node):
+        """
+        Prunes stardeps intended for mutation ordering
+        on an upstream fused node if after fusion there is another dependency
+        on the fused upstream node, making the stardep redundant
+
+        In essence this enforces an ordering on fusions. As fusions occur, prunable stardeps will
+        be incrementally removed, enabling other fusions, ensuring they are fused in order.
+        """
+        name_to_dep_count = collections.Counter()
+
+        for dep in self.unmet_dependencies:
+            if not isinstance(dep, WeakDep):
+                name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
+
+        def should_prune(dep):
+            if isinstance(dep, WeakDep):
+                is_redundant = (
+                    name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 0
+                )
+                # These can occur because fused nodes always gather deps from their snodes
+                # If B has a weakdep on A
+                # B gets fused with C, then any time BC is fused, the weakdep will reappear
+                is_self_dep = name_to_fused_node[dep.name] == self
+                return is_redundant or is_self_dep
+            else:
+                return False
+
+        deps_to_prune = {dep for dep in self.unmet_dependencies if should_prune(dep)}
+        self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
+        self.set_read_writes(self.read_writes.remove_reads(deps_to_prune))
+
     def get_name(self) -> str:
         return self.node.get_name()
 
@@ -145,7 +177,7 @@ class BaseSchedulerNode:
         return self.get_name()
 
     def get_names(self) -> Set[str]:
-        return set([self.get_name()])
+        return {self.get_name()}
 
     def get_nodes(self) -> List["BaseSchedulerNode"]:
         return [self]
@@ -176,7 +208,14 @@ class BaseSchedulerNode:
             return
 
         if (
-            isinstance(self, (SchedulerNode,))
+            (
+                isinstance(self, (SchedulerNode,))
+                # o what have i done.  lets make this an api
+                or (
+                    isinstance(self, ExternKernelSchedulerNode)
+                    and isinstance(self.node, ir.AllReduce)
+                )
+            )
             and config.inplace_buffers
             and (
                 not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
@@ -216,17 +255,21 @@ class BaseSchedulerNode:
                         V.graph.wrapper_code.codegen_inplace_reuse(
                             input_node.node, self.node
                         )
-                        V.kernel.args.make_inplace(
-                            input_node.get_name(), self.get_name()
-                        )
-                        # mutations not tracked in cpp kernels
-                        if isinstance(
-                            V.kernel, torch._inductor.codegen.triton.TritonKernel
-                        ):
-                            V.kernel.mutations.add(input_node.get_name())
-                            V.kernel.mutations.add(self.get_name())
+                        # hacky check for if V.kernel is a real kernel or NullHandler
+                        if hasattr(V.kernel, "args"):
+                            # if there isn't a triton kernel, then we don't need to call triton-specific things.
+                            # but TODO this might be a convenient place to signal to the Collective kernels to inplace
+                            # (and, can we make "kernel" less generic of a name?)
+                            V.kernel.args.make_inplace(
+                                input_node.get_name(), self.get_name()
+                            )
+                            # mutations not tracked in cpp kernels
+                            if isinstance(
+                                V.kernel, torch._inductor.codegen.triton.TritonKernel
+                            ):
+                                V.kernel.mutations.add(input_node.get_name())
+                                V.kernel.mutations.add(self.get_name())
                         return
-
         V.graph.wrapper_code.codegen_allocation(self.node)
 
     def can_free(self):
@@ -280,6 +323,25 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
     def is_extern(self):
         return True
+
+    def can_inplace(self, read_dep: dependencies.MemoryDep):
+        if self.get_aliases() or self.is_template():
+            return False
+
+        if read_dep.name not in self.scheduler.name_to_node:
+            # don't allow reuse of an 'input' buffer, we don't own it
+            # (would this have been fixed if I tracked mutations properly above?)
+            return False
+
+        if not isinstance(self.node, torch._inductor.ir.AllReduce):
+            # TODO make this a property of the IR
+            return False
+
+        if len(self.read_writes.writes) == 1:
+            write_dep = next(iter(self.read_writes.writes))
+            return read_dep.numbytes_hint() == write_dep.numbytes_hint()
+
+        return False
 
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
@@ -555,7 +617,7 @@ class NodeUser:
 class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
-        super(Scheduler, self).__init__()
+        super().__init__()
         self.backends = {}
 
         self.nodes = []
@@ -611,6 +673,10 @@ class Scheduler:
         self.current_device = None
         self.buffer_names_to_free = set()
         self.buffer_names_no_longer_needed = set()
+
+        # fx graph node to the position it appears in the graph
+        # for debug attribution
+        self.origin_to_index = {}
 
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
@@ -678,15 +744,15 @@ class Scheduler:
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
                 add_user(alt_name, node)
-                node.add_mutation_dep(alt_name)
+                node.add_mutation_dep(StarDep(alt_name))
                 for other_node in name_to_users[alt_name]:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
                     known_dep_node_names = dep_closure(node.get_name())
                     if other_name not in known_dep_node_names:
-                        # If this node alreay directly or indirectly depends on other_node,
-                        # we don't need to insert an extra StarDep.
-                        node.add_mutation_dep(other_name)
+                        # If this node already directly or indirectly depends on other_node,
+                        # we don't need to insert an extra dep.
+                        node.add_mutation_dep(WeakDep(other_name))
                         add_user(other_name, node)
 
             # add normal non-mutation dependencies
@@ -810,6 +876,11 @@ class Scheduler:
                 )
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.topological_sort_schedule()
+        self.prune_redundant_deps()
+
+    def prune_redundant_deps(self):
+        for node in self.nodes:
+            node.prune_redundant_deps(self.name_to_fused_node)
 
     def get_possible_fusions(self):
         """
@@ -928,14 +999,18 @@ class Scheduler:
         """
         node1_names = node1.get_names()
         computed_deps = set()
+
         for rd in node2.unmet_dependencies:
             for cd in node1.read_writes.writes:
                 # StarDep doesn't match MemoryDep, different indices don't match
                 # However, broadcasting sometimes strips dimensions, and if that's the case
                 # we still can match unmet dep
+                # if there's indirect indexing, don't match it
                 if (
                     rd.name == cd.name
                     and type(rd) == type(cd)
+                    and not free_symbol_has(rd.index, "tmp")
+                    and not free_symbol_has(cd.index, "tmp")
                     and rd.index == cd.index
                     and len(rd.size) >= len(cd.size)
                     and rd.size[: len(cd.size)] == cd.size
@@ -1016,9 +1091,8 @@ class Scheduler:
                     V.graph.wrapper_code.codegen_free(node.node)
             elif name in V.graph.graph_inputs:
                 storage = V.graph.graph_inputs[name].data
-                if not isinstance(storage, ir.ReinterpretView):
-                    assert storage.is_input_buffer()
-                    V.graph.wrapper_code.codegen_free(storage.data)
+                assert storage.is_input_buffer()
+                V.graph.wrapper_code.codegen_free(storage.data)
 
         self.buffer_names_to_free.clear()
 
@@ -1070,6 +1144,8 @@ class Scheduler:
             device.type != "cuda" or device.index is not None
         ), f"{device} should have been normalized in lowering"
         V.graph.device_types.add(device.type)
+        V.graph.add_device_idx(device.index)
+
         if device.type == "cpu":
             from .codegen.cpp import CppScheduling
 
@@ -1094,9 +1170,21 @@ class Scheduler:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
 
+    def enter_context(self, node):
+        def get_order(n):
+            if n not in self.origin_to_index:
+                self.origin_to_index.update({n: i for i, n in enumerate(n.graph.nodes)})
+            return self.origin_to_index[n]
+
+        origins = [(get_order(e), e) for n in node.get_nodes() for e in n.node.origins]
+        if origins:
+            _, last = max(origins)
+            V.graph.wrapper_code.enter_context(last)
+
     @dynamo_timed
     def codegen(self):
         for node in self.nodes:
+            self.enter_context(node)
             self.buffer_names_no_longer_needed.update(node.last_usage)
 
             if not isinstance(node, NopKernelSchedulerNode):

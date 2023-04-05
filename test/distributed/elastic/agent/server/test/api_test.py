@@ -189,8 +189,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         spec = self._get_worker_spec(max_restarts=1)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
-        self.assertEquals(WorkerState.INIT, worker_group.state)
-        self.assertEquals(spec.max_restarts, agent._remaining_restarts)
+        self.assertEqual(WorkerState.INIT, worker_group.state)
+        self.assertEqual(spec.max_restarts, agent._remaining_restarts)
 
     @patch("torch.distributed.elastic.agent.server.api.put_metric")
     def test_record_flakiness_metric(self, put_metric_mock):
@@ -398,7 +398,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         agent.run()
 
         # no failure, no membership changes -> no retries
-        self.assertEquals(max_restarts, agent._remaining_restarts)
+        self.assertEqual(max_restarts, agent._remaining_restarts)
         record_events_mock.assert_called_once()
 
     @patch.object(TestAgent, "_initialize_workers", side_effect=RuntimeError())
@@ -450,7 +450,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         worker_group = agent._worker_group
 
         agent.run()
-        self.assertEquals(WorkerState.SUCCEEDED, worker_group.state)
+        self.assertEqual(WorkerState.SUCCEEDED, worker_group.state)
         record_events_mock.assert_called_once()
 
     @patch.object(
@@ -482,8 +482,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         )
         agent = TestAgent(spec)
         total_sum, ranks = agent._get_ranks(role_infos, 0, 0, len(role_infos))
-        self.assertEquals(15, total_sum)
-        self.assertEquals([0, 1, 2, 3], list(ranks))
+        self.assertEqual(15, total_sum)
+        self.assertEqual([0, 1, 2, 3], list(ranks))
 
     def test_assign_worker_ranks(self):
         role_infos = [

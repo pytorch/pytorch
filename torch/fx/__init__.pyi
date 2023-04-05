@@ -1,7 +1,11 @@
+from ._symbolic_trace import (
+    symbolic_trace as symbolic_trace,
+    Tracer as Tracer,
+    wrap as wrap,
+)
 from .graph import Graph as Graph
 from .graph_module import GraphModule as GraphModule
-from .node import Node as Node, map_arg as map_arg
-from .proxy import Proxy as Proxy
-from ._symbolic_trace import Tracer as Tracer, symbolic_trace as symbolic_trace, wrap as wrap
 from .interpreter import Interpreter as Interpreter, Transformer as Transformer
+from .node import map_arg as map_arg, Node as Node
+from .proxy import Proxy as Proxy
 from .subgraph_rewriter import replace_pattern as replace_pattern

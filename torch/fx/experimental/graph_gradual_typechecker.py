@@ -11,12 +11,7 @@ import itertools
 
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
-
-try:
-    import sympy  # type: ignore[import]
-    HAS_SYMPY = True
-except ImportError:
-    HAS_SYMPY = False
+import sympy
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 _REFINEMENT_RULES: Dict[Target, Callable] = {}
@@ -305,7 +300,7 @@ def calculate_out_dimension(d_in, module_instance, index):
     dilation = (module_instance.dilation, module_instance.dilation) \
         if isinstance(module_instance.dilation, int) else module_instance.dilation
 
-    DIMENSION_TYPES = (int, sympy.Symbol) if HAS_SYMPY else (int,)
+    DIMENSION_TYPES = (int, sympy.Symbol)
 
     if d_in == Dyn:
         return Dyn
@@ -814,18 +809,15 @@ class Refine:
         """
         Replace all unknown types with fresh type variables.
         """
-        if HAS_SYMPY:
-            if isinstance(typ, Var):
-                return sympy.symbols(str(typ))
-            elif isinstance(typ, TensorType):
-                new_args = [self.convert_to_sympy_symbols(a) for a in typ.__args__]
-                return TensorType(tuple(new_args))
-            elif isinstance(typ, list):
-                return [self.convert_to_sympy_symbols(t) for t in typ]
-            elif isinstance(typ, tuple):
-                return (self.convert_to_sympy_symbols(t) for t in typ)
-            else:
-                return typ
+        if isinstance(typ, Var):
+            return sympy.symbols(str(typ))
+        elif isinstance(typ, TensorType):
+            new_args = [self.convert_to_sympy_symbols(a) for a in typ.__args__]
+            return TensorType(tuple(new_args))
+        elif isinstance(typ, list):
+            return [self.convert_to_sympy_symbols(t) for t in typ]
+        elif isinstance(typ, tuple):
+            return (self.convert_to_sympy_symbols(t) for t in typ)
         else:
             return typ
 
@@ -865,29 +857,26 @@ class Refine:
             pass
 
     def infer_symbolic_relations(self, n: Node):
-        if HAS_SYMPY:
-            n.type = self.convert_to_sympy_symbols(n.type)
-            if n.op == 'call_function':
-                if n.target in _RULES:
-                    return _RULES[n.target](n)
-                else:
-                    pass
-
-            if n.op == 'call_module':
-                module_instance = self.traced.get_submodule(n.target)
-                if type(module_instance) in _RULES:
-                    return _RULES[type(module_instance)](n, module_instance)
-                else:
-                    pass
-
-            if n.op == 'output':
-                def get_node_type(a):
-                    return a.type
-                n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
-                return n.type
-
+        n.type = self.convert_to_sympy_symbols(n.type)
+        if n.op == 'call_function':
+            if n.target in _RULES:
+                return _RULES[n.target](n)
             else:
                 pass
+
+        if n.op == 'call_module':
+            module_instance = self.traced.get_submodule(n.target)
+            if type(module_instance) in _RULES:
+                return _RULES[type(module_instance)](n, module_instance)
+            else:
+                pass
+
+        if n.op == 'output':
+            def get_node_type(a):
+                return a.type
+            n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
+            return n.type
+
         else:
             pass
 

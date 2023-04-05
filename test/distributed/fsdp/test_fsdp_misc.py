@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import functools
+import os
 import sys
 import warnings
 from collections import namedtuple
@@ -19,6 +20,7 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
+from torch.distributed.fsdp.flat_param import _FSDP_USE_UNSAFE_SETATTR
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
     ModuleWrapPolicy,
@@ -95,6 +97,20 @@ class TestFSDPMisc(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_not_all_outputs_used_in_loss(self):
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ]
+            },
+            self._test_fsdp_not_all_outputs_used_in_loss,
+        )
+
+    def _test_fsdp_not_all_outputs_used_in_loss(
+        self, sharding_strategy: ShardingStrategy
+    ):
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -120,58 +136,52 @@ class TestFSDPMisc(FSDPTest):
                 for p1, p2 in zip(fsdp.parameters(), local.parameters()):
                     torch.testing.assert_close(p1, p2)
 
-        for sharding_strategy in [
-            ShardingStrategy.FULL_SHARD,
-            ShardingStrategy.SHARD_GRAD_OP,
-            ShardingStrategy.NO_SHARD,
-        ]:
-            with self.subTest(sharding_strategy=sharding_strategy):
-                fsdp_ctor = functools.partial(FSDP, sharding_strategy=sharding_strategy)
-                m = MyModule().cuda()
-                m_local = deepcopy(m)
-                local_m = m_local
-                prev_params = [p.clone() for p in m_local.parameters()]
+        fsdp_ctor = functools.partial(FSDP, sharding_strategy=sharding_strategy)
+        m = MyModule().cuda()
+        m_local = deepcopy(m)
+        local_m = m_local
+        prev_params = [p.clone() for p in m_local.parameters()]
 
-                m.lin1 = fsdp_ctor(m.lin1)
-                m = fsdp_ctor(m)
-                _check_equal(m_local, m)
+        m.lin1 = fsdp_ctor(m.lin1)
+        m = fsdp_ctor(m)
+        _check_equal(m_local, m)
 
-                opt = torch.optim.SGD(m.parameters(), lr=1e-3)
-                opt_local = torch.optim.SGD(local_m.parameters(), lr=1e-3)
+        opt = torch.optim.SGD(m.parameters(), lr=1e-3)
+        opt_local = torch.optim.SGD(local_m.parameters(), lr=1e-3)
 
-                for i in range(6):
-                    t = torch.ones(4, device="cuda")
-                    a, b = m(t)
-                    local_a, local_b = local_m(t)
-                    if i < 2:
-                        # use both params in loss computation. Later,
-                        # b will go unused and we check grads are the
-                        # same as local training.
-                        loss = (a @ b).sum()
-                        loss_local = (local_a @ local_b).sum()
-                    else:
-                        loss = a.sum()
-                        loss_local = local_a.sum()
+        for i in range(6):
+            t = torch.ones(4, device="cuda")
+            a, b = m(t)
+            local_a, local_b = local_m(t)
+            if i < 2:
+                # use both params in loss computation. Later,
+                # b will go unused and we check grads are the
+                # same as local training.
+                loss = (a @ b).sum()
+                loss_local = (local_a @ local_b).sum()
+            else:
+                loss = a.sum()
+                loss_local = local_a.sum()
 
-                    loss.backward()
-                    loss_local.backward()
-                    _check_resharded(m)
-                    opt.step()
-                    opt_local.step()
-                    _check_equal(m_local, m)
-                    # Ensure at least some change from previous params, otherwise
-                    # above check would be vacuously true.
-                    self.assertTrue(
-                        any(
-                            not torch.equal(p1, p2)
-                            for p1, p2 in zip(prev_params, m_local.parameters())
-                        )
-                    )
-                    prev_params = [p.clone() for p in local_m.parameters()]
-                    opt.zero_grad()
-                    opt_local.zero_grad()
+            loss.backward()
+            loss_local.backward()
+            _check_resharded(m)
+            opt.step()
+            opt_local.step()
+            _check_equal(m_local, m)
+            # Ensure at least some change from previous params, otherwise
+            # above check would be vacuously true.
+            self.assertTrue(
+                any(
+                    not torch.equal(p1, p2)
+                    for p1, p2 in zip(prev_params, m_local.parameters())
+                )
+            )
+            prev_params = [p.clone() for p in local_m.parameters()]
+            opt.zero_grad()
+            opt_local.zero_grad()
 
-                dist.barrier()
+        dist.barrier()
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
@@ -629,6 +639,60 @@ class TestFSDPMiscWorldSize1(FSDPTest):
             "when offloading parameters.",
         ):
             fsdp_model(inp)
+
+    @skip_if_lt_x_gpu(2)
+    def test_unsafe_setattr(self):
+        """
+        Tests that the environment variable for using unsafe setattr gates as
+        expected.
+        """
+        self.run_subtests(
+            {"use_orig_params": [False, True]},
+            self._test_unsafe_setattr,
+        )
+
+    def _test_unsafe_setattr(self, use_orig_params: bool):
+        called_setattr_override = False
+
+        class SetattrLinear(nn.Module):
+            def __init__(self, in_dim: int, out_dim: int, device: torch.device) -> None:
+                super().__init__()
+                self.weight = nn.Parameter(
+                    torch.randn((in_dim, out_dim), device=device)
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x @ self.weight
+
+            def __setattr__(self, name: str, value: Any) -> None:
+                nonlocal called_setattr_override
+                called_setattr_override = True
+                return super().__setattr__(name, value)
+
+        # Construct FSDP module without changing any environment variables and
+        # run forward, which triggers both unsharded and sharded view setting
+        module = SetattrLinear(5, 5, torch.device("cuda"))
+        fsdp_module = FSDP(module, use_orig_params=use_orig_params)
+        inp = torch.randn((8, 5), device=torch.device("cuda"))
+        called_setattr_override = False
+        fsdp_module(inp)
+        self.assertTrue(called_setattr_override)
+
+        # Repeat with unsafe setattr explicitly enabled
+        os.environ[_FSDP_USE_UNSAFE_SETATTR] = "1"
+        module = SetattrLinear(5, 5, torch.device("cuda"))
+        fsdp_module = FSDP(module, use_orig_params=use_orig_params)
+        called_setattr_override = False
+        fsdp_module(inp)
+        self.assertFalse(called_setattr_override)
+
+        # Repeat with unsafe setattr explicitly disabled
+        os.environ[_FSDP_USE_UNSAFE_SETATTR] = "0"
+        module = SetattrLinear(5, 5, torch.device("cuda"))
+        fsdp_module = FSDP(module, use_orig_params=use_orig_params)
+        called_setattr_override = False
+        fsdp_module(inp)
+        self.assertTrue(called_setattr_override)
 
 
 instantiate_parametrized_tests(TestFSDPMisc)

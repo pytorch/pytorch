@@ -4,6 +4,7 @@ import copy
 import itertools
 import functools
 import unittest
+from contextlib import nullcontext
 
 try:
     import torchvision
@@ -300,9 +301,8 @@ class TestMkldnn(TestCase):
     def test_conv3d_bf16(self):
         self._test_conv_bf16_base(dim=3)
 
-    def _test_conv2d_nhwc_base(self, weight_memory_format, dtype):
-        conv_module = torch.nn.Conv2d
-        input_shapes = (224, 224)
+    def _test_conv2d_nhwc_base(self, conv_module, weight_memory_format, dtype):
+        input_shapes = (55, 55)
         options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
         for train, bias, dilation, groups in options:
             N = torch.randint(3, 10, (1,)).item()
@@ -310,8 +310,13 @@ class TestMkldnn(TestCase):
             C = torch.randint(1, 3, (1,)).item() * groups
             x_shape = (N, C) + input_shapes
             x = torch.randn(x_shape, dtype=dtype)
-            # conv1: mkldnn conv2d in contiguous memory format (nchw)
-            # conv2: mkldnn conv2d in channels last memory format (nhwc)
+
+            # TODO: remove this when group depthwise is supported:
+            if conv_module is torch.nn.ConvTranspose2d and groups > 1 and C == groups:
+                continue
+
+            # conv1: mkldnn conv in contiguous memory format (nchw)
+            # conv2: mkldnn conv in channels last memory format (nhwc)
             conv1 = conv_module(in_channels=C,
                                 out_channels=M,
                                 kernel_size=3,
@@ -342,15 +347,85 @@ class TestMkldnn(TestCase):
                 self.assertEqual(x1.grad, x2.grad)
 
     def test_conv2d_nhwc(self):
-        self._test_conv2d_nhwc_base(torch.contiguous_format, dtype=torch.float32)
-        self._test_conv2d_nhwc_base(torch.channels_last, dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.float32)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv2d_nhwc_bf16(self):
         # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
         if has_bf16_support():
-            self._test_conv2d_nhwc_base(torch.contiguous_format, dtype=torch.bfloat16)
-            self._test_conv2d_nhwc_base(torch.channels_last, dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16)
+
+    def test_conv_transpose2d_nhwc(self):
+        self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_conv_transpose2d_nhwc_bf16(self):
+        # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
+        if has_bf16_support():
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16)
+
+    def _test_conv_transpose_base(self, dim):
+        conv_module = {
+            1: torch.nn.ConvTranspose1d,
+            2: torch.nn.ConvTranspose2d,
+            3: torch.nn.ConvTranspose3d
+        }
+        input_shapes = {1: (55,), 2: (28, 28), 3: (14, 14, 14)}
+        options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
+        for train, bias, dilation, groups in options:
+            N = torch.randint(3, 10, (1,)).item()
+            M = torch.randint(1, 3, (1,)).item() * groups
+            C = torch.randint(1, 3, (1,)).item() * groups
+            x_shape = (N, C) + input_shapes[dim]
+            data = torch.randn(x_shape, dtype=torch.float32)
+            # conv: mkldnn tranpose conv fp32
+            # conv_ref: thnn transpose conv fp32
+            conv = conv_module[dim](in_channels=C,
+                                    out_channels=M,
+                                    kernel_size=3,
+                                    stride=1,
+                                    padding=1,
+                                    dilation=dilation,
+                                    bias=bias,
+                                    groups=groups).to(dtype=torch.float32)
+            x = data.clone()
+            x_ref = x.clone()
+            if train:
+                x.requires_grad_()
+                x_ref.requires_grad_()
+
+            conv_ref = copy.deepcopy(conv)
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_ref = conv_ref(x_ref)
+                if train:
+                    y_ref.sum().backward()
+
+            y = conv(x)
+            if train:
+                y.sum().backward()
+
+            self.assertEqual(y, y_ref)
+            if train:
+                self.assertEqual(x.grad, x_ref.grad)
+                self.assertEqual(conv.weight.grad,
+                                 conv_ref.weight.grad,
+                                 atol=1e-3,
+                                 rtol=1e-3)
+                if bias:
+                    self.assertEqual(conv.bias.grad, conv_ref.bias.grad)
+
+    def test_conv_transpose1d(self):
+        self._test_conv_transpose_base(dim=1)
+
+    def test_conv_transpose2d(self):
+        self._test_conv_transpose_base(dim=2)
+
+    def test_conv_transpose3d(self):
+        self._test_conv_transpose_base(dim=3)
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -1317,7 +1392,7 @@ class TestMkldnn(TestCase):
 
                 model1 = copy.deepcopy(model)
                 model2 = copy.deepcopy(model)
-                with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16):
+                with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16), torch.no_grad() if not training else nullcontext():
                     with torch.backends.mkldnn.flags(enabled=False):
                         torch.manual_seed(seed)
                         output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
