@@ -24,8 +24,7 @@ class TorchCompileTests(unittest.TestCase):
         model(x)
         self.assertEqual(cnt.frame_count, 1)
 
-
-    def test_compiled_model_can_be_saved(self):
+    def test_overwrite_call_impl(self):
         model = ToyModel()
         model(torch.randn(1, 10))
         self.assertTrue(model._compiled_call_impl is None)
@@ -33,7 +32,10 @@ class TorchCompileTests(unittest.TestCase):
         model(torch.rand(1, 10))
         self.assertTrue(model._compiled_call_impl is not None)
 
-        
+    def test_compiled_model_can_be_saved_and_loaded(self):
+        model = ToyModel()
+        model.compile()
+        model(torch.randn(1, 10))
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(model, os.path.join(tmpdirname, "model.pt"))
