@@ -42,7 +42,6 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | Stable CUDA | Experimental CUDA |
 | --- | --- | --- | --- |
-| 2.0.1 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
 | 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
 | 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
 | 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
@@ -248,9 +247,9 @@ Minor release process takes around 6-7 weeks to complete.
 
 1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2-3 weeks after the release completion.
 2. Patch Release: Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed and following decisions are made:
-  * Should the new patch Release be created
-  * Timeline execution for the patch Release
-3. Cherry picking phase. Starts after the decision is made to create patch Release. At this point a new Issue tracker for patch release is created, and announcement is made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the regressions are asked to create cherry picks. This process normally takes 2 weeks.
+  * Should the new patch Release be created ?
+  * Timeline execution for the patch release
+3. Cherry picking phase starts after the decision is made to create patch release. At this point a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
 4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger new build and produce new release candidate. Announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
 5. General Availability
 
