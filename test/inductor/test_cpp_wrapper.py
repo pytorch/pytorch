@@ -107,7 +107,7 @@ if RUN_CUDA:
         device: str = "cuda"
         tests: TorchTestCase = test_torchinductor.CudaTests()
 
-    # Maintain two seperate test lists for cuda and cpp for now
+    # Maintain two separate test lists for cuda and cpp for now
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_bitwise"),  # int32
