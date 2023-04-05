@@ -87,6 +87,7 @@ jobs:
           { config: "default", shard: 5, num_shards: 6, runner: "linux.4xlarge" },
           { config: "default", shard: 6, num_shards: 6, runner: "linux.4xlarge" },
         ]}
+      sync-tag: asan-build
 
   linux-focal-py3_9-clang7-asan-test:
     name: linux-focal-py3.9-clang7-asan
@@ -96,6 +97,7 @@ jobs:
       build-environment: linux-focal-py3.9-clang7-asan
       docker-image: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.test-matrix }}
+      sync-tag: asan-test
 
   linux-focal-py3_8-clang10-onnx-build:
     name: linux-focal-py3.8-clang10-onnx

@@ -463,6 +463,7 @@ def run_test(
         and not RERUN_DISABLED_TESTS
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
+        and os.getenv('PYTORCH_TEST_WITH_SLOW', '0') != '1'
     )
     timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))

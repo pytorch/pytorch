@@ -82,3 +82,25 @@ jobs:
       build-environment: linux-bionic-py3.8-clang9
       docker-image: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.test-matrix }}
+
+  linux-focal-py3_9-clang7-asan-build:
+    name: linux-focal-py3.9-clang7-asan
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-py3.9-clang7-asan
+      docker-image-name: pytorch-linux-focal-py3-clang7-asan
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
+        ]}
+      sync-tag: asan-build
+
+  linux-focal-py3_9-clang7-asan-test:
+    name: linux-focal-py3.9-clang7-asan
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-py3_9-clang7-asan-build
+    with:
+      build-environment: linux-focal-py3.9-clang7-asan
+      docker-image: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.test-matrix }}
+      sync-tag: asan-test
