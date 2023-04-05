@@ -326,7 +326,7 @@ auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const Tenso
 
 int64_t get_available_workspace() {
   int device;
-  C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+  C10_CUDA_CHECK(cudaGetDevice(&device));
   size_t max_block_size = 0;
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
   return static_cast<int64_t>(max_block_size);

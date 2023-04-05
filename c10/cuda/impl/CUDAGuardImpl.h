@@ -29,17 +29,20 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Device exchangeDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
-    int old_device_index = c10::cuda::ExchangeDevice(d.index());
-    return Device(DeviceType::CUDA, old_device_index);
+    Device old_device = getDevice();
+    if (old_device.index() != d.index()) {
+      C10_CUDA_CHECK(cudaSetDevice(d.index()));
+    }
+    return old_device;
   }
   Device getDevice() const override {
     int device;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    C10_CUDA_CHECK(cudaGetDevice(&device));
     return Device(DeviceType::CUDA, device);
   }
   c10::optional<Device> uncheckedGetDevice() const noexcept {
     int device;
-    const auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDevice(&device));
+    const auto err = C10_CUDA_ERROR_HANDLED(cudaGetDevice(&device));
     C10_CUDA_CHECK_WARN(err);
     if (err != cudaSuccess) {
       return c10::nullopt;
@@ -48,10 +51,16 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   void setDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
-    C10_CUDA_CHECK(c10::cuda::SetDevice(d.index()));
+    Device current_device = getDevice();
+    if (current_device != d) {
+      C10_CUDA_CHECK(cudaSetDevice(d.index()));
+    }
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
+    auto current_device = uncheckedGetDevice();
+    if (!current_device.has_value() || current_device.value() != d) {
+      C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
+    }
   }
   Stream getStream(Device d) const noexcept override {
     return getCurrentCUDAStream(d.index()).unwrap();
@@ -105,15 +114,15 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       return;
     auto cuda_event = static_cast<cudaEvent_t>(event);
     int orig_device;
-    C10_CUDA_CHECK_WARN(c10::cuda::GetDevice(&orig_device));
-    C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(device_index));
+    C10_CUDA_CHECK_WARN(cudaGetDevice(&orig_device));
+    C10_CUDA_CHECK_WARN(cudaSetDevice(device_index));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_deletion(
           reinterpret_cast<uintptr_t>(cuda_event));
     }
     C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
-    C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(orig_device));
+    C10_CUDA_CHECK_WARN(cudaSetDevice(orig_device));
   }
 
   void record(
