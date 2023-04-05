@@ -840,7 +840,7 @@ class TestForeach(TestCase):
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
         dtypes=(torch.float,),
     )
-    def test_inplace_foreach_multi_grad_fn(self, device, dtype, op):
+    def test_inplace_foreach_preserves_requires_grad(self, device, dtype, op):
         inplace_op = op.inplace_variant
         if inplace_op is None:
             return
