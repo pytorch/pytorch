@@ -263,6 +263,7 @@ header_template_rule(
     include = "aten/src",
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
+        "@AT_MKLDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
         "@AT_FFTW_ENABLED@": "0",
@@ -1444,7 +1445,12 @@ cc_library(
 
 cu_library(
     name = "caffe2_cuda",
-    srcs = [":caffe2_cu_srcs"],
+    # one may think that `quantization_gpu.cu` could be a separate kernel,
+    # however that leads to de-registration problem that's described in
+    # https://github.com/pytorch/pytorch/issues/79236
+    # To solve it we add it into the `caffe2_cuda`,
+    # this is also aligned with the CMake build.
+    srcs = [":caffe2_cu_srcs"] + ["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"],
     copts = CAFFE2_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
     deps = [
@@ -1591,12 +1597,6 @@ TORCH_COPTS = COMMON_COPTS + [
     "-fno-trapping-math",
 ]
 
-cu_library(
-    name = "torch_distributed_cuda",
-    srcs = ["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"],
-    deps = [":torch_headers"],
-)
-
 torch_sources = {
     k: ""
     for k in (
@@ -1631,7 +1631,6 @@ cc_library(
         "//caffe2/proto:torch_cc_proto",
         "@kineto",
     ] + if_cuda([
-        ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",
         "@cutlass",
     ]),
