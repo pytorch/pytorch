@@ -108,9 +108,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 if config.assume_static_by_default:
                     # The guard produced here must be narrow, because
                     # we are running with assume_static_by_default
-                    self.assertTrue("L['x'].size()[0] == 6" in guard.code_list)
+                    self.assertTrue("x.size()[0] == 6" in guard.code_list)
                 else:
-                    self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
+                    self.assertTrue("x.size()[0] <= 10" in guard.code_list)
 
         self.assertTrue(hit)
 

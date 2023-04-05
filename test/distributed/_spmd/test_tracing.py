@@ -10,16 +10,16 @@ import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
 from torch.distributed._spmd.api import (
-    compile,
     COMPILED_OBJECT_KEY,
     Override,
     Schema,
     SPMD,
+    compile,
 )
 from torch.distributed._spmd.comm_tensor import CommTensor
 from torch.distributed._tensor import DeviceMesh, Replicate
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
+from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed.distributed_c10d import get_global_rank, get_world_size
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -123,8 +123,12 @@ class TraceDeviceMeshTestBase:
 
             # use a local_tensor + 1 for tracing to make sure that we are not
             # simply replaying recorded tensor value
-            to_receive = torch.empty_like(scattered_tensors[mesh.get_coordinate()[dim]])
-            traced_fn = make_fx(fn)(to_receive, [t + 1 for t in scattered_tensors])
+            to_receive = torch.empty_like(
+                scattered_tensors[mesh.get_coordinate()[dim]]
+            )
+            traced_fn = make_fx(fn)(
+                to_receive, [t + 1 for t in scattered_tensors]
+            )
 
             received_tensor = traced_fn(to_receive, scattered_tensors)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
@@ -141,18 +145,26 @@ class TraceDeviceMeshTestBase:
                 get_global_rank(dim_group, i) for i in range(dim_group_size)
             ]
 
-            def fn(tensor: torch.Tensor):
-                big_tensor = mesh.all_gather(tensor, mesh_dim=dim)
-                return list(torch.chunk(big_tensor, dim_group_size))
+            gathered_list = [
+                torch.empty_like(local_tensor) for _ in range(dim_group_size)
+            ]
+
+            def fn(gathered_list: List[torch.Tensor], tensor: torch.Tensor):
+                gathered_list = [CommTensor(t) for t in gathered_list]
+                tensor = CommTensor(tensor)
+                mesh.all_gather(gathered_list, tensor, mesh_dim=dim)
+                return [t * 1 for t in gathered_list]
 
             # use a local_tensor + 1 for tracing to make sure that we are not
             # simply replaying recorded tensor value
-            traced_fn = make_fx(fn)(local_tensor + 1)
-            gathered_list = traced_fn(local_tensor)
+            traced_fn = make_fx(fn)(gathered_list, local_tensor + 1)
+            gathered_list = traced_fn(gathered_list, local_tensor)
 
             self.assertEqual(len(gathered_list), dim_group_size)
             for idx, gathered_tensor in enumerate(gathered_list):
-                self.assertEqual(gathered_tensor, torch.ones(3, 3) * global_ranks[idx])
+                self.assertEqual(
+                    gathered_tensor, torch.ones(3, 3) * global_ranks[idx]
+                )
 
 
 class TraceDeviceMesh3DTest(DTensorTestBase, TraceDeviceMeshTestBase):
@@ -210,10 +222,14 @@ class TraceModuleTest(DTensorTestBase):
         spmd = SPMD(
             deepcopy(model),
             schema=Schema(
-                mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
+                mesh=DeviceMesh(
+                    self.device_type, torch.arange(self.world_size)
+                ),
                 placements=[Replicate()],
             ),
-            input_schemas=kwargs["inp_schemas"] if "inp_schemas" in kwargs else None,
+            input_schemas=kwargs["inp_schemas"]
+            if "inp_schemas" in kwargs
+            else None,
         )
         if "inp_schemas" in kwargs:
             del kwargs["inp_schemas"]
@@ -233,7 +249,8 @@ class TraceModuleTest(DTensorTestBase):
             # _Partial tensor shouldn't do that automatically. Hence explicitly
             # do division here.
             self.assertTrue(
-                p1.grad.allclose(p2.grad / self.world_size) or p1.grad.allclose(p2.grad)
+                p1.grad.allclose(p2.grad / self.world_size)
+                or p1.grad.allclose(p2.grad)
             )
 
     @with_comms
@@ -254,7 +271,9 @@ class TraceModuleTest(DTensorTestBase):
         inp_kwargs = {}
         inp_kwargs["inp_schemas"] = [
             Schema(
-                mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
+                mesh=DeviceMesh(
+                    self.device_type, torch.arange(self.world_size)
+                ),
                 placements=[Replicate()],
             )
         ]
@@ -312,7 +331,9 @@ class TraceModuleTest(DTensorTestBase):
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.module_list = nn.ModuleList([nn.Linear(10, 10) for _ in range(2)])
+                self.module_list = nn.ModuleList(
+                    [nn.Linear(10, 10) for _ in range(2)]
+                )
 
             def forward(self, x):
                 return sum([m(x) for m in self.module_list])
@@ -338,7 +359,9 @@ class TraceModuleTest(DTensorTestBase):
             SPMD(
                 deepcopy(top_model),
                 schema=Schema(
-                    mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
+                    mesh=DeviceMesh(
+                        self.device_type, torch.arange(self.world_size)
+                    ),
                     placements=[Replicate()],
                 ),
             ),
@@ -353,7 +376,8 @@ class TraceModuleTest(DTensorTestBase):
             # _Partial tensor shouldn't do that automatically. Hence explicitly
             # do division here.
             self.assertTrue(
-                p1.grad.allclose(p2.grad / self.world_size) or p1.grad.allclose(p2.grad)
+                p1.grad.allclose(p2.grad / self.world_size)
+                or p1.grad.allclose(p2.grad)
             )
 
 
@@ -373,7 +397,9 @@ class DataDependentModule(nn.Module):
         positive = x[x >= 0]
         negative = x[x < 0]
 
-        in_sizes = torch.tensor([positive.numel(), negative.numel()], dtype=torch.int32)
+        in_sizes = torch.tensor(
+            [positive.numel(), negative.numel()], dtype=torch.int32
+        )
         out_sizes = torch.empty_like(in_sizes)
         dist.all_to_all_single(
             out_sizes,
@@ -383,7 +409,9 @@ class DataDependentModule(nn.Module):
         )
 
         xs = [positive, negative]
-        ys = [torch.Tensor(out_sizes[i].item()) for i in range(out_sizes.numel())]
+        ys = [
+            torch.Tensor(out_sizes[i].item()) for i in range(out_sizes.numel())
+        ]
         dist.all_to_all(ys, xs)
 
         # some dummy compute
@@ -580,7 +608,9 @@ class TraceTrainStepTest(DTensorTestBase):
         transform_targets = []
 
         class DDMOverride(Override):
-            def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+            def replacement(
+                self, orig_submodule: torch.nn.Module
+            ) -> torch.nn.Module:
                 return DummyDDM()
 
             def transform(
@@ -597,7 +627,9 @@ class TraceTrainStepTest(DTensorTestBase):
                         # original logic, as we are testing the ability to
                         # modify graph after DTensor expansion.
                         with gm.graph.inserting_before(node):
-                            new_node = gm.graph.call_function(torch.add, args=node.args)
+                            new_node = gm.graph.call_function(
+                                torch.add, args=node.args
+                            )
                         node.replace_all_uses_with(new_node)
 
                 gm.graph.lint()
@@ -658,7 +690,9 @@ class TraceTrainStepTest(DTensorTestBase):
         self.assertEqual(graph_optimization.call_count, 1)
         gm = train_step.__dict__[COMPILED_OBJECT_KEY].gm
         train_step(mod, opt, inp)
-        self.assertEqual(id(gm), id(train_step.__dict__[COMPILED_OBJECT_KEY].gm))
+        self.assertEqual(
+            id(gm), id(train_step.__dict__[COMPILED_OBJECT_KEY].gm)
+        )
         self.assertEqual(graph_optimization.call_count, 1)
 
 

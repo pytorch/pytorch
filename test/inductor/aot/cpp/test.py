@@ -1,8 +1,9 @@
-import shutil
-
 import torch
 import torch._dynamo
 import torch._inductor
+import torch._inductor.config
+
+torch._inductor.config.aot_codegen_output_prefix = "aot_inductor_output"
 
 
 class Net(torch.nn.Module):
@@ -17,5 +18,5 @@ class Net(torch.nn.Module):
 
 inp = torch.randn((32, 64), device="cpu")
 module, _ = torch._dynamo.export(Net(), inp)
-lib_path = torch._inductor.aot_compile(module, [inp])
-shutil.copy(lib_path, "aot_inductor_output.so")
+so_path = torch._inductor.aot_compile(module, [inp])
+print(so_path)

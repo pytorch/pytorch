@@ -175,12 +175,7 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
     out_size[0] *= group_size
     out_tensor = shard.new_empty(out_size)
     assert out_tensor.is_contiguous()
-    # FIXME gloo doesn't support _allgather_base
-    if shard.is_cpu:
-        tensor_list = list(torch.chunk(out_tensor, group_size))
-        work = dist.all_gather(tensor_list, shard, group=group, async_op=True)
-    else:
-        work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
+    work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
     _register_tensor_work(out_tensor, work)
 
     return out_tensor
@@ -301,38 +296,6 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
 
 
 
-def all_gather_tensor(
-    self: torch.Tensor,
-    gather_dim: int,
-    group: RANK_TYPES,
-    tag: str = "",
-):
-    """
-    Gather tensor data across from all machines and concatenate over ``gather_dim``.
-
-    Note that it currently only supports gather_dim = 0.
-
-    The input tensor is left unmodified.
-    Group can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
-        DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
-
-    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
-    that information and perform collective algebraic optimization. Use other forms of input for that.
-    """
-    assert self.is_contiguous()
-    tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch._C._nn.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
-    res: torch.Tensor = AsyncCollectiveTensor(tensor)
-    _register_wrapper_tensor(res, tensor)
-    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
-    if gather_dim != 0:
-        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
-    return res
-
 def reduce_scatter_tensor(
     self: torch.Tensor,
     reduceOp: str,
@@ -344,6 +307,7 @@ def reduce_scatter_tensor(
     Reduces the tensor data across all machines in such a way that all get
     the final result, then scatter the results to correponding ranks.
 
+    Note that it currently only supports scatter_dim = 0.
 
     The input tensor is left unmodified.
     Group can be one of:
@@ -357,15 +321,10 @@ def reduce_scatter_tensor(
     """
     tag, rankset, group_size = _expand_group(group, tag)
     assert (
-        self.size(scatter_dim) % group_size == 0
+        self.size(0) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
-    if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
-
-    tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, 0, tag, rankset, group_size)  # type: ignore[attr-defined]
-    res = _maybe_wrap_tensor(tensor)
-    return res
+    tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, scatter_dim, tag, rankset, group_size)  # type: ignore[attr-defined]
+    return _maybe_wrap_tensor(tensor)
 
 
 c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")

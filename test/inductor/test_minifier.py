@@ -7,7 +7,7 @@ import torch
 import torch._dynamo
 import torch._inductor.utils
 from torch._dynamo.test_minifier_common import MinifierTestBase
-from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS
 
 _HAS_TRITON = torch._inductor.utils.has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
@@ -324,7 +324,6 @@ inner(torch.randn(20, 20).to("cpu"))
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    # Skip CI tests on mac since CPU inductor does not seem to work due to C++ compile errors,
-    # also skip on ASAN due to https://github.com/pytorch/pytorch/issues/98262
-    if not IS_MACOS and not TEST_WITH_ASAN:
+    # skip CI tests on mac since CPU inductor does not seem to work due to C++ compile errors
+    if not IS_MACOS:
         run_tests()

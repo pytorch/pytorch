@@ -74,13 +74,6 @@ def cache_dir():
     return cache_dir
 
 
-@functools.lru_cache(None)
-def cubin_cache_dir():
-    cubin_dir = os.path.join(cache_dir(), "cubin")
-    os.makedirs(cubin_dir, exist_ok=True)
-    return cubin_dir
-
-
 class PersistentCache:
     def __init__(self):
         self.local_cache_path = os.path.join(cache_dir(), "local_cache")
@@ -454,11 +447,8 @@ def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
 
 
-def optimization_flags(cuda=False):
+def optimization_flags():
     base_flags = "-O3 -ffast-math -fno-finite-math-only"
-    if cuda:
-        return base_flags
-
     if sys.platform == "darwin":
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         # Also, `-march=native` is unrecognized option on M1
@@ -473,38 +463,30 @@ def use_custom_generated_macros():
 
 
 def get_include_and_linking_paths(
-    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False
+    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa
 ):
-    macros = ""
     if sys.platform == "linux" and (
         include_pytorch
         or vec_isa != invalid_vec_isa
-        or cuda
         or config.cpp.enable_kernel_profile
     ):
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
-        ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
-        lpaths = cpp_extension.library_paths(cuda) + [
-            sysconfig.get_config_var("LIBDIR")
-        ]
-        libs = ["c10", "torch", "torch_cpu", "torch_python"]
-        if cuda:
-            libs += ["c10_cuda", "cuda", "torch_cuda"]
-            ipaths += [f"{cpp_extension._TORCH_PATH}/../aten/src/"]
-        else:
-            libs += ["gomp"]
-            macros = vec_isa.build_macro()
-            if macros:
-                macros = f"-D{macros}"
+        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
+        lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
+        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+        macros = vec_isa.build_macro()
+        if macros:
+            macros = f"-D{macros}"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
-        ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
+        macros = ""
         if sys.platform == "darwin":
             # GNU OpenMP generally is not available on MacOS
             # There is either Intel OpenMP(for x86) or LLVM OpenMP (for both x86 and arm64)
@@ -535,22 +517,20 @@ def cpp_compile_command(
     shared=True,
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
-    cuda=False,
 ):
     ipaths, lpaths, libs, macros = get_include_and_linking_paths(
-        include_pytorch, vec_isa, cuda
+        include_pytorch, vec_isa
     )
 
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {input} {get_shared(shared)}
-            {get_warning_all_flag(warning_all)} {cpp_flags()}
+            {cpp_compiler()} {input} {get_shared(shared)} {get_warning_all_flag(warning_all)} {cpp_flags()}
             {ipaths} {lpaths} {libs} {macros}
-            {optimization_flags(cuda)}
+            {optimization_flags()}
             {use_custom_generated_macros()}
-            -o {output}
+            -o{output}
         """,
     ).strip()
 
@@ -560,15 +540,15 @@ class AotCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def compile(cls, source_code, cuda):
+    def compile(cls, source_code):
+        from .codegen.wrapper import CppWrapperCodeGen
+
         # TODO: update cpp_compile_command for different platforms
-        picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
+        picked_vec_isa = pick_vec_isa()
         key, input_path = write(
             source_code,
             "cpp",
-            code_hash(
-                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
-            ),
+            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -576,13 +556,21 @@ class AotCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_so = f"{input_path[:-4]}.so"
+                output_so = (
+                    os.path.join(os.getcwd(), f"{config.aot_codegen_output_prefix}.so")
+                    if config.aot_codegen_output_prefix
+                    else f"{input_path[:-3]}.so"
+                )
+
+                output_header = f"{output_so[:-3]}.h"
+                with open(output_header, "w") as header_file:
+                    header_file.writelines("#include <torch/torch.h>\n\n")
+                    header_file.writelines(f"{CppWrapperCodeGen.decl_str};\n")
+
+                log.info(f"AOT-Inductor compiles code into: {output_so}")
                 if not os.path.exists(output_so):
                     cmd = cpp_compile_command(
-                        input=input_path,
-                        output=output_so,
-                        vec_isa=picked_vec_isa,
-                        cuda=cuda,
+                        input=input_path, output=output_so, vec_isa=picked_vec_isa
                     ).split(" ")
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
@@ -590,7 +578,6 @@ class AotCodeCache:
                         raise exc.CppCompileError(cmd, e.output) from e
 
                 cls.cache[key] = output_so
-
         return cls.cache[key]
 
 

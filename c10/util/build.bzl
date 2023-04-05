@@ -9,7 +9,7 @@ def define_targets(rules):
         deps = [
             ":base",
             "//c10/core:ScalarType",
-            "//c10/macros",
+            "//c10/macros:macros",
         ],
     )
 
@@ -29,12 +29,15 @@ def define_targets(rules):
                 "typeid.h",
             ],
         ),
+        # This library uses flags and registration. Do not let the
+        # linker remove them.
+        alwayslink = True,
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
-            "//c10/macros",
             "@fmt",
+            "//c10/macros:macros",
         ] + rules.select({
             "//c10:using_gflags": ["@com_github_gflags_gflags//:gflags"],
             "//conditions:default": [],
@@ -42,9 +45,6 @@ def define_targets(rules):
             "//c10:using_glog": ["@com_github_glog//:glog"],
             "//conditions:default": [],
         }),
-        # This library uses flags and registration. Do not let the
-        # linker remove them.
-        alwayslink = True,
     )
 
     rules.cc_library(
@@ -65,7 +65,7 @@ def define_targets(rules):
         deps = [
             ":base",
             "//c10/core:ScalarType",
-            "//c10/macros",
+            "//c10/macros:macros",
         ],
     )
 
@@ -77,8 +77,5 @@ def define_targets(rules):
                 "ssize.h",
             ],
         ),
-        visibility = [
-            "//:__pkg__",
-            "//c10:__pkg__",
-        ],
+        visibility = ["//c10:__pkg__", "//:__pkg__"],
     )

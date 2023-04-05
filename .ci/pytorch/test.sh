@@ -289,37 +289,35 @@ test_perf_for_dashboard() {
   local suite="$1"
   shift
 
-  dtype=amp
-  backend=inductor
-  for mode in inference training; do
+  for dtype in amp float32; do
     # All the accuracy tests can be skipped once the CI accuracy checking is stable enough
     # Run accuracy test for inductor with different configs
     # --disable-cudagraphs is the default inductor behavior
     # TODO: update here once cudagraphs is turned on as default
+    backend=inductor
     python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+        --accuracy --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_training_cuda_accuracy.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+        --accuracy --"$dtype" --backend "$backend" "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_accuracy.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+        --accuracy --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_training_cuda_accuracy.csv"
 
     # Run performance test
     # Skip dynamo-eager and aot-eager for performance test
     # Run performance test for inductor with different configs
     # TODO: add more configs here, e.g. max-autotune, etc.
     python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
+        --performance --cold-start-latency --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
+        --performance --cold-start-latency --"$dtype" --backend "$backend" "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-        --dynamic-batch-only --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
+        --performance --cold-start-latency --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_training_cuda_performance.csv"
   done
 }
 
@@ -384,10 +382,11 @@ test_dynamo_benchmark() {
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
-    test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
+    # Performance test training only
+    test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training "$@"
   else
     # Check inference with --float32
-    test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
+    test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --float32 "$@"
     if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
       # Check training with --amp
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
