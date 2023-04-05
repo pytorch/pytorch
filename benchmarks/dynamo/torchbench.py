@@ -3,7 +3,6 @@ import gc
 import importlib
 import logging
 import os
-import re
 import sys
 import warnings
 from os.path import abspath, exists
@@ -209,6 +208,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         self.suite_name = "torchbench"
         self.optimizer = None
 
+        from torchbenchmark import _list_model_paths
+
+        self.model_names = [os.path.basename(p) for p in _list_model_paths()]
+
     @property
     def skip_models(self):
         return SKIP
@@ -322,26 +325,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             import torch_xla  # noqa: F401
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
-
-    def iter_model_names(self, args):
-        from torchbenchmark import _list_model_paths
-
-        models = _list_model_paths()
-        start, end = self.get_benchmark_indices(len(models))
-        for index, model_path in enumerate(models):
-            if index < start or index >= end:
-                continue
-
-            model_name = os.path.basename(model_path)
-            if (
-                not re.search("|".join(args.filter), model_name, re.I)
-                or re.search("|".join(args.exclude), model_name, re.I)
-                or model_name in args.exclude_exact
-                or model_name in self.skip_models
-            ):
-                continue
-
-            yield model_name
 
     def pick_grad(self, name, is_training):
         if is_training or name in ("maml",):
