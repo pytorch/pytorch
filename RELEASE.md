@@ -21,7 +21,7 @@
 - [Patch Releases](#patch-releases)
   - [Patch Release Criteria](#patch-release-criteria)
   - [Patch Release Process](#patch-release-process)
-    - [Patch Rlease Process Description](#patch-release-process-description)
+    - [Patch Release Process Description](#patch-release-process-description)
     - [Triage](#triage)
     - [Issue Tracker for Patch releases](#issue-tracker-for-patch-releases)
     - [Building a release schedule / cherry picking](#building-a-release-schedule--cherry-picking)
@@ -239,7 +239,7 @@ Patch releases should be considered if a regression meets the following criteria
 
 ## Patch Release Process
 
-### Patch Rlease Process Description
+### Patch Release Process Description
 
 > Main POC: Patch Release Managers, Triage Reviewers
 
@@ -248,8 +248,8 @@ Minor release process takes around 6-7 weeks to complete.
 
 1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2-3 weeks after the release completion.
 2. Patch Release: Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed and following decisions are made:
- - Should the new patch Release be created
- - Timeline execution for the patch Release
+  * Should the new patch Release be created
+  * Timeline execution for the patch Release
 3. Cherry picking phase. Starts after the decision is made to create patch Release. At this point a new Issue tracker for patch release is created, and announcement is made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the regressions are asked to create cherry picks. This process normally takes 2 weeks.
 4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger new build and produce new release candidate. Announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
 5. General Availability
