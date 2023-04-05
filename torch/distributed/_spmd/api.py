@@ -524,9 +524,6 @@ def _compile(
     # dedup at tracer-level to avoid multiple graph passes.
     gm = _dedup_collectives(gm)
 
-    if torch.distributed.get_rank() == 0:
-        gm.graph.print_tabular()
-
     # 7. Replace previously inserted dummy ones with real graphs.
     if module_override:
         for _, override in module_override.items():
