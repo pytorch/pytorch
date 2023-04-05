@@ -577,8 +577,6 @@ class TestDistBackend(MultiProcessTestCase):
                 rank=self.rank,
                 timeout=timeout,
             )
-            if torch.cuda.is_available():
-                torch.cuda.set_device(self.rank)
         except RuntimeError as e:
             if "recompile" in e.args[0]:
                 sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
