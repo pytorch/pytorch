@@ -342,7 +342,7 @@ class _World:
     Container class for c10d process group state.
     This is used during registration and lookup of PG state.
 
-    .. warning:: This is an experimental API inteded to expose the inner workings
+    .. warning:: This is an experimental API intended to expose the inner workings
        of c10d and is subject to change..
     """
     def __init__(self):
@@ -1096,7 +1096,7 @@ def _new_process_group_helper(
         # Set sequence numbers for gloo and nccl backends.
         if backend_str in [Backend.GLOO, Backend.NCCL]:
             backend_class._set_sequence_number_for_group()
-        # If the type is a sublcass of ProcessGroup then return this process group immediately
+        # If the type is a subclass of ProcessGroup then return this process group immediately
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
         if issubclass(type(backend_class), ProcessGroup):
