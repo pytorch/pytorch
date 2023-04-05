@@ -835,6 +835,24 @@ class TestForeach(TestCase):
             wrapped_op(inputs, self.is_cuda, not disable_fastpath, ord=ord, zero_size=False),
         )
 
+    @onlyCUDA
+    @ops(
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        dtypes=(torch.float,),
+    )
+    def test_inplace_foreach_multi_grad_fn(self, device, dtype, op):
+        inplace_op = op.inplace_variant
+        if inplace_op is None:
+            return
+
+        sample = list(op.sample_inputs(dtype=dtype, device=device, num_input_tensors=[2], same_size=True))[0]
+        tensors = sample.input
+        tensors[1].requires_grad_(True)
+        inplace_op(sample.input, *sample.args)
+
+        self.assertIsNone(tensors[0].grad_fn)
+        self.assertIsNotNone(tensors[1].grad_fn)
+
 
 instantiate_device_type_tests(TestForeach, globals())
 
