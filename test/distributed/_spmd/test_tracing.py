@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from functools import wraps
-from typing import Any, Dict, List
+from typing import Any, List
 
 import numpy as np
 import torch
@@ -545,7 +545,6 @@ class TraceTrainStepTest(DTensorTestBase):
             def transform(
                 self,
                 gm: fx.GraphModule,
-                schema_map: Dict[str, Schema],
                 flat_state: List[torch.Tensor],
             ) -> fx.Graph:
                 # check dedup is successful, where there should only be 1 allreduce
@@ -609,7 +608,6 @@ class TraceTrainStepTest(DTensorTestBase):
             def transform(
                 self,
                 gm: fx.GraphModule,
-                schema_map: Dict[str, Schema],
                 flat_state: List[torch.Tensor],
             ) -> fx.Graph:
                 nonlocal transform_targets
