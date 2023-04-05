@@ -20,7 +20,7 @@ def module_contains_param(module: nn.Module, parametrization: Type[nn.Module]) -
         return any(
             [
                 any(isinstance(param, parametrization) for param in param_list)
-                for key, param_list in module.parametrizations.items()  # type: ignore[assignment]
+                for key, param_list in module.parametrizations.items()  # type: ignore[union-attr,operator]
             ]
         )
     return False
