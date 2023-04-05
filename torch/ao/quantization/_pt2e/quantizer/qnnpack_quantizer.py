@@ -3,7 +3,7 @@ from .quantizer import Quantizer
 
 import copy
 from dataclasses import dataclass
-from typing import List, NamedTuple, Optional, Set
+from typing import List, NamedTuple, Optional, Set, Dict
 from torch.ao.quantization.observer import (
     PlaceholderObserver,
     HistogramObserver,
@@ -78,7 +78,7 @@ def get_supported_symmetric_quantized_spec_and_operators() -> List[SpecAndOperat
     supported_spec_and_operators: List[SpecAndOperators] = []
     for operator_spec in [get_default_symmetric_qnnpack_operator_spec(), get_default_per_channel_symmetric_qnnpack_operator_spec()]:
         for ops in supported_symmetric_quantized_operators():
-            supported_spec_and_operators.append((operator_spec, ops))
+            supported_spec_and_operators.append(SpecAndOperators(operator_spec, ops))
     return copy.deepcopy(supported_spec_and_operators)
 
 def get_default_symmetric_qnnpack_operator_spec():
@@ -202,12 +202,13 @@ class QNNPackQuantizer(Quantizer):
         return list(op_specs)
 
     @classmethod
-    def get_supported_operator_for_operator_spec(cls, operator_spec: OperatorSpec) -> List[str]:
-        ops: Set[str] = set({})
-        for spec, op in cls.supported_spec_and_operators:
-            if spec == operator_spec:
-                ops.add(op)
-        return ops
+    def get_supported_operator_for_operator_spec(cls, operator_spec: Optional[OperatorSpec]) -> List[str]:
+        all_ops: Set[str] = set()
+        for spec, ops in cls.supported_spec_and_operators:
+            # None is supported for all ops
+            if operator_spec is None or spec == operator_spec:
+                all_ops.union(set(ops))
+        return list(all_ops)
 
     def set_global(self, operator_spec: Optional[OperatorSpec]) -> QNNPackQuantizer:
         self.operator_spec_config.set_global(operator_spec)
@@ -228,7 +229,7 @@ class QNNPackQuantizer(Quantizer):
             self._annotate_op(model, op, global_spec)
         return model
 
-    def _annotate_op(self, model: torch.fx.GraphModule, op: str, operator_spec: OperatorSpec) -> None:
+    def _annotate_op(self, model: torch.fx.GraphModule, op: str, operator_spec: Optional[OperatorSpec]) -> None:
         _DEFAULT_TARGET_DTYPE_INFO = {
             "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
             "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),

@@ -19,7 +19,7 @@ from typing import Dict, Tuple
 
 def _maybe_insert_input_and_output_observers_for_node(
     node: Node,
-    model: torch.nn.Module,
+    model: torch.fx.GraphModule
 ):
     this_node_dtype_info = node.meta["target_dtype_info"] if "target_dtype_info" in node.meta else None
     if "val" in node.meta:
