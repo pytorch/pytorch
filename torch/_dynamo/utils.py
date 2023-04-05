@@ -23,9 +23,10 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 import torch._logging
+from torch._guards import detect_fake_mode  # noqa: F401
 from . import config
 
 try:
@@ -44,7 +45,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_map
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
@@ -1316,23 +1317,6 @@ def assert_no_fake_params_or_buffers(gm):
         assert not isinstance(
             param, torch._subclasses.FakeTensor
         ), f"Unexpected fake param {name} {stack_or_hint(param)}"
-
-
-def fake_mode_from_tensors(inputs: List[Any]):
-    """
-    Takes a list of anything, unflattened is fine, returns a fake_mode
-    if any are fake. All fake modes on all fake tensors must be identical.
-    Returns None if no fake_mode is fine
-    """
-    flat_inputs, _ = tree_flatten(inputs)
-    fake_mode = None
-    for flat_input in flat_inputs:
-        if isinstance(flat_input, torch._subclasses.FakeTensor):
-            if fake_mode is None:
-                fake_mode = flat_input.fake_mode
-            else:
-                assert fake_mode is flat_input.fake_mode
-    return fake_mode
 
 
 def fqn(obj: Any):
