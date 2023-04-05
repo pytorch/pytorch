@@ -4,6 +4,8 @@ import itertools
 import logging
 import sys
 import warnings
+
+from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
 import functorch
@@ -13,15 +15,17 @@ import torch._dynamo.config as dynamo_config
 
 import torch.fx
 import torch.utils._pytree as pytree
-
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics, overrides, pattern_matcher
+from .codegen.wrapper import KernelParamCache
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
@@ -164,20 +168,30 @@ def compile_fx_inner(
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
-    fake_mode = fake_mode_from_tensors(
-        example_inputs
-    ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+    fake_mode = fake_mode_from_tensors(example_inputs)
+    if not fake_mode:
+        fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+    else:
+        FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
+            *example_inputs
+        )
+    # pattern matcher passes might not preserve striding information
+    # on node.meta["val"]. if in the future we rely on these being
+    # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
         pattern_matcher.fx_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
+    with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
             gm,
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
             aot_mode=aot_mode,
+            cpp_wrapper=config.cpp_wrapper,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
@@ -441,6 +455,76 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
+def compile_fx_aot(
+    module: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+    inner_compile=compile_fx_inner,
+    config_patches: Optional[Dict[str, Any]] = None,
+    decompositions: Optional[Dict[OpOverload, Callable]] = None,
+):
+    """
+    JIT-compile the model and run it to generate kernel binaries in the first pass;
+    Generate cpp wrapper code and compile it to a dynamic library in the second pass
+    """
+    from torch.ao.quantization.fx.utils import assert_and_get_unique_device
+
+    # Do we need to check inputs device as well?
+    device = assert_and_get_unique_device(module)
+    new_config_patches = config_patches.copy() if config_patches is not None else dict()
+
+    if device.type == "cuda":
+        # So far, we only need to do this for the Triton backend
+        with KernelParamCache():
+            new_config_patches.update(
+                {
+                    "cpp_wrapper": False,
+                    "triton.cudagraphs": False,
+                    "triton.unique_kernel_names": True,
+                    "triton.store_cubin": True,
+                }
+            )
+            with config.patch(new_config_patches):
+                module_copy = deepcopy(module)
+                inputs_copy = deepcopy(example_inputs)
+                compiled = compile_fx(
+                    module_copy,
+                    inputs_copy,
+                    inner_compile,
+                    new_config_patches,
+                    decompositions,
+                )
+                compiled(inputs_copy)
+                del module_copy, inputs_copy
+
+            new_config_patches.update(
+                {
+                    "cpp_wrapper": True,
+                    "triton.store_cubin": False,
+                }
+            )
+            return compile_fx(
+                module,
+                example_inputs,
+                inner_compile=functools.partial(inner_compile, aot_mode=True),
+                config_patches=new_config_patches,
+                decompositions=decompositions,
+            )
+    else:
+        assert device.type == "cpu"
+        new_config_patches.update(
+            {
+                "cpp_wrapper": True,
+            }
+        )
+        return compile_fx(
+            module,
+            example_inputs,
+            inner_compile=functools.partial(inner_compile, aot_mode=True),
+            config_patches=new_config_patches,
+            decompositions=decompositions,
+        )
+
+
 _graph_counter = itertools.count(0)
 
 
@@ -450,7 +534,6 @@ def compile_fx(
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
-    aot_mode=False,
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
@@ -460,21 +543,6 @@ def compile_fx(
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
-                decompositions=decompositions,
-                aot_mode=aot_mode,
-            )
-
-    if aot_mode:
-        aot_config_patches = {
-            "cpp_wrapper": True,
-            "debug": True,
-            "triton.cudagraphs": False,
-        }
-        with config.patch(aot_config_patches):
-            return compile_fx(
-                model_,
-                example_inputs_,
-                inner_compile=functools.partial(inner_compile, aot_mode=aot_mode),
                 decompositions=decompositions,
             )
 
