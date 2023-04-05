@@ -50,6 +50,8 @@ from ._internal.exporter import (  # usort:skip. needs to be last to avoid circu
     ExportOutput,
     ExportOutputSerializer,
     dynamo_export,
+    InputFormatter,
+    OutputFormatter,
 )
 
 __all__ = [
@@ -93,6 +95,8 @@ __all__ = [
     "ExportOutput",
     "ExportOutputSerializer",
     "dynamo_export",
+    "InputFormatter",
+    "OutputFormatter",
 ]
 
 # Set namespace for exposed private names

@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import functools
 
-import inspect
-
-from typing import Any, Callable, Dict, Optional, Tuple, Union
-
-import onnx
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.fx
 import torch.onnx
-import torch.onnx._internal.fx.fx_exporter
+
+import torch.onnx._internal.fx.fx_exporter as fx_exporter
 import torch.onnx._internal.fx.passes as passes
 from torch.onnx._internal import _beartype
 
@@ -50,48 +47,10 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
         return False
 
     @_beartype.beartype
-    def to_bool(self, obj: "torch.fx.Proxy") -> bool:
+    def to_bool(self, obj: torch.fx.Proxy) -> bool:
         # FIXME: This is a hack to tracing through if-else Python blocks.
         # It may generate incorrect ONNX graphs if the if-else block
         return False
-
-
-@_beartype.beartype
-def _trace_into_fx_graph_via_fx_symbolic_trace(
-    signature: inspect.Signature,
-    module: torch.nn.Module,
-    *args,
-    # kwargs are the keyword arguments to call "module"; that is,
-    # module(*args, **kwargs) must run.
-    **kwargs,
-) -> Tuple["torch.fx.GraphModule", Tuple[Any, ...]]:
-    # We hope the input kwargs will be mapped to bound.args after binding.
-    # If not, we will raise an error.
-    bound = signature.bind(*args, **kwargs)
-    bound.apply_defaults()
-    # After apply_defaults, all non keyword-only arguments are in bound.args.
-    # Because below code do not support keyword-word arguments, bound.kwargs
-    # must be empty.
-    assert len(bound.kwargs) == 0, bound.kwargs
-
-    # Create inputs to call symbolic trace (torch.fx.symbolic_trace)
-    # Example content of concrete_args:
-    #  concrete_args["x"] = torch.fx._symbolic_trace.PH
-    #  concrete_args["b"] = 1
-    # where "x" and "b" are argument names in "signature".
-    concrete_args = {}
-    for param_name, param_value in bound.arguments.items():
-        if isinstance(param_value, torch.Tensor):
-            # param_value can be, e.g., a real tensor or a fake tensor.
-            # param_value is treated as substitutable tensor symbol (aka placeholder).
-            concrete_args[param_name] = torch.fx._symbolic_trace.PH
-        else:
-            concrete_args[param_name] = param_value
-
-    return (
-        _module_expansion_symbolic_trace(module, concrete_args=concrete_args),
-        bound.args,
-    )
 
 
 def _wrap_for_symbolic_trace(target: Callable) -> Tuple[Callable, Callable]:
@@ -164,26 +123,47 @@ def _module_expansion_symbolic_trace(
             setattr(torch, name, wrapped)
 
 
-class FXSymbolicTraceExportOutput(torch.onnx.ExportOutput):
-    def __init__(
+# TODO: Migrate to `DynamoExporter` after fake model tracing is supported.
+# Proposal at https://github.com/pytorch/pytorch/issues/95900.
+class FXSymbolicTraceExporter(fx_exporter.FXGraphModuleExporter):
+    @_beartype.beartype
+    def _trace_into_fx_graph_via_fx_symbolic_trace(
         self,
-        model_proto: onnx.ModelProto,
-        fx_graph_module: torch.fx.GraphModule,
-        bound_args: Tuple[Any, ...],
-        replaced_attrs: Tuple[torch.Tensor, ...],
-    ):
-        super().__init__(model_proto)
-        self.fx_graph_module = fx_graph_module
-        self.bound_args = bound_args
-        self.replaced_attrs = replaced_attrs
+    ) -> Tuple[torch.fx.GraphModule, Sequence[Any]]:
+        _, named_args = self._apply_input_format_step(
+            fx_exporter.BindInputStep,
+            self.model_args,
+            self.model_kwargs,
+            step_init_args=(self.model_signature,),
+        )
 
+        # Create inputs to call symbolic trace (torch.fx.symbolic_trace)
+        # Example content of concrete_args:
+        #  concrete_args["x"] = torch.fx._symbolic_trace.PH
+        #  concrete_args["b"] = 1
+        # where "x" and "b" are argument names in "signature".
+        concrete_args = {}
+        for param_name, param_value in named_args.items():
+            if isinstance(param_value, torch.Tensor):
+                # param_value can be, e.g., a real tensor or a fake tensor.
+                # param_value is treated as substitutable tensor symbol (aka placeholder).
+                concrete_args[param_name] = torch.fx._symbolic_trace.PH
+            else:
+                concrete_args[param_name] = param_value
 
-class FXSymbolicTraceExporter(
-    torch.onnx._internal.fx.fx_exporter.FXGraphModuleExporter
-):
-    def export(self) -> FXSymbolicTraceExportOutput:
-        graph_module, bound_args = _trace_into_fx_graph_via_fx_symbolic_trace(
-            self.model_signature, self.model, *self.model_args, **self.model_kwargs
+        bound_args, _ = self._apply_input_format_step(
+            fx_exporter.MergeKwargsIntoArgsStep, [], named_args
+        )
+
+        return (
+            _module_expansion_symbolic_trace(self.model, concrete_args=concrete_args),
+            bound_args,
+        )
+
+    def export(self) -> torch.onnx.ExportOutput:
+        graph_module, bound_args = self._trace_into_fx_graph_via_fx_symbolic_trace()
+        self._output_formatter.append_step(
+            fx_exporter.FlattenOutputWithTreeSpecValidationStep()
         )
 
         # Make sure all placeholder nodes are executed before get_attr nodes.
@@ -208,12 +188,7 @@ class FXSymbolicTraceExporter(
         graph_module.recompile()
 
         export_output = self.export_fx_to_onnx(
-            graph_module, bound_args + replaced_attrs
+            graph_module, tuple(bound_args) + replaced_attrs
         )
 
-        return FXSymbolicTraceExportOutput(
-            model_proto=export_output.model_proto,
-            fx_graph_module=graph_module,
-            bound_args=bound_args,
-            replaced_attrs=replaced_attrs,
-        )
+        return export_output

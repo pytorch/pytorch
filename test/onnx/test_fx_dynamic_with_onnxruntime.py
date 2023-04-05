@@ -111,7 +111,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
 
-    onnx_model = torch.onnx.dynamo_export(
+    export_output = torch.onnx.dynamo_export(
         model,
         *input_args,
         **input_kwargs,
@@ -121,13 +121,13 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         ),
     )
 
-    compare_pytorch_onnx_with_ort(onnx_model, input_args)
+    compare_pytorch_onnx_with_ort(export_output, input_args)
 
     # This confirms the exported mode accepts different input shapes
     # when dynamic shape is enabled.
     if additional_test_inputs:
         for additional_input_args in additional_test_inputs:
-            compare_pytorch_onnx_with_ort(onnx_model, additional_input_args)
+            compare_pytorch_onnx_with_ort(export_output, additional_input_args)
 
 
 class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):

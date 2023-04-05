@@ -9,11 +9,13 @@ from typing import (
     Any,
     Callable,
     Final,
+    List,
     Mapping,
     Optional,
     Protocol,
     runtime_checkable,
     Sequence,
+    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -163,20 +165,93 @@ class ProtobufExportOutputSerializer:
         destination.write(export_output.model_proto.SerializeToString())
 
 
+# TODO(bowbao): Add diagnostics for IO formatters.
+class InputFormatStep(abc.ABC):
+    @abc.abstractmethod
+    def format(
+        self, args: Sequence[Any], kwargs: Mapping[str, Any]
+    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        ...
+
+
+class InputFormatter:
+    _input_format_steps: List[InputFormatStep]
+
+    def __init__(self, input_format_steps: Optional[List[InputFormatStep]] = None):
+        self._input_format_steps = input_format_steps or []
+
+    @_beartype.beartype
+    def append_step(self, step: InputFormatStep):
+        self._input_format_steps.append(step)
+
+    @_beartype.beartype
+    def to_onnx(self, *model_args, **model_kwargs) -> Sequence[torch.Tensor]:
+        args: Sequence[Any] = model_args
+        kwargs: Mapping[str, Any] = model_kwargs
+        for step in self._input_format_steps:
+            args, kwargs = step.format(args, kwargs)
+        assert not kwargs
+        return args
+
+
+class OutputFormatStep(abc.ABC):
+    @abc.abstractmethod
+    def format(self, model_outputs: Any) -> Any:
+        ...
+
+
+class OutputFormatter:
+    _output_format_steps: List[OutputFormatStep]
+
+    def __init__(self, output_format_steps: Optional[List[OutputFormatStep]] = None):
+        self._output_format_steps = output_format_steps or []
+
+    @_beartype.beartype
+    def append_step(self, step: OutputFormatStep):
+        self._output_format_steps.append(step)
+
+    @_beartype.beartype
+    def to_onnx(self, model_outputs: Any) -> Sequence[torch.Tensor]:
+        for step in self._output_format_steps:
+            model_outputs = step.format(model_outputs)
+        return model_outputs
+
+
 class ExportOutput:
     """An in-memory representation of a PyTorch model that has been exported to ONNX."""
 
     _model_proto: Final[onnx.ModelProto]
+    _input_formatter: Final[InputFormatter]
+    _output_formatter: Final[OutputFormatter]
 
     @_beartype.beartype
-    def __init__(self, model_proto: onnx.ModelProto):
+    def __init__(
+        self,
+        model_proto: onnx.ModelProto,
+        input_formatter: InputFormatter,
+        output_formatter: OutputFormatter,
+    ):
         self._model_proto = model_proto
+        self._input_formatter = input_formatter
+        self._output_formatter = output_formatter
 
     @property
     def model_proto(self) -> onnx.ModelProto:
         """The exported ONNX model as an ``onnx.ModelProto``."""
 
         return self._model_proto
+
+    @property
+    def input_formatter(self) -> InputFormatter:
+        """The input formatter used to convert inputs between format of PyTorch, torch.fx and ONNX."""
+
+        return self._input_formatter
+
+    @property
+    def output_formatter(self) -> OutputFormatter:
+        """The output formatter used to convert outputs between format of PyTorch, torch.fx and ONNX."""
+
+        return self._output_formatter
 
     @_beartype.beartype
     def save(
@@ -198,6 +273,9 @@ class ExportOutput:
 
 
 class Exporter(abc.ABC):
+    _input_formatter: InputFormatter
+    _output_formatter: OutputFormatter
+
     class WrappedFuncModule(torch.nn.Module):
         def __init__(self, forward: Callable):
             super().__init__()
@@ -228,6 +306,9 @@ class Exporter(abc.ABC):
         )
         self.model_args = model_args
         self.model_kwargs = model_kwargs
+
+        self._input_formatter = InputFormatter()
+        self._output_formatter = OutputFormatter()
 
     @abc.abstractmethod
     def export(self) -> ExportOutput:
@@ -342,9 +423,9 @@ def dynamo_export(
 
     _assert_dependencies(resolved_export_options)
 
-    from torch.onnx._internal.fx.dynamo_exporter import DynamoOptimizeExporter
+    from torch.onnx._internal.fx.dynamo_exporter import DynamoExporter
 
-    return DynamoOptimizeExporter(
+    return DynamoExporter(
         options=resolved_export_options,
         model=model,
         model_args=model_args,
