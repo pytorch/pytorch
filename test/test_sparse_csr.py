@@ -3310,29 +3310,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
 
-class _TritonLibrary(object):
-    lib = torch.library.Library("triton", "DEF")
-    ops = {}
-
-    @classmethod
-    def probablyRegisterOp(cls, op_key, full_schema, op_impl, dispatch_key):
-        if op_key not in cls.ops:
-            cls.lib.define(full_schema)
-            cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
-            cls.ops[op_key] = op_impl
-
-        return cls.ops[op_key]
-
-class _WrappedKernel(object):
-    def __init__(self, kernel):
-        self.kernel = kernel
-        self.kernel_invoked = False
-
-    def __call__(self, *args, **kwargs):
-        res = self.kernel(*args, **kwargs)
-        self.kernel_invoked = True
-        return res
-
 def skipIfNoTriton(cls):
     from torch._inductor.utils import has_triton
 
@@ -3362,12 +3339,21 @@ class TestSparseCompressedTritonKernels(TestCase):
         from functools import partial
         from torch.sparse._triton_ops import bsr_dense_mm
 
-        kernel = _TritonLibrary.probablyRegisterOp(
+        def kernel_impl(*args, **kwargs):
+            return bsr_dense_mm(*args, skip_checks=True, **kwargs)
+
+        wrapped_kernel_impl = torch._WrappedTritonKernel(kernel_impl)
+
+        kernel = torch._TritonLibrary.probablyRegisterOp(
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
-            _WrappedKernel(lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs)),
+            wrapped_kernel_impl,
             "SparseCsrCUDA"
         )
+
+        # kernel != wrapped_kernel_impl means dispatch was already registered.
+        # This is exactly what we need!
+        self.assertTrue(kernel is not wrapped_kernel_impl)
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
