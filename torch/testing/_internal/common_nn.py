@@ -2978,6 +2978,17 @@ new_module_tests = [
         reference_fn=single_batch_reference_fn,
         desc="no_batch_dim",
     ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=([56, 56, 56], 1e-5, False),
+        cpp_constructor_args='torch::nn::LayerNormOptions({56, 56, 56}).eps(1e-5).elementwise_affine(false)',
+        input_size=(4, 56, 56, 56),
+        cudnn=True,
+        check_eval=True,
+        gradcheck_fast_mode=True,
+        check_half=True,
+        desc='3d_no_affine_large_feature',
+    ),
 ]
 
 # add conv padding mode tests:
