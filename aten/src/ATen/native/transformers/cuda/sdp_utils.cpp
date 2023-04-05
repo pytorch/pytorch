@@ -42,6 +42,7 @@ bool has_for_nested_inputs(sdp_params params) {
 
 std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
+      SDPBackend::cudnn_mha,
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
@@ -544,6 +545,11 @@ bool check_use_deterministic_algorithms(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool use_cudnn_mha(sdp_params kernel_params, bool print_debug) {
+  static bool flag = c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true;
+  return flag;
+}
+
 bool use_flash_attention(sdp_params params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
@@ -634,6 +640,10 @@ SDPBackend select_sdp_backend(sdp_params kernel_params) {
   bool print_debug = false;
   for (auto& backend : ordering) {
     switch (backend) {
+      case SDPBackend::cudnn_mha:
+        if (use_cudnn_mha(kernel_params, print_debug)) {
+              return SDPBackend::cudnn_mha;
+        }
       case SDPBackend::flash_attention:
         if (use_flash_attention(kernel_params, print_debug)) {
           return SDPBackend::flash_attention;

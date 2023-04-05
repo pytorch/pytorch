@@ -604,7 +604,13 @@ Tensor scaled_dot_product_attention(
       query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
+  TORCH_WARN("IS CAUSAL?", is_causal);
   switch (backend) {
+    case sdp::SDPBackend::cudnn_mha: {
+      auto out_lse_softmax = at::_cudnn_mha(
+	query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+      return std::get<0>(out_lse_softmax);
+    }
     case sdp::SDPBackend::flash_attention: {
       auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
           query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
