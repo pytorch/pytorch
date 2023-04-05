@@ -118,6 +118,10 @@ print_guards = os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1"
 # Show a warning for every specialization
 print_specializations = False
 
+# Simplify guards, summarizing static and dynamic constraints on dimensions.
+# NOTE: This only has an effect when dynamic_shapes=True.
+summarize_dim_constraints = False
+
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 

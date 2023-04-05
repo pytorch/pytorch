@@ -9,11 +9,12 @@ import sys
 import textwrap
 import threading
 import traceback
-from dataclasses import dataclass
+from collections import defaultdict
 from contextlib import contextmanager
+from dataclasses import dataclass
+from enum import Enum
 from functools import lru_cache
 from typing import cast, Dict, List, Optional, Set, Type, Union
-from enum import Enum
 
 import torch
 
@@ -42,6 +43,7 @@ class GuardOnDataDependentSymNode(RuntimeError):
 
 import sympy
 from sympy.printing.str import StrPrinter
+from sympy.printing.precedence import precedence
 from sympy.core.logic import fuzzy_and, fuzzy_or
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
@@ -1341,6 +1343,279 @@ class LoggingShapeGuardPrinter(ShapeGuardPrinter):
         super().__init__(var_to_sources, lambda n: n.name(), var_to_sources)
 
 
+class DynamicDimConstraintPrinter(StrPrinter):
+    def __init__(self, symbol_to_source):
+        super().__init__()
+        self.symbol_to_source = symbol_to_source
+
+    def print_source(self, source) -> str:
+        return f"dynamic_dim({source.base.name()}, {source.idx})"
+
+    def _print_Symbol(self, expr) -> str:
+        assert isinstance(expr, sympy.Symbol), str(type(expr))
+
+        return self.print_source(self.symbol_to_source[expr][0])
+
+    def _print_Relational(self, expr):
+        return '%s %s %s' % (
+            self.parenthesize(expr.lhs, precedence(expr)),
+            expr.rel_op,
+            self.parenthesize(expr.rhs, precedence(expr))
+        )
+
+
+class DimConstraints:
+    """
+    Custom solver for a system of constraints on symbolic dimensions.
+    Solutions are "static" values or simplified "dynamic" constraints.
+    """
+
+    def __init__(self, symbol_to_source, var_to_val):
+        # We try to solve systems of inequalities with 1 free variable.
+        self._univariate_inequalities = defaultdict(set)
+        # Among them, we prioritize solving for a free variable that has equalities.
+        self._symbols_with_equalities = set()
+        # A solution of a free variable with equalities becomes a substitution.
+        # We use these substitutions to simplify other constraints.
+        self._substitutions = {}
+
+        # In general, constraints may have // and % operations.
+        # Of course, // can be expressed in terms of / and %.
+        # Our inequality solver can handle / but not %. So we need to transform them away.
+        # We do so by using the values of variables as hints to evaluate %.
+        # For soundness we record additional congruence guards and solve them separately.
+        self._var_to_val = var_to_val
+        self._congruences = defaultdict(set)
+
+        # We do not try to (directly) solve inequalities with > 1 free variables.
+        self._multivariate_inequalities = set()
+
+        # We park external equalities between free variables here.
+        self._symbolic_equivalences = []
+
+        # Solutions come in two forms:
+        # - (static) specializations
+        # - (dynamic) inequalities / congruences
+        self._static_results = set()
+        self._dynamic_results = set()
+
+        self._dcp = DynamicDimConstraintPrinter(symbol_to_source)
+
+    def rewrite_with_congruences(self, s, expr):
+        """
+        Eliminate expressions of the form b // d and b % d while adding congruences of the form b % d == k.
+        This leaves rational operators (in particular of the form b / d) that our inequality solver can handle.
+        We solve the added congruences separately (using our congruence solver, see below).
+        """
+        def mod_handler(*args):
+            # Suppose that we have an expression of the form b % d with free variable s.
+            # Using the value of s as a "hint," we can evaluate b % d to a value k.
+            # Then we can rewrite b % d to k while adding the guard b % d == k.
+
+            # NOTE(avik): This abstraction is provably sound but, in general, incomplete. It is complete IFF
+            # the original expression always evaluates to a constant value (i.e., it does not vary with s).
+            # In other words,
+            # - solutions of s with the rewritten expression are guaranteed to also be solutions of s with
+            #   the original expression;
+            # - while it may be possible to find solutions of s with the original expression that are not
+            #   solutions with the rewritten expression, in that case the original expression cannot evaluate
+            #   to the same value for all solutions of s.
+            #
+            # Should we be worried about this incompleteness? No, because of the following reasons:
+            # 1. It unblocks dramatic simplification that would not be otherwise possible with current tech
+            #    (i.e., "don't let perfect be the enemy of the good").
+            # 2. We already have a tradition of using hints to add guards in the compiler for making progress.
+            # 3. We have not yet seen a counterexample arise in practice! In particular, any congruence guards
+            #    we generate (or simplify to) seem to be of the form b % d == k where k is a constant.
+            #
+            # Here's a theoretical counterexample: 3*s % (s + 1) == s - 2, that is satisfied by all s >= 2.
+            # With any hint (say) s = k, we'd rewrite this to: 3*s % (s + 1) == k - 2. But, substituting, we
+            # would then get k - 2 == s - 2, and thus s = k as the (only, constant) solution!
+            base, divisor = args
+            base, divisor = self.rewrite_with_congruences(s, base), self.rewrite_with_congruences(s, divisor)
+            mod_reduced = base.subs(self._var_to_val) % divisor.subs(self._var_to_val)
+            congruence = (base - mod_reduced) % divisor
+            if congruence != 0:
+                self._congruences[s].add(congruence)
+            return mod_reduced
+
+        def floor_div_handler(*args):
+            # Suppose that we have an expression of the form b // d with free variable s.
+            # Using the value of s, we can evaluate b % d to a value k.
+            # Then we can rewrite b // d to (b - k) / d, while adding the guard b % d == k.
+
+            # NOTE(avik): This is exactly equivalent to rewriting b // d as (b - (b % d)) / d
+            # and eliminating b % d as above.
+            base, divisor = args
+            base, divisor = self.rewrite_with_congruences(s, base), self.rewrite_with_congruences(s, divisor)
+            mod_reduced = base.subs(self._var_to_val) % divisor.subs(self._var_to_val)
+            congruence = (base - mod_reduced) % divisor
+            if congruence != 0:
+                self._congruences[s].add(congruence)
+            return (base - mod_reduced) / divisor
+
+        if expr.has(sympy.Mod):
+            expr = expr.replace(sympy.Mod, mod_handler)
+        if expr.has(FloorDiv):
+            expr = expr.replace(FloorDiv, floor_div_handler)
+        return expr
+
+    def add(self, expr):
+        if expr == True:
+            return
+        orig_expr = expr
+        orig_reduced = orig_expr.subs(self._var_to_val)
+        assert orig_reduced != False, f"{orig_expr} is inconsistent!"
+        free_symbols = expr.free_symbols
+        assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
+        if len(free_symbols) > 1:
+            # multivariate: record and move on
+            self._multivariate_inequalities.add(expr)
+        else:
+            # univariate: can solve these immediately
+            s = next(iter(free_symbols))
+            # eliminate // and % (see documentation of `rewrite_with_congruences` above)
+            expr = self.rewrite_with_congruences(s, expr)
+            if expr != True:
+                reduced = expr.subs(self._var_to_val)
+                assert reduced != False, f"{expr}, obtained by rewriting {orig_expr} with congruences, is inconsistent!"
+                if isinstance(expr, sympy.Eq):
+                    # special status for symbols that have equalities (see `solve` below)
+                    self._symbols_with_equalities.add(s)
+                self._univariate_inequalities[s].add(expr)
+
+    def add_equality(self, source, expr):
+        if expr.free_symbols:
+            # these will resolve to either specializations or dynamic equality constraints
+            self._symbolic_equivalences.append((source, expr))
+        else:
+            # specialization, right here
+            self._static_results.add(f"{source.name()} == {expr}")
+
+    def reduce_congruences(self):
+        reduced_congruences = {}
+        for s, congruences in self._congruences.items():
+            remainder_modulus_pairs = []
+            congruences_to_check = set()
+            for congruence in congruences:
+                base, divisor = congruence.args
+                # We are given a congruence of the form base % divisor == 0 with a free variable s. So:
+                # - we transform this into an equation of the form base = divisor * tmp;
+                # - we solve this equation for s to get a linear solution with free variable tmp.
+                tmp = sympy.Symbol("tmp", integer=True)
+                symbol, solution = sympy.solve_linear(base - divisor * tmp, symbols=[s])
+                # See https://docs.sympy.org/latest/modules/solvers/solvers.html#sympy.solvers.solvers.solve_linear
+                # for how to interpret the results.
+                if s == symbol:
+                    # This means the solution is of the form s = modulus*tmp + remainder.
+                    modulus, remainder = sympy.polys.polytools.div(solution, tmp)
+                    # Make sure 0 <= remainder <= modulus.
+                    remainder = remainder % modulus
+                    remainder_modulus_pairs.append((remainder, modulus))
+                else:
+                    # This means that we did not get a unique solution to the equation.
+                    # No problem, we will check it.
+                    congruences_to_check.add(congruence)
+            # Finally we solve for a congruence s such that s = r_i mod m_i for each (r_i, m_i).
+            # The solution will be a congruence of the form s = r mod m.
+            # NOTE(avik): Since the given m_i may not be pairwise coprime, we can't just use CRT.
+            remainder, modulus = sympy.ntheory.modular.solve_congruence(*remainder_modulus_pairs)
+            reduced_congruences[s] = {(s - remainder) % modulus}
+            substitution = {s: modulus * sympy.Symbol("tmp", integer=True) + remainder}
+            reduced_congruences[s].update(
+                congruence for congruence in congruences_to_check
+                if not sympy.checksol(congruence, substitution)
+            )
+
+        return reduced_congruences
+
+    def solve(self):
+        # as long as there are symbols with equalities, solve for them
+        while(self._symbols_with_equalities):
+            s = self._symbols_with_equalities.pop()
+            exprs = self._univariate_inequalities.pop(s)
+            solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
+            assert isinstance(solution, sympy.Eq), f"Expected an equality constraint for {s}, got {solution} instead"
+            symbol, val = solution.args
+            assert symbol == s, f"Expected a constraint on {s} instead of on {symbol}"
+            # because this is univariate, the solution is a specialization
+            self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} = {val}")
+            # add this as a substitution to simplify other constraints
+            self._substitutions[s] = val
+
+            # simplify multivariate inequalities: some of them will now become univariate!
+            multivariate_inequalities = self._multivariate_inequalities
+            self._multivariate_inequalities = set()
+            for expr in multivariate_inequalities:
+                self.add(expr.subs(s, self._substitutions[s]))
+
+            # simplify symbolic equivalences: some of them will now become specializations!
+            symbolic_equivalences = self._symbolic_equivalences
+            self._symbolic_equivalences = []
+            for source, expr in symbolic_equivalences:
+                self.add_equality(source, expr.subs(s, self._substitutions[s]))
+
+        # remaining symbols have only pure inequalities (no equalities)
+        for s, exprs in self._univariate_inequalities.items():
+            solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
+            # because this is univariate, the solution is a dynamic (range) constraint
+            self._dynamic_results.add(self._dcp.doprint(solution))
+
+        # remaining symbolic equivalences become dynamic equality constraints
+        for source, expr in self._symbolic_equivalences:
+            self._dynamic_results.add(f"{self._dcp.print_source(source)} == {self._dcp.doprint(expr)}")
+
+        # solve linear congruences
+        # NOTE(avik): We do not need to solve them for symbols that have already been specialized.
+        reduced_congruences = self.reduce_congruences()
+        for s, congruences in reduced_congruences.items():
+            for congruence in congruences:
+                # any congruence that cannot be checked becomes a dynamic constraint as well
+                if not (s in self._substitutions) or not sympy.checksol(congruence, {s: self._substitutions[s]}):
+                    self._dynamic_results.add(self._dcp.doprint(sympy.Eq(congruence, 0)))
+
+    def prettify_univariate_inequalities(self):
+        buf = "{"
+        for free_symbol, exprs in self._univariate_inequalities.items():
+            buf += f"\n\t{free_symbol}: ["
+            for expr in exprs:
+                buf += f"\n\t\t{expr},"
+            buf += f"\n\t],"
+        return buf + "\n}"
+
+    def prettify_multivariate_inequalities(self):
+        buf = "["
+        for expr in self._multivariate_inequalities:
+            buf += f"\n\t{expr},"
+        return buf + "\n]"
+
+    def prettify_congruences(self):
+        buf = "{"
+        for free_symbol, exprs in self._congruences.items():
+            buf += f"\n\t{free_symbol}: ["
+            for expr in exprs:
+                buf += f"\n\t\t{expr.args[0]} % {expr.args[1]} == 0,"
+            buf += f"\n\t],"
+        return buf + "\n}"
+
+    def prettify_results(self):
+        buf = ""
+        if self._static_results:
+            buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
+            buf += "\nNOTE: Specializations will happen by default with `assume_static_by_default=True`."
+            for result in self._static_results:
+                buf += f"\n\t{result}"
+            buf += "\n"
+        if self._dynamic_results:
+            buf += "\nThe following dimensions CAN be dynamic."
+            buf += "\nYou can use the following code to specify the constraints they must satisfy:"
+            buf += "\n```\nconstraints=["
+            for result in self._dynamic_results:
+                buf += f"\n\t{result},"
+            buf += "\n]\n```"
+        return buf
+
+
 TLS = threading.local()
 
 
@@ -1718,7 +1993,7 @@ class ShapeEnv:
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        from torch._dynamo.source import TensorPropertySource, TensorProperty
+        from torch._dynamo.source import TensorPropertySource, TensorProperty, NegateSource
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -1726,12 +2001,14 @@ class ShapeEnv:
 
         symbol_to_source = collections.defaultdict(list)
         symbol_to_constraints = collections.defaultdict(list)
-        dynamic_sources = []
         constraint_violations = []
 
         def record_constraint_violation(msg_fn):
             assert callable(msg_fn)
             constraint_violations.append(msg_fn)
+
+        def is_dim(src):
+            return isinstance(src, TensorPropertySource) and src.prop is TensorProperty.SIZE
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
@@ -1811,6 +2088,8 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
+        dim_constraints = DimConstraints(symbol_to_source, self.var_to_val)
+
         if not _simplified:
             for source, expr in input_guards:
                 # Small optimization
@@ -1820,6 +2099,8 @@ class ShapeEnv:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
+                if is_dim(source):
+                    dim_constraints.add_equality(source, expr)
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
                 # NB: Not necessary to report constraint violations here:
@@ -1835,6 +2116,8 @@ class ShapeEnv:
                 continue
             g = self.simplify(g)
             try:
+                if any(is_dim(source) for s in g.free_symbols for source in symbol_to_source[s]):
+                    dim_constraints.add(g)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
                 exprs.append(guard_expr)
                 # A non-relational constraint on a single sizevar can violate
@@ -1884,7 +2167,7 @@ class ShapeEnv:
                         if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
                             record_constraint_violation(lambda: (
                                 f"Could not validate constraint {c.render(sources[0])} as "
-                                f"we actually inferred the valid range to be [{vr.lower}, {vr.upper}]."
+                                f"we actually inferred the valid range to be [{c_vr.lower}, {c_vr.upper}]."
                                 "This is actually supposed to be impossible to "
                                 "trigger right now as we do not refine ranges; maybe you called "
                                 "constrain_range manually, or we forgot to update this error message? "
@@ -1895,6 +2178,8 @@ class ShapeEnv:
                 assert symbol.is_integer
                 bounds = []
                 if r.lower != -sympy.oo:
+                    if any(is_dim(source) for source in sources):
+                        dim_constraints.add(sympy.Ge(symbol, r.lower))
                     bounds.append(str(r.lower))
                 bounds.append(source_ref(sources[0]))
                 # NB: This looks like an off-by-one error but it's not: the
@@ -1905,14 +2190,21 @@ class ShapeEnv:
                 # won't matter because sizes in practice will be no where near
                 # the 64-bit limit.
                 if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
+                    if any(is_dim(source) for source in sources):
+                        dim_constraints.add(sympy.Le(symbol, r.upper))
                     bounds.append(str(r.upper))
                 if len(bounds) > 1:
                     exprs.append(" <= ".join(bounds))
+
+        if torch._dynamo.config.dynamic_shapes and torch._dynamo.config.summarize_dim_constraints:
+            dim_constraints.solve()
+            log.warning(f"Summary of dimension constraints:{dim_constraints.prettify_results()}")
 
         if constraint_violations:
             msgs = [f"  {i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
             msgs = "\n".join(msgs)
             raise ConstraintViolationError(f"Constraints violated!\n{msgs}")
+
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
@@ -2231,14 +2523,16 @@ class ShapeEnv:
         if torch._dynamo.config.print_guards:
             if log.level <= logging.WARNING:
                 # reusing flag that prints guards
-                frame_summaries = TracingContext.get().frame_summary_stack
-                # frame_summaries describes a stack of functions
-                # TODO(avik): It would be better to describe a stack of function calls instead
-                current_loc = TracingContext.get().loc_in_frame
-                # current_loc describes a line in the current frame
-                user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
-                expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
-                log.warning(f"Adding shape guard {expr} at \n{user_stack}")
+                tc = TracingContext.get()
+                if tc is not None:
+                    frame_summaries = tc.frame_summary_stack
+                    # frame_summaries describes a stack of functions
+                    # TODO(avik): It would be better to describe a stack of function calls instead
+                    current_loc = tc.loc_in_frame
+                    # current_loc describes a line in the current frame
+                    user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
+                    expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
+                    log.warning(f"Adding shape guard {expr} at \n{user_stack}")
             log.debug("SHAPE GUARD", stack_info=True)
         self.guards.append(guard)
 
