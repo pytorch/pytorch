@@ -806,9 +806,7 @@ command = [
 [[linter]]
 code = 'ROUND'
 include_patterns = [
-    'c10/**',
-    'aten/**',
-    'torch/csrc/**',
+    'aten/src/ATen/native/**',
 ]
 command = [
     'python3',
