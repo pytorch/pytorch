@@ -5780,6 +5780,24 @@ class CommonTemplate:
 
         self.common(fn, ())
 
+    def test_getitem(self):
+        out_features = ["p3", "p4", "p5", "p6", "p7"]
+        in_feature = "p5"
+
+        def fn(a):
+            return a[out_features.index(in_feature)]
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = [
+                    torch.rand([1, 256, 100, 152]),
+                    torch.rand([1, 256, 50, 76]),
+                    torch.rand([1, 256, 25, 38]),
+                ]
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x), opt_fn(x))
+
 
 @dataclasses.dataclass
 class TestFailure:
