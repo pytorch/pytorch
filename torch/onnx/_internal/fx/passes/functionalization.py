@@ -7,14 +7,14 @@ import torch.fx
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass
-from torch.onnx._internal.fx.passes import utils
+from torch.onnx._internal.fx.passes import _utils
 
 
 class Functionalize(_pass.Transform):
     """Functionalize a GraphModule.
 
     This pass utilizes ``torch.func.functionalize`` to convert a GraphModule into a
-    functional form. The two main functionalities are:
+    functional form. The two main functionalities are (copied from its documentations):
 
     * ``torch.func.functionalize`` removes (intermediate) mutations and aliasing from a
     function, while preserving the function's semantics.
@@ -23,6 +23,31 @@ class Functionalize(_pass.Transform):
     on function inputs. However to preserve semantics, functionalize will "fix up" the
     mutations after the transform has finished running, by detecting if any tensor inputs
     "should have" been mutated, and copying the new data back to the inputs if necessary.
+    For example, consider::
+
+        def fn(a, b):
+            a.add_(b)
+            return a
+
+      For a call like `fn(x, y)`, the variable `x` outside is also mutated. Hence just
+      functionalizing is not enough for preserving the original semantics. A "special"
+      input mutation step needs to be inserted at the end.::
+
+        # After functionalization, without input mutation "fix up".
+        # This is not semantically the same. The variable outside the function call that
+        # was passed in as `a` is not mutated.
+        def fn(a, b):
+            new_a = a + b
+            return new_a
+
+        # Functionalization with input mutation "fix up" that preserves semantics.
+        def fn(a, b):
+            new_a = a + b
+
+            # Copying the new data back to the inputs
+            a.copy_(new_a)
+
+            return new_a
 
     For ONNX inference, it is recommended to run ``RemoveInputMutation`` after this pass.
     ``RemoveInputMutation`` removes the "fix up" nodes that were added by ``Functionalize``,
@@ -37,7 +62,7 @@ class Functionalize(_pass.Transform):
     @_beartype.beartype
     def _run(self, *args) -> torch.fx.GraphModule:
         # To preserve stack trace info after `make_fx`.
-        module = utils.wrap_graph_module_for_node_meta_preservation(self.module)
+        module = _utils.wrap_graph_module_for_node_meta_preservation(self.module)
 
         functionalized_callable = torch.func.functionalize(module)
         fx_mode = "symbolic" if self.enable_dynamic_axes else "fake"
@@ -51,7 +76,7 @@ class Functionalize(_pass.Transform):
 
         # Rename placeholder targets to match the original module's signature since
         # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).
-        utils.replace_placeholder_name_and_target(graph_module, self.module)
+        _utils.replace_placeholder_name_and_target(graph_module, self.module)
 
         return graph_module
 
