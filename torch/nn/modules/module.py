@@ -433,7 +433,7 @@ class Module:
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
     call_super_init: bool = False
-    _compiled_call_impl : Optional[Callable] = None
+    __compiled_call_impl : Optional[Callable] = None
 
 
 
@@ -1496,8 +1496,8 @@ class Module:
         return result
 
     def _wrapped_call_impl(self, *args, **kwargs):
-        if self._compiled_call_impl:
-            return self._compiled_call_impl(*args, **kwargs)
+        if self.__compiled_call_impl:
+            return self.__compiled_call_impl(*args, **kwargs)
         else:
             return self._call_impl(*args, **kwargs)
 
@@ -1582,11 +1582,11 @@ class Module:
 
         return result
 
-    __call__ : Callable[..., Any] = _call_impl if torch.jit.is_scripting() else _wrapped_call_impl
+    __call__ : Callable[..., Any] = _wrapped_call_impl
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        state.pop("_compiled_call_impl", None)
+        state.pop("__compiled_call_impl", None)
         return state
 
     def __setstate__(self, state):
@@ -2448,4 +2448,4 @@ class Module:
        
         See :func:`torch.compile` for details on the arguments for this function.
         """
-        self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
+        self.__compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
