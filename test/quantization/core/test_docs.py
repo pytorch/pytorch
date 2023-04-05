@@ -25,7 +25,7 @@ class TestQuantizationDocs(QuantizationTestCase):
 
     def run(self, result=None):
         with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
-            super(TestQuantizationDocs, self).run(result)
+            super().run(result)
 
     def _get_code(
         self, path_from_pytorch, unique_identifier, offset=2, short_snippet=False

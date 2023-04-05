@@ -88,6 +88,7 @@ pw_cast_for_int_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
+
 # This expands x until x.dim() == dim. Might be useful as an operator
 def _unsqueeze_to_dim(x: Tensor, dim: int):
     for _ in range(dim - x.dim()):
@@ -405,8 +406,9 @@ def _nll_loss_backward(
         grad_output = grad_output / total_weight
 
     target = target.unsqueeze(channel_dim)
+    safe_target = torch.where(target != ignore_index, target, 0)
     grad_input = torch.zeros_like(self)
-    grad_input = torch.scatter(grad_input, channel_dim, target, -1.0)
+    grad_input = torch.scatter(grad_input, channel_dim, safe_target, -1.0)
 
     if grad_input.dim() > grad_output.dim() > 0:
         grad_output = grad_output.unsqueeze(channel_dim)
@@ -417,9 +419,7 @@ def _nll_loss_backward(
         weight = weight.reshape(new_shape)
         grad_output = grad_output * weight
 
-    has_ignore_index = ignore_index >= 0
-    if has_ignore_index:
-        grad_output = torch.where(target != ignore_index, grad_output, 0)
+    grad_output = torch.where(target != ignore_index, grad_output, 0)
 
     return grad_input * grad_output
 
@@ -620,7 +620,6 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
-
     ndim = self.dim()
     if ndim == 0:
         raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
@@ -1054,7 +1053,6 @@ def embedding(
 
 
 @register_decomposition(aten.embedding_dense_backward)
-@pw_cast_for_opmath
 def embedding_dense_backward(
     grad_output: Tensor,
     indices: Tensor,
@@ -1062,20 +1060,24 @@ def embedding_dense_backward(
     padding_idx: int,
     scale_grad_by_freq: bool,
 ):
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        grad_output, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    grad_output = grad_output.to(computation_dtype)
     indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
         counts = counts.index_put([indices], ones, accumulate=True)
         grad_weights_scale = counts[indices]
-        grad_output = grad_output / grad_weights_scale.unsqueeze(1)
+        grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
     mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
     grad = grad_output.masked_fill(mask, 0)
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return grad_weight.index_put([indices], grad, accumulate=True)
+    return grad_weight.index_put([indices], grad, accumulate=True).to(result_dtype)
 
 
 def prod(x: List[int]):
@@ -1134,21 +1136,17 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
-# This computes the mean and variance along the specifized normalization dims,
-# then normalizes along those dims. Finally, it returns the mean and variance of
-# the normalized dims. Note that it intentionally leaves outputs upcasted.
-# Example:
-# input: [2, 3, 4, 5], norm_dims: [1, 3]
-# mean: [2, 1, 4, 1]
-def normalize(input, norm_dims, eps):
-    computation_dtype = utils.get_computation_dtype(input.dtype)
-    input_acc = input.to(dtype=computation_dtype)
-    biased_var = torch.var(input_acc, dim=norm_dims, unbiased=False, keepdim=True)
-    mean = torch.mean(input_acc, dim=norm_dims, keepdim=True)
-    rstd = torch.rsqrt(biased_var + eps)
-
-    out = (input - mean) * rstd
-    return out, mean, rstd
+@register_decomposition(aten.addmv)
+@out_wrapper()
+@pw_cast_for_opmath
+def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+    if not self.is_floating_point() and not self.is_complex():
+        beta = int(beta)
+        alpha = int(alpha)
+    out = alpha * torch.mv(mat1, vec)
+    if beta == 0:
+        return out
+    return out + beta * self
 
 
 @register_decomposition(aten.native_group_norm_backward)
@@ -1341,10 +1339,9 @@ def native_batch_norm_helper(
     if training:
         computation_dtype = utils.get_computation_dtype(input.dtype)
         input_acc = input.to(dtype=computation_dtype)
-        biased_var = torch.var(
-            input_acc, dim=reduction_dims, unbiased=False, keepdim=True
+        biased_var, mean = torch.var_mean(
+            input_acc, dim=reduction_dims, correction=0, keepdim=True
         )
-        mean = torch.mean(input_acc, dim=reduction_dims, keepdim=True)
         rstd = torch.rsqrt(biased_var + eps)
 
         output = (input - mean) * rstd
@@ -1457,9 +1454,15 @@ def native_batch_norm_decomposition(
             "running_var is None, but running_mean is provided. "
             "They should both be None or both be provided."
         )
-    return aten._native_batch_norm_legit(
-        input, weight, bias, running_mean, running_var, training, momentum, eps
-    )
+    if training:
+        # HACK: batch norm consolidation should clean this up so this op doesn't take in a training arg.
+        return aten._native_batch_norm_legit(
+            input, weight, bias, running_mean, running_var, training, momentum, eps
+        )
+    else:
+        return aten._native_batch_norm_legit_no_training(
+            input, weight, bias, running_mean, running_var, momentum, eps
+        )
 
 
 @aten.unsafe_chunk.default.py_impl(DispatchKey.CompositeImplicitAutograd)
@@ -1472,6 +1475,28 @@ def unsafe_chunk_py_impl(tensor, chunks, dim=0) -> List[Tensor]:
         split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
         return torch.ops.aten.unsafe_split_with_sizes.default(tensor, split_sizes, dim)
     return torch.ops.aten.unsafe_split.Tensor(tensor, split_size, dim)
+
+
+@register_decomposition(aten._native_batch_norm_legit_no_training.default)
+def _native_batch_norm_legit_no_training(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    return aten._native_batch_norm_legit.default(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        False,  # training
+        momentum,
+        eps,
+    )
 
 
 @register_decomposition(aten._native_batch_norm_legit.default)
@@ -2673,6 +2698,18 @@ def gru_impl(
     return out, torch.stack(final_hiddens, 0)
 
 
+@register_decomposition(aten._upsample_bilinear2d_aa.vec)
+@aten._upsample_bilinear2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_bilinear2d_aa.vec.py_impl(DispatchKey.Autograd)
+def upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_bilinear2d_aa(
+        input, osize, align_corners, scale_h, scale_w
+    )
+
+
 @register_decomposition(aten.upsample_bilinear2d.vec)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
@@ -2813,14 +2850,13 @@ def nll_loss_forward(
     if weight is not None:
         w = weight.unsqueeze(0) if n_dims > 1 else weight
         self = self * w
-
-    target_ = target.unsqueeze(channel_dim)
+    safe_target = torch.where(target != ignore_index, target, 0)
+    safe_target_ = safe_target.unsqueeze(channel_dim)
     # target can be [N, 1] or [1]
 
-    result = -torch.gather(self, channel_dim, target_).squeeze(channel_dim)
+    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
 
-    if ignore_index >= 0:
-        result = torch.where(target != ignore_index, result, 0)
+    result = torch.where(target != ignore_index, result, 0)
 
     if reduction == Reduction.NONE.value and n_dims > 1:
         total_weight = self.new_full((), 0.0)
@@ -2828,22 +2864,16 @@ def nll_loss_forward(
 
     if weight is not None:
         w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
-        wsum = torch.gather(w, channel_dim, target_).squeeze(channel_dim)
-        if ignore_index >= 0:
-            wsum = torch.where(target != ignore_index, wsum, 0)
+        wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
+        wsum = torch.where(target != ignore_index, wsum, 0)
         total_weight = wsum.sum()
-    elif ignore_index >= 0:
-        total_weight = (target != ignore_index).sum().to(self)
     else:
-        total_weight = self.new_full((), 1.0 * result.numel())
+        total_weight = (target != ignore_index).sum().to(self)
 
     if reduction == Reduction.SUM.value:
         result = result.sum()
     elif reduction == Reduction.MEAN.value:
-        if weight is None:
-            result = result.sum() / total_weight if ignore_index >= 0 else result.mean()
-        else:
-            result = result.sum() / total_weight
+        result = result.sum() / total_weight
 
     return result, total_weight
 
@@ -3034,7 +3064,7 @@ def mv(self, vec):
     )
     utils.check(
         self.size(1) == vec.size(0),
-        lambda: f"size mismatch, got {self.size(0)}x{self.size(1)},{vec.size(0)}",
+        lambda: f"size mismatch, got input ({self.size(0)}x{self.size(1)}), vec ({vec.size(0)})",
     )
     return (self * vec).sum(dim=1)
 
@@ -3306,6 +3336,20 @@ def upsample_bicubic2d_vec(
         )
     scale_h, scale_w = scale_factors if scale_factors else (None, None)
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
+
+
+@register_decomposition(aten.aminmax)
+@out_wrapper("min", "max")
+def aminmax(self, *, dim=None, keepdim=False):
+    amin = torch.amin(self, dim=dim, keepdim=keepdim)
+    amax = torch.amax(self, dim=dim, keepdim=keepdim)
+    return amin, amax
+
+
+@register_decomposition(aten.nansum)
+@out_wrapper()
+def nansum(self, dim=None, keepdim=False, *, dtype=None):
+    return aten.sum(torch.where(torch.isnan(self), 0, self), dim, keepdim, dtype=dtype)
 
 
 def register_inplace(aten_op, outplace_op):

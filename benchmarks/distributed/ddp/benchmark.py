@@ -173,7 +173,7 @@ class Benchmark:
 
 class TorchvisionBenchmark(Benchmark):
     def __init__(self, device, distributed_backend, bucket_size, model):
-        super(TorchvisionBenchmark, self).__init__(
+        super().__init__(
             device,
             distributed_backend,
             bucket_size,

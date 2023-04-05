@@ -10,7 +10,6 @@
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
@@ -20,6 +19,7 @@
 #include <ATen/native/Activation.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/SmallBuffer.h>
@@ -77,15 +77,15 @@ Tensor toNonOptPrimal(const c10::optional<Tensor>& t) {
 }
 
 void copy_range(variable_list& out, IndexRange range, const Tensor& t) {
-  AT_ASSERT(range.second <= out.size());
-  AT_ASSERTM(
+  TORCH_CHECK(range.second <= out.size());
+  TORCH_CHECK(
       range.second - range.first == 1, "inconsistent range for Tensor output");
   out[range.first] = t;
 }
 
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
-  AT_ASSERT(range.second <= out.size());
-  AT_ASSERTM(
+  TORCH_CHECK(range.second <= out.size());
+  TORCH_CHECK(
       range.second - range.first == t.size(),
       "inconsistent range for TensorList output");
   std::copy(t.begin(), t.end(), out.begin() + range.first);
@@ -121,9 +121,9 @@ std::vector<Tensor> not_implemented_list(const char* name, const char* reason) {
 Tensor maybe_multiply(const Tensor& t, const Scalar& s) {
   bool is_one = false;
   if (s.isFloatingPoint()) {
-    is_one = s.toDouble() == 1;
+    is_one = s.toSymFloat() == 1;
   } else if (s.isIntegral(true)) {
-    is_one = s.toLong() == 1;
+    is_one = s.toSymInt() == 1;
   }
 
   if (is_one) {
@@ -380,6 +380,60 @@ Tensor _nested_from_padded_backward(
   return grad.to_padded_tensor(0, input.sizes());
 }
 
+std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
+    const variable_list& grads,
+    const Tensor& self,
+    const Tensor& grad_output,
+    const Tensor& weight) {
+  if (!grad_output.defined()) {
+    return std::make_tuple(Tensor(), Tensor(), Tensor());
+  }
+
+  Tensor grad_self, grad_grad_output, grad_weight;
+
+  if (grads[1].defined()) {
+    grad_self =
+        (grad_output.dim() == 1 ? grad_output.unsqueeze(0) : grad_output)
+            .matmul(grads[1]);
+    if (grad_output.dim() == 1) {
+      grad_self = grad_self.squeeze(0);
+    }
+  }
+  if (grads[0].defined()) {
+    grad_weight =
+        (grad_output.dim() == 1 ? grad_output.unsqueeze(1) : grad_output.mT())
+            .matmul(grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0]);
+  }
+
+  if (grads[0].defined() || grads[1].defined() || grads[2].defined()) {
+    grad_grad_output = at::zeros_like(grad_output);
+    if (grad_output.dim() == 1) {
+      grad_grad_output = grad_grad_output.unsqueeze(0);
+    }
+  }
+
+  if (grads[0].defined()) {
+    grad_grad_output = grad_grad_output +
+        (grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0])
+            .matmul(weight.mT());
+  }
+  if (grads[1].defined()) {
+    grad_grad_output = grad_grad_output +
+        (self.dim() == 1 ? self.unsqueeze(0) : self).matmul(grads[1].mT());
+  }
+  if (grads[2].defined()) {
+    grad_grad_output = grad_grad_output + grads[2];
+  }
+  if (grad_grad_output.defined() && grad_output.dim() == 1) {
+    grad_grad_output = grad_grad_output.squeeze(0);
+  }
+
+  return std::make_tuple(
+      std::move(grad_self),
+      std::move(grad_grad_output),
+      std::move(grad_weight));
+}
+
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -453,10 +507,14 @@ Tensor pow_backward_exponent(
   } else {
     cond = at::logical_and(self == 0, exponent >= 0);
   }
+  auto promoted_dtype = at::result_type(self, exponent);
+  // `.to()` is no-op if dtype is same.
+  auto self_ = self.to(promoted_dtype);
+
   auto out =
       grad *
       at::where(
-          cond, at::zeros({}, grad.options()), (result * self.log()).conj());
+          cond, at::zeros({}, grad.options()), (result * self_.log()).conj());
   return handle_r_to_c(exponent, std::move(out));
 }
 
@@ -466,6 +524,9 @@ Tensor pow_backward_exponent(
     const Tensor& exponent,
     Tensor result) {
   auto grad_lambda = [](Tensor a, Scalar b) { return (a * b.log()).conj(); };
+  auto base_ = exponent.is_complex() && !base.isComplex()
+      ? base.toComplexDouble()
+      : base;
   if (base.equal(0.0)) {
     auto cond = [](auto exp) {
       if (exp.is_complex()) {
@@ -477,10 +538,10 @@ Tensor pow_backward_exponent(
     auto out = grad *
         at::where(cond(exponent),
                   at::zeros({}, grad.options()),
-                  grad_lambda(std::move(result), base));
+                  grad_lambda(std::move(result), base_));
     return handle_r_to_c(exponent, std::move(out));
   } else {
-    auto out = grad * grad_lambda(std::move(result), base);
+    auto out = grad * grad_lambda(std::move(result), base_);
     return handle_r_to_c(exponent, std::move(out));
   }
 }
@@ -521,14 +582,18 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
       : grad.masked_select(mask).sum();
 }
 
-Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
+template <typename T>
+Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st) {
   auto out = grad * other.conj();
   return handle_r_to_c(self_st, std::move(out));
 }
+template Tensor mul_tensor_backward(Tensor, Tensor, ScalarType);
+template Tensor mul_tensor_backward(Tensor, Scalar, ScalarType);
 
+template <typename T>
 Tensor div_tensor_self_backward(
     Tensor grad,
-    Tensor other,
+    T other,
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
@@ -538,11 +603,24 @@ Tensor div_tensor_self_backward(
   auto result = grad / other.conj();
   return handle_r_to_c(self_st, std::move(result));
 }
+template Tensor div_tensor_self_backward(
+    Tensor,
+    Tensor,
+    ScalarType,
+    const c10::optional<c10::string_view>&);
+template Tensor div_tensor_self_backward(
+    Tensor,
+    Scalar,
+    ScalarType,
+    const c10::optional<c10::string_view>&);
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+template <typename T>
+Tensor div_tensor_self_backward(Tensor grad, T other, ScalarType self_st) {
   return div_tensor_self_backward(
       std::move(grad), std::move(other), self_st, c10::nullopt);
 }
+template Tensor div_tensor_self_backward(Tensor, Tensor, ScalarType);
+template Tensor div_tensor_self_backward(Tensor, Scalar, ScalarType);
 
 Tensor div_tensor_other_backward(
     Tensor grad,
@@ -677,7 +755,7 @@ Tensor prod_safe_zeros_backward(
     const Tensor& grad,
     const Tensor& inp,
     int64_t dim) {
-  if (inp.numel() == 0) {
+  if (inp.sym_numel() == 0) {
     // When input has a zero sized dimension (empty tensor),
     // we don't need to actually compute the grads.
     // So we just reshape `grad` as `input`.
@@ -725,7 +803,7 @@ Tensor prod_backward(
         .view_as(input);
   }
   Tensor zero_idx = (input == 0).nonzero();
-  if (zero_idx.numel() == 0) {
+  if (zero_idx.sym_numel() == 0) {
     return grad * (result / input).conj();
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -784,7 +862,7 @@ static Tensor generic_solve_jvp(
 
 Tensor cumsum_backward(const Tensor& grad, int64_t dim) {
   // Trivial case
-  if (grad.numel() <= 1 || grad.size(dim) == 1) {
+  if (grad.sym_numel() <= 1 || grad.sym_size(dim) == 1) {
     return grad;
   }
   return grad.flip(dim).cumsum(dim).flip(dim);
@@ -808,7 +886,7 @@ Tensor logcumsumexp_backward(
     const Tensor& self,
     Tensor result,
     int64_t dim) {
-  if (grad.dim() == 0 || grad.numel() == 0) {
+  if (grad.dim() == 0 || grad.sym_numel() == 0) {
     return grad;
   }
 
@@ -1545,27 +1623,32 @@ Tensor var_backward(
     Tensor grad,
     const Tensor& self,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<at::Scalar>& correction_opt,
     bool keepdim) {
-  auto correction = correction_opt.value_or(1);
+  const auto correction = correction_opt.value_or(1).toSymFloat();
   if (self.dim() == 0 || !dim_opt.has_value()) {
-    // To apease ASAN
-    auto n = self.numel();
-    if (n == correction) {
-      return INFINITY * grad;
+    const auto dof = c10::SymFloat(self.sym_numel()) - correction;
+    if (dof <= 0) {
+      // when n == correction, 2 / (n - correction) is infinity
+      // when self == self.mean(), we return NaN because infinity * 0 = NaN
+      // otherwise, we return infinity because infinity * c = infinity, for all
+      // c > 0
+      return grad *
+          at::where(
+                 self == self.mean(),
+                 std::numeric_limits<double>::quiet_NaN(),
+                 std::numeric_limits<double>::infinity());
     } else {
-      return (c10::SymFloat(2.0) /
-              c10::SymFloat(self.sym_numel() - correction)) *
-          grad * (self - self.mean());
+      return (c10::SymFloat(2.0) / dof) * grad * (self - self.mean());
     }
   }
   auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {
     grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
   }
-  const c10::SymInt dof = _safe_size(self.sym_sizes(), dim) - correction;
+  const c10::SymFloat rnumel(_safe_size(self.sym_sizes(), dim));
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (c10::SymFloat(2.0) / c10::SymFloat(dof)) * grad *
+  return (c10::SymFloat(2.0) / (rnumel - correction)) * grad *
       (self - self.mean(dim, /*keepdim=*/true));
 }
 
@@ -1574,10 +1657,10 @@ Tensor std_backward(
     const Tensor& grad,
     const Tensor& self,
     at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction,
+    const c10::optional<c10::Scalar>& correction_opt,
     bool keepdim) {
   auto grad_var = (grad / (result * 2)).masked_fill_(result == 0, 0);
-  return var_backward(std::move(grad_var), self, dim, correction, keepdim);
+  return var_backward(std::move(grad_var), self, dim, correction_opt, keepdim);
 }
 
 Tensor var_mean_backward(
@@ -1585,12 +1668,11 @@ Tensor var_mean_backward(
     const Tensor& gmean,
     const Tensor& self,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<c10::Scalar>& correction_opt,
     bool keepdim) {
-  auto correction = correction_opt.value_or(1);
   Tensor gself;
   if (gvar.defined()) {
-    gself = var_backward(gvar, self, dim_opt, correction, keepdim);
+    gself = var_backward(gvar, self, dim_opt, correction_opt, keepdim);
   }
   if (gmean.defined()) {
     auto aux = mean_backward(
@@ -1610,12 +1692,11 @@ Tensor std_mean_backward(
     const Tensor& self,
     const Tensor& std,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<c10::Scalar>& correction_opt,
     bool keepdim) {
-  auto correction = correction_opt.value_or(1);
   Tensor gself;
   if (gstd.defined()) {
-    gself = std_backward(std, gstd, self, dim_opt, correction, keepdim);
+    gself = std_backward(std, gstd, self, dim_opt, correction_opt, keepdim);
   }
   if (gmean.defined()) {
     auto aux = mean_backward(
@@ -1657,7 +1738,7 @@ Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
   // L^{-1}dA(L^{-H}) = L^{-1}dL + (L^{-1}dL)^H
   //               = sym(L^{-1}dL)
   // where sym(X) = X + X^H
-  // A short computaiton gives that the inverse of sym is given by
+  // A short computation gives that the inverse of sym is given by
   // \pi(X) = X.tril() - 0.5*diag(X)
   // so
   // dL = L\pi(L^{-1}dA(L^{-H}))
@@ -1760,8 +1841,8 @@ Tensor cholesky_inverse_jvp(
 // of Ap^i, A^j, dA^k with i, j, k in {1, H}, where X^H = X.mH(). To prove that,
 // note (A Ap)^H = A Ap and (Ap A)^H = Ap A, which could be shown by taking the
 // product between the SVD decompositions of A and Ap. Consider the
-// conjugate-tranposed [2]: (A Ap A)^H = A^H (A Ap) = A^H. By differentiating it
-// we get: dA^H A Ap + A^H dA Ap + A^H A dAp = dA^H. By multiplying from the
+// conjugate-transposed [2]: (A Ap A)^H = A^H (A Ap) = A^H. By differentiating
+// it we get: dA^H A Ap + A^H dA Ap + A^H A dAp = dA^H. By multiplying from the
 // left by Ap^H and using Ap^H A^H = (A Ap)^H = A Ap: Ap^H dA^H A Ap + A Ap dA
 // Ap + A Ap A dAp = Ap^H dA^H. By multiplying from the left by Ap and by
 // applying [1] and [2] repeatedly until impossible we get: Ap Ap^H dA^H A Ap +
@@ -1846,6 +1927,14 @@ Tensor split_with_sizes_backward(
   return ret;
 }
 
+Tensor _nested_split_with_sizes_backward(
+    const std::vector<torch::autograd::Variable>& grads,
+    c10::SymIntArrayRef split_sizes,
+    int64_t dim,
+    const Tensor& self) {
+  return not_implemented("aten::split_with_sizes");
+}
+
 Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymInt split_size,
@@ -1867,7 +1956,7 @@ Tensor max_pool_double_backward(
     int dim) {
   AT_ASSERT(indices.dim() >= dim);
   // handle non-empty inputs
-  if (indices.numel()) {
+  if (indices.sym_numel() != 0) {
     auto size = indices.sizes().slice(0, indices.dim() - dim).vec();
     size.push_back(-1);
     auto indices_view = indices.view(size);
@@ -1965,12 +2054,8 @@ Tensor binary_cross_entropy_target_backward(
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction) {
-  auto grad_target = [&] {
-    if (self.is_mps()) {
-      return self.neg().log1p_().sub_(self.log());
-    }
-    return at::logit(self).neg_();
-  }();
+  auto grad_target = at::logit(self).neg_();
+
   if (!areAnyTensorSubclassLike({grad})) {
     grad_target.mul_(grad);
   } else {
@@ -1986,7 +2071,7 @@ Tensor binary_cross_entropy_target_backward(
   }
 
   if (reduction == at::Reduction::Mean) {
-    grad_target.div_(target.numel());
+    grad_target.div_(target.sym_numel());
   }
 
   return grad_target;
@@ -2020,7 +2105,7 @@ Tensor binary_cross_entropy_double_backward_target(
   res = isTensorSubclassLike(denom) ? res.div(denom) : res.div_(denom);
 
   if (reduction == at::Reduction::Mean) {
-    res.div_(target.numel());
+    res.div_(target.sym_numel());
   }
 
   return res;
@@ -2071,7 +2156,7 @@ Tensor binary_cross_entropy_with_logits_backward(
   }
 
   if (reduction == at::Reduction::Mean) {
-    grad_input.div_(input.numel());
+    grad_input.div_(input.sym_numel());
   }
 
   return grad_input;
@@ -2112,7 +2197,7 @@ Tensor binary_cross_entropy_with_logits_target_backward(
   }
 
   if (reduction == at::Reduction::Mean) {
-    grad_target.div_(target.numel());
+    grad_target.div_(target.sym_numel());
   }
 
   return grad_target;
@@ -2189,7 +2274,7 @@ Tensor binary_cross_entropy_double_backward(
     }
   }
   if (reduction == at::Reduction::Mean) {
-    return gI / input.numel();
+    return gI / input.sym_numel();
   }
 
   return gI;
@@ -2218,7 +2303,7 @@ Tensor binary_cross_entropy_double_backward_grad_output(
     }
   }
   if (reduction == at::Reduction::Mean) {
-    return ggO / input.numel();
+    return ggO / input.sym_numel();
   }
   return ggO;
 }
@@ -2236,7 +2321,7 @@ Tensor smooth_l1_loss_double_backward(
   auto d = (input - target).abs();
   auto grad_input = grad * (d < beta).type_as(grad) / beta;
   if (reduction == at::Reduction::Mean) {
-    grad_input /= input.numel();
+    grad_input /= input.sym_numel();
   }
   return grad_input;
 }
@@ -2250,7 +2335,7 @@ Tensor huber_loss_double_backward(
   auto d = (input - target).abs();
   auto grad_input = grad * (d < delta);
   if (reduction == at::Reduction::Mean) {
-    grad_input /= input.numel();
+    grad_input /= input.sym_numel();
   }
   return grad_input;
 }
@@ -2276,7 +2361,7 @@ Tensor mse_loss_double_backward(
     int64_t reduction) {
   auto grad_input = 2 * grad;
   if (reduction == at::Reduction::Mean) {
-    grad_input /= input.numel();
+    grad_input /= input.sym_numel();
   }
   return grad_input;
 }
@@ -2290,7 +2375,7 @@ Tensor soft_margin_loss_double_backward(
   auto zplus1 = z + 1;
   auto grad_input = grad * (target * target) * z / (zplus1 * zplus1);
   if (reduction == at::Reduction::Mean) {
-    grad_input /= input.numel();
+    grad_input /= input.sym_numel();
   }
   return grad_input;
 }
@@ -2345,7 +2430,7 @@ Tensor softplus_double_backward(
 //           this later)
 //   4. Return the as_strided view of the storage tensor using input geometry.
 //
-// In step (2), if the output tensor does't have overlapping memory, we can
+// In step (2), if the output tensor doesn't have overlapping memory, we can
 // safely scatter (`storage.as_strided(output_geometry).copy_(grad)`);
 // otherwise, we must use `index_add` as gradients at different indices may need
 // to be summed to a single location.
@@ -2478,12 +2563,12 @@ Tensor softplus_double_backward(
 //
 //        Note that all values in `S(n)` are the same (they point to the same
 //        memory location anyways, so this step doesn't change anything, but
-//        effectively avoids having the denpendency on the layout of `input`.
+//        effectively avoids having the dependency on the layout of `input`.
 //        I.e., the result holds fixed regardless of the layout of `input`, as
 //        long as `input_stride` is fixed.
 //
-//      NOTE: for forward pass, we can equivalently simply selet any one of
-//            `S(n)` as `storage[n]`. However, cosnidering this as an average
+//      NOTE: for forward pass, we can equivalently simply select any one of
+//            `S(n)` as `storage[n]`. However, considering this as an average
 //            operation makes backward easier (so all values in set
 //            `{ grad_input[i] : i in S(n) }` are the same, and it can use the
 //            same geometry as input).
@@ -2622,7 +2707,7 @@ Tensor softplus_double_backward(
 //                                stride[B[j]]
 //
 //              Then the invariant is obviously satisfied at every dimension
-//              in this block if it is satisfied at dimnesion B[-1]. It only
+//              in this block if it is satisfied at dimension B[-1]. It only
 //              remains to show that it is satisfied at the last dimension in
 //              each block.
 //
@@ -3189,7 +3274,7 @@ Tensor svd_backward(
   // where CP(n-1) is the complex projective space of dimension n-1.
   // In other words, M is just the complex projective space, and pi is (pretty
   // similar to) the usual principal bundle from S^{2n-1} to CP(n-1). The case k
-  // > 1 is the same, but requiring a linear inependence condition between the
+  // > 1 is the same, but requiring a linear independence condition between the
   // vectors from the different S^{2n-1} or CP(n-1).
   //
   // Note that this is a U(1)^k-bundle. In plain words, this means that the
@@ -3649,14 +3734,14 @@ Tensor linalg_qr_backward(
     const Tensor& Q,
     const Tensor& R,
     const c10::string_view mode) {
-  // Nb. We won't be too formal below, as writing this proof formaly is a pain
+  // Nb. We won't be too formal below, as writing this proof formally is a pain
   // We'll link here a formal writing of all this at some point in the future
   //
   // Case m >= n
   // dQ = dAR^{-1} - Qsyminv(sym(Q^H dA R^{-1}))
   // dR = syminv(sym(Q^H dA R^{-1}))R
   //
-  // With the notation from the JVP formla, the only two computations that we
+  // With the notation from the JVP formula, the only two computations that we
   // need are syminv*(R) = 0.5 * (R.triu() + R.triu()^H - Re diag(R)) sym*(X) =
   // 2 * X Using these, after a few simplifications we get that gA = (gQ +
   // syminvadj(triu(gR R^H - Q^H gQ)))R^{-H}
@@ -3813,10 +3898,10 @@ Tensor masked_fmap(
   // for example det_backward
 
   // Precondition for the n == 0 case to make sense
-  TORCH_INTERNAL_ASSERT(t.numel() != 0);
+  TORCH_INTERNAL_ASSERT(t.sym_numel() != 0);
   auto t_masked = t.index({mask});
-  auto n = t_masked.numel();
-  if (n == t.numel()) {
+  auto n = t_masked.sym_numel();
+  if (n == t.sym_numel()) {
     return f1(t, ts...);
   } else if (n == 0) {
     return f2(t, ts...);
@@ -3859,7 +3944,7 @@ Tensor linalg_det_backward(
     const Tensor& pivots) {
   at::NoTF32Guard disable_tf32;
   // A.numel() == 0 necessary for the singular case
-  if (!grad.defined() || A.numel() == 0) {
+  if (!grad.defined() || A.sym_numel() == 0) {
     return {};
   }
 
@@ -4689,14 +4774,14 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
 }
 
 Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
-  // We must conditionally initalize this using to_dense if sparse, sparse
+  // We must conditionally initialize this using to_dense if sparse, sparse
   // addition is not supported without exact shape match
   Tensor self_p1_conj;
   if (self.layout() == c10::kSparse || self.layout() == c10::kSparseCsr ||
       self.layout() == c10::kSparseCsc || self.layout() == c10::kSparseBsr ||
       self.layout() == c10::kSparseBsc) {
     // The warning only applies to the sparsity of self, dense grad is never
-    // materialized so if self is strided and grad is sparse nothing unepected
+    // materialized so if self is strided and grad is sparse nothing unexpected
     // happens memory wise
     TORCH_WARN(
         "log1p_backward: received self with sparse layout, but backward requires materialization of a dense tensor with this shape");
@@ -4901,7 +4986,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // range(k) to range(k - 1, -1, -1) in the main loop, and left/right
   // Householder projection applications get flipped.
   // The comments below about the algorithmic details assume flip_order = false.
-  if (!grad.defined() || !input_.numel() || !tau.numel()) {
+  if (!grad.defined() || input_.sym_numel() == 0 || tau.sym_numel() == 0) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }
   auto m = input_.size(-2);
@@ -4936,7 +5021,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // better performance
   bool modify_K_in_place = !at::GradMode::is_enabled();
 
-  // This method exploites that at k-th iteration vector v_k has only elements
+  // This method exploits that at k-th iteration vector v_k has only elements
   // v_k[k:] which are non-zero.
   auto update_grad = [&m](
                          int64_t k,
@@ -5194,7 +5279,7 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
   if (self_requires_grad || tau_requires_grad) {
     if (left ^ transpose) {
       // Assume left = true and transpose = false. The case with
-      // left = false and tranpose = true is very much similar with just
+      // left = false and transpose = true is very much similar with just
       // transposed arguments passed into householder_product_backward.
       // Ormqr computes B = H_1 * ... * H_k * A.
       // The sensivity wrt H_i is given by (see notes in
@@ -6045,7 +6130,7 @@ Tensor gather_with_keepdimed_indices(
 // P^T dA1 = dL U1 + L dU1 => [left-multiply by L^{-1}, right-multiply by
 // U1^{-1}] L^{-1} P^T dA1 U1^{-1} = L^{-1} dL + dU1 U1^{-1} (**). Note, L is
 // lower-triangular, and so is its inverse, hence L^{-1} dL is lower-triangular.
-// Also, since the diagonal of L (all ones) is never exposed explicity (packed
+// Also, since the diagonal of L (all ones) is never exposed explicitly (packed
 // representation), the diagonal of dL is zero, and hence diag(L^{-1} dL) = 0.
 // Assuming that U1 is full-rank, similarly, dU1 U1^{-1} is upper-triangular.
 // Combining these observations we conclude:
@@ -6328,10 +6413,10 @@ Tensor logsumexp_jvp(
     const Tensor& self_t,
     IntArrayRef dim,
     bool keepdim) {
-  // NB: for simplicitly, we recompute some values that can be reused from
+  // NB: for simplicity, we recompute some values that can be reused from
   // forward
   auto self_p_exp = [&self_p, &dim]() {
-    if (self_p.numel() > 0) {
+    if (self_p.sym_numel() > 0) {
       return (self_p - at::amax(self_p, dim, true))
           .exp(); // Use the exp-normalize trick
     } else {
@@ -6617,9 +6702,9 @@ Tensor take_backward(
     const Tensor& indices) {
   Tensor grad_self = at::zeros_like(self);
   // For Composite Compliance,
-  // if `grad` and `indices` are CCT but `self` is not
+  // if `grad` and `indices` are CCT but `grad_self` is not
   // then we use the out-of-place variant of `put`.
-  if (!isTensorSubclassLike(self) &&
+  if (!isTensorSubclassLike(grad_self) &&
       areAnyTensorSubclassLike({grad, indices})) {
     return grad_self.put(indices, grad, true);
   }

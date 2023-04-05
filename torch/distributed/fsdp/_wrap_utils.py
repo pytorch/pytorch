@@ -26,10 +26,6 @@ class FullyShardedModuleState(NamedTuple):
 
     params: List[nn.Parameter]
     buffers: List[torch.Tensor]
-    # Parameter and buffer names are prefixed starting from the submodule,
-    # which is not necessarily the root module
-    param_names: List[str]
-    buffer_names: List[str]
 
 
 def _auto_wrap(
@@ -137,9 +133,7 @@ def _get_fully_sharded_module_to_states(
         deque: Deque[Tuple[nn.Module, str]] = collections.deque()
         deque.append((submodule, ""))
         params: List[nn.Parameter] = []
-        param_names: List[str] = []
         buffers: List[torch.Tensor] = []
-        buffer_names: List[str] = []
         while len(deque) > 0:
             module, prefix = deque.popleft()
             # Reverse `named_children()`, use `appendleft()`, and add to the
@@ -149,18 +143,16 @@ def _get_fully_sharded_module_to_states(
             ):
                 if child_module not in wrapped_modules_set:
                     deque.appendleft((child_module, prefix + child_module_name + "."))
-            for param_name, param in module.named_parameters(recurse=False):
+            for param in module.parameters(recurse=False):
                 if param not in visited_params and not _is_fsdp_flattened(param):
                     params.append(param)
                     visited_params.add(param)
-                    param_names.append(prefix + param_name)
-            for buffer_name, buffer in module.named_buffers(recurse=False):
+            for buffer in module.buffers(recurse=False):
                 if buffer not in visited_buffers:
                     buffers.append(buffer)
                     visited_buffers.add(buffer)
-                    buffer_names.append(prefix + buffer_name)
         fully_sharded_module_to_states[submodule] = FullyShardedModuleState(
-            params, buffers, param_names, buffer_names
+            params, buffers
         )
     return fully_sharded_module_to_states
 

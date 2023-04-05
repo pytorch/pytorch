@@ -3,6 +3,7 @@
 Opset 9 is supported by ONNX release 1.4.1
 release on 01/23/19
 """
+from __future__ import annotations
 
 import builtins
 import functools
@@ -18,14 +19,7 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import (  # noqa: F401
-    _constants,
-    _deprecation,
-    _patch_torch,
-    _type_utils,
-    errors,
-    symbolic_helper,
-)
+from torch.onnx import _constants, _deprecation, _type_utils, errors, symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils, registration
 from torch.types import Number
@@ -54,6 +48,7 @@ __all__ = [
     "batch_norm",
     "bernoulli",
     "bitwise_not",
+    "bitwise_or",
     "bmm",
     "broadcast_tensors",
     "bucketize",
@@ -73,6 +68,7 @@ __all__ = [
     "conv1d",
     "conv2d",
     "conv3d",
+    "convert_element_type",
     "convolution",
     "cos",
     "cosine_similarity",
@@ -144,6 +140,7 @@ __all__ = [
     "log1p",
     "log2",
     "logical_and",
+    "logical_not",
     "logical_or",
     "logical_xor",
     "logsumexp",
@@ -151,6 +148,7 @@ __all__ = [
     "lstm",
     "lt",
     "masked_fill",
+    "masked_fill_",
     "matmul",
     "max_pool1d_with_indices",
     "max_pool2d_with_indices",
@@ -543,6 +541,7 @@ def cat(g: jit_utils.GraphContext, tensor_list, dim):
     assert all(
         [
             symbolic_helper._get_tensor_rank(nonempty_tensors[0]) is None
+            or symbolic_helper._get_tensor_rank(t) is None
             or symbolic_helper._get_tensor_rank(t)
             == symbolic_helper._get_tensor_rank(nonempty_tensors[0])
             for t in nonempty_tensors
@@ -942,7 +941,9 @@ def expand_as(g: jit_utils.GraphContext, self, other):
         for d in range(self_t.dim()):
             if torch.equal(self_t.mean(d).unsqueeze(d).expand_as(self_t), self_t):
                 dims.append(d)
-                self = g.op("Constant", value_t=self_t.mean(dims).to(orig_type))
+                self = g.op(
+                    "Constant", value_t=self_t.mean(dims, keepdim=True).to(orig_type)
+                )
 
     shape = g.op("Shape", other)
     return g.op("Expand", self, shape)
@@ -1323,7 +1324,6 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 
     if require_cast:
         for input in inputs:
-
             if input.isCompleteTensor():
                 input_scalar_type = _type_utils.JitScalarType.from_value(input)
                 if input_scalar_type != dtype_0:
@@ -1915,12 +1915,10 @@ def _pad_circular(g: jit_utils.GraphContext, input: _C.Value, pad: _C.Value):
     for idx in range(ndim):
         pad_r = padding[-(2 * idx + 1)]
         pad_l = padding[-(2 * idx + 2)]
-        # get size for targeting the last idx, as Slice don't take start=[-1], end=[-1]
-        size = symbolic_helper._get_tensor_sizes(input)
         tensors = []
         if pad_l > 0:
             left = symbolic_helper._slice_helper(
-                g, cur, axes=[2 + idx], starts=[-(pad_l)], ends=[size[2 + idx]]
+                g, cur, axes=[2 + idx], starts=[-(pad_l)], ends=[_constants.INT64_MAX]
             )
             tensors.append(left)
 
@@ -2086,6 +2084,24 @@ def bitwise_not(g: jit_utils.GraphContext, input):
             input,
         )
     return g.op("Not", input)
+
+
+@_onnx_symbolic("aten::bitwise_or")
+@_beartype.beartype
+def bitwise_or(g, self, other):
+    if not symbolic_helper._is_bool(self):
+        raise errors.SymbolicValueError(
+            "ONNX export does NOT support exporting bitwise OR "
+            "for non-boolean input values. self: ",
+            self,
+        )
+    if not symbolic_helper._is_bool(other):
+        raise errors.SymbolicValueError(
+            "ONNX export does NOT support exporting bitwise OR "
+            "for non-boolean input values. other: ",
+            other,
+        )
+    return g.op("Or", self, other)
 
 
 @_beartype.beartype
@@ -2277,6 +2293,12 @@ def logical_or(g: jit_utils.GraphContext, input, other):
 @_beartype.beartype
 def logical_xor(g: jit_utils.GraphContext, input, other):
     return g.op("Xor", input, other)
+
+
+@_onnx_symbolic("aten::logical_not")
+@_beartype.beartype
+def logical_not(g: jit_utils.GraphContext, input):
+    return g.op("Not", g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL))
 
 
 @_onnx_symbolic("aten::__rshift_")
@@ -3390,9 +3412,9 @@ def _unsupported_dropout(name: str):
 
 
 @_onnx_symbolic("aten::norm")
-@symbolic_helper.parse_args("v", "t", "is", "i")
+@symbolic_helper.parse_args("v", "t", "is", "i", "v")
 @_beartype.beartype
-def norm(g: jit_utils.GraphContext, self, p, dim, keepdim):
+def norm(g: jit_utils.GraphContext, self, p, dim, keepdim, dtype=None):
     if p == 1:
         f = _reduce_op_symbolic("ReduceL1")
     elif p == 2:
@@ -3401,7 +3423,11 @@ def norm(g: jit_utils.GraphContext, self, p, dim, keepdim):
         raise errors.SymbolicValueError(
             "ONNX export only p-norms with p of 1 or 2", self
         )
-    return f(g, self, dim=dim, keepdim=keepdim)
+    result = f(g, self, dim=dim, keepdim=keepdim)
+    if dtype is not None:
+        dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+        result = g.op("Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type())
+    return result
 
 
 @_onnx_symbolic("aten::conv_tbc")
@@ -4100,6 +4126,13 @@ def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, out=None):
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
+@_onnx_symbolic("prim::convert_element_type")
+@_beartype.beartype
+def convert_element_type(g: jit_utils.GraphContext, self, *args):
+    dtype = symbolic_helper._get_const(args[0], "i", "dtype")
+    return g.op("Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type())
+
+
 @_onnx_symbolic("aten::to")
 @_beartype.beartype
 def to(g: jit_utils.GraphContext, self, *args):
@@ -4450,7 +4483,6 @@ def _generic_rnn(
     batch_first=None,
     batch_sizes=None,
 ):
-
     warnings.warn(
         "Exporting a model to ONNX with a batch_size other than 1, "
         + "with a variable length with "
@@ -5477,6 +5509,12 @@ def masked_fill(g: jit_utils.GraphContext, self, mask, value):
     mask = g.op("Cast", mask, to_i=_C_onnx.TensorProtoDataType.BOOL)
     value = symbolic_helper._maybe_get_scalar(value)
     return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
+
+
+@_onnx_symbolic("aten::masked_fill_")
+@_beartype.beartype
+def masked_fill_(g: jit_utils.GraphContext, self, mask, value):
+    return masked_fill(g, self, mask, value)
 
 
 @_onnx_symbolic("aten::index")

@@ -56,7 +56,7 @@ size_t getInstanceCount() {
 }
 
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
-  m.impl("aten::random_.from_int",                 random_from_to);
+  m.impl("aten::random_.from",                 random_from_to);
   m.impl("aten::random_.to",                   random_to);
   m.impl("aten::random_",                      random_);
 }

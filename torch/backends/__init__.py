@@ -40,7 +40,7 @@ class ContextProp:
 
 class PropModule(types.ModuleType):
     def __init__(self, m, name):
-        super(PropModule, self).__init__(name)
+        super().__init__(name)
         self.m = m
 
     def __getattr__(self, attr):

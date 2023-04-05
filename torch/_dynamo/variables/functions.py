@@ -3,12 +3,14 @@ import enum
 import functools
 import inspect
 import itertools
+import sys
 import types
 from typing import Dict, List
 
 import torch
 
 from .. import variables
+from ..allowed_functions import is_allowed, is_builtin_callable
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
@@ -45,6 +47,10 @@ def wrap_bound_arg(tx, val, options, source=None):
         val, (torch.Size, torch.device, torch.dtype)
     ):
         return variables.ConstantVariable(val, **options)
+    elif is_builtin_callable(val):
+        return variables.BuiltinVariable(val, source=source, **options)
+    elif is_allowed(val):
+        return variables.TorchVariable(val, source=source, **options)
     elif isinstance(val, types.FunctionType):
         return variables.UserFunctionVariable(val, source=source, **options)
     elif isinstance(val, enum.Enum):
@@ -104,7 +110,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
     def __init__(self, fn, is_constant=False, **kwargs):
-        super(UserFunctionVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
@@ -112,7 +118,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             self.is_constant = False
 
         assert isinstance(
-            fn, types.FunctionType
+            fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
@@ -256,14 +262,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 tx, self.fn, self.get_name(), options, args, kwargs
             )
 
-        return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
+        return super().call_function(tx, args, kwargs)
 
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
 
     def __init__(self, fn, obj, **kwargs):
-        super(UserMethodVariable, self).__init__(fn=fn, **kwargs)
+        super().__init__(fn=fn, **kwargs)
         self.obj = obj
 
     def __str__(self):
@@ -291,16 +297,14 @@ class UserMethodVariable(UserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
-        return super(UserMethodVariable, self).num_parameters() - 1
+        return super().num_parameters() - 1
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
     def __init__(self, wrapped, context, **kwargs):
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
-        super(WrappedUserMethodVariable, self).__init__(
-            wrapped.fn, wrapped.obj, **kwargs
-        )
+        super().__init__(wrapped.fn, wrapped.obj, **kwargs)
         self.wrapped = wrapped
         self.context = context
 
@@ -317,7 +321,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
     def __init__(self, wrapped, context, **kwargs):
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
-        super(WrappedUserFunctionVariable, self).__init__(wrapped.fn, **kwargs)
+        super().__init__(wrapped.fn, **kwargs)
         self.wrapped = wrapped
         self.context = context
 
@@ -360,7 +364,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_scope,
         **kwargs,
     ):
-        super(NestedUserFunctionVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
         assert isinstance(f_globals, dict)
@@ -453,8 +457,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if self.kwdefaults:
             flags |= 0x02
             codegen(self.kwdefaults)
-        if isinstance(self.annotations, variables.ConstDictVariable) or isinstance(
-            self.annotations, variables.TupleVariable
+        if isinstance(
+            self.annotations, (variables.ConstDictVariable, variables.TupleVariable)
         ):
             flags |= 0x04
             try:
@@ -474,5 +478,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             flags |= 0x08
             codegen(self.closure)
         codegen(self.code)
-        codegen(self.fn_name)
-        return [create_instruction("MAKE_FUNCTION", flags)]
+        if sys.version_info < (3, 11):
+            codegen(self.fn_name)
+        return [create_instruction("MAKE_FUNCTION", arg=flags)]

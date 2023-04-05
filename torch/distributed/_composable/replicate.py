@@ -3,7 +3,7 @@ from typing import List, Tuple
 import torch
 import torch.nn as nn
 
-from . import _ddp
+from torch.nn.parallel import DistributedDataParallel
 from .contract import _get_registry, contract
 
 
@@ -22,6 +22,7 @@ def replicate(
         >>> module = nn.Linear(3, 3)
         >>> replicate(module)
     """
+    torch._C._log_api_usage_once("torch.distributed.replicate")
     _ReplicateState().mark_modules(module, **kwargs)
     return module
 
@@ -77,13 +78,13 @@ class _ReplicateState:
         for module in self.modules:
             self._recursive_collect_params(module)
 
-        self._ddp = _ddp.DistributedDataParallel(self._param_list, **self.kwargs)
+        self._ddp = DistributedDataParallel(self._param_list, **self.kwargs)
 
     def forward_pre_hook(
         self, module: nn.Module, input: Tuple[torch.Tensor, ...]
     ) -> None:
         self.init_helper()
-        self._ddp.pre_forward()
+        self._ddp._pre_forward()
 
     def forward_post_hook(
         self,
@@ -91,4 +92,4 @@ class _ReplicateState:
         input: Tuple[torch.Tensor],
         output: torch.Tensor,
     ) -> torch.Tensor:
-        return self._ddp.post_forward(output)
+        return self._ddp._post_forward(output)

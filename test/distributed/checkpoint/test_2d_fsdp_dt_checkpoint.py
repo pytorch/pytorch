@@ -20,7 +20,7 @@ from torch.distributed.tensor.parallel import (
     PairwiseParallel,
     parallelize_module,
 )
-from torch.distributed.tensor.parallel.fsdp import is_available
+from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 
@@ -39,7 +39,7 @@ LR = 3e-5
 
 class SimpleModel(torch.nn.Module):
     def __init__(self):
-        super(SimpleModel, self).__init__()
+        super().__init__()
         self.net1 = torch.nn.Linear(5, 8)
         self.relu = torch.nn.ReLU()
         self.net2 = torch.nn.Linear(8, 4)
@@ -120,7 +120,7 @@ def init_model(
 
 class Test2dFsdpDtCheckpoint(DTensorTestBase):
     def _test_fsdp_dt_checkpoint(self, fsdp_pg=None) -> None:
-        if not is_available():
+        if not enable_2d_with_fsdp():
             self.skipTest("FSDP 2d parallel integration not available")
 
         CHECKPOINT_DIR = self.temp_dir
@@ -139,7 +139,7 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
             state_dict = {
                 "model": model.state_dict(),
-                "optim": FSDP.sharded_optim_state_dict(model, optim),
+                "optim": FSDP.optim_state_dict(model, optim),
             }
 
             dist_cp.save_state_dict(
@@ -181,8 +181,8 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
                 optimizer_key="optim",
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             )
-            flattened_osd = FSDP.flatten_sharded_optim_state_dict(
-                optim_state["optim"], model_2, optim_2
+            flattened_osd = FSDP.optim_state_dict_to_load(
+                model_2, optim_2, optim_state["optim"]
             )
             optim_2.load_state_dict(flattened_osd)
 

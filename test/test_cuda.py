@@ -22,14 +22,19 @@ from random import randint
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
+from torch.cuda._memory_viz import profile_plot
+from torch.cuda._memory_viz import trace_plot
+from torch.cuda._memory_viz import segment_plot
+
+from torch import inf, nan
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
-from torch._six import inf, nan
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -44,13 +49,24 @@ TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
+
+try:
+    import torchvision.models  # noqa: F401
+    from torchvision.models import resnet18  # noqa: F401
+
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (torch.cuda.get_allocator_backend() == "cudaMallocAsync")
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
+TEST_GRAPH = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
 TEST_BF16 = False
+TEST_PYNVML = not torch.cuda._HAS_PYNVML
 if TEST_CUDA:
     torch.ones(1).cuda()  # initialize cuda context
     TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
@@ -58,17 +74,8 @@ if TEST_CUDA:
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
     TEST_BF16 = torch.cuda.is_bf16_supported()
-
-
-def make_sparse_tensor(t, n, *sizes):
-    assert t.is_sparse
-    tensor = t()
-    i = tensor._indices()
-    i = i.new(len(sizes), n).copy_(
-        torch.cat([torch.LongTensor(1, n).random_(s) for s in sizes], 0))
-    v = tensor._values()
-    v = v.new(n).copy_(torch.randn(n))
-    return t(i, v, torch.Size(sizes)).coalesce()
+    TEST_GRAPH = (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or \
+                 (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
 
 _cycles_per_ms = None
 
@@ -79,12 +86,12 @@ class TestCuda(TestCase):
     FIFTY_MIL_CYCLES = 50000000
 
     def setUp(self):
-        super(TestCuda, self).setUp()
+        super().setUp()
         self.autocast_lists = AutocastTestLists(torch.device('cuda:0'))
 
     def tearDown(self):
         del self.autocast_lists
-        super(TestCuda, self).tearDown()
+        super().tearDown()
 
     def _check_memory_stat_consistency(self):
         snapshot = torch.cuda.memory_snapshot()
@@ -387,7 +394,7 @@ class TestCuda(TestCase):
         self.assertTrue((tensor == 1).all())
 
 
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "Segmentation fault (core dumped)")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)")
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
         total_memory = torch.cuda.get_device_properties(0).total_memory
@@ -1595,7 +1602,7 @@ class TestCuda(TestCase):
             p = subprocess.Popen([sys.executable, '-c', f"""\
 import sys
 import torch
-from torch._six import inf, nan
+from torch import inf, nan
 try:
     with torch.random.fork_rng(devices=[0]):
         torch.multinomial(torch.tensor({probs}).to('cuda'), 2, replacement=True)
@@ -1702,21 +1709,17 @@ except RuntimeError as e:
 
     def test_bincount_ext(self):
         # ensure CUDA code coverage
-        input_size = (5000,)
+        input_size = (100000,)
         w = torch.randn(input_size, dtype=torch.double, device='cuda')
         w_cpu = w.cpu()
         # test shared memory impl
         t = torch.randint(50, input_size, dtype=torch.int8, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
-        # test multi block memory impl
-        # see `THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM` in SummaryOps.cu
-        t = torch.randint(500, input_size, dtype=torch.int64, device='cuda')
-        self.assertEqual(t.cpu().bincount(), t.bincount())
-        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
         # test global memory impl
-        # see `THRESH_NUMBER_BINS_FOR_GLOBAL_MEM` in SummaryOps.cu
-        t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
+        #   see `CUDAHistogramMemoryType` in SummaryOps.cu
+        #   50000 * sizeof(int64_t) == 390 KiB, which should exceed smem of any known GPU
+        t = torch.randint(50000, input_size, dtype=torch.int64, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
 
@@ -1743,6 +1746,10 @@ except RuntimeError as e:
             before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(idx)
             # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
             t = torch.randn(1024 * 1024 * 8, device='cuda:' + str(idx))
+            if IS_JETSON:
+                # w/o syncing, mem_get_info will run before memory allocated has actually increased.
+                # This race condition causes consistent failure
+                torch.cuda.synchronize()
             after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
 
             self.assertTrue(after_free_bytes < before_free_bytes)
@@ -1766,9 +1773,18 @@ except RuntimeError as e:
             l.append(torch.randn(1024 * 1024 * 8, device=torch.device("cuda:0")))
 
         no_leak()
-
-        with self.assertRaisesRegex(RuntimeError, r"CUDA driver API confirmed .+ on device 0.+"):
-            leak_gpu0()
+        regex = r"CUDA driver API confirmed .+ on device 0.+"
+        if IS_JETSON:
+            try:
+                leak_gpu0()
+            except RuntimeError as e:
+                import re
+                assert re.match(regex, str(e)), str(e) + "\n does not match: \n" + regex
+        else:
+            # assertRaisesRegex does not pass with Python for Jetson,
+            # even though the RuntimeError matches regex using re.match
+            with self.assertRaisesRegex(RuntimeError, regex):
+                leak_gpu0()
 
         if TEST_MULTIGPU:
             @self.wrap_with_cuda_memory_check
@@ -1797,6 +1813,7 @@ except RuntimeError as e:
         self.assertEqual(y[0, 0, 0, 2**30], expected)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @gcIfJetson
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
@@ -1871,7 +1888,7 @@ except RuntimeError as e:
 
         class StreamModel(torch.nn.Module):
             def __init__(self):
-                super(StreamModel, self).__init__()
+                super().__init__()
                 self.event = torch.cuda.Event()
                 self.stream0 = torch.cuda.Stream()
                 self.stream1 = torch.cuda.Stream()
@@ -2220,11 +2237,6 @@ torch.cuda.synchronize()
         found_inf = torch.empty((1,), dtype=dtype, device=device)
         cur = found_inf.device
 
-        # As of d0c925f (4/16/20), docs are unclear about best API for sparse cuda tensor construction.
-        # https://pytorch.org/docs/master/tensors.html shows torch.sparse_coo_tensor(...), but it has no docstring.
-        # The same page shows several tensors with layout=torch.sparse_coo, but no constructors using that layout.
-        # Meanwhile, https://pytorch.org/docs/master/sparse.html shows torch.sparse.FloatTensor(...), which looks
-        # legacy and does not accept a device="cuda" kwarg.  Going with torch.sparse_coo_tensor.
         i = torch.tensor([[0, 1, 1],
                           [2, 0, 2]], device="cuda", dtype=torch.int64)
         v = torch.tensor([16., 32., 64.], device="cuda", dtype=torch.float)
@@ -2508,6 +2520,43 @@ torch.cuda.synchronize()
                     if k == "step":
                         actual = actual.squeeze()
                     self.assertEqual(state_control[k], actual)
+
+    def test_grads_invalidated_between_unscale_and_step(self):
+        for optimizer_ctor, optimizer_kwargs in product(
+            (torch.optim.Adam, torch.optim.AdamW),
+            (
+                {"foreach": False, "fused": False},
+                {"foreach": True, "fused": False},
+                {"foreach": False, "fused": True},
+            ),
+        ):
+            with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
+                self._test_grads_invalidated_between_unscale_and_step(optimizer_ctor, optimizer_kwargs)
+
+    def _test_grads_invalidated_between_unscale_and_step(self, optimizer_ctor, optimizer_kwargs):
+        model, _, optimizer, _, data, loss_fn, _ = self._create_scaling_case(
+            optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+        )
+        scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
+
+        orig_params = [p.clone().detach() for p in model.parameters()]
+
+        for i, (input, target) in enumerate(data):
+            optimizer.zero_grad()
+            with torch.autocast('cuda', enabled=True):
+                output = model(input)
+                loss = loss_fn(output, target)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+
+            # deliberately break grads
+            for j, param in enumerate(model.parameters()):
+                param.grad.copy_(torch.inf if j % 2 else torch.nan)
+
+            scaler.step(optimizer)
+            scaler.update()
+
+        self.assertEqual(orig_params, list(model.parameters()))
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -3334,7 +3383,7 @@ torch.cuda.synchronize()
                                     torch.nn.Linear(8, 8)).cuda()
         input = torch.rand((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
         with torch.autocast('cuda', ):
-            output = checkpoint_sequential(model, 2, input)
+            output = checkpoint_sequential(model, 2, input, use_reentrant=True)
         self.assertTrue(output.requires_grad)
         self.assertTrue(output.dtype is torch.float16)
         output.sum().backward()
@@ -3364,9 +3413,7 @@ torch.cuda.synchronize()
                 self.assertTrue(torch.cuda.is_current_stream_capturing())
                 g.capture_end()
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_capture_simple(self):
         s = torch.cuda.Stream()
 
@@ -3385,9 +3432,7 @@ torch.cuda.synchronize()
 
         self.assertTrue(b.sum().item() == 11000.)
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_error(self):
         # We need to run this test in a separate thread as the error we trigger
         # puts the cuda context in a bad state
@@ -3429,9 +3474,7 @@ exit(2)
                 g.capture_end()
         self.assertTrue(any("The CUDA Graph is empty" in str(w.message) for w in caught))
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_capture_oom(self):
         oom_regex = "would exceed allowed memory" if TEST_CUDAMALLOCASYNC else \
                     "out of memory"
@@ -3439,9 +3482,7 @@ exit(2)
             with torch.cuda.graph(torch.cuda.CUDAGraph()):
                 torch.zeros(2 ** 40, device="cuda")
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_repeat_graph_capture_cublas_workspace_memory(self):
         (x, y, z) = 1024, 512, 64
         a = torch.rand((x, y), device='cuda')
@@ -3464,9 +3505,7 @@ exit(2)
 
         self.assertFalse(used_gb_before + 0.1 < used_gb_after)
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_rng_functional(self):
         ops_with_kwargs = ((torch.nn.functional.dropout, {"p": 0.1}),
                            (torch.nn.functional.rrelu, {"training": True}),)
@@ -3550,9 +3589,7 @@ exit(2)
         for op, kwargs in ops_with_kwargs:
             run(op, kwargs)
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_rng_distributions(self):
         size = 10000
         input = torch.rand((size,), device="cuda", dtype=torch.float)
@@ -3679,9 +3716,7 @@ exit(2)
             # Adds an empty dict for kwargs, which none of the Tensor methods use
             run("Tensor", *(meth_with_args + ({},)))
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_two_successive(self):
         torch.cuda.empty_cache()
 
@@ -3744,14 +3779,14 @@ exit(2)
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
+    @unittest.skipIf((not TEST_GRAPH) or
                      IS_WINDOWS or  # appears to still be broken on Windows as of 11.4+
-                     int(torch.version.cuda.split(".")[0]) < 11 or
-                     (int(torch.version.cuda.split(".")[0]) == 11 and
-                      int(torch.version.cuda.split(".")[1]) < 4),
+                     (torch.version.cuda and
+                     int(torch.version.cuda.split(".")[0]) == 11 and
+                     int(torch.version.cuda.split(".")[1]) < 4),
                      "Graph bindings disallow concurrent replay for CUDA < 11.4, see " +
                      "https://github.com/pytorch/pytorch/pull/57556")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_concurrent_replay(self):
         torch.cuda.empty_cache()
 
@@ -3820,9 +3855,7 @@ exit(2)
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_three_successive(self):
         torch.cuda.empty_cache()
 
@@ -3882,10 +3915,8 @@ exit(2)
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     TEST_CUDAMALLOCASYNC or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH) or
+                     TEST_CUDAMALLOCASYNC , "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_memory_stats_and_use_result_after_destroy_graph(self):
         kSmallSize = 1048576
         kSmallBuffer = 2097152
@@ -3988,9 +4019,7 @@ exit(2)
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_record_stream(self):
         # Makes sure graph capture defers attempting to reclaim allocations used across streams. See
         # "Q. Why skip process_events if a capture might be underway?" in c10/cuda/CUDACachingAllocator.cpp
@@ -4030,9 +4059,8 @@ exit(2)
         # dummy allocation triggers process_events, Hopefully successfully processes b's end-of-life event.
         c = torch.zeros((3,), device="cuda")
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @skipIfRocm
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     # If this test is the first in the process to try cudnn rnns with dropout, it'll initialize
     # DropoutState's long-lived internal buffer. Calling code perceives this (correct) behavior
     # as a memory leak unless we skip the leak check.
@@ -4061,9 +4089,7 @@ exit(2)
 
         y = model(x)
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_grad_scaling(self):
         torch.cuda.empty_cache()
 
@@ -4087,9 +4113,11 @@ exit(2)
         opt.zero_grad(set_to_none=True)
 
         # capture
-        with torch.cuda.graph(g):
+        with torch.cuda.stream(s):
+            g.capture_begin()
             loss = (weight.half() * static_input).sum()
             scaler.scale(loss).backward()
+            g.capture_end()
 
         input_vals = [5, 20000, 5, 40000]
         # If the scale gets updated properly, these are the scale, growth tracker,
@@ -4110,15 +4138,12 @@ exit(2)
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
 
-    @unittest.skipIf(
-        (not TEST_CUDA) or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
-        "CUDA >= 11.0 required for graphs",
-    )
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     @parametrize(
         "with_amp,cache_enabled,allow_unused_input",
         [
-            (False, False, True),
-            (True, False, True),
+            subtest((False, False, True), decorators=[skipIfRocm]),
+            subtest((True, False, True), decorators=[skipIfRocm]),
             subtest((True, True, True), decorators=[unittest.expectedFailure]),
             subtest((False, False, False), decorators=[unittest.expectedFailure]),
         ],
@@ -4238,7 +4263,9 @@ exit(2)
 
     def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
         for actually_do_graphs in (True, False):
-            params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
+            params = [
+                torch.randn((i + 5, i + 5), device="cuda") for i in range(2)
+            ] + [torch.randn((), device="cuda")]
             params_control = [p.clone().requires_grad_() for p in params]
             params_graphed = [p.clone().requires_grad_() for p in params]
 
@@ -4282,9 +4309,7 @@ exit(2)
             for p_control, p_graphed in zip(params_control, params_graphed):
                 self.assertEqual(p_control, p_graphed)
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_adam_adamw(self):
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
         cases = [
@@ -4300,10 +4325,7 @@ exit(2)
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
                 self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
 
-    @unittest.skipIf(
-        not TEST_CUDA or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
-        "CUDA >= 11.0 required for graphs",
-    )
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_adam_adamw_with_explicitly_capturable_param_groups(self):
         # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
         n_warmup, n_replay = 3, 2
@@ -4348,10 +4370,7 @@ exit(2)
                 self.assertEqual(ref_p1, param1)
                 self.assertEqual(ref_p2, param2)
 
-    @unittest.skipIf(
-        (not TEST_CUDA) or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
-        "CUDA >= 11.0 required for graphs",
-    )
+    @unittest.skipIf((not TEST_GRAPH), "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_scaling_fused_optimizers(self):
         cases = [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
@@ -4588,16 +4607,16 @@ class TestCudaComm(TestCase):
         numel = 5
         num_bytes = numel * 8
         tensors = [
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
+            self.genSparseTensor((2, 3), 2, 1, False, 'cuda', torch.float64)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).cuda(),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
-            make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            self.genSparseTensor((2, 3), 2, 10, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((2, 3), 2, 5, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((3, 3), 2, 7, False, 'cuda', torch.int64)[0],
+            self.genSparseTensor((2, 3), 2, 2, False, 'cuda', torch.float32)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
+            self.genSparseTensor((2, 7), 2, 3, False, 'cuda', torch.int64)[0],
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
@@ -4663,16 +4682,16 @@ class TestCudaComm(TestCase):
         numel = 5
         num_bytes = numel * 8
         tensors = [
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
+            self.genSparseTensor((2, 3), 2, 1, False, 'cuda', torch.float64)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).cuda(),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
-            make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            self.genSparseTensor((2, 3), 2, 10, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((2, 3), 2, 5, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((3, 3), 2, 7, False, 'cuda', torch.int64)[0],
+            self.genSparseTensor((2, 3), 2, 2, False, 'cuda', torch.float32)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
+            self.genSparseTensor((2, 7), 2, 3, False, 'cuda', torch.int64)[0],
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
@@ -4959,7 +4978,7 @@ class TestCudaComm(TestCase):
     def test_memory_snapshot(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True)
+            torch.cuda.memory._record_memory_history("state", stacks="python")
             x = torch.rand(311, 411, device='cuda')
 
             # create a bunch of tensors that all will tile into the
@@ -4997,13 +5016,23 @@ class TestCudaComm(TestCase):
             self.assertTrue(ss['device_traces'][0][-1]['action'] == 'segment_free')
 
         finally:
-            torch.cuda.memory._record_memory_history(False)
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(not IS_LINUX, "linux only cpp unwinding")
+    def test_direct_traceback(self):
+        from torch._C._profiler import gather_traceback, symbolize_tracebacks
+        c = gather_traceback(True, True, True)
+        r, = symbolize_tracebacks([c])
+        r = str(r)
+        self.assertTrue("test_cuda.py" in r)
+        self.assertTrue("unwind" in r)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+            torch.cuda.memory._record_memory_history("state", stacks="all")
             x = torch.rand(311, 411, device='cuda')
 
             ss = torch.cuda.memory._snapshot()['segments']
@@ -5013,13 +5042,82 @@ class TestCudaComm(TestCase):
                     if 'history' in b:
                         for h in b['history']:
                             if h['real_size'] == 311 * 411 * 4:
-                                self.assertNotEqual(len(h['cpp_frames']), 0)
+                                self.assertTrue('::rand' in str(h['frames']))
                                 found_it = True
             self.assertTrue(found_it)
 
         finally:
-            torch.cuda.memory._record_memory_history(False)
+            torch.cuda.memory._record_memory_history(None)
 
+
+    @skipIfRocm
+    def test_memory_profiler_viz(self):
+        with torch.profiler.profile(
+            with_stack=True,
+            profile_memory=True,
+            record_shapes=True
+        ) as prof:
+            x = torch.rand(128, 128, device='cuda')
+            x * x + x * x
+        plot = profile_plot(prof)
+        self.assertTrue("test_cuda.py" in plot)
+        self.assertTrue("test_memory_profiler_viz" in plot)
+        self.assertTrue('"elements_category": [' in plot)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    def test_memory_plots(self):
+        for context, stacks in (("all", "all" if IS_LINUX else "python"), ("all", "python"), (None, "python")):
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history("all", context=context, stacks=stacks)
+
+                def run():
+                    x = torch.rand(128, 128, device='cuda')
+                    x * x + x * x
+
+                run()
+                cpp = stacks == "all"
+                record_context = context is not None
+                ss = torch.cuda.memory._snapshot()
+                tplot = trace_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in tplot))
+                self.assertTrue(cpp == ("::rand" in tplot))
+
+                self.assertTrue(str(128 * 128 * 4) in tplot)
+                splot = segment_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in splot))
+                self.assertTrue(str(128 * 128 * 4) in splot)
+                self.assertTrue(cpp == ("::rand" in splot))
+                torch.cuda.memory._record_memory_history(None)
+            finally:
+                torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    def test_memory_snapshot_script(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history("state", stacks="python")
+
+            @torch.jit.script
+            def foo():
+                return torch.rand(311, 411, device='cuda')
+
+            x = foo()
+
+            ss = torch.cuda.memory._snapshot()['segments']
+            found_it = False
+            for seg in ss:
+                for b in seg['blocks']:
+                    if 'history' in b:
+                        for h in b['history']:
+                            if h['real_size'] == 311 * 411 * 4:
+                                self.assertTrue(h['frames'][0]['name'] == 'foo')
+                                found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.cuda.memory._record_memory_history(None)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
@@ -5108,7 +5206,7 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
-    @unittest.skipIf(IS_WINDOWS, 'Windows CI does not like the load_inline')
+    @unittest.skipIf(not IS_LINUX, 'cpp traces only on linux')
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_cpp_memory_snapshot_pickle(self):
         from torch.utils.cpp_extension import load_inline
@@ -5118,28 +5216,45 @@ class TestCudaComm(TestCase):
             std::string data = torch::cuda::_memory_snapshot_pickled();
             return py::bytes(data);
         }
-        void record(bool e) {
-            torch::cuda::_record_memory_history(e);
+        void record(bool e, bool ctx) {
+            torch::cuda::_record_memory_history(e, ctx, 10, ctx, ctx);
         }
         """
         m = load_inline(name='snapshot', cpp_sources=[source], functions=['do_snapshot', 'record'])
-        try:
-            m.record(True)
-            t = torch.rand(311, 411, device='cuda')
-            mem = pickle.loads(m.do_snapshot())
-            found = False
-            for s in mem['segments']:
-                for b in s['blocks']:
-                    if b['state'] == 'active_allocated' and 'history' in b:
-                        history = b['history']
-                        if history and history[0]['real_size'] == 311 * 411 * 4:
-                            found = True
-            last_action = mem['device_traces'][0][-1]
-            self.assertTrue(last_action['action'] == 'alloc')
-            self.assertTrue(last_action['size'] == 311 * 411 * 4)
-            self.assertTrue(found)
-        finally:
-            m.record(False)
+        for ctx in (False, True):
+            try:
+                m.record(True, ctx)
+
+                @torch.jit.script
+                def the_script_fn():
+                    return torch.rand(311, 411, device='cuda')
+
+                def run():
+                    t = the_script_fn()
+                    return pickle.loads(m.do_snapshot())
+
+                mem = run()
+                found = False
+                for s in mem['segments']:
+                    for b in s['blocks']:
+                        if b['state'] == 'active_allocated' and 'history' in b:
+                            history = b['history']
+                            if history and history[0]['real_size'] == 311 * 411 * 4:
+                                if ctx:
+                                    frame_text = str(history[0]['frames'])
+                                    # C++ frame
+                                    self.assertTrue('::rand' in frame_text)
+                                    # script frame
+                                    self.assertTrue('the_script_fn' in frame_text)
+                                    # python frame
+                                    self.assertTrue('case.py' in frame_text)
+                                found = True
+                last_action = mem['device_traces'][0][-1]
+                self.assertTrue(last_action['action'] == 'alloc')
+                self.assertTrue(last_action['size'] == 311 * 411 * 4)
+                self.assertTrue(found)
+            finally:
+                m.record(False, False)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
     def test_notifies_oom(self):
@@ -5152,6 +5267,387 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_nvml_get_handler(self):
+        self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_temperature(self):
+        self.assertTrue(0 <= torch.cuda.temperature() <= 150)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_power_draw(self):
+        self.assertTrue(torch.cuda.power_draw() >= 0)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_clock_speed(self):
+        self.assertTrue(torch.cuda.clock_rate() >= 0)
+
+
+MIN_BLOCK_SIZE = 512
+SMALL_SIZE = 1048576
+SMALL_BUFFER = 2097152
+LARGE_BUFFER = 20971520
+
+def get_cudagraph_segments(pool_id):
+    segments = torch.cuda.memory_snapshot()
+    return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
+
+def get_all_cudagraph_segments():
+    segments = torch.cuda.memory_snapshot()
+    return [segment for segment in segments if segment["segment_pool_id"] != (0, 0)]
+
+def cudagraphify(fn, inputs, pool=None):
+    torch.cuda.synchronize()
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        fn(*inputs)
+    stream.synchronize()
+    torch.cuda.current_stream().wait_stream(stream)
+    torch.cuda.synchronize()
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream, pool=pool):
+        static_outputs = fn(*inputs)
+
+    return graph, static_outputs
+
+def int8_cuda(size):
+    return torch.ones([size], device="cuda", dtype=torch.uint8)
+
+def live_blocks(pool_id):
+    blocks = 0
+    seg = get_cudagraph_segments(pool_id)
+    for segment in get_cudagraph_segments(pool_id):
+        for block in segment["blocks"]:
+            blocks += block["state"] == "active_allocated"
+    return blocks
+
+
+def tensor_metadata(x):
+    return {
+        "nbytes": x.untyped_storage().nbytes(),
+        "data_ptr": x.untyped_storage().data_ptr(),
+        "size": x.shape,
+        "stride": x.stride(),
+        "dtype": x.dtype,
+        "device": x.device,
+        "storage_offset": x.storage_offset(),
+    }
+
+
+def reconstruct_from_tensor_metadata(metadata):
+    s = torch._C._construct_storage_from_data_pointer(
+        metadata["data_ptr"], metadata["device"], metadata["nbytes"]
+    )
+    t = torch.empty([0], device=metadata["device"], dtype=metadata["dtype"])
+    t.set_(
+        source=s,
+        storage_offset=metadata["storage_offset"],
+        size=metadata["size"],
+        stride=metadata["stride"],
+    )
+    return t
+
+
+@unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
+class TestBlockStateAbsorption(TestCase):
+
+    def checkCheckpointedBlock(self, before_block, after_block):
+        for field in ("size", "state"):
+            self.assertEqual(before_block[field], after_block[field])
+
+    def checkCheckpointedState(self, before_segments, after_segments):
+        # after may contain additional segments, but all of the segments in before
+        # should be exactly equivalent to after
+        after_ptr_to_segment = {segment["address"] : segment for segment in after_segments}
+
+        for before_segment in before_segments:
+            self.assertTrue(before_segment["address"] in after_ptr_to_segment)
+            after_segment = after_ptr_to_segment[before_segment["address"]]
+
+            for field in ("device", "total_size", "allocated_size", "active_size", "segment_type", "segment_pool_id"):
+                self.assertEqual(before_segment[field], after_segment[field])
+
+            self.assertEqual(len(before_segment["blocks"]), len(after_segment["blocks"]))
+            for before_block, after_block in zip(before_segment["blocks"], after_segment["blocks"]):
+                self.checkCheckpointedBlock(before_block, after_block)
+
+    @staticmethod
+    def setCheckpointPoolState(device, state, stale_storages_ptr, storages_deleters=None):
+        stale_storages_ptr = [t.untyped_storage()._cdata for t in stale_storages_ptr]
+        storages_deleters = [] if not storages_deleters else [t.untyped_storage()._cdata for t in storages_deleters]
+        torch._C._cuda_setCheckpointPoolState(device, state, stale_storages_ptr, storages_deleters)
+
+    def checkFunction(self, fn, inputs, pool=None):
+        graph, outputs = cudagraphify(fn, inputs, pool=pool)
+
+        pool_id = graph.pool()
+        device = outputs[0].device.index
+
+        segments_before_checkpoint = get_cudagraph_segments(pool_id)
+
+        state = torch._C._cuda_getCheckpointState(device, pool_id)
+        self.setCheckpointPoolState(device, state, [], [])
+
+        self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
+
+    def setUp(self):
+        super().setUp()
+        self.segment_length = len(get_all_cudagraph_segments())
+
+    def tearDown(self):
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        self.assertEqual(len(get_all_cudagraph_segments()), self.segment_length)
+
+        super().tearDown()
+
+    def test_simple(self):
+
+        def foo():
+            x = torch.zeros([SMALL_SIZE * 8], device="cuda", dtype=torch.uint8)
+            x = x + x
+            x1 = int8_cuda(SMALL_SIZE) + int8_cuda(SMALL_SIZE) + int8_cuda(SMALL_SIZE)
+            y = int8_cuda(SMALL_SIZE) + x1
+            z = int8_cuda(SMALL_SIZE)
+            return x, y, z
+
+        self.checkFunction(foo, [])
+
+    def test_allocated_in_middle_of_segment(self):
+
+        def foo():
+            small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
+            return small_buffers[5].add_(2)
+
+        self.checkFunction(foo, [])
+
+    def test_multiple_middle_allocations(self):
+
+        def foo():
+            small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
+            return small_buffers[5], small_buffers[8]
+
+        self.checkFunction(foo, [])
+
+    def test_middle_allocations_contiguous(self):
+        def foo():
+            small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
+            return small_buffers[5], small_buffers[6]
+
+        self.checkFunction(foo, [])
+
+    def test_additional_free_following_checkpoint(self):
+
+        def foo():
+            return int8_cuda(MIN_BLOCK_SIZE),
+
+        def foo2():
+            return int8_cuda(MIN_BLOCK_SIZE),
+
+        graph, outputs = cudagraphify(foo, [])
+        pool_id = graph.pool()
+
+        segments_before_checkpoint = get_cudagraph_segments(pool_id)
+
+        state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+
+        graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
+
+
+        self.setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
+
+        del outputs2
+
+        self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
+
+    # TODO: re-enable
+    # def test_additional_free_error(self):
+    #     def foo():
+    #         return int8_cuda(MIN_BLOCK_SIZE),
+
+    #     def foo2():
+    #         return int8_cuda(MIN_BLOCK_SIZE),
+
+    #     graph, outputs = cudagraphify(foo, [])
+    #     pool_id = graph.pool()
+
+    #     segments_before_checkpoint = get_cudagraph_segments(pool_id)
+
+    #     state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+
+        # graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
+        # with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
+        #     self.setCheckpointPoolState(outputs[0].device.index, state, [], [])
+
+    def test_tensor_dies_after_checkpoint(self):
+
+        def foo():
+            return int8_cuda(MIN_BLOCK_SIZE), int8_cuda(MIN_BLOCK_SIZE)
+
+        graph, outputs = cudagraphify(foo, [])
+        pool_id = graph.pool()
+        device = outputs[0].device.index
+
+        segments_before_checkpoint = get_cudagraph_segments(pool_id)
+        state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+
+        output_data_ptrs = [output.data_ptr() for output in outputs]
+
+        del outputs
+
+        self.setCheckpointPoolState(device, state, [], [])
+
+        self.assertEqual(live_blocks(pool_id), 2)
+        torch._C._cuda_cudaCachingAllocator_raw_delete(output_data_ptrs[0])
+        self.assertEqual(live_blocks(pool_id), 1)
+        torch._C._cuda_cudaCachingAllocator_raw_delete(output_data_ptrs[1])
+        self.assertEqual(live_blocks(pool_id), 0)
+
+    def test_assigning_back_deleter_fns_to_tensor(self):
+
+        def foo(x):
+            return int8_cuda(SMALL_BUFFER) + x, int8_cuda(SMALL_BUFFER) + x, int8_cuda(LARGE_BUFFER) + x
+
+        inp = torch.tensor([1], device="cuda")
+        graph, outputs = cudagraphify(foo, [inp])
+        pool_id = graph.pool()
+        graph.replay()
+
+        device = outputs[0].device.index
+
+        for i in range(len(outputs)):
+            self.assertTrue(outputs[i].mean(dtype=torch.float) == 2)
+
+        state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+
+        output_ptrs = [output.untyped_storage().data_ptr() for output in outputs]
+        ten_metadata = [tensor_metadata(t) for t in outputs]
+
+        self.assertEqual(live_blocks(pool_id), 3)
+
+        del outputs
+
+        self.assertEqual(live_blocks(pool_id), 0)
+
+        reconstructed_tensors = [reconstruct_from_tensor_metadata(metadata) for metadata in ten_metadata]
+
+        for i in range(len(reconstructed_tensors)):
+            self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 2)
+
+        inp.add_(1)
+        graph.replay()
+
+        for i in range(len(reconstructed_tensors)):
+            self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 3)
+
+        self.setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
+
+        self.assertEqual(live_blocks(pool_id), 3)
+
+        reconstructed_tensors[0] = None
+        self.assertEqual(live_blocks(pool_id), 2)
+
+        reconstructed_tensors[1] = None
+        self.assertEqual(live_blocks(pool_id), 1)
+
+        # should not change, we did not pass it in to swap data ptrs
+        reconstructed_tensors[2] = None
+        self.assertEqual(live_blocks(pool_id), 1)
+
+        torch._C._cuda_cudaCachingAllocator_raw_delete(output_ptrs[2])
+
+        self.assertEqual(live_blocks(pool_id), 0)
+
+    @skipIfNoTorchVision
+    def test_resnet(self):
+        import torchvision
+        m = torchvision.models.resnet50()
+        m.eval()
+        m = m.cuda()
+
+        inp = torch.rand([1, 3, 255, 255], device="cuda")
+        self.checkFunction(m, [inp])
+
+
+    def test_allocate_in_thread_to_pool(self):
+
+        def foo():
+            return torch.rand([4], device="cuda")
+
+        pool = torch.cuda.graph_pool_handle()
+        graph, outputs = cudagraphify(foo, [], pool=pool)
+        device = outputs[0].device.index
+        del outputs
+
+        @contextlib.contextmanager
+        def _use_cuda_memory_pool_manager(device, mem_pool):
+            """
+            Context manager to use cuda graph pool for new allocations. If you use this manager
+            all cudagraph tensors in use should be reflected in the allocator or they will be overwritten.
+            existing_graph should already have been used in a capture, and the mem_pool must already exist.
+            """
+            torch.cuda.synchronize()
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            stream_context = torch.cuda.stream(stream)
+            stream_context.__enter__()
+            torch._C._cuda_beginAllocateCurrentStreamToPool(device, mem_pool)
+            try:
+                yield
+            finally:
+                torch._C._cuda_endAllocateCurrentStreamToPool(device)
+                torch._C._cuda_releasePool(device, mem_pool)
+                stream_context.__exit__(None, None, None)
+
+
+        segments = get_cudagraph_segments(pool)
+        self.assertEqual(len(get_cudagraph_segments(pool)), 1)
+
+        def use_pool():
+            def alloc_three():
+                a = int8_cuda(LARGE_BUFFER)
+                b = int8_cuda(LARGE_BUFFER)
+                c = a + b
+
+            with _use_cuda_memory_pool_manager(device, pool):
+                # three allocations
+                for _ in range(10):
+                    alloc_three()
+
+            # three more allocations not in pool
+            alloc_three()
+
+
+        def no_pool():
+            # two allocations
+            for _ in range(10):
+                a = int8_cuda(LARGE_BUFFER)
+                b = int8_cuda(LARGE_BUFFER)
+                del a, b
+
+        graph_thread = threading.Thread(target=use_pool)
+        no_graph_thread = threading.Thread(target=no_pool)
+        graph_thread.start()
+        no_graph_thread.start()
+
+        graph_thread.join()
+        no_graph_thread.join()
+
+        self.assertEqual(len(get_cudagraph_segments(pool)), 4)
+
+        del graph
+
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        self.assertEqual(len(get_cudagraph_segments(pool)), 0)
 
 
 instantiate_parametrized_tests(TestCuda)

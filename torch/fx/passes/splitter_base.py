@@ -229,7 +229,7 @@ def generate_inputs_for_submodules(
 
     handles = []
     results = {}
-    submodule_to_names = dict((mod, name) for name, mod in model.named_modules())
+    submodule_to_names = {mod: name for name, mod in model.named_modules()}
 
     def pre_forward(module, module_inputs):
         results[submodule_to_names[module]] = copy.deepcopy(module_inputs) if deepcopy else module_inputs

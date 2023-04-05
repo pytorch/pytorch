@@ -22,6 +22,7 @@ result = subprocess.run(
 PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
 IS_WINDOWS: bool = os.name == "nt"
 
+
 # Returns '/usr/local/include/python<version number>'
 def get_python_include_dir() -> str:
     return gp()["include"]
@@ -77,8 +78,7 @@ def run_command(
     try:
         return subprocess.run(
             args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
     finally:
@@ -106,8 +106,7 @@ def clang_search_dirs() -> List[str]:
     result = subprocess.run(
         [compiler, "-E", "-x", "c++", "-", "-v"],
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
     )
     stderr = result.stderr.decode().strip().split("\n")
@@ -149,7 +148,7 @@ def check_file(
         proc = run_command(
             [binary, f"-p={build_dir}", *include_args, filename],
         )
-    except (OSError) as err:
+    except OSError as err:
         return [
             LintMessage(
                 path=filename,

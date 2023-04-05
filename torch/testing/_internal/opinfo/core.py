@@ -151,7 +151,7 @@ class SampleInput:
                 not var_args and not var_kwargs
             ), """
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
-explicitly setting the "args" and "kwargs" paremeters, but the two
+explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
         elif len(var_args) or len(var_kwargs):
             assert (
@@ -615,6 +615,7 @@ class AliasInfo:
 #   the great majority of PyTorch's (public) operators.
 #
 
+
 # Classes and methods for the operator database
 @dataclass
 class OpInfo:
@@ -868,9 +869,9 @@ class OpInfo:
 
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(
-            map(
-                lambda dtypes: isinstance(dtypes, utils._dynamic_dispatch_dtypes),
-                dtypes_args,
+            (
+                isinstance(dtypes, utils._dynamic_dispatch_dtypes)
+                for dtypes in dtypes_args
             )
         )
 
@@ -1549,6 +1550,7 @@ def make_error_inputs_elementwise_binary(error_inputs_func):
 
 # The following functions and classes are for testing elementwise binary operators.
 
+
 # Returns a generator of pairs of contiguous tensors on the requested device
 #   and with the requested dtype.
 #
@@ -1659,7 +1661,7 @@ def generate_elementwise_binary_small_value_tensors(
         complex_vals = product(_float_vals, _float_vals)
         # Note the use of list is required here or the map generator will be
         #  emptied by the following product and it won't produce the desired cross-product
-        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        complex_vals = [complex(*x) for x in complex_vals]
         prod = product(complex_vals, complex_vals)
     elif dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
         prod = product(_int_vals, _int_vals)
@@ -1699,7 +1701,7 @@ def generate_elementwise_binary_large_value_tensors(
         complex_vals = product(_large_float_vals, _large_float_vals)
         # Note the use of list is required here or the map generator will be
         #  emptied by the following product and it won't produce the desired cross-product
-        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        complex_vals = [complex(*x) for x in complex_vals]
         prod = product(complex_vals, complex_vals)
     elif dtype in (torch.int16, torch.int32, torch.int64):
         prod = product(_large_int_vals, _large_int_vals)
@@ -1730,7 +1732,7 @@ def generate_elementwise_binary_extremal_value_tensors(
         complex_vals = product(_float_extremals, _float_extremals)
         # Note the use of list is required here or the map generator will be
         #  emptied by the following product and it won't produce the desired cross-product
-        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        complex_vals = [complex(*x) for x in complex_vals]
         prod = product(complex_vals, complex_vals)
     else:
         raise ValueError("Unsupported dtype!")
@@ -1827,7 +1829,7 @@ def generate_elementwise_binary_with_scalar_samples(
         yield SampleInput(lhs_scalar, args=(rhs_scalar,))
 
 
-# Returns a generator of pairs of contiguous tensors and 0d tensos and scalars and type promotion
+# Returns a generator of pairs of contiguous tensors and 0d tensors and scalars and type promotion
 def generate_elementwise_binary_with_scalar_and_type_promotion_samples(
     op, *, device, dtype, requires_grad=False
 ):
@@ -1997,7 +1999,6 @@ class BinaryUfuncInfo(OpInfo):
         supports_two_python_scalars=False,  # Whether the operator allows scalar x scalar inputs
         **kwargs,
     ):
-
         self._original_binary_ufunc_args = locals().copy()
 
         # Elementwise binary operations perform the equivalent of test_numpy_refs
@@ -2011,7 +2012,7 @@ class BinaryUfuncInfo(OpInfo):
             ),
         )
         kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
-        super(BinaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
@@ -2053,8 +2054,9 @@ def sample_inputs_elementwise_unary(
     _L = S if kwargs.get("small_inputs_only", False) else L
 
     low, high = op_info.domain
-    low = low if low is None else low + op_info._domain_eps
-    high = high if high is None else high - op_info._domain_eps
+    is_floating = dtype.is_floating_point or dtype.is_complex
+    low = low if low is None or not is_floating else low + op_info._domain_eps
+    high = high if high is None or not is_floating else high - op_info._domain_eps
     if (
         op_info.supports_sparse_csr
         or op_info.supports_sparse_csc
@@ -2099,8 +2101,9 @@ def _replace_values_in_tensor(tensor, condition, safe_value):
 # Helper to create a unary elementwise tensor with valid inputs
 def _make_unary_elementwise_tensor(shape, *, op, dtype, **kwargs):
     low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
+    is_floating = dtype.is_floating_point or dtype.is_complex
+    low = low if low is None or not is_floating else low + op._domain_eps
+    high = high if high is None or not is_floating else high - op._domain_eps
 
     a = make_tensor(shape, low=low, high=high, dtype=dtype, **kwargs)
 
@@ -2119,8 +2122,9 @@ def _filter_unary_elementwise_tensor(a, *, op):
         return a
 
     low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
+    is_floating = a.dtype.is_floating_point or a.dtype.is_complex
+    low = low if low is None or not is_floating else low + op._domain_eps
+    high = high if high is None or not is_floating else high - op._domain_eps
 
     if a.dtype is torch.uint8 and low is not None:
         low = max(low, 0)
@@ -2144,7 +2148,6 @@ def _filter_unary_elementwise_tensor(a, *, op):
 
 
 def generate_elementwise_unary_tensors(op, *, device, dtype, requires_grad, **kwargs):
-
     # Special-cases bool
     if dtype is torch.bool:
         tensors = (
@@ -2215,10 +2218,6 @@ def generate_elementwise_unary_extremal_value_tensors(
 def generate_elementwise_unary_noncontiguous_tensors(
     op, *, device, dtype, requires_grad=False
 ):
-    low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
-
     make_arg = partial(
         _make_unary_elementwise_tensor,
         op=op,
@@ -2491,7 +2490,6 @@ class SpectralFuncInfo(OpInfo):
         decorators=None,
         **kwargs,
     ):
-
         self._original_spectral_func_args = dict(locals()).copy()
         self._original_spectral_func_args.update(kwargs)
 
@@ -2530,7 +2528,7 @@ class ShapeFuncInfo(OpInfo):
         sample_inputs_func=None,
         **kwargs,
     ):
-        super(ShapeFuncInfo, self).__init__(
+        super().__init__(
             name,
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
@@ -2542,17 +2540,40 @@ class ShapeFuncInfo(OpInfo):
 
 
 def sample_inputs_foreach(
-    self, device, dtype, N, *, noncontiguous=False, same_size=False, low=None, high=None
+    self,
+    device,
+    dtype,
+    N,
+    *,
+    noncontiguous=False,
+    same_size=False,
+    low=None,
+    high=None,
+    zero_size: bool,
 ):
+    if zero_size:
+        return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
     if same_size:
         return [
-            make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous)
+            make_tensor(
+                (N, N),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
+            )
             for _ in range(N)
         ]
     else:
         return [
             make_tensor(
-                (N - i, N - i), dtype=dtype, device=device, noncontiguous=noncontiguous
+                (N - i, N - i),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
             )
             for i in range(N)
         ]
@@ -2583,6 +2604,7 @@ class ForeachFuncInfo(OpInfo):
         supports_alpha_param=False,
         sample_inputs_func=sample_inputs_foreach,
         supports_autograd=False,
+        supports_scalar_self_arg=False,
         **kwargs,
     ):
         super().__init__(
@@ -2594,6 +2616,7 @@ class ForeachFuncInfo(OpInfo):
             supports_autograd=supports_autograd,
             **kwargs,
         )
+        self.supports_scalar_self_arg = supports_scalar_self_arg
 
         (
             foreach_method,
@@ -2711,5 +2734,5 @@ def clone_sample(sample, **kwargs):
     return SampleInput(
         clone_tensor(sample.input),
         args=tuple(map(clone_tensor, sample.args)),
-        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items())),
+        kwargs={k: clone_tensor(v) for k, v in sample_kwargs.items()},
     )

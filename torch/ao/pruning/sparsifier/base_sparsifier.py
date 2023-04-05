@@ -24,6 +24,7 @@ KEYS_NOT_IN_STATE_DICT = ["module", "module_fqn", "tensor_name"]
 
 __all__ = ["BaseSparsifier"]
 
+
 # TODO update desc with new config args
 class BaseSparsifier(abc.ABC):
     r"""Base class for all sparsifiers.
@@ -283,7 +284,11 @@ class BaseSparsifier(abc.ABC):
                 module.sparse_params = sparse_params
 
     def convert(
-        self, module, mapping=None, inplace=False, parameterization=FakeSparsity
+        self,
+        module: nn.Module,
+        mapping: Optional[Dict[Type[nn.Module], Type[nn.Module]]] = None,
+        inplace: bool = False,
+        parameterization: Type[nn.Module] = FakeSparsity,
     ):
         r"""Converts submodules in input module to a different module according to `mapping`
         by calling `from_dense` method on the target module class
@@ -303,12 +308,19 @@ class BaseSparsifier(abc.ABC):
         reassign = {}
         for name, mod in module.named_children():
             # leaf node
-            if module_contains_param(mod, parameterization) and type_before_parametrizations(mod) in mapping:
+            if (
+                module_contains_param(mod, parameterization)
+                and type_before_parametrizations(mod) in mapping
+            ):
                 reassign[name] = swap_module(mod, mapping)
             else:
                 # recurse
-                reassign[name] = self.convert(mod, mapping=mapping, inplace=True, parameterization=parameterization)
-
+                reassign[name] = self.convert(
+                    mod,
+                    mapping=mapping,
+                    inplace=True,
+                    parameterization=parameterization,
+                )
 
         for key, value in reassign.items():
             module._modules[key] = value

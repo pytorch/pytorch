@@ -45,7 +45,6 @@ def parse_backend_yaml(
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
 ) -> ParsedExternalYaml:
-
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
         for f in concatMap(
@@ -377,29 +376,25 @@ def gen_dispatchkey_nativefunc_headers(
     # Convert to a set first to remove duplicate kernel names.
     # Backends are allowed to repeat kernel names; only generate the declaration once!
     # Sort for deterministic output.
-    backend_declarations = list(
-        sorted(
-            set(
-                concatMap(
-                    lambda f: dest.compute_native_function_declaration(
-                        f, backend_indices[backend_dispatch_key]
-                    ),
-                    grouped_native_functions,
-                )
+    backend_declarations = sorted(
+        set(
+            concatMap(
+                lambda f: dest.compute_native_function_declaration(
+                    f, backend_indices[backend_dispatch_key]
+                ),
+                grouped_native_functions,
             )
         )
     )
-    autograd_declarations = list(
-        sorted(
-            set(
-                concatMap(
-                    lambda f: []
-                    if autograd_dispatch_key is None
-                    else dest.compute_native_function_declaration(
-                        f, backend_indices[autograd_dispatch_key]
-                    ),
-                    grouped_native_functions,
-                )
+    autograd_declarations = sorted(
+        set(
+            concatMap(
+                lambda f: []
+                if autograd_dispatch_key is None
+                else dest.compute_native_function_declaration(
+                    f, backend_indices[autograd_dispatch_key]
+                ),
+                grouped_native_functions,
             )
         )
     )
@@ -536,7 +531,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
 def run(
     source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str] = None
 ) -> None:
-
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.absolute()
     template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")

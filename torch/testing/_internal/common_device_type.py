@@ -239,7 +239,7 @@ except ImportError:
 #         # Intention is to override
 #         def assertEqual(self, x, y):
 #             # This DOESN'T WORK!
-#             super(TestFooDeviceType, self).assertEqual(x, y)
+#             super().assertEqual(x, y)
 #
 # If you try to run this code, you'll get an error saying that TestFooDeviceType
 # is not in scope.  This is because after instantiating our classes, we delete
@@ -665,11 +665,6 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
     # Creates device-specific test cases
     for base in desired_device_type_test_bases:
-        # Special-case for ROCm testing -- only test for 'cuda' i.e. ROCm device by default
-        # The except_for and only_for cases were already checked above. At this point we only need to check 'cuda'.
-        if TEST_WITH_ROCM and base.device_type != 'cuda':
-            continue
-
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupport runtime class:
@@ -957,7 +952,7 @@ def largeTensorTest(size, device=None):
     In other tests, the `device=` argument needs to be specified.
     """
     if isinstance(size, str):
-        assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
+        assert size.endswith(('GB', 'gb')), "only bytes or GB supported"
         size = 1024 ** 3 * int(size[:-2])
 
     def inner(fn):
@@ -1235,9 +1230,7 @@ def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
 def has_cusolver():
-    version = _get_torch_cuda_version()
-    # cuSolver is disabled on cuda < 10.1.243
-    return version >= (10, 2)
+    return not TEST_WITH_ROCM
 
 # Skips a test on CUDA if cuSOLVER is not available
 def skipCUDAIfNoCusolver(fn):

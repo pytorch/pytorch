@@ -94,7 +94,8 @@ class TORCH_API ScriptModuleSerializer {
       const std::string& archive_name,
       const std::string& archive_dir,
       const std::string& tensor_dir,
-      bool use_storage_context = false);
+      bool use_storage_context = false,
+      bool skip_tensor_data = false);
   void updateSourceRangeTags(const SourceRangeRecords& ranges);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;

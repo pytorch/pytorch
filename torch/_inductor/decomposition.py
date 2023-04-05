@@ -14,15 +14,25 @@ from . import config, utils
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 inductor_decompositions = get_decompositions(
     [
         aten.arange,
+        aten.bitwise_and_,
+        aten.bitwise_or_,
+        aten.clamp_min_,
         aten.flip,
+        aten.lcm,
         aten.linalg_vector_norm,
+        aten.sin_,
+        aten.sqrt_,
         aten.std,
         aten.std_mean,
         aten._to_copy,
+        aten.tril_indices,
+        aten.triu_indices,
+        aten.unsafe_split,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -50,6 +60,18 @@ def clamp(x, min=None, max=None):
 @register_decomposition([aten.floor_divide.default])
 def floordiv(a, b):
     return aten.div.Tensor_mode(a, b, rounding_mode="floor")
+
+
+# Not really sure how to put this into the main library.  PrimTorch wants
+# empty_permuted to go to the prim, and typically users don't really want
+# to decompose to empty_strided (but inductor is OK with it, because we are
+# cool with strides and everything goes to empty_strided)
+@register_decomposition([aten.empty_permuted.default])
+def empty_permuted(size, physical_layout, **kwargs):
+    perm = [0] * len(size)
+    for p, l in enumerate(physical_layout):
+        perm[l] = p
+    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
 def get_alignment_size(x):
@@ -204,8 +226,8 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 fast_flush=True,
             )[0]
 
-        # Shape padding introduces addtional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
-        # tradeoff between performance improvement from shape padding and overhead from addtional memory ops
+        # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
+        # tradeoff between performance improvement from shape padding and overhead from additional memory ops
         # TODO: Build a learned model which would be better than this heuristic
         return ori_time > pad_time * 1.1
 
@@ -322,8 +344,8 @@ def all(input):
 
 
 @register_decomposition([aten.all.dim])
-def all_dim(input, dim, keeepdim=False):
-    return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
+def all_dim(input, dim, keepdim=False):
+    return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
 
 
 # NB: this decomposition is not stride accurate, do not put it in the main
@@ -342,9 +364,18 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
         result = result * alpha
+    if beta == 0:
+        return result
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
+
+
+@register_decomposition([aten.cat.default])
+def cat(tensors, dim=0):
+    if len(tensors) == 1:
+        return tensors[0].clone()
+    return NotImplemented
 
 
 @register_decomposition([aten.conj_physical])
@@ -364,10 +395,34 @@ def bernoulli(self, *, generator=None):
     return torch.rand_like(self, dtype=torch.float32) < self
 
 
-@register_decomposition([aten.bernoulli.p])
-def bernoulli_p(self, p=0.5, *, generator=None):
-    assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < p
+@register_decomposition([aten.fmin, prims.fmin])
+def fmin(self, other):
+    return torch.where(torch.isnan(other) | (other > self), self, other)
+
+
+@register_decomposition([aten.fmax, prims.fmax])
+def fmax(self, other):
+    return torch.where(torch.isnan(other) | (other < self), self, other)
+
+
+@register_decomposition([aten.narrow_copy])
+def narrow_copy(self, dim, start, length):
+    return torch.narrow(self, dim, start, length).clone()
+
+
+@register_decomposition([aten.expand_copy])
+def expand_copy(self, size, *, implicit=False):
+    return aten.expand(self, size, implicit=implicit).clone()
+
+
+@register_decomposition([aten.view_copy.default])
+def view_copy_default(self, size):
+    return aten.view(self, size).clone()
+
+
+@register_decomposition([aten.view_copy.dtype])
+def view_copy_dtype(self, dtype):
+    return self.to(dtype).clone()
 
 
 """
@@ -384,6 +439,9 @@ extra_random_decomps = get_decompositions(
         aten.exponential_,
         aten.geometric,
         aten.geometric_,
+        aten.normal,
+        aten.normal_,
+        aten.normal_functional,
         aten.log_normal,
         aten.log_normal_,
         aten.uniform_,
@@ -396,7 +454,17 @@ register_extra_random_decomp = functools.partial(
 
 @register_extra_random_decomp([aten.bernoulli_])
 def bernoulli_(self, p=0.5):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
     return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
+
+
+@register_extra_random_decomp([aten.bernoulli.p])
+def bernoulli_p(self, p=0.5, *, generator=None):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < p
 
 
 @functools.lru_cache(None)

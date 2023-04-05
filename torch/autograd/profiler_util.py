@@ -19,7 +19,7 @@ class EventList(list):
         use_cuda = kwargs.pop('use_cuda', True)
         profile_memory = kwargs.pop('profile_memory', False)
         with_flops = kwargs.pop('with_flops', False)
-        super(EventList, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._use_cuda = use_cuda
         self._profile_memory = profile_memory
         self._tree_built = False

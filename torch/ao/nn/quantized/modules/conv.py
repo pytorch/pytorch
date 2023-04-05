@@ -48,7 +48,7 @@ class _ConvNd(WeightedQuantizedModule):
               device=None,
               dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_ConvNd, self).__init__()
+        super().__init__()
 
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
@@ -120,7 +120,7 @@ class _ConvNd(WeightedQuantizedModule):
     #   self
     #   |--- _packed_params : Conv2dPackedParamsBase or Conv3dPackedParamsBase
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         (w, b) = self._weight_bias()
         destination[prefix + 'weight'] = w
         destination[prefix + 'bias'] = b
@@ -161,7 +161,7 @@ class _ConvNd(WeightedQuantizedModule):
         state_dict.pop(prefix + 'scale')
         self.zero_point = int(state_dict[prefix + 'zero_point'])
         state_dict.pop(prefix + 'zero_point')
-        super(_ConvNd, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict, prefix, local_metadata, False, missing_keys,
             unexpected_keys, error_msgs)
 
@@ -330,7 +330,7 @@ class Conv1d(_ConvNd):
 
         # Subclasses of _ConvNd needs to call _init rather than __init__. See
         # discussion on PR #49702
-        super(Conv1d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -433,7 +433,7 @@ class Conv2d(_ConvNd):
         dilation = _pair(dilation)
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
-        super(Conv2d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -535,7 +535,7 @@ class Conv3d(_ConvNd):
         dilation = _triple(dilation)
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
-        super(Conv3d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -597,7 +597,7 @@ class _ConvTransposeNd(_ConvNd):
         factory_kwargs = {'device': device, 'dtype': dtype}
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
-        super(_ConvTransposeNd, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride,
             padding, dilation, transposed, output_padding,
             groups, bias, padding_mode, **factory_kwargs)
@@ -725,7 +725,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         dilation = _single(dilation)
         output_padding = _single(output_padding)
 
-        super(ConvTranspose1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
@@ -816,7 +816,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         dilation = _pair(dilation)
         output_padding = _pair(output_padding)
 
-        super(ConvTranspose2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
@@ -909,7 +909,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         dilation = _triple(dilation)
         output_padding = _triple(output_padding)
 
-        super(ConvTranspose3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 

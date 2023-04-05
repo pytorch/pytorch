@@ -1,9 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 
 #pragma once
+#include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <ATen/ATen.h>
 
 
 #ifdef __OBJC__
@@ -32,6 +32,7 @@ enum class MacOSVersion : uint32_t {
   MACOS_VER_13_0_PLUS = 0,
   MACOS_VER_13_1_PLUS,
   MACOS_VER_13_2_PLUS,
+  MACOS_VER_13_3_PLUS,
 };
 
 //-----------------------------------------------------------------
@@ -78,7 +79,7 @@ class TORCH_API MPSDevice {
 
 TORCH_API bool is_available();
 TORCH_API bool is_macos_13_or_newer(MacOSVersion version = MacOSVersion::MACOS_VER_13_0_PLUS);
-
+TORCH_API void device_synchronize();
 TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
 
 } // namespace mps

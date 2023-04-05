@@ -1,8 +1,11 @@
+import warnings
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
+import torch.utils.data.datapipes.iter.sharding
+
 from torch.utils.data.datapipes._decorator import functional_datapipe
-from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
+from torch.utils.data.datapipes.datapipe import DataChunk, IterDataPipe
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 
 __all__ = [
@@ -11,7 +14,17 @@ __all__ = [
     "UnBatcherIterDataPipe",
 ]
 
-T_co = TypeVar('T_co', covariant=True)
+T_co = TypeVar("T_co", covariant=True)
+
+def __getattr__(name: str):
+    if name in ["SHARDING_PRIORITIES", "ShardingFilterIterDataPipe"]:
+        warnings.warn(f"`{name}` from `torch.utils.data.datapipes.iter.grouping` is going to be removed in PyTorch 2.1"
+                      f"Please use `{name}` from the `torch.utils.data.datapipes.iter.sharding`",
+                      category=FutureWarning, stacklevel=2)
+
+        return getattr(torch.utils.data.datapipes.iter.sharding, name)
+
+    raise AttributeError(f"module {__name__} has no attribute {name}")
 
 @functional_datapipe('batch')
 class BatcherIterDataPipe(IterDataPipe[DataChunk]):
@@ -104,8 +117,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
 
     def __iter__(self):
         for element in self.datapipe:
-            for i in self._dive(element, unbatch_level=self.unbatch_level):
-                yield i
+            yield from self._dive(element, unbatch_level=self.unbatch_level)
 
     def _dive(self, element, unbatch_level):
         if unbatch_level < -1:
@@ -113,8 +125,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
         if unbatch_level == -1:
             if isinstance(element, (list, DataChunk)):
                 for item in element:
-                    for i in self._dive(item, unbatch_level=-1):
-                        yield i
+                    yield from self._dive(item, unbatch_level=-1)
             else:
                 yield element
         elif unbatch_level == 0:
@@ -122,8 +133,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
         else:
             if isinstance(element, (list, DataChunk)):
                 for item in element:
-                    for i in self._dive(item, unbatch_level=unbatch_level - 1):
-                        yield i
+                    yield from self._dive(item, unbatch_level=unbatch_level - 1)
             else:
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
 

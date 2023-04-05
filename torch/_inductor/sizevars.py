@@ -1,40 +1,17 @@
-import dataclasses
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List
 
 import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-from . import ir
-from .codegen.common import IndentedBuffer
 from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass
-class ZeroGuard:
-    """
-    An expression we should check equals zero.
-    Guards are currently not checked.  Plan to add this later.
-    """
-
-    expr: Expr
-
-
-@dataclasses.dataclass
-class PositiveGuard:
-    """
-    An expression we should check for > 0
-    Guards are currently not checked.  Plan to add this later.
-    """
-
-    expr: Expr
 
 
 class SizeVarAllocator:
@@ -44,28 +21,13 @@ class SizeVarAllocator:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
-        self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
         # maps of dynamic sizes that have to be precomputed on the host to the kernel args
         self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
         self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = dict()
-        self.need_seed = False
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
-        self.declare = ""
-        self.ending = ""
-        self.as_strided = "as_strided"
-
-    def seed(self):
-        """
-        Seed is a special variable used to hold the rng seed for a graph.
-
-        Note this is only used by the CPU backend, we put seeds in a
-        1-element tensor for the CUDA backend.
-        """
-        self.need_seed = True
-        return sympy_symbol("seed")
 
     def simplify(self, expr: Expr):
         return sympy.expand(expr).xreplace(self.replacements)
@@ -250,7 +212,11 @@ class SizeVarAllocator:
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
-        self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        if isinstance(left, Expr):
+            left = sympy_subs(left, self.inv_precomputed_replacements)
+        if isinstance(right, Expr):
+            right = sympy_subs(right, self.inv_precomputed_replacements)
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
@@ -298,9 +264,7 @@ class SizeVarAllocator:
         assert self.size_hint(expr) > 0
         if len(expr.free_symbols) == 0:
             return
-        if "-" in str(expr):
-            # all vars are positive, so needs a minus sign to get negative values
-            self.guards.append(PositiveGuard(expr))
+        assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
     def guard_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
@@ -334,11 +298,22 @@ class SizeVarAllocator:
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
 
+    def guard_static_shapes(self, left: List[Expr]) -> List[int]:
+        return [self.guard_static_shape(x) for x in left]
+
     def __getitem__(self, val: int) -> Expr:
         return self.shape_env.duck_int(val)
 
     def size_hint(self, expr: Expr) -> int:
-        out = sympy_subs(sympy.expand(expr), self.var_to_val)
+        if not isinstance(expr, Expr):
+            return int(expr)
+        free_symbols = expr.free_symbols
+        if not free_symbols:
+            return int(expr)
+        while any(s.name.startswith("ps") for s in free_symbols):
+            expr = sympy_subs(expr, self.inv_precomputed_replacements)
+            free_symbols = expr.free_symbols
+        out = sympy_subs(expr, self.var_to_val)
         return int(out)
 
     def size_hints(self, exprs: List[Expr]) -> int:
@@ -422,7 +397,7 @@ class SizeVarAllocator:
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         strides = tuple(
-            map(lambda x: abs(x), self.stride_hints(index, vars))
+            map(abs, self.stride_hints(index, vars))
         )  # lambda to placate mypy
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
@@ -434,70 +409,6 @@ class SizeVarAllocator:
             self.precomputed_replacements[expr] = sym
             self.inv_precomputed_replacements[sym] = expr
         return self.precomputed_replacements[expr]
-
-    def codegen(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
-        """Assign all symbolic shapes to locals"""
-        if self.need_seed:
-            code.writeline(
-                "seed = torch.randint(2**31, size=(), dtype=torch.int32).item()"
-            )
-
-        @functools.lru_cache(None)
-        def sizeof(name):
-            code.writeline(f"{self.declare}{name}_size = {name}.size(){self.ending}")
-            return f"{name}_size"
-
-        @functools.lru_cache(None)
-        def strideof(name):
-            code.writeline(
-                f"{self.declare}{name}_stride = {name}.stride(){self.ending}"
-            )
-            return f"{name}_stride"
-
-        # Assign all symbolic shapes needed to local variables
-        needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
-
-        for name, value in graph_inputs.items():
-            shapes = value.get_size()
-            for dim, shape in enumerate(shapes):
-                shape = self.simplify(shape)
-                if shape in needed:
-                    needed.remove(shape)
-                    code.writeline(
-                        f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
-                    )
-
-        for name, value in graph_inputs.items():
-            shapes = value.get_stride()
-            for dim, shape in enumerate(shapes):
-                shape = self.simplify(shape)
-                if shape in needed:
-                    needed.remove(shape)
-                    code.writeline(
-                        f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
-                    )
-
-    def codegen_precomputed_sizes(self, code: IndentedBuffer):
-        from .codegen.wrapper import pexpr
-
-        for sym, expr in self.inv_precomputed_replacements.items():
-            code.writeline(f"{self.declare}{sym} = {pexpr(expr)}")
-
-    def codegen_sizevar(self, x: Expr) -> str:
-        from .codegen.wrapper import pexpr
-
-        return pexpr(self.simplify(x))
-
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        parts = list(map(self.codegen_sizevar, shape))
-        if len(parts) == 0:
-            return "()"
-        if len(parts) == 1:
-            return f"({parts[0]}, )"
-        return f"({', '.join(parts)})"
-
-    def codegen_benchmark_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        return self.codegen_shape_tuple(shape)
 
 
 def join_dimensions(expr: Expr) -> Expr:
@@ -563,25 +474,6 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
                     )
                     return expr
     return expr
-
-
-class CppSizeVarAllocator(SizeVarAllocator):
-    def __init__(self, shape_env=None):
-        super().__init__(shape_env)
-        self.declare = "auto "
-        self.ending = ";"
-        self.as_strided = "at::as_strided"
-
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        parts = list(map(self.codegen_sizevar, shape))
-        if len(parts) == 0:
-            return "{}"
-        if len(parts) == 1:
-            return f"{{{parts[0]}, }}"
-        return f"{{{', '.join(parts)}}}"
-
-    def codegen_benchmark_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        return super().codegen_shape_tuple(shape)
 
 
 class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]

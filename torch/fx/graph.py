@@ -451,26 +451,20 @@ class CodeGen:
                         prev_stacktrace = node.stack_trace
 
                         lines = node.stack_trace.strip().split('\n')
-                        idx = 0
-                        while idx < len(lines):
+                        # stacktrace should have innermost frame last, so we
+                        # iterate backwards to find the first line that starts
+                        # with 'File '
+                        summary_str = ""
+                        for idx in range(len(lines) - 2, -1, -1):
                             line = lines[idx].strip()
-                            if line.startswith('File '):
-                                break
-                            idx += 1
-
-                        summary_lines = []
-                        if idx + 1 < len(lines):
-                            matches = pattern.match(lines[idx].strip())
+                            matches = pattern.match(line)
                             if matches:
                                 file = matches.group(1)
                                 lineno = matches.group(2)
-                                lineage = f'File: {file}:{lineno}'
-                                summary_lines.append(lineage)
-
-                            code = f"code: {lines[idx + 1].strip()}"
-                            summary_lines.append(code)
-
-                        summary_str = ', '.join(summary_lines)
+                                # next line should be the code
+                                code = lines[idx + 1].strip()
+                                summary_str = f'File: {file}:{lineno}, code: {code}'
+                                break
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
@@ -796,8 +790,9 @@ class Graph:
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         g._codegen = copy.deepcopy(self._codegen)
         assert isinstance(output_vals, tuple)
-        output_val, old_output_val = output_vals
-        g.output(output_val, type_expr=getattr(old_output_val, 'type', None))
+        output_val, old_output_node = output_vals
+        new_output_node = g.output(output_val, type_expr=getattr(old_output_node, 'type', None))
+        new_output_node.meta = copy.copy(old_output_node.meta)
         return g
 
     @compatibility(is_backward_compatible=True)

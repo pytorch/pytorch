@@ -10,7 +10,6 @@ import tempfile
 import warnings
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
-from ._six import string_classes as _string_classes
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from torch.storage import _get_dtype_from_pickle_storage_type
@@ -57,8 +56,10 @@ class SourceChangeWarning(Warning):
 @contextmanager
 def mkdtemp():
     path = tempfile.mkdtemp()
-    yield path
-    shutil.rmtree(path)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path)
 
 
 _package_registry = []
@@ -1079,7 +1080,7 @@ def _get_restore_location(map_location):
         def restore_location(storage, location):
             location = map_location.get(location, location)
             return default_restore_location(storage, location)
-    elif isinstance(map_location, _string_classes):
+    elif isinstance(map_location, (str, bytes)):
         def restore_location(storage, location):
             return default_restore_location(storage, map_location)
     elif isinstance(map_location, torch.device):

@@ -913,7 +913,7 @@ For example:
     t.register_hook(fn)
     t.backward()
 
-Furthemore, it can be helpful to know that under the hood,
+Furthermore, it can be helpful to know that under the hood,
 when hooks are registered to a Tensor, they actually become permanently bound to the grad_fn
 of that Tensor, so if that Tensor is then modified in-place,
 even though the Tensor now has a new grad_fn, hooks registered before it was

@@ -701,6 +701,15 @@ See :func:`torch.as_strided`
 )
 
 add_docstr_all(
+    "as_strided_",
+    r"""
+as_strided_(size, stride, storage_offset=None) -> Tensor
+
+In-place version of :meth:`~Tensor.as_strided`
+""",
+)
+
+add_docstr_all(
     "atan",
     r"""
 atan() -> Tensor
@@ -3124,10 +3133,12 @@ add_docstr_all(
 masked_scatter_(mask, source)
 
 Copies elements from :attr:`source` into :attr:`self` tensor at positions where
-the :attr:`mask` is True.
+the :attr:`mask` is True. Elements from :attr:`source` are copied into :attr:`self`
+starting at position 0 of :attr:`source` and continuing in order one-by-one for each
+occurrence of :attr:`mask` being True.
 The shape of :attr:`mask` must be :ref:`broadcastable <broadcasting-semantics>`
 with the shape of the underlying tensor. The :attr:`source` should have at least
-as many elements as the number of ones in :attr:`mask`
+as many elements as the number of ones in :attr:`mask`.
 
 Args:
     mask (BoolTensor): the boolean mask
@@ -3137,6 +3148,16 @@ Args:
 
     The :attr:`mask` operates on the :attr:`self` tensor, not on the given
     :attr:`source` tensor.
+
+Example:
+
+    >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
+    >>> self.masked_scatter_(mask, source)
+    tensor([[0, 0, 0, 0, 1],
+            [2, 3, 0, 4, 5]])
+
 """,
 )
 
@@ -5348,9 +5369,15 @@ See :func:`torch.topk`
 add_docstr_all(
     "to_dense",
     r"""
-to_dense() -> Tensor
+to_dense(dtype=None, *, masked_grad=True) -> Tensor
 
 Creates a strided copy of :attr:`self` if :attr:`self` is not a strided tensor, otherwise returns :attr:`self`.
+
+Keyword args:
+    {dtype}
+    masked_grad (bool, optional): If set to ``True`` (default) and
+      :attr:`self` has a sparse layout then the backward of
+      :meth:`to_dense` returns ``grad.sparse_mask(self)``.
 
 Example::
 
@@ -6362,6 +6389,21 @@ add_docstr_all(
 masked_scatter(mask, tensor) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+
+.. note::
+
+    The inputs :attr:`self` and :attr:`mask`
+    :ref:`broadcast <broadcasting-semantics>`.
+
+Example:
+
+    >>> self = torch.tensor([0, 0, 0, 0, 0])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
+    >>> self.masked_scatter(mask, source)
+    tensor([[0, 0, 0, 0, 1],
+            [2, 3, 0, 4, 5]])
+
 """,
 )
 
@@ -6548,7 +6590,7 @@ Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
 add_docstr_all(
     "is_sparse",
     r"""
-Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
+Is ``True`` if the Tensor uses sparse COO storage layout, ``False`` otherwise.
 """,
 )
 
@@ -6570,6 +6612,22 @@ add_docstr_all(
     "ndim",
     r"""
 Alias for :meth:`~Tensor.dim()`
+""",
+)
+
+add_docstr_all(
+    "itemsize",
+    r"""
+Alias for :meth:`~Tensor.element_size()`
+""",
+)
+
+add_docstr_all(
+    "nbytes",
+    r"""
+Returns the number of bytes consumed by the "view" of elements of the Tensor
+if the Tensor does not use sparse storage layout.
+Defined to be :meth:`~Tensor.numel()` * :meth:`~Tensor.element_size()`
 """,
 )
 

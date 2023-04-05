@@ -221,10 +221,13 @@ def generate_inputs_for_model(
     vocab_size = model.config.vocab_size
     if model_name.endswith("MultipleChoice"):
         input = rand_int_tensor(device, 0, vocab_size, (bs, num_choices, seq_length))
+        torch._dynamo.mark_dynamic(input, 2)
     elif model_name.startswith("Roberta"):
         input = rand_int_tensor(device, 0, 1, (bs, seq_length))
+        torch._dynamo.mark_dynamic(input, 1)
     else:
         input = rand_int_tensor(device, 0, vocab_size, (bs, seq_length))
+        torch._dynamo.mark_dynamic(input, 1)
 
     if "Bart" in model_name:
         input[:, -1] = model.config.eos_token_id
@@ -364,7 +367,7 @@ EXTRA_MODELS = {
 
 class HuggingfaceRunner(BenchmarkRunner):
     def __init__(self):
-        super(HuggingfaceRunner, self).__init__()
+        super().__init__()
         self.suite_name = "huggingface"
 
     def load_model(
@@ -373,7 +376,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         model_name,
         batch_size=None,
     ):
-
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
@@ -513,7 +515,6 @@ def refresh_model_names_and_batch_sizes():
     lm_seen = set()
     family_seen = set()
     for cls_name in hf_fx._SUPPORTED_MODELS:
-
         if "For" not in cls_name:
             continue
 

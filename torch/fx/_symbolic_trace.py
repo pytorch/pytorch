@@ -264,7 +264,7 @@ class Tracer(TracerBase):
             for name, value in chain(*[m.__dict__.items() for m in autowrap_modules])
             if not name.startswith("_") and callable(value)
         }
-        self._autowrap_function_ids.update(set([id(f) for f in autowrap_functions]))
+        self._autowrap_function_ids.update({id(f) for f in autowrap_functions})
 
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
@@ -627,7 +627,7 @@ class Tracer(TracerBase):
                 raise RuntimeError(
                     f"Tracing expected {len(arg_names)} arguments but got {len(concrete_args)} concrete arguments"
                 )
-            concrete_args = {name: val for name, val in zip(arg_names, concrete_args)}
+            concrete_args = dict(zip(arg_names, concrete_args))
         args.extend(proxy_placeholder(names) for names in arg_names)
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
@@ -899,7 +899,7 @@ class _PatchedFnSetAttr(_PatchedFn):
 
 class _Patcher:
     def __init__(self):
-        super(_Patcher, self).__init__()
+        super().__init__()
         self.patches_made: List[_PatchedFn] = []
         self.visited: Set[int] = set()
 

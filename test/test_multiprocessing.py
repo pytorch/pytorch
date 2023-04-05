@@ -34,7 +34,7 @@ TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 class SubProcess(mp.Process):
     def __init__(self, tensor):
-        super(SubProcess, self).__init__()
+        super().__init__()
         self.tensor = tensor
         self.daemon = True
 
@@ -819,6 +819,8 @@ if __name__ == "__main__":
         time.sleep(5)
         p.join()
 
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "non-deterministically hangs with ASAN https://github.com/pytorch/pytorch/issues/94024")
     def test_variable_sharing(self):
         for requires_grad in [True, False]:
             var = torch.arange(1., 26).view(5, 5).requires_grad_(requires_grad)

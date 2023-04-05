@@ -360,7 +360,7 @@ class TestSerialization(TestCase):
     def test_default_qat_qconfig(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(5, 5)
                 self.relu = nn.ReLU()
 

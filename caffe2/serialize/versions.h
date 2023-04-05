@@ -6,7 +6,7 @@ namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0xBL;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0xAL;
 
 // Versions (i.e. why was the version number bumped?)
 

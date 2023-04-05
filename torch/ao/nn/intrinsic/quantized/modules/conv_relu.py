@@ -31,7 +31,7 @@ class ConvReLU1d(nnq.Conv1d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
-        super(ConvReLU1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)
@@ -81,7 +81,7 @@ class ConvReLU2d(nnq.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
-        super(ConvReLU2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)
@@ -131,7 +131,7 @@ class ConvReLU3d(nnq.Conv3d):
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
         assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
-        super(ConvReLU3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)

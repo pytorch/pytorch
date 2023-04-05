@@ -22,7 +22,7 @@ class BNReLU2d(nnq.BatchNorm2d):
     _FLOAT_MODULE = torch.ao.nn.intrinsic.BNReLU2d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
-        super(BNReLU2d, self).__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
+        super().__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -58,7 +58,7 @@ class BNReLU3d(nnq.BatchNorm3d):
     _FLOAT_MODULE = torch.ao.nn.intrinsic.BNReLU3d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
-        super(BNReLU3d, self).__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
+        super().__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue

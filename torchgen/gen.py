@@ -368,7 +368,6 @@ def translate_args(
     sig: Union[CppSignature, DispatcherSignature],
     cpp_sig: CppSignature,
 ) -> str:
-
     # Adds SpecialArgName.possibly_redundant_memory_format NamedCType for memory_format bindings
     def add_spl_memory_format_binding(input_bindings: List[Binding]) -> List[Binding]:
         output_bindings: List[Binding] = []
@@ -1188,8 +1187,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     # These sets are used to conveniently test if an argument is a
     # kwarg-only or out argument
-    kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
-    out_arg_set = set(a.name for a in f.func.arguments.out)
+    kwarg_only_set = {a.name for a in f.func.arguments.flat_kwarg_only}
+    out_arg_set = {a.name for a in f.func.arguments.out}
 
     sig_group = CppSignatureGroup.from_native_function(
         f, method=False, fallback_binding=False
@@ -1453,7 +1452,7 @@ def get_native_function_declarations(
         ns_helper = NamespaceHelper(
             namespace_str=namespace,
             entity_name="",
-            max_level=3,
+            max_level=4,
         )
         # Convert to a set first to remove duplicate kernel names. Backends are
         # allowed to repeat kernel names; only generate the declaration once!
@@ -1651,7 +1650,6 @@ def get_native_function_schema_registrations(
     aten_schema_registrations = []
     custom_namespace = None
     for namespace, funcs in ns_native_functions.items():
-
         schema_registrations_body = list(
             mapMaybe(RegisterSchema(schema_selector), funcs)
         )
@@ -2099,21 +2097,19 @@ def gen_headers(
 
         # These are keywords in C++, so aren't valid symbol names
         # https://en.cppreference.com/w/cpp/language/operator_alternative
-        names -= set(
-            [
-                "and",
-                "and_eq",
-                "bitand",
-                "bitor",
-                "compl",
-                "not",
-                "not_eq",
-                "or",
-                "or_eq",
-                "xor",
-                "xor_eq",
-            ]
-        )
+        names -= {
+            "and",
+            "and_eq",
+            "bitand",
+            "bitor",
+            "compl",
+            "not",
+            "not_eq",
+            "or",
+            "or_eq",
+            "xor",
+            "xor_eq",
+        }
 
         return {
             "aten_symbols": " \\\n".join(

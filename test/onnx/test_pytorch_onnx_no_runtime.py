@@ -30,9 +30,7 @@ def export_to_onnx(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction],
     input: Union[torch.Tensor, Tuple[torch.Tensor]],
     custom_ops: Optional[
-        Iterable[
-            Union[contextlib.AbstractContextManager, contextlib.ContextDecorator],
-        ]
+        Iterable[Union[contextlib.AbstractContextManager, contextlib.ContextDecorator]]
     ] = None,
     mocks: Optional[Iterable] = None,
     operator_export_type: torch.onnx.OperatorExportTypes = torch.onnx.OperatorExportTypes.ONNX,
@@ -99,7 +97,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         class TraceMe(torch.nn.Module):
             def __init__(self):
-                super(TraceMe, self).__init__()
+                super().__init__()
                 self.foo = Foo()
 
             def forward(self, x):
@@ -120,9 +118,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ModuleToExport, self).__init__()
-
             @torch.jit.script_method
             def forward(self, x):
                 y = x - x
@@ -138,9 +133,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             return torch.nn.functional.sigmoid(inp)  # triggers a deprecation warning
 
         class WarningTest(torch.nn.Module):
-            def __init__(self):
-                super(WarningTest, self).__init__()
-
             def forward(self, x):
                 return func_with_warning(x)
 
@@ -151,16 +143,13 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_onnx_export_script_python_fail(self):
         class PythonModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(PythonModule, self).__init__()
-
             @torch.jit.ignore
             def forward(self, x):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
-                super(ModuleToExport, self).__init__()
+                super().__init__()
                 self.mod = PythonModule()
 
             @torch.jit.script_method
@@ -175,15 +164,12 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_onnx_export_script_inline_trace(self):
         class ModuleToInline(torch.nn.Module):
-            def __init__(self):
-                super(ModuleToInline, self).__init__()
-
             def forward(self, x):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
-                super(ModuleToExport, self).__init__()
+                super().__init__()
                 self.mod = torch.jit.trace(ModuleToInline(), torch.zeros(1, 2, 3))
 
             @torch.jit.script_method
@@ -196,16 +182,13 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ModuleToInline, self).__init__()
-
             @torch.jit.script_method
             def forward(self, x):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
-                super(ModuleToExport, self).__init__()
+                super().__init__()
                 self.mod = ModuleToInline()
 
             @torch.jit.script_method
@@ -218,9 +201,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_onnx_export_script_module_loop(self):
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ModuleToExport, self).__init__()
-
             @torch.jit.script_method
             def forward(self, x):
                 # test if we support end to end onnx export on loop and
@@ -236,9 +216,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
     @common_utils.suppress_warnings
     def test_onnx_export_script_truediv(self):
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ModuleToExport, self).__init__()
-
             @torch.jit.script_method
             def forward(self, x):
                 z = x.size(0) / 2
@@ -252,9 +229,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_onnx_export_script_non_alpha_add_sub(self):
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ModuleToExport, self).__init__()
-
             @torch.jit.script_method
             def forward(self, x):
                 bs = x.size(0) + 1
@@ -265,9 +239,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ModuleToExport, self).__init__()
-
             @torch.jit.script_method
             def forward(self, x):
                 if bool(torch.sum(x) > 0):
@@ -280,7 +251,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):
             def __init__(self):
-                super(ModuleToInline, self).__init__()
+                super().__init__()
                 self.m = torch.nn.Parameter(torch.ones(3, 3))
                 self.unused = torch.nn.Parameter(torch.ones(1, 2, 3))
 
@@ -290,7 +261,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
-                super(ModuleToExport, self).__init__()
+                super().__init__()
                 self.mod = ModuleToInline()
                 self.param = torch.nn.Parameter(torch.ones(3, 4))
 
@@ -310,7 +281,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
     def test_onnx_export_speculate(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self, m):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.m = m
 
             @torch.jit.script_method
@@ -693,9 +664,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return 2 * x
 
@@ -795,7 +763,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         )
 
     def test_dropout_script(self):
-
         eg = torch.zeros(1, 2, 3, requires_grad=True)
 
         @jit_utils._trace(eg)
@@ -817,9 +784,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         T, B, C = 3, 5, 7
 
         class PadPackedWrapper(torch.nn.Module):
-            def __init__(self):
-                super(PadPackedWrapper, self).__init__()
-
             def forward(self, x, seq_lens):
                 x = pack_padded_sequence(x, seq_lens)
                 x, _ = pad_packed_sequence(x)
@@ -871,7 +835,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         class RNNTraceWrapper(torch.nn.Module):
             def __init__(self, cell_type):
-                super(RNNTraceWrapper, self).__init__()
+                super().__init__()
                 if cell_type == "RNN":
                     self.rnn = torch.nn.RNN(
                         input_size=C, hidden_size=C, num_layers=num_layers
@@ -930,7 +894,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         class LSTMTraceWrapper(torch.nn.Module):
             def __init__(self):
-                super(LSTMTraceWrapper, self).__init__()
+                super().__init__()
 
                 self.rnn = torch.nn.LSTM(
                     input_size=C, hidden_size=C, num_layers=num_layers
@@ -1101,7 +1065,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         # For BUILD_CAFFE2=0, aten fallback only when not exportable
         class ONNXExportable(torch.nn.Module):
             def __init__(self):
-                super(ONNXExportable, self).__init__()
+                super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.fc1 = torch.nn.Linear(12, 8)
                 self.fc2 = torch.nn.Linear(8, 4)

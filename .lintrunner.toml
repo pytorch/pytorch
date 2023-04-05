@@ -1,3 +1,5 @@
+merge_base_with = "origin/master"
+
 [[linter]]
 code = 'FLAKE8'
 include_patterns = ['**/*.py']
@@ -31,14 +33,16 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'flake8==3.8.2',
-    'flake8-bugbear==20.1.4',
-    'flake8-comprehensions==3.3.0',
-    'flake8-executable==2.0.4',
-    'flake8-pyi==20.5.0',
-    'mccabe==0.6.1',
-    'pycodestyle==2.6.0',
-    'pyflakes==2.2.0',
+    'flake8==6.0.0',
+    'flake8-bugbear==23.3.23',
+    'flake8-comprehensions==3.11.1',
+    'flake8-executable==2.1.3',
+    'flake8-logging-format==0.9.0',
+    'flake8-pyi==23.3.1',
+    'flake8-simplify==0.19.3',
+    'mccabe==0.7.0',
+    'pycodestyle==2.10.0',
+    'pyflakes==3.0.1',
 ]
 
 
@@ -46,6 +50,8 @@ init_command = [
 code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
+    'aten/src/ATen/mps/**/*.mm',
+    'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
     'c10/**/*.h',
@@ -145,7 +151,6 @@ init_command = [
     'expecttest==0.1.3',
     'mypy==0.960',
     'types-requests==2.27.25',
-    'types-six==1.16.15',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
     'types-protobuf==3.19.18',
@@ -367,6 +372,7 @@ include_patterns = ['**']
 exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
+    '**/*.patch',
     'third_party/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
@@ -674,7 +680,6 @@ exclude_patterns = [
     'cmake/Modules_CUDA_fix/**',
     'cmake/Caffe2Config.cmake.in',
     'aten/src/ATen/ATenConfig.cmake.in',
-    'cmake/Caffe2ConfigVersion.cmake.in',
     'cmake/TorchConfig.cmake.in',
     'cmake/TorchConfigVersion.cmake.in',
     'cmake/cmake_uninstall.cmake.i',
@@ -822,6 +827,8 @@ init_command = [
 [[linter]]
 code = 'UFMT'
 include_patterns = [
+    '.github/**/*.py',
+    'test/run_test.py',
     'test/onnx/**/*.py',
     'test/test_dynamo_cudagraphs.py',
     'tools/**/*.py',
@@ -840,6 +847,7 @@ include_patterns = [
     'torch/_refs/**/*.py',
     'torch/_subclasses/**/*.py',
     'torch/_*.py',
+    'torch/**/*.pyi',
     'torch/testing/_internal/opinfo/**/*.py',
     'torchgen/**/*.py',
     'torch/_functorch/make_functional.py',
@@ -851,8 +859,17 @@ include_patterns = [
     'test/distributed/fsdp/**/*.py',
     'torch/testing/_internal/common_fsdp.py',
     'torch/distributed/_composable/**/*.py',
+    'torch/distributed/_spmd/**/*.py',
+    'torch/distributed/_tensor/**/*.py',
     'test/distributed/_composable/**/*.py',
+    'test/distributed/_spmd/**/*.py',
+    'test/distributed/_tensor/**/*.py',
     'torch/testing/_internal/common_dist_composable.py',
+    'test/test_value_ranges.py',
+    'torch/utils/_sympy/interp.py',
+    'torch/utils/_sympy/reference.py',
+    'torch/_logging/**/*.py',
+    'torch/nn/parallel/distributed.py',
 ]
 command = [
     'python3',
@@ -869,9 +886,9 @@ init_command = [
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
-    'black==22.3.0',
-    'ufmt==1.3.3',
-    'usort==1.0.2',
+    'black==23.3.0',
+    'ufmt==2.1.0',
+    'usort==1.0.6',
 ]
 is_formatter = true
 
@@ -891,4 +908,33 @@ command = [
     """,
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'BAZEL_LINTER'
+include_patterns = ['WORKSPACE']
+command = [
+    'python3',
+    'tools/linter/adapters/bazel_linter.py',
+    '--binary=.lintbin/bazel',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=bazel',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=bazel',
+]
+is_formatter = true
+
+[[linter]]
+code = 'LINTRUNNER_VERSION'
+include_patterns = ['**']
+command = [
+    'python3',
+    'tools/linter/adapters/lintrunner_version_linter.py'
 ]

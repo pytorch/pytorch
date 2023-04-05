@@ -905,6 +905,10 @@ static inline void diff_check(const Tensor& self, int64_t n, int64_t dim, const 
       self.dim() >= 1,
       "diff expects input to be at least one-dimensional");
 
+  TORCH_CHECK(
+      n >= 0,
+      "order must be non-negative but got ", n);
+
   diff_check_compatible_shape(self, prepend, dim);
   diff_check_compatible_shape(self, append, dim);
 }
@@ -1179,7 +1183,10 @@ Tensor& sum_out(const Tensor& self, DimnameList dim,
 
 Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
                        bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
+  if (self.device().is_cpu()) {
+    TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
+  }
+
   // For integral types, use existing sum as
   // integral types don't have `Nan`.
   if (c10::isIntegralType(self.scalar_type(), true)){
@@ -1297,7 +1304,9 @@ TORCH_IMPL_FUNC(mean_out)
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
   // in lieu of the sum + divide implementation below.
-  if (self.device().is_cpu()) {
+  // Note: there has an accuracy loss for half and bfloat16 which has one more type
+  // cast compared with mean_stub path.
+  if (self.device().is_cpu() && dtype != kHalf && dtype != kBFloat16) {
     int64_t dim_prod = 1;
     if (!opt_dim.has_value() || opt_dim.value().empty() || self.ndimension() == 0) {
       dim_prod = self.numel();
@@ -1341,8 +1350,8 @@ Tensor& nanmean_out(
     c10::optional<ScalarType> opt_dtype,
     Tensor& result) {
   TORCH_CHECK(
-      self.is_floating_point(),
-      "nanmean(): expected input to have floating point dtype but got ",
+      self.is_floating_point() || self.is_complex(),
+      "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
   const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
   at::native::nansum_out(self, dim, keepdim, opt_dtype, result).div_(factor);
@@ -1355,8 +1364,8 @@ Tensor nanmean(
     bool keepdim,
     optional<ScalarType> opt_dtype) {
   TORCH_CHECK(
-      self.is_floating_point(),
-      "nanmean(): expected input to have floating point dtype but got ",
+      self.is_floating_point() || self.is_complex(),
+      "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
@@ -1600,7 +1609,7 @@ TORCH_IMPL_FUNC(argmin_out)
   argmax_argmin_impl(self, dim, keepdim, result, argmin_stub);
 }
 
-static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_sqrt) {
+static double std_var_all_cpu(const Tensor& self, double correction, bool take_sqrt) {
   const auto dtype = self.scalar_type();
   TORCH_CHECK(dtype == kDouble || dtype == kFloat,
               "std_var_all: Unsupported dtype ", dtype);
@@ -1638,7 +1647,7 @@ static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_
       0, iter.numel(), at::internal::GRAIN_SIZE, 0.0, reduction, std::plus<>{});
 
   const auto var = [&] () __ubsan_ignore_float_divide_by_zero__ {
-    return sum_dx2 / std::max(int64_t{0}, self.numel() - correction);
+    return sum_dx2 / std::max(0.0, self.numel() - correction);
   }();
   const auto result = take_sqrt ? std::sqrt(var) : var;
 
@@ -1652,7 +1661,7 @@ static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_
 
 static Tensor& std_var_out(
     const char* fname, Tensor& result, const Tensor& self,
-    at::OptionalIntArrayRef dim, c10::optional<int64_t> correction_opt,
+    at::OptionalIntArrayRef dim, const c10::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
   TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda(),
               "std and var only supports tensors on a CPU or CUDA device, but got: ",
@@ -1696,7 +1705,7 @@ static Tensor& std_var_out(
   }
 
   // Computation for floating point
-  const auto correction = correction_opt.value_or(1);
+  const auto correction = correction_opt.value_or(1).toDouble();
   ScalarType dtype = get_dtype_from_result(result, {});
   auto iter = make_reduction(fname, result, self, dim, keepdim, dtype);
   TORCH_CHECK(at::canCast(self.scalar_type(), result.scalar_type()),
@@ -1723,7 +1732,7 @@ static Tensor& std_var_out(
 
 static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     const char* fname, Tensor& result1, Tensor& result2, const Tensor& self,
-    at::OptionalIntArrayRef dim, c10::optional<int64_t> correction_opt,
+    at::OptionalIntArrayRef dim, const c10::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
@@ -1777,7 +1786,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
   }
 
   // Computation for floating point
-  const auto correction = correction_opt.value_or(1);
+  const auto correction = correction_opt.value_or(1).toDouble();
   ScalarType dtype = get_dtype_from_result(result1, {});
   auto iter =
       make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
@@ -1796,7 +1805,7 @@ std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::var_mean(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0),
       keepdim);
 }
 
@@ -1804,22 +1813,21 @@ std::tuple<Tensor, Tensor> std_mean(
     const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::std_mean(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0),
       keepdim);
 }
 
 std::tuple<Tensor, Tensor> std_mean(const Tensor& self, bool unbiased) {
   return at::std_mean(
       self, /*dim=*/c10::nullopt,
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0));
 }
 
 std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
   return at::var_mean(
       self, /*dim=*/c10::nullopt,
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0));
 }
-
 std::tuple<Tensor&, Tensor&> var_mean_out(
     Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
     int64_t correction, bool keepdim) {
@@ -1834,7 +1842,7 @@ static TensorOptions options_to_value_type(TensorOptions opts) {
 
 std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction, bool keepdim) {
+    const c10::optional<Scalar>& correction, bool keepdim) {
   Tensor result1 = at::empty({0}, options_to_value_type(self.options()));
   Tensor result2 = at::empty({0}, self.options());
   return std_var_mean_out(
@@ -1843,7 +1851,7 @@ std::tuple<Tensor, Tensor> var_mean(
 
 std::tuple<Tensor, Tensor> std_mean(
     const Tensor& self, at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction, bool keepdim) {
+    const c10::optional<Scalar>& correction, bool keepdim) {
   Tensor result1 = at::empty({0}, options_to_value_type(self.options()));
   Tensor result2 = at::empty({0}, self.options());
   return std_var_mean_out(
@@ -1853,59 +1861,59 @@ std::tuple<Tensor, Tensor> std_mean(
 Tensor var(const Tensor& self, bool unbiased) {
   return at::var(
       self, /*dim=*/c10::nullopt,
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0));
 }
 
 Tensor var(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::var(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0),
       keepdim);
 }
 
 Tensor& var_out(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim, Tensor& result) {
   return at::var_out(
       result, self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0),
       keepdim);
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
   return at::std(
-      self, /*dim=*/c10::nullopt, /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
+      self, /*dim=*/c10::nullopt, /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0));
 }
 
 Tensor std(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::std(self, dim,
-                 /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}), keepdim);
+                 /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0), keepdim);
 }
 
 Tensor& std_out(const Tensor& self, at::OptionalIntArrayRef opt_dim, bool unbiased, bool keepdim, Tensor& result) {
   return at::std_out(result, self, opt_dim,
-                     /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}), keepdim);
+                     /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0), keepdim);
 }
 
 Tensor std(const Tensor& self, at::OptionalIntArrayRef dim,
-           c10::optional<int64_t> correction, bool keepdim) {
+           const c10::optional<Scalar>& correction, bool keepdim) {
   Tensor result = at::empty({0}, options_to_value_type(self.options()));
   return std_var_out("std", result, self, dim, correction, keepdim, true);
 }
 
 Tensor& std_out(
     const Tensor& self, at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction, bool keepdim, Tensor& result) {
+    const c10::optional<Scalar>& correction, bool keepdim, Tensor& result) {
   return std_var_out("std", result, self, dim, correction, keepdim, true);
 }
 
 Tensor& var_out(
     const Tensor& self, at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction, bool keepdim, Tensor& result) {
+    const c10::optional<Scalar>& correction, bool keepdim, Tensor& result) {
   return std_var_out("var", result, self, dim, correction, keepdim, false);
 }
 
 Tensor var(
     const Tensor& self, at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction, bool keepdim) {
+    const c10::optional<Scalar>& correction, bool keepdim) {
   Tensor result = at::empty({0}, options_to_value_type(self.options()));
   return std_var_out("var", result, self, dim, correction, keepdim, false);
 }
@@ -1935,32 +1943,32 @@ std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim, bool unb
   return at::std_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
-Tensor std(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction, bool keepdim) {
+Tensor std(const Tensor& self, DimnameList dim, const c10::optional<Scalar>& correction, bool keepdim) {
   return at::std(self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
-Tensor& std_out(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction,
+Tensor& std_out(const Tensor& self, DimnameList dim, const c10::optional<Scalar>& correction,
                 bool keepdim, Tensor& result) {
   return at::std_out(result, self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
-Tensor var(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction, bool keepdim) {
+Tensor var(const Tensor& self, DimnameList dim, const c10::optional<Scalar>& correction, bool keepdim) {
   return at::var(self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
-Tensor& var_out(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction,
+Tensor& var_out(const Tensor& self, DimnameList dim, const c10::optional<Scalar>& correction,
                 bool keepdim, Tensor& result) {
   return at::var_out(
       result, self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
 std::tuple<Tensor,Tensor> var_mean(const Tensor& self, DimnameList dim,
-                                   c10::optional<int64_t> correction, bool keepdim) {
+                                   const c10::optional<Scalar>& correction, bool keepdim) {
   return at::var_mean(self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
 std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim,
-                                   c10::optional<int64_t> correction, bool keepdim) {
+                                   const c10::optional<Scalar>& correction, bool keepdim) {
   return at::std_mean(self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
