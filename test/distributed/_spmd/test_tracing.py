@@ -528,7 +528,6 @@ class TraceTrainStepTest(DTensorTestBase):
         # FIXME(@mrshenli): remove manual seed once dist.compile can synchronize
         # module parameters.
         torch.manual_seed(1)
-        # FIXME(@mrshenli): gradients for bias is missing
         mod = nn.Linear(10, 10, bias=True).cuda(rank)
         opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
         inp = torch.randn(2, 10).cuda(rank)
@@ -538,7 +537,34 @@ class TraceTrainStepTest(DTensorTestBase):
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
 
     def _test_adam(self, *, foreach: bool, fused: bool):
-        @compile()
+        class AssertOverride(Override):
+            def __init__(self, outer):
+                self.outer = outer
+
+            def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+                return orig_submodule
+
+            def transform(
+                self,
+                gm: fx.GraphModule,
+                schema_map: Dict[str, Schema],
+                flat_state: List[torch.Tensor],
+            ) -> fx.Graph:
+                # check dedup is successful, where there should only be 1 allreduce
+                self.outer.assertEqual(
+                    len(
+                        [
+                            n
+                            for n in gm.graph.nodes
+                            if n.target == torch.ops.aten.all_reduce.default
+                        ]
+                    ),
+                    1,
+                )
+
+                return gm
+
+        @compile(module_override={nn.Linear: AssertOverride(self)})
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()
@@ -548,7 +574,7 @@ class TraceTrainStepTest(DTensorTestBase):
         # module parameters.
         torch.manual_seed(0)
         # FIXME(@mrshenli): gradients for bias is missing
-        mod = nn.Linear(10, 10, bias=False).cuda(rank)
+        mod = nn.Sequential(nn.Linear(10, 10, bias=False)).cuda(rank)
         opt = torch.optim.Adam(
             mod.parameters(),
             lr=0.01,
