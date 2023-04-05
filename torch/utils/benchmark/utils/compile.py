@@ -82,6 +82,7 @@ def benchmark_compile(
             # Compilation only happens after the first inference
             compilation_time = bench_loop(opt_model, sample_input, 1, optimizer, loss_fn)
 
+            # TODO: Not 100% sure this is the right way to do this yet
             if compile_counter_with_backend.frame_count > 1:
                 raise RuntimeError("Recompilation occurred during benchmarking.")
 
@@ -96,8 +97,8 @@ def benchmark_compile(
     # Benchmark
     running_time = bench_loop(opt_model, sample_input, num_iters, optimizer, loss_fn)
 
-    compilation_time = round(compilation_time, 4) if compilation_time is not None else None
-    running_time = round(running_time, 4) if running_time is not None else None
+    compilation_time = round(compilation_time, 4) if compilation_time else None
+    running_time = round(running_time, 4) if running_time else None
 
 
     return compilation_time, running_time
