@@ -76,10 +76,7 @@ CI_SKIP = collections.defaultdict(list)
 CI_SKIP[CI("eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    "gat",  # only works on CPU
-    "gcn",  # only works on CPU
     "llama",  # does not support complex32
-    "sage",  # only works on CPU
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
@@ -275,6 +272,8 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     "convit_base",  # TypeError: Cannot convert symbols to int
     "pnasnet5large",  # CompilationError: math.ceil
     "tf_efficientnet_b0",  # CompilationError: math.ceil
+    # huggingface
+    "GoogleFnet",  # Cannot call sizes() on tensor with symbolic sizes/strides
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -285,7 +284,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # timm_models
     "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
-
 
 CI_SKIP_OPTIMIZER = {
     # TIMM
@@ -1099,6 +1097,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_cuda(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -1673,11 +1675,6 @@ def parse_args(args=None):
     """,
     )
     parser.add_argument(
-        "--training",
-        action="store_true",
-        help="Performs training",
-    )
-    parser.add_argument(
         "--ddp",
         action="store_true",
         help="Wraps model in DDP before running it, and uses dynamo DDPOptmizer (graph breaks) by default.",
@@ -1928,6 +1925,17 @@ def parse_args(args=None):
     mode_group.add_argument(
         "--performance", action="store_true", help="Measures performance speedup"
     )
+
+    run_mode_group = parser.add_mutually_exclusive_group(required=True)
+    run_mode_group.add_argument(
+        "--training",
+        action="store_true",
+        help="Performs training",
+    )
+    run_mode_group.add_argument(
+        "--inference", action="store_true", help="Performs inference"
+    )
+
     return parser.parse_args(args)
 
 
@@ -2144,6 +2152,8 @@ def run(runner, args, original_dir=None):
 
     if args.devices == ["cpu"]:
         runner.skip_models.update(runner.very_slow_models)
+    elif args.devices == ["cuda"]:
+        runner.skip_models.update(runner.skip_models_for_cuda)
 
     if args.inductor or args.inductor_settings:
         runner.skip_models.update(runner.failing_torchinductor_models)

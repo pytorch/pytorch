@@ -5,15 +5,15 @@ from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
 
 import torch.nn as nn
 from torch import fx
-from torch.fx.graph import _PyTreeCodeGen, PythonCode
-from torch.fx.node import Argument
-from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 from torch.distributed._spmd.graph_utils import (
     clone_subgraph,
     get_output,
     is_leaf_subgraph,
 )
+from torch.fx.graph import _PyTreeCodeGen, PythonCode
+from torch.fx.node import Argument
+from torch.profiler import record_function
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
