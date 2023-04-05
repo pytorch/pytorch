@@ -70,21 +70,57 @@ class DistTensorRandomOpTest(DTensorTestBase):
         _set_offset(offset + global_size, device_mesh)
         check_rng_state(1234, global_size, device_mesh)
 
-        dtensor = dtensor.redistribute(device_mesh, [Replicate()])
+        # allgather the local tensors
         local_tensor = dtensor.to_local()
+        local_tensor_list = [
+            torch.empty_like(local_tensor) for i in range(self.world_size)
+        ]
+        device_mesh.all_gather(local_tensor_list, local_tensor)
 
-        for shard_num in range(self.world_size):
-            if self.rank == shard_num:
-                self.assertEqual(local_tensor[:, shard_num], local_tensor[:, self.rank])
-            else:
+        # compare with local tensors from other ranks
+        for other_rank in range(self.world_size):
+            if self.rank != other_rank:
+                # other rank should have an identical local tensor
                 self.assertNotEqual(
-                    local_tensor[:, shard_num], local_tensor[:, self.rank]
+                    local_tensor_list[self.rank], local_tensor_list[other_rank]
                 )
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_deterministic_dropout_1d(self):
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        size = [4, 1]
+
+        # initialize rng state
+        manual_seed(1234, device_mesh)
+        _tensor = torch.empty(*size, device="cuda")
+        dtensor = DTensor.from_local(_tensor, device_mesh, [Shard(1)])
+
+        # a random op call shifts the offset
+        dtensor.uniform_(0, 1)
+
+        # the dtensor is now replicate on all ranks
+        dtensor = dtensor.redistribute(device_mesh, [Replicate()])
 
         # TODO: support dropout
         with self.assertRaisesRegex(RuntimeError, "supported"):
             dropout = torch.nn.Dropout(p=0.2)
             dtensor = dropout(dtensor)
+
+            # allgather the local tensors
+            local_tensor = dtensor.to_local()
+            local_tensor_list = [
+                torch.empty_like(local_tensor) for i in range(self.world_size)
+            ]
+            device_mesh.all_gather(local_tensor_list, local_tensor)
+
+            # compare with local tensors from other ranks
+            for other_rank in range(self.world_size):
+                if self.rank != other_rank:
+                    # other rank should have an identical local tensor
+                    self.assertEqual(
+                        local_tensor_list[self.rank], local_tensor_list[other_rank]
+                    )
 
 
 if __name__ == "__main__":
