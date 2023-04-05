@@ -314,7 +314,7 @@ cc_library(
         "aten/src",
     ],
     deps = [
-        "//c10:headers",
+        "//c10",
     ],
 )
 
@@ -383,7 +383,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
-        "//c10:headers",
+        "//c10",
         "@cuda",
         "@cuda//:cuda_driver",
         "@cuda//:nvrtc",
@@ -1262,7 +1262,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_core_macros",
-        "//c10:headers",
+        "//c10",
         "//caffe2/proto:caffe2_pb",
     ],
 )
@@ -1579,7 +1579,7 @@ cc_library(
     deps = [
         ":aten_headers",
         ":caffe2_headers",
-        "//c10:headers",
+        "//c10",
         "@com_github_google_flatbuffers//:flatbuffers",
         "@local_config_python//:python_headers",
         "@onnx",
