@@ -1123,6 +1123,37 @@ class TestNestedTensorDeviceType(TestCase):
             RuntimeError, "div requires offsets to match when given NestedTensors",
             lambda: nt_chunks[0] / nt_chunks[1])
 
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.half)
+    @parametrize("batch_size", [2, 8, 16, 32])
+    @parametrize("max_seq_len", [5, 10, 100])
+    def test_nested_tensor_softmax(self, device, dtype, batch_size, max_seq_len):
+        softmax = torch.nn.Softmax(dim=3)
+        # padding distribution (sequence length of each data point)
+        padding = torch.randint(low=1, high=max_seq_len, size=(batch_size,))
+        nt_list = []
+        padded_list = []
+        query_list = []
+        head = torch.randint(low=1, high=5, size=(1,)) * 2
+        # preparing random input for softmax and nested_tensor_softmax
+        for i in range(batch_size):
+            query_list.append(torch.zeros((padding[i], padding[i]), dtype=dtype, device=device))
+            nt_list.append(torch.randn((head, padding[i], padding[i]), dtype=dtype, device=device))
+            padded_tensor = torch.zeros((head, max_seq_len, max_seq_len), dtype=dtype, device=device)
+            padded_tensor[:, :padding[i], :padding[i]] = nt_list[-1]
+            padded_list.append(padded_tensor)
+        nt = torch.nested.nested_tensor(nt_list)
+        # stack tensors in padded_list to create a new dimension matching nested tensor
+        padded = torch.stack(padded_list).to(device)
+        query = torch.nested.nested_tensor(query_list)
+        gt_out = softmax(nt)
+        softmax_out = torch._nested_tensor_softmax_with_shape(padded, query)
+        # fill in ground truth values in a tensor for comparison
+        gt = torch.zeros_like(padded, dtype=dtype, device=device)
+        for i in range(batch_size):
+            gt[i, :, :padding[i], :padding[i]] = gt_out[i, :, :, :]
+        torch.testing.assert_close(softmax_out, gt, rtol=1e-7, atol=1e-5)
+
     @dtypes(torch.float, torch.float16)
     @skipMeta
     @torch.inference_mode()
