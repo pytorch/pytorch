@@ -270,7 +270,7 @@ def validate_device_type(device_type: str) -> None:
         )
 
 
-def get_autograd_not_implemented_kernel(custom_op: CustomOp) -> Callable:
+def get_autograd_not_implemented_kernel(custom_op) -> Callable:
     def autograd_not_implemented(*args, **kwargs) -> None:
         if pytree.tree_any(
             lambda x: isinstance(x, torch.Tensor) and x.requires_grad, (args, kwargs)
