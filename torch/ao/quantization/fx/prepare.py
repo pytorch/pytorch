@@ -593,6 +593,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg)
 
+        # for nodes that doesn't have `reuse_input_obs_or_fq` configured, we'll default to False, this makes configuring this field optional for users
         reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
 
         act_post_process_ctr = node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"] if is_weight else \

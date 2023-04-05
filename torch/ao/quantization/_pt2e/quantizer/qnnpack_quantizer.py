@@ -70,15 +70,15 @@ SpecAndOperators = NamedTuple(
 )
 
 
-def supported_symmetric_quantized_operators():
+def supported_symmetric_quantized_operators() -> List[str]:
     supported_operators = ["conv2d"]
     return copy.deepcopy(supported_operators)
 
 def get_supported_symmetric_quantized_spec_and_operators() -> List[SpecAndOperators]:
     supported_spec_and_operators: List[SpecAndOperators] = []
     for operator_spec in [get_default_symmetric_qnnpack_operator_spec(), get_default_per_channel_symmetric_qnnpack_operator_spec()]:
-        for ops in supported_symmetric_quantized_operators():
-            supported_spec_and_operators.append(SpecAndOperators(operator_spec, ops))
+        ops = supported_symmetric_quantized_operators()
+        supported_spec_and_operators.append(SpecAndOperators(operator_spec, ops))
     return copy.deepcopy(supported_spec_and_operators)
 
 def get_default_symmetric_qnnpack_operator_spec():
@@ -129,7 +129,7 @@ class OperatorSpecConfig:
     def __init__(self):
         super().__init__()
         self.global_spec: Optional[OperatorSpec] = None
-        self.operator_type_specs: Dict[str, OperatorSpec] = {}
+        self.operator_type_specs: Dict[str, Optional[OperatorSpec]] = {}
 
     def set_global(self, operator_spec: Optional[OperatorSpec]) -> OperatorSpecConfig:
         self.global_spec = operator_spec
@@ -147,7 +147,11 @@ _TORCH_DTYPE_TO_QDTYPE = {
     torch.int32: torch.qint32,
     torch.float16: torch.float16,
 }
-def _get_act_observer(tensor_spec: TensorSpec):
+def _get_act_obs_or_fq_ctr(operator_spec: Optional[TensorSpec]):
+    if operator_spec is None:
+        return None
+    assert operator_spec is not None
+    tensor_spec: TensorSpec = operator_spec.activation
     qdtype = _TORCH_DTYPE_TO_QDTYPE[tensor_spec.dtype]
     assert tensor_spec.qscheme in [torch.per_tensor_affine, torch.per_tensor_symmetric]
     if not tensor_spec.is_dynamic:
@@ -162,7 +166,11 @@ def _get_act_observer(tensor_spec: TensorSpec):
         # TODO: extend this helper function to support dynamic quantization
         raise Exception("Unsupported tensor_spec for activation: {}".format(tensor_spec))
 
-def _get_weight_observer(tensor_spec: TensorSpec):
+def _get_weight_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
+    if operator_spec is None:
+        return None
+    assert operator_spec is not None
+    tensor_spec: TensorSpec = operator_spec.weight
     qdtype = _TORCH_DTYPE_TO_QDTYPE[tensor_spec.dtype]
     if tensor_spec.qscheme == torch.per_tensor_symmetric:
         return MinMaxObserver.with_args(
@@ -183,7 +191,11 @@ def _get_weight_observer(tensor_spec: TensorSpec):
     else:
         raise Exception("Unsupported tensor_spec for weight: {}".format(tensor_spec))
 
-def _get_bias_observer(tensor_spec: TensorSpec):
+def _get_bias_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
+    if operator_spec is None:
+        return None
+    assert operator_spec is not None
+    tensor_spec: TensorSpec = operator_spec.bias
     assert tensor_spec.dtype == torch.float, "Only float dtype for bias is supported for bias right now"
     return PlaceholderObserver.with_args(dtype=tensor_spec.dtype)
 
@@ -207,7 +219,7 @@ class QNNPackQuantizer(Quantizer):
         for spec, ops in cls.supported_spec_and_operators:
             # None is supported for all ops
             if operator_spec is None or spec == operator_spec:
-                all_ops.union(set(ops))
+                all_ops = all_ops.union(ops)
         return list(all_ops)
 
     def set_global(self, operator_spec: Optional[OperatorSpec]) -> QNNPackQuantizer:
@@ -223,6 +235,14 @@ class QNNPackQuantizer(Quantizer):
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """ just handling global spec for now
         """
+        # initialize default target_dtype_info
+        _DEFAULT_TARGET_DTYPE_INFO = {
+            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
+            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
+        }
+        for node in model.graph.nodes:
+            node.meta["target_dtype_info"] = copy.deepcopy(_DEFAULT_TARGET_DTYPE_INFO)
+
         global_spec = self.operator_spec_config.global_spec
         ops = self.get_supported_operator_for_operator_spec(global_spec)
         for op in ops:
@@ -230,27 +250,19 @@ class QNNPackQuantizer(Quantizer):
         return model
 
     def _annotate_op(self, model: torch.fx.GraphModule, op: str, operator_spec: Optional[OperatorSpec]) -> None:
-        _DEFAULT_TARGET_DTYPE_INFO = {
-            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
-            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
-        }
         assert op == "conv2d", "only conv2d is supported right now"
         for node in model.graph.nodes:
             if node.op == "call_function" and node.target == torch.ops.aten.convolution.default:
                 node.meta["target_dtype_info"] = {
-                    "input_act_obs_or_fq_ctr": _get_act_observer(operator_spec.activation),
-                    "weight_obs_or_fq_ctr": _get_weight_observer(operator_spec.weight),
-                    "bias_obs_or_fq_ctr": _get_bias_observer(operator_spec.bias),
-                    "output_act_obs_or_fq_ctr": _get_act_observer(operator_spec.activation),
+                    "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+                    "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(operator_spec),
+                    "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(operator_spec),
+                    "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
                     # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
                     "weight_index": 1,
                     # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
                     "bias_index": 2,
                 }
-                # set default target_dtype_info for input args
-                for arg in node.args:
-                    if isinstance(arg, Node) and "target_dtype_info" not in arg.meta:
-                        arg.meta["target_dtype_info"] = _DEFAULT_TARGET_DTYPE_INFO
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass

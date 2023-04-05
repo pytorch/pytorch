@@ -1423,6 +1423,8 @@ class _TensorBase(metaclass=_TensorMeta):
     _grad: Optional[Tensor]
     grad: Optional[Tensor]
     _backward_hooks: Optional[Dict[_int, Callable[[Tensor], Optional[Tensor]]]]
+    nbytes: _int
+    itemsize: _int
     ${tensor_method_hints}
 
 # Defined in torch/csrc/multiprocessing/init.cpp

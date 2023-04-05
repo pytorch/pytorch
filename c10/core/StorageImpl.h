@@ -81,16 +81,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     size_bytes_is_symbolic_ = false;
   }
 
-  template <typename T>
-  inline T* unsafe_data() const {
-    return static_cast<T*>(data_ptr_.get());
-  }
-
-  template <typename T>
-  inline T* mutable_unsafe_data() {
-    return static_cast<T*>(mutable_data());
-  }
-
   // Destructor doesn't call release_resources because it's
   // unnecessary; don't forget to change that if needed!
   void release_resources() override {

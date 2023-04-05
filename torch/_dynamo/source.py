@@ -380,7 +380,11 @@ class ODictGetItemSource(Source):
         return self.base.guard_source()
 
     def name(self):
-        return f"___odict_getitem({self.base.name()}, {self.index!r})"
+        if isinstance(self.index, type):
+            rep = f'__load_module("{self.index.__module__}").{self.index.__qualname__}'
+            return f"___odict_getitem({self.base.name()}, {rep})"
+        else:
+            return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass

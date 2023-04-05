@@ -153,6 +153,8 @@ class TestQuantizePT2E(QuantizationTestCase):
                     "output_act_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(dtype=torch.float),
                 }
                 for node in model.graph.nodes:
+                    node.meta["target_dtype_info"] = copy.deepcopy(_DEFAULT_TARGET_DTYPE_INFO)
+                for node in model.graph.nodes:
                     if node.op == "call_function" and node.target == torch.ops.aten.convolution.default:
                         node.meta["target_dtype_info"] = {
                             "input_act_obs_or_fq_ctr": observer.default_observer,
@@ -162,11 +164,6 @@ class TestQuantizePT2E(QuantizationTestCase):
                             "weight_index": 1,
                             "bias_index": 2,
                         }
-                        # set default target_dtype_info for input args
-                        for arg in node.args:
-                            if isinstance(arg, Node) and "target_dtype_info" not in arg.meta:
-                                arg.meta["target_dtype_info"] = _DEFAULT_TARGET_DTYPE_INFO
-
 
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
@@ -208,9 +205,9 @@ class TestQuantizePT2E(QuantizationTestCase):
             def forward(self, x):
                 return self.conv(x)
 
-        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qnnpack_quantizer
+        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
         quantizer = QNNPackQuantizer()
-        operator_spec = qnnpack_quantizer.get_default_per_channel_symmetric_qnnpack_operator_spec()
+        operator_spec = qq.get_default_per_channel_symmetric_qnnpack_operator_spec()
         quantizer.set_global(operator_spec)
         m = M().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
