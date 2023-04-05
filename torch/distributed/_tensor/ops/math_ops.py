@@ -11,7 +11,7 @@ from torch.distributed._tensor.ops.utils import (
     normalize_dims,
     register_prop_rule,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec, _Partial
+from torch.distributed._tensor.placement_types import _Partial, DTensorSpec
 
 
 aten = torch.ops.aten
