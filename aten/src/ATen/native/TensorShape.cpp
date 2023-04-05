@@ -1107,7 +1107,7 @@ Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
            "): the number of sizes provided (", size.size(), ") ",
            "must be greater or equal to the number of dimensions in the tensor (",
            self.dim(), ")");
-  TORCH_CHECK(!self.is_sparse() && !self.is_sparse_csr(), 
+  TORCH_CHECK(!self.is_sparse() && !at::sparse_csr::is_sparse_compressed(self),
             "expand is unsupported for ", self.layout(), " tensors");
 
   auto expandedSizesAndStrides = inferExpandGeometry_dimvector(self.sizes(), self.strides(), size);
