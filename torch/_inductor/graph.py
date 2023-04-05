@@ -1,4 +1,3 @@
-import functools
 import logging
 import operator
 import os
@@ -25,12 +24,7 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import (
-    CppAotWrapperCodeGen,
-    CppWrapperCodeGen,
-    CudaAotWrapperCodeGen,
-    WrapperCodeGen,
-)
+from .codegen.wrapper import CppAotWrapperCodeGen, CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -132,7 +126,6 @@ class GraphLowering(torch.fx.Interpreter):
         num_static_inputs=None,
         graph_id=None,
         aot_mode=False,
-        cpp_wrapper=False,
     ):
         super().__init__(gm)
         self.extra_traceback = False  # we do our own error wrapping
@@ -162,9 +155,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
-        # TODO: aot_mode and cpp_wrapper are tangled now. Some refactoring is needed.
+        self._can_use_cpp_wrapper = config.cpp_wrapper
         self.aot_mode = aot_mode
-        self.cpp_wrapper = cpp_wrapper
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
@@ -238,9 +230,8 @@ class GraphLowering(torch.fx.Interpreter):
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
-        self.cpp_wrapper = False
-        assert not self.aot_mode, "AOT compilation failed"
-        log.debug("Set cpp_wrapper to False due to %s", cond)
+        self._can_use_cpp_wrapper = False
+        log.debug("Set _can_use_cpp_wrapper to False due to %s", cond)
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
@@ -248,7 +239,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
-        if self.cpp_wrapper:
+        if config.cpp_wrapper:
             self.check_buffer_for_cpp_wrapper(buffer)
 
         name = f"buf{len(self.buffers)}"
@@ -570,14 +561,12 @@ class GraphLowering(torch.fx.Interpreter):
         if sys.platform != "linux":
             self.disable_cpp_wrapper("platform not linux")
 
-    @functools.lru_cache(None)
-    def get_single_device(self):
-        return list(self.device_types)[0] if len(self.device_types) == 1 else None
-
     def check_device_for_cpp_buffer(self):
-        device = self.get_single_device()
-        if self.get_single_device() is None:
-            self.disable_cpp_wrapper("device not CPU or CUDA")
+        if len(self.device_types) == 1:
+            device = self.device_types.pop()
+            if device == "cpu":
+                return
+        self.disable_cpp_wrapper("device not CPU")
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
@@ -596,22 +585,16 @@ class GraphLowering(torch.fx.Interpreter):
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
-        if self.aot_mode:
-            device = self.get_single_device()
+        if config.cpp_wrapper:
             self.check_cpp_wrapper()
-            if device == "cpu":
-                self.wrapper_code = CppAotWrapperCodeGen()
+            if self._can_use_cpp_wrapper:
+                self.wrapper_code = (
+                    CppAotWrapperCodeGen() if self.aot_mode else CppWrapperCodeGen()
+                )
+                return
             else:
-                assert device == "cuda", "Non-supported device for AOT compilation"
-                self.wrapper_code = CudaAotWrapperCodeGen()
-        elif self.cpp_wrapper:
-            self.check_cpp_wrapper()
-            if self.cpp_wrapper:
-                self.wrapper_code = CppWrapperCodeGen()
-            else:
-                self.wrapper_code = WrapperCodeGen()
-        else:
-            self.wrapper_code = WrapperCodeGen()
+                assert not self.aot_mode, "Model does not support AOT compilation"
+        self.wrapper_code = WrapperCodeGen()
 
     def codegen(self):
         from .scheduler import Scheduler
@@ -670,6 +653,7 @@ class GraphLowering(torch.fx.Interpreter):
         from .codecache import PyCodeCache
 
         code, linemap = self.codegen()
+
         mod = PyCodeCache.load(code, linemap=linemap)
         for name, value in self.constants.items():
             setattr(mod, name, value)
@@ -686,13 +670,13 @@ class GraphLowering(torch.fx.Interpreter):
         if self.aot_mode:
             from .codecache import AotCodeCache
 
-            code, linemap = self.codegen()
-            output_code_log.debug(f"Output code: \n{code}")
+            code = self.codegen()
+            if config.debug:
+                print(code)
 
-            libpath = AotCodeCache.compile(
-                code, cuda=(self.get_single_device() == "cuda")
-            )
-            return lambda dummy: libpath
+            # return the generated .so file path
+            output_path = AotCodeCache.compile(code)
+            return lambda dummy: output_path
         else:
             return self.compile_to_module().call
 

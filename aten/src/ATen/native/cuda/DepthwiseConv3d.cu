@@ -423,9 +423,7 @@ Tensor conv_depthwise3d_cuda(
   Tensor weight_ = weight.contiguous();
   Tensor bias_ = bias.defined() ? bias.contiguous() : bias;
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf,
-      kBFloat16,
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(),
       "conv_depthwise3d",
       [&]{
@@ -553,9 +551,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
 
   if (output_mask[0]) {
     const Tensor weight_ = weight.contiguous();
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kHalf,
-        kBFloat16,
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         grad_output.scalar_type(),
         "conv_depthwise3d",
         [&] {
@@ -590,9 +586,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
 
   if (output_mask[1]) {
     const Tensor input_ = input.contiguous();
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kHalf,
-        kBFloat16,
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         grad_output.scalar_type(),
         "conv_depthwise3d",
         [&] {

@@ -88,7 +88,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   template <typename T>
   inline T* mutable_unsafe_data() {
-    return static_cast<T*>(mutable_data());
+    return static_cast<T*>(this->data_ptr_.get());
   }
 
   // Destructor doesn't call release_resources because it's
@@ -144,7 +144,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void* mutable_data() {
-    return data_ptr_.mutable_get();
+    return data_ptr_.get();
   }
 
   at::DeviceType device_type() const {

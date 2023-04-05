@@ -5,7 +5,6 @@ from typing import Callable, cast, Dict, Iterable, Optional, Sequence, Set, Tupl
 import torch
 
 from torch import Tensor
-from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import Shard
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import (
@@ -14,6 +13,7 @@ from torch.distributed._tensor.ops.utils import (
     prod,
     register_prop_rule,
 )
+from torch.distributed._tensor._utils import compute_local_shape
 
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 
@@ -604,11 +604,7 @@ def register_prop_rule_map(
         global_in_shape = input_dtensor_spec.shape
         assert global_in_shape is not None, "Shape required."
 
-        (
-            global_out_shape,
-            shard_out,
-            shardable_dims,
-        ) = propagate_shape_and_sharding(
+        (global_out_shape, shard_out, shardable_dims,) = propagate_shape_and_sharding(
             input_dtensor_spec.placements,
             tuple(global_in_shape),
             rules,
@@ -618,9 +614,7 @@ def register_prop_rule_map(
         if shard_out is not None:
             # no reshard needed
             output_dtensor_spec = DTensorSpec(mesh=mesh, placements=shard_out)
-            local_out_shape = compute_local_shape(
-                list(global_out_shape), mesh, shard_out
-            )
+            local_out_shape = compute_local_shape(list(global_out_shape), mesh, shard_out)
 
             # We only need the local shape to lower the call into the local op
             args = op_schema.args_schema

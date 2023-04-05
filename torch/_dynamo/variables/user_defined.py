@@ -3,7 +3,6 @@ import contextlib
 import functools
 import importlib
 import inspect
-import itertools
 import random
 import types
 from typing import Dict, List
@@ -11,14 +10,12 @@ from typing import Dict, List
 import torch.nn
 
 from .. import variables
-from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     get_custom_getattr,
     is_namedtuple_cls,
-    istype,
     namedtuple_fields,
     object_has_getattribute,
 )
@@ -122,23 +119,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
         ):
             var = tx.output.side_effects.track_object_new(
-                self.source,
-                self.value,
-                variables.UnspecializedNNModuleVariable
-                if issubclass(self.value, torch.nn.Module)
-                else UserDefinedObjectVariable,
-                options,
+                self.source, self.value, UserDefinedObjectVariable, options
             )
-            if (
-                inspect.getattr_static(self.value, "__init__", None)
-                is torch.nn.Module.__init__
-            ):
-                tx.output.side_effects.store_attr(
-                    var, "__call_nn_module_init", variables.ConstantVariable(True)
-                )
-                return var
-            else:
-                return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+            return var.add_options(var.call_method(tx, "__init__", args, kwargs))
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
@@ -216,18 +199,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (
-                method is collections.OrderedDict.__contains__
-                and len(args) == 1
-                and isinstance(args[0], ConstantVariable)
-                and inspect.getattr_static(type(self.value), "keys")
-                is collections.OrderedDict.keys
-            ):
-                assert not kwargs
-                return ConstantVariable(
-                    args[0].as_python_constant() in self.value, **options
-                ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
-
-            if (
                 method is collections.OrderedDict.items
                 and isinstance(self.value, collections.OrderedDict)
                 and self.source
@@ -290,51 +261,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tx.random_calls.append((self.value, args, kwargs))
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
-            )
-        elif istype(self.value, types.MethodType):
-            func = self.value.__func__
-            obj = self.value.__self__
-            if (
-                func is torch.utils._contextlib._DecoratorContextManager.clone
-                and is_allowed(obj.__class__)
-                and not (args or kwargs)
-            ):
-                return variables.TorchVariable(obj.__class__).call_function(
-                    tx, args, kwargs
-                )
-        elif (
-            istype(self.value, functools.partial)
-            and is_allowed(self.value.func)
-            and all(
-                variables.ConstantVariable.is_literal(v)
-                for v in itertools.chain(self.value.args, self.value.keywords.values())
-            )
-        ):
-            options = VariableTracker.propagate(self, args, kwargs.values())
-            options.setdefault("guards", set())
-            if self.source:
-                options["guards"].add(
-                    AttrSource(self.source, "func").make_guard(GuardBuilder.ID_MATCH)
-                )
-                options["guards"].add(
-                    AttrSource(self.source, "args").make_guard(
-                        GuardBuilder.CONSTANT_MATCH
-                    )
-                )
-                options["guards"].add(
-                    AttrSource(self.source, "keywords").make_guard(
-                        GuardBuilder.CONSTANT_MATCH
-                    )
-                )
-
-            partial_args = [variables.ConstantVariable(v) for v in self.value.args]
-            partial_args.extend(args)
-            partial_kwargs = {
-                k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
-            }
-            partial_kwargs.update(kwargs)
-            return variables.TorchVariable(self.value.func, **options).call_function(
-                tx, partial_args, partial_kwargs
             )
 
         return super().call_function(tx, args, kwargs)

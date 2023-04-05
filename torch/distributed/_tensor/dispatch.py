@@ -1,15 +1,19 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
-from typing import Callable, cast, Dict, List, Sequence, Tuple, Union
+from typing import Callable, cast, Dict, Tuple, Union, Sequence, List
 
 import torch
 
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
-from torch.distributed._tensor.op_schema import ArgsType, KwargsType, OutputSpecType
+from torch.distributed._tensor.op_schema import (
+    ArgsType,
+    KwargsType,
+    OutputSpecType,
+)
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
+from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
@@ -48,7 +52,9 @@ def wrap(res: object, spec: OutputSpecType) -> object:
             # to handle that case and make sure we don't wrap None with DTensor.
             # (i.e. native_layer_norm.backward)
             if isinstance(e, (list, tuple)) and isinstance(s, (list, tuple)):
-                res_list.append(type(e)([to_dt(ee, ss) for ee, ss in zip(e, s)]))
+                res_list.append(
+                    type(e)([to_dt(ee, ss) for ee, ss in zip(e, s)])
+                )
             elif e is not None and s is not None:
                 res_list.append(to_dt(e, s))
             else:
@@ -88,7 +94,9 @@ def _reshape_alias(
     return torch.ops.aten.view(x, shape)
 
 
-_CURRENT_DECOMPOSITION_TABLE: Dict[Callable[..., object], Callable[..., object]] = {
+_CURRENT_DECOMPOSITION_TABLE: Dict[
+    Callable[..., object], Callable[..., object]
+] = {
     torch.ops.aten._reshape_alias.default: _reshape_alias,
 }
 
@@ -103,7 +111,9 @@ def operator_dispatch(
     arg_list, _ = tree_flatten(args)
     mesh = None
     for arg in arg_list:
-        if isinstance(arg, torch.Tensor) and not isinstance(arg, dtensor.DTensor):
+        if isinstance(arg, torch.Tensor) and not isinstance(
+            arg, dtensor.DTensor
+        ):
             raise RuntimeError(
                 f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
                 " torch.Tensor to DTensor before calling distributed operators!"
@@ -125,7 +135,9 @@ def operator_dispatch(
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
 
-    output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
+    output_sharding = sharding_propagator.propagate_op_sharding(
+        op_call, op_schema
+    )
 
     # if the schema suggestion from sharding prop is not the same instance as the
     # input op_schema, it indicates a reshard, we need to redistribute the input
@@ -163,7 +175,9 @@ def operator_dispatch(
             if ret_type == "bool":
                 import operator
 
-                local_results: object = functools.reduce(operator.and_, obj_list, True)
+                local_results: object = functools.reduce(
+                    operator.and_, obj_list, True
+                )
             else:
                 raise NotImplementedError(
                     f"return type {ret_type} in DTensor op is not supported"

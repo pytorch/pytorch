@@ -53,13 +53,7 @@ class BaseListVariable(VariableTracker):
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
-        from .tensor import SymNodeVariable
-
-        if isinstance(arg, SymNodeVariable):
-            index = arg.sym_num
-        else:
-            index = arg.as_python_constant()
-
+        index = arg.as_python_constant()
         if isinstance(index, slice):
             if self.source is not None:
                 return self.clone(
@@ -73,7 +67,7 @@ class BaseListVariable(VariableTracker):
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 ).add_options(arg, self)
         else:
-            assert isinstance(index, (int, torch.SymInt))
+            assert isinstance(index, int)
             return self.items[index].add_options(arg, self)
 
     def unpack_var_sequence(self, tx):

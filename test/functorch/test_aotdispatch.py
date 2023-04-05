@@ -2830,7 +2830,7 @@ aot_autograd_module_failures = set({
                                   # for TrnasformerEncoder layers, MHA and sdp custom kernels
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
                            # to a causal mask tensor, to see if Boolean is_causal should be set
-                           # for TransformerEncoder layers, MHA and sdp custom kernels
+                           # for TrnasformerEncoder layers, MHA and sdp custom kernels
                            # (this bubbles up to Transformer)
 })
 
@@ -2850,9 +2850,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.AdaptiveMaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
-                         # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
-    torch.nn.LocalResponseNorm  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 
