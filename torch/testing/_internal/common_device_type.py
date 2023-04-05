@@ -204,8 +204,6 @@ except ImportError:
 #         Skips the test if the device is a CPU device and MKL is not installed
 #     - @skipCUDAIfNoMagma
 #         Skips the test if the device is a CUDA device and MAGMA is not installed
-#     - @skipCUDAOpIfRocm
-#         Skips the op test if the device is a CUDA device and ROCm is being used
 #     - @skipCUDAIfRocm
 #         Skips the test if the device is a CUDA device and ROCm is being used
 
@@ -1253,13 +1251,18 @@ def skipCUDAIfNoMagmaAndNoCusolver(fn):
 
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(msg="test doesn't currently work on the ROCm stack"):
-    def decorator(fn):
-        return skipCUDAIf(TEST_WITH_ROCM, f"skipCUDAIfRocm: {msg}")(fn)
-    return decorator
 
-# Skips a test on CUDA opinfo test when using ROCm 
-def skipCUDAOpIfRocm(fn):
-    return skipCUDAIf(TEST_WITH_ROCM, "skipCUDAOpIfRocm: test doesn't currently work on the ROCm stack")(fn)
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if TEST_WITH_ROCM:
+                if self.device_type == 'cuda':
+                    raise unittest.SkipTest(f"skipCUDAIfRocm: {msg}")
+
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
 
 # Skips a test on CUDA when not using ROCm.
 def skipCUDAIfNotRocm(fn):
