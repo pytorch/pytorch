@@ -460,12 +460,9 @@ size_t computeLengthsAndOffsets(
   }
   for(const auto i : c10::irange(group_size)) {
     size_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
-    TORCH_INTERNAL_ASSERT(
-        length <= std::numeric_limits<int>::max() &&
-            offset <= std::numeric_limits<int>::max(),
-        "Length or offset larger than INT_MAX not supported");
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
+    // TODO: see if we should add overflow protection for offset
     offset += length;
   }
   return offset;
