@@ -613,6 +613,8 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 ASSIGN_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
 for (const auto& i : c10::irange( ${irange} )) {
+  const auto requires_grad_fn = compute_requires_grad(${args_with_derivatives});
+  requires_grad_fns.push_back(requires_grad_fn);
   auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
   grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
   grad_fns.push_back(grad_fn);
@@ -1156,11 +1158,7 @@ def emit_body(
                         args[i] += "[i]"
             setup.append("for (const auto& i : c10::irange(grad_fns.size())) {")
             setup.append("  auto grad_fn = grad_fns[i];")
-            setup.append(
-                f"  const auto requires_grad_fn = compute_requires_grad({', '.join(set(args))});"
-            )
-            setup.append("  requires_grad_fns.push_back(requires_grad_fn);")
-            setup.append("  if (requires_grad_fn) {")
+            setup.append("  if (requires_grad_fns[i]) {")
             save_input_stmts = save_variables(info.all_saved_inputs, False, guard_for)
             setup.extend([f"    {stmt}" for stmt in save_input_stmts])
             setup.append("  }")
