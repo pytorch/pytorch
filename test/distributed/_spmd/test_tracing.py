@@ -141,20 +141,14 @@ class TraceDeviceMeshTestBase:
                 get_global_rank(dim_group, i) for i in range(dim_group_size)
             ]
 
-            gathered_list = [
-                torch.empty_like(local_tensor) for _ in range(dim_group_size)
-            ]
-
-            def fn(gathered_list: List[torch.Tensor], tensor: torch.Tensor):
-                gathered_list = [CommTensor(t) for t in gathered_list]
-                tensor = CommTensor(tensor)
-                mesh.all_gather(gathered_list, tensor, mesh_dim=dim)
-                return [t * 1 for t in gathered_list]
+            def fn(tensor: torch.Tensor):
+                big_tensor = mesh.all_gather(tensor, mesh_dim=dim)
+                return list(torch.chunk(big_tensor, dim_group_size))
 
             # use a local_tensor + 1 for tracing to make sure that we are not
             # simply replaying recorded tensor value
-            traced_fn = make_fx(fn)(gathered_list, local_tensor + 1)
-            gathered_list = traced_fn(gathered_list, local_tensor)
+            traced_fn = make_fx(fn)(local_tensor + 1)
+            gathered_list = traced_fn(local_tensor)
 
             self.assertEqual(len(gathered_list), dim_group_size)
             for idx, gathered_tensor in enumerate(gathered_list):
@@ -613,7 +607,10 @@ class TraceTrainStepTest(DTensorTestBase):
                 return DummyDDM()
 
             def transform(
-                self, gm: fx.GraphModule, schema_map: Dict[str, Schema]
+                self,
+                gm: fx.GraphModule,
+                schema_map: Dict[str, Schema],
+                flat_state: List[torch.Tensor],
             ) -> fx.Graph:
                 nonlocal transform_targets
                 for node in gm.graph.nodes:
@@ -689,6 +686,59 @@ class TraceTrainStepTest(DTensorTestBase):
         train_step(mod, opt, inp)
         self.assertEqual(id(gm), id(train_step.__dict__[COMPILED_OBJECT_KEY].gm))
         self.assertEqual(graph_optimization.call_count, 1)
+
+
+class CoverageTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 2
+
+    def _test_train_step(self, mod, inp):
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
+        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.01, foreach=True)
+
+        ddp_inp = deepcopy(inp)
+
+        # materialize optimizer states
+        mod(inp).sum().backward()
+        opt.step()
+        opt.zero_grad()
+
+        ddp_mod(ddp_inp).sum().backward()
+        ddp_opt.step()
+        ddp_opt.zero_grad()
+
+        # test parameter parity
+        train_step(mod, opt, inp)
+
+        ddp_mod(ddp_inp).sum().backward()
+        # FIXME(@mrshenli): DDP by default divides grads by world size, but
+        # torch.distributed.compile does not do that yet.
+        with torch.no_grad():
+            for p in ddp_mod.parameters():
+                p.grad *= self.world_size
+        ddp_opt.step()
+
+        for p1, p2 in zip(mod.parameters(), ddp_mod.parameters()):
+            self.assertEqual(p1, p2)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_log_softmax(self):
+        torch.manual_seed(0)
+        mod = nn.Sequential(
+            nn.Linear(10, 10),
+            nn.Softmax(dim=1),
+        ).cuda(self.rank)
+        inp = torch.randn(20, 10).cuda(self.rank)
+        self._test_train_step(mod, inp)
 
 
 if __name__ == "__main__":

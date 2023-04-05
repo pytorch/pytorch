@@ -201,7 +201,8 @@ class TracerBase:
                     'torch/utils/_python_dispatch.py',
                     'torch/_prims_common/wrappers.py',
                     'torch/_refs/__init__.py',
-                    'torch/_refs/nn/functional/__init__.py'
+                    'torch/_refs/nn/functional/__init__.py',
+                    'torch/utils/_stats.py',
                     ]
         while frame:
             frame = frame.f_back
