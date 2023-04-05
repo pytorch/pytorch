@@ -41,7 +41,7 @@ class ModelReportObserver(ObserverBase):
 
     Note: this tool is meant for FX Graph Mode Quantization
     """
-    
+
     epoch_activation_min: torch.Tensor
     epoch_activation_max: torch.Tensor
     min_val: torch.Tensor
