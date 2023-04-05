@@ -258,6 +258,51 @@ class TestPythonRegistration(TestCase):
         del my_lib2
         del my_lib1
 
+    def test_create_new_library_fragment_no_existing(self):
+        my_lib = Library("foo", "FRAGMENT")
+
+        my_lib.define("sum(Tensor self) -> Tensor")
+
+        @torch.library.impl(my_lib, "sum", "CPU")
+        def my_sum(*args, **kwargs):
+            return args[0]
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.ops.foo.sum(x), x)
+
+        del my_lib
+
+    def test_create_new_library_fragment_with_existing(self):
+        my_lib1 = Library("foo", "DEF")
+
+        # Create a fragment
+        my_lib2 = Library("foo", "FRAGMENT")
+
+        my_lib2.define("sum(Tensor self) -> Tensor")
+
+        @torch.library.impl(my_lib2, "sum", "CPU")
+        def my_sum(*args, **kwargs):
+            return args[0]
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.ops.foo.sum(x), x)
+
+        # Create another fragment
+        my_lib3 = Library("foo", "FRAGMENT")
+
+        my_lib3.define("sum3(Tensor self) -> Tensor")
+
+        @torch.library.impl(my_lib3, "sum3", "CPU")
+        def my_sum3(*args, **kwargs):
+            return args[0]
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.ops.foo.sum3(x), x)
+
+        del my_lib1
+        del my_lib2
+        del my_lib3
+
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     def test_alias_analysis(self):
         def test_helper(alias_analysis=""):
@@ -284,8 +329,9 @@ class TestPythonRegistration(TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported kind"):
             my_lib1 = Library("myns", "BLA")
 
-        with self.assertRaisesRegex(ValueError, "reserved namespace"):
-            my_lib1 = Library("prim", "DEF")
+        for kind in ('DEF', 'FRAGMENT'):
+            with self.assertRaisesRegex(ValueError, "reserved namespace"):
+                my_lib1 = Library("prim", kind)
 
     def test_returning_symint(self) -> None:
         shape_env = ShapeEnv()
