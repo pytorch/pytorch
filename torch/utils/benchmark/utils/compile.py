@@ -134,19 +134,19 @@ if HAS_TABULATE:
         If a compilation fails for any reason including the dependency not being included
         then we will print Failed to compile {backend} with mode {mode}
 
-        | Train/Inference   | Backend         | Mode   | Compilation Time   | Average Running Time   | Speedup   |
-        |-------------------|-----------------|--------|--------------------|------------------------|-----------|
-        | Inference         | Eager           | -      | -                  | 0.0163 ms              | -         |
-        | Inference         | aot_ts_nvfuser  | -      | 0.1914 ms          | 0.088 ms               | 19%       |
-        | Inference         | cudagraphs      | -      | 0.2405 ms          | 0.1286 ms              | 13%       |
-        | Inference         | nvprims_nvfuser | -      | 0.1898 ms          | 0.1312 ms              | 12%       |
+        | Train/Inference   | Backend         | Mode   | Compilation Time   | Average Running Time   | Speedup        |
+        |-------------------|-----------------|--------|--------------------|------------------------|----------------|
+        | Inference         | Eager           | -      | -                  | 0.0172 ms              | -              |
+        | Inference         | aot_ts_nvfuser  | -      | 0.1658 ms          | 0.0789 ms              | 0.2180x slower |
+        | Inference         | cudagraphs      | -      | 0.2327 ms          | 0.1293 ms              | 0.1330x slower |
+        | Inference         | nvprims_nvfuser | -      | 0.1963 ms          | 0.1344 ms              | 0.1280x slower |
 
-        | Train/Inference   | Backend         | Mode   | Compilation Time   | Average Running Time   | Speedup   |
-        |-------------------|-----------------|--------|--------------------|------------------------|-----------|
-        | Training          | Eager           | -      | -                  | 0.0171 ms              | -         |
-        | Training          | aot_ts_nvfuser  | -      | 0.1371 ms          | 0.091 ms               | 19%       |
-        | Training          | cudagraphs      | -      | 0.2147 ms          | 0.1304 ms              | 13%       |
-        | Training          | nvprims_nvfuser | -      | 0.1697 ms          | 0.1268 ms              | 13%       |
+        | Train/Inference   | Backend         | Mode   | Compilation Time   | Average Running Time   | Speedup        |
+        |-------------------|-----------------|--------|--------------------|------------------------|----------------|
+        | Training          | Eager           | -      | -                  | 0.0184 ms              | -              |
+        | Training          | aot_ts_nvfuser  | -      | 0.1376 ms          | 0.0842 ms              | 0.2185x slower |
+        | Training          | cudagraphs      | -      | 0.2154 ms          | 0.1321 ms              | 0.1393x slower |
+        | Training          | nvprims_nvfuser | -      | 0.1824 ms          | 0.125 ms               | 0.1472x slower |
 
 
         """
@@ -177,14 +177,19 @@ if HAS_TABULATE:
                         if torch.cuda.is_available():
                             _disable_tensor_cores()
                             if running_time is not None:
-                                speedup = eager_time / running_time
+                                speedup_ratio = eager_time / running_time
+                                speedup = (
+                                    f"{abs(speedup_ratio):.4f}x faster"
+                                    if speedup_ratio >= 1
+                                    else f"{abs(speedup_ratio):.4f}x slower"
+                                )
                                 table.append([
                                     ("Training" if optimizer else "Inference"),
                                     backend if backend else "-",
                                     mode if mode is not None else "-",
                                     f"{compilation_time} ms " if compilation_time else "-",
                                     f"{running_time} ms " if running_time else "-",
-                                    f"{int(round(speedup * 100, 4))}%" if speedup else "-"
+                                    speedup if speedup else "-"
                                 ])
 
             else:
@@ -193,13 +198,15 @@ if HAS_TABULATE:
                     model, sample_input, num_iters, backend, None, optimizer, loss_fn)
 
                 if running_time is not None:
-                    speedup = eager_time / running_time
+                    speedup_ratio = eager_time / running_time
+                    speedup = f"{abs(speedup_ratio):.4f}x faster" if speedup_ratio >= 1 else f"{abs(speedup_ratio):.4f}x slower"
+
                     table.append([
                         ("Training" if optimizer else "Inference"),
                         backend, "-",
                         f"{compilation_time} ms " or "-",
                         f"{running_time} ms ",
-                        f"{int(round(speedup * 100, 0))}%" or "-"
+                        speedup if speedup else "-"
                     ])
 
 
