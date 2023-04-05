@@ -402,7 +402,7 @@ def _pre_forward(
         args (Tuple[Any, ...]): Module forward ``args``.
         kwargs (Dict[str, Any]): Module forward ``kwargs``.
     """
-    with torch.autograd.record_function("FullyShardedDataParallel._pre_forward"):
+    with torch.profiler.record_function("FullyShardedDataParallel._pre_forward"):
         state.training_state = TrainingState.FORWARD_BACKWARD
         state._exec_order_data.record_pre_forward(handles, module.training)
         for handle in handles:
@@ -605,7 +605,7 @@ def _pre_backward_hook(
     if _handles_key and state._ran_pre_backward_hook.get(_handles_key, False):
         return
 
-    with torch.autograd.profiler.record_function(
+    with torch.profiler.record_function(
         "FullyShardedDataParallel._pre_backward_hook"
     ):
         # Queue the post-backward callback once for the root FSDP instance to
