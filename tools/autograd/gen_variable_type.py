@@ -613,11 +613,15 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 ASSIGN_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
 for (const auto& i : c10::irange( ${irange} )) {
-  const auto requires_grad_fn = compute_requires_grad(${args_with_derivatives});
-  requires_grad_fns.push_back(requires_grad_fn);
-  auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
-  grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
-  grad_fns.push_back(grad_fn);
+  grad_fns.push_back([&]() -> std::shared_ptr<${op}> {
+      if (!compute_requires_grad(${args_with_derivatives})) {
+          return nullptr;
+      } else {
+          auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+          grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
+          return grad_fn;
+      }
+  }());
 }
 """
 )
@@ -675,7 +679,7 @@ SET_HISTORY_FOR_VECTOR_OF_GRAD_FN = CodeTemplate(
 if (!grad_fns.empty()) {
     auto differentiable_outputs = ${differentiable_outputs};
     for (const auto& i : c10::irange(differentiable_outputs.size())) {
-        if (requires_grad_fns[i]) {
+        if (grad_fns[i] != nullptr) {
             ${fn}_history(differentiable_outputs[i], grad_fns[i]);
         }
     }
@@ -1145,31 +1149,19 @@ def emit_body(
             return f"grad_fn->should_compute_output({edge_off})"
 
         if is_inplace_foreach:
-            args: List[str] = [arg.name for arg in args_with_derivatives]
-            for i, argument in enumerate(args):
-                if inplace_foreacharg2refarg:
-                    for f_arg, r_arg in inplace_foreacharg2refarg.items():
-                        if argument == r_arg.name:
-                            args[i] = f_arg.name
-                            if hasattr(f_arg.type, "elem"):
-                                args[i] += "[i]"
-                else:
-                    if hasattr(args_with_derivatives[i].type, "elem"):
-                        args[i] += "[i]"
-            setup.append("for (const auto& i : c10::irange(grad_fns.size())) {")
-            setup.append("  auto grad_fn = grad_fns[i];")
-            setup.append("  if (requires_grad_fns[i]) {")
             save_input_stmts = save_variables(info.all_saved_inputs, False, guard_for)
-            setup.extend([f"    {stmt}" for stmt in save_input_stmts])
-            setup.append("  }")
+            if save_input_stmts:
+                setup.append("for (const auto& i : c10::irange(grad_fns.size())) {")
+                setup.append("  auto grad_fn = grad_fns[i];")
+                setup.append("  if (grad_fn != nullptr) {")
+                setup.extend([f"    {stmt}" for stmt in save_input_stmts])
+                setup.append("  }")
+                setup.append("}")
         else:
             setup.extend(save_variables(info.all_saved_inputs, False, guard_for))
-        for arg in args_with_derivatives:
-            if is_tensor_list_type(arg.type) and not is_inplace_foreach:
-                setup.append(f"grad_fn->{arg.name}_size_ = {arg.name}.size();")
-
-        if is_inplace_foreach:
-            setup.append("}")
+            for arg in args_with_derivatives:
+                if is_tensor_list_type(arg.type):
+                    setup.append(f"grad_fn->{arg.name}_size_ = {arg.name}.size();")
         return setup
 
     def setup_derivative(differentiable_inputs: List[DifferentiableInput]) -> List[str]:
@@ -1338,7 +1330,6 @@ def emit_body(
                         var = "original_selfs[i].value()"
                     assert not is_output
                 if inplace and is_output:
-                    # TODO(crcrpar): Handle this case with `inplace_foreacharg2refarg`
                     if name == "result_" and is_inplace_foreach:
                         var = "self[i]"
                     else:
@@ -1639,9 +1630,10 @@ def emit_body(
                     [
                         "for (const auto& i : c10::irange(grad_fns.size())) {",
                         "  auto grad_fn = grad_fns[i];",
+                        "  if (grad_fn != nullptr) {",
                     ]
-                    + [f"  {s}" for s in stmts]
-                    + ["}"]
+                    + [f"    {s}" for s in stmts]
+                    + ["  }", "}"]
                 )
                 return CONDITIONAL.substitute(
                     cond="!grad_fns.empty()", statements=stmts
