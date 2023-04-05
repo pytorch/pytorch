@@ -4827,7 +4827,7 @@ class TestSparseAny(TestCase):
                     dense = op.op(t_inp.to_dense(), *(t_args[0].to_dense(), *t_args[1:]), **t_kwargs)
                 except Exception as msg:
                     # this is strided op issue, so skipping the sample silently here
-                    if "\"cpublas_axpy_impl\" not implemented for 'ComplexHalf'":
+                    if "\"cpublas_axpy_impl\" not implemented for 'ComplexHalf'" in str(msg):
                         continue
                     raise
                 self.assertEqual(result, dense)
