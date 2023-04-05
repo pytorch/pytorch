@@ -11,6 +11,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Type,
     Union,
@@ -382,6 +383,35 @@ FOREACH_DECOMP_TABLE = {
 }
 
 
+DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
+    aten.all_reduce.default,
+    aten.wait_tensor.default,
+}
+
+
+def _dedup_collectives(gm: fx.GraphModule) -> fx.GraphModule:
+    args_to_node: Dict[Tuple[Any, ...], fx.Node] = {}
+
+    for node in gm.graph.nodes:
+        # replace all args with the results from the first unique comm op
+        args, _ = pytree.tree_flatten(node.args)
+
+        if node.target in DEDUP_TARGETS:
+            args_key = (node.target, *args)
+            unique_node = args_to_node.get(args_key, None)
+            if unique_node is None:
+                # first time seeing this combination, remember it
+                args_to_node[args_key] = node
+            else:
+                # the current node is a duplicate, replace it
+                node.replace_all_uses_with(unique_node)
+                gm.graph.erase_node(node)
+
+    gm.recompile()
+
+    return gm
+
+
 @dataclass
 class _CompiledResult:
     gm: fx.GraphModule
@@ -481,7 +511,20 @@ def _compile(
     flat_state, _ = pytree.tree_flatten([named_states, params_and_buffers])
     gm = _to_caller_flattened_graph_module(gm)
 
-    # 6. Replace previously inserted dummy ones with real graphs.
+    # 6. dedup comm operators.
+    # The duplication could come from DTensor args and kwargs redistribution.
+    # Suppose one operator produces a Partial gradient tensor and model
+    # parameters are replicated. In this case, every optimizer operation using
+    # that Partial gradient tensor would trigger an allreduce. This is becuase
+    # DTensor only has local information on individual tensor/operator, which is
+    # not sufficient to detect duplications in the graph. This situation can
+    # also happen when inserting FSDP allgather if a parameter is used multiple
+    # times in the forward method.
+    # TODO(@mrshenli): @yifuwang has a suggestion of conducting expansion and
+    # dedup at tracer-level to avoid multiple graph passes.
+    gm = _dedup_collectives(gm)
+
+    # 7. Replace previously inserted dummy ones with real graphs.
     if module_override:
         for _, override in module_override.items():
             gm = override.transform(gm, name_to_spec, flat_state)
