@@ -34,7 +34,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 try:
     # using tools/ to optimize test run.
-    sys.path.insert(0, str(REPO_ROOT))
+    sys.path.append(str(REPO_ROOT))
     from tools.stats.export_test_times import TEST_TIMES_FILE
     from tools.testing.test_selections import (
         calculate_shards,
@@ -259,7 +259,6 @@ CI_SERIAL_LIST = [
     "test_cpp_api_parity",
     "test_reductions",
     "test_cuda",
-    "test_cuda_expandable_segments",
     "test_jit_cuda_fuser",  # OOM on test_issue_1785, also profiling?
     "test_indexing",
     "test_fx_backends",
