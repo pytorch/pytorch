@@ -822,6 +822,24 @@ class TestTransformers(NNTestCase):
         # Mask check disabled results in sparisty fastpath, independently of the mask
         _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
         _test_fastpath(model, not_aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
+    
+    @parametrize("device", device_list)
+    def test_multiheadattention_fastpath_attn_mask(self, device):
+        with torch.no_grad():
+            B = 2
+            L = 4
+            D = 8
+            H = 4
+
+            mha = nn.MultiheadAttention(D, H, batch_first=True).to(device)
+
+            X = torch.randn(B, L, D).to(device)
+            M = torch.randn(B * H, L, L).to(device) > 0
+
+            mha.train()  # disable fast path
+            out, _ = mha(X, X, X, attn_mask=M, need_weights=False)  # works
+            mha.eval()  # enable fast path
+            out, _ = mha(X, X, X, attn_mask=M, need_weights=False)  # previously crashed (fixed)
 
     # Test failing MHA when bias was NoneType
     def test_bias_is_none(self):

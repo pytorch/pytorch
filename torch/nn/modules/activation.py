@@ -1150,6 +1150,8 @@ class MultiheadAttention(Module):
             why_not_fast_path = "add_zero_attn was enabled"
         elif not self._qkv_same_embed_dim:
             why_not_fast_path = "_qkv_same_embed_dim was not True"
+        elif attn_mask is not None:
+            why_not_fast_path = "attn_mask was not None"
         elif query.is_nested and (key_padding_mask is not None or attn_mask is not None):
             why_not_fast_path = "supplying both src_key_padding_mask and src_mask at the same time \
                                  is not supported with NestedTensor input"
