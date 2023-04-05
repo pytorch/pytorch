@@ -638,6 +638,38 @@ command = [
 ]
 
 [[linter]]
+code = 'RAWCUDADEVICE'
+include_patterns = [
+    'aten/**',
+    'c10/**',
+    'torch/csrc/**',
+]
+exclude_patterns = [
+    'aten/src/ATen/cuda/CUDAContext.cpp',
+    'aten/src/ATen/cuda/CUDAGeneratorImpl.cpp',
+    'aten/src/ATen/test/**',
+    'c10/core/impl/InlineDeviceGuard.h',
+    'c10/cuda/CUDADeviceAssertionHost.cpp',
+    'c10/cuda/CUDAFunctions.cpp',
+    'c10/cuda/CUDAGuard.h',
+    'c10/cuda/impl/CUDATest.cpp',
+    'torch/csrc/cuda/nccl.cpp',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=cudaSetDevice',
+    '--pattern=cudaGetDevice',
+    '--linter-name=RAWCUDADEVICE',
+    '--error-name=raw CUDA API usage',
+    """--error-description=\
+        This line calls raw CUDA APIs directly; please use c10::cuda wrappers instead.
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'ROOT_LOGGING'
 include_patterns = [
     '**/*.py',
