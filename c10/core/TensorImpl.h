@@ -19,6 +19,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
@@ -218,6 +219,18 @@ is_channels_last_3d
 is_non_overlapping_and_dense
 #endif
 
+/**
+ * This structure is intended to hold additional metadata of the specific device
+ *backend
+ **/
+struct C10_API BackendMeta : intrusive_ptr_target {
+  virtual ~BackendMeta(){};
+  virtual intrusive_ptr<BackendMeta> clone(
+      const intrusive_ptr<BackendMeta>& ptr) const {
+    return ptr;
+  }
+};
+
 struct C10_API ExtraMeta {
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
@@ -230,6 +243,7 @@ struct C10_API ExtraMeta {
   SymBool is_channels_last_3d_{false};
   SymBool is_non_overlapping_and_dense_{true};
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
+  intrusive_ptr<c10::BackendMeta> backend_meta_;
 
   ExtraMeta() = default;
 
@@ -244,7 +258,8 @@ struct C10_API ExtraMeta {
       SymBool is_channels_last,
       SymBool is_channels_last_3d,
       SymBool is_non_overlapping_and_dense,
-      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
+      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
+      intrusive_ptr<c10::BackendMeta> backend_meta)
       : sizes_(std::move(sizes)),
         strides_(std::move(strides)),
         numel_(std::move(numel)),
@@ -256,7 +271,8 @@ struct C10_API ExtraMeta {
         is_channels_last_(std::move(is_channels_last)),
         is_channels_last_3d_(std::move(is_channels_last_3d)),
         is_non_overlapping_and_dense_(std::move(is_non_overlapping_and_dense)),
-        named_tensor_meta_(std::move(named_tensor_meta)) {}
+        named_tensor_meta_(std::move(named_tensor_meta)),
+        backend_meta_(backend_meta) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
     return std::make_unique<ExtraMeta>(
@@ -270,7 +286,8 @@ struct C10_API ExtraMeta {
         is_channels_last_,
         is_channels_last_3d_,
         is_non_overlapping_and_dense_,
-        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr);
+        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr,
+        backend_meta_ ? backend_meta_->clone(backend_meta_) : nullptr);
   }
 };
 
@@ -1556,8 +1573,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
-    return storage_.unsafeGetStorageImpl()->mutable_unsafe_data<T>() +
-        storage_offset_;
+    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
   }
 
  public:
@@ -1573,7 +1589,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline const void* data() const {
-    return data(&StorageImpl::data);
+    return mutable_data_impl();
   }
 
   /**
@@ -1587,7 +1603,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline void* mutable_data() {
-    return data(&StorageImpl::mutable_data);
+    return mutable_data_impl();
   }
 
  private:
@@ -1595,16 +1611,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // We are able to pull this off because unsafeGetStorageImpl() is a
   // const method that returns a non-const StorageImpl.
-  template <
-      // A member function pointer on StorageImpl that gets the raw
-      // data.
-      typename StorageImplFunc,
-      // The result of applying StorageImplFunc to the storage. This
-      // is ultimately the same type we return, but we mayy manipulate
-      // it before returning.
-      typename ReturnType = decltype((
-          std::declval<StorageImpl>().*std::declval<StorageImplFunc>())())>
-  ReturnType data(const StorageImplFunc& data_accessor) const {
+  void* mutable_data_impl() const {
     TORCH_CHECK(
         has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
@@ -1615,18 +1622,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Computing an offset into an empty tensor would be UB, since an empty
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
-    if (is_empty()) {
+    char* const data = static_cast<char*>(storage_.mutable_data());
+    if (data == nullptr) {
       return nullptr;
     }
-    auto* data = (storage_.unsafeGetStorageImpl()->*data_accessor)();
-    // Just propagates the const-ness from the ReturnType to a
-    // C-string.
-    using BytesPtr = std::conditional_t<
-        std::is_const<std::remove_pointer_t<ReturnType>>::value,
-        const char*,
-        char*>;
-    return static_cast<ReturnType>(
-        static_cast<BytesPtr>(data) + data_type_.itemsize() * storage_offset_);
+    return static_cast<void*>(data + data_type_.itemsize() * storage_offset_);
   }
 
  public:
@@ -1635,8 +1635,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * that all invariants required by data() are upheld here.
    */
   template <typename T>
-  inline const T* unsafe_data() const {
-    return storage_.unsafe_data<T>() + storage_offset_;
+  inline T* unsafe_data() const {
+    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
   }
 
   /**
@@ -1656,6 +1656,27 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Cannot report itemsize of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
     return data_type_.itemsize();
+  }
+
+  void set_backend_meta(intrusive_ptr<c10::BackendMeta> backend_meta) {
+    if (!extra_meta_) {
+      extra_meta_ = std::make_unique<ExtraMeta>();
+    }
+    extra_meta_->backend_meta_ = std::move(backend_meta);
+  }
+
+  c10::BackendMeta* get_backend_meta() {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->backend_meta_.get();
+  }
+
+  intrusive_ptr<c10::BackendMeta> get_backend_meta_intrusive_ptr() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->backend_meta_;
   }
 
  protected:
