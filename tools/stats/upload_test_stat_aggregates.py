@@ -70,13 +70,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--date",
         type=datetime.date.fromisoformat,
-        help="Date to upload test stat aggregates for (YYYY-MM-DD). Must be in the last 30 days",
+        help="Date to upload test stat aggregates for (YYYY-MM-DD)."
+        + "Must be in the last 30 days. Uploads data for the previous day.",
         required=True,
     )
     args = parser.parse_args()
     if args.date < datetime.datetime.now().date() - datetime.timedelta(days=30):
         raise ValueError("date must be in the last 30 days")
-    data = get_test_stat_aggregates(date=args.date)
+    data = get_test_stat_aggregates(date=args.date - datetime.timedelta(days=1))
     upload_to_s3(
         bucket_name="torchci-aggregated-stats",
         key=f"test_data_aggregates/{str(args.date)}",
