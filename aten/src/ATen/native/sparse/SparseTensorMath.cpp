@@ -863,16 +863,17 @@ Tensor& intersection_binary_op_sparse_dense_out(
 
   // Short-circuit if either s_ or d is empty.
   if (!s_._nnz() || !s_.numel() || !d.numel()) {
-    const auto dense_dim = s_.dense_dim();
-    const auto sparse_dim = res_shape.size() - dense_dim;
-    const auto indices = at::empty({sparse_dim, 0}, s_._indices().options());
+    const int64_t dense_dim = s_.dense_dim();
+    const int64_t sparse_dim = static_cast<int64_t>(res_shape.size()) - dense_dim;
+    const int64_t nnz = 0;
+    const auto indices = at::empty({sparse_dim, nnz}, s_._indices().options());
     auto res_values_shape = s_._values().sizes().vec();
-    res_values_shape[0] = 0;
+    res_values_shape[0] = nnz;
     const auto values = at::empty(res_values_shape, s_._values().options().dtype(res.scalar_type()));
     auto* res_impl = get_sparse_impl(res);
     res_impl->raw_resize_(sparse_dim, dense_dim, /*size=*/res_shape);
     res_impl->set_indices_and_values_unsafe(indices, values);
-    res_impl->set_nnz_and_narrow(0);
+    res_impl->set_nnz_and_narrow(nnz);
     return res._coalesced_(true);
   }
 
