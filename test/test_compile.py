@@ -18,10 +18,9 @@ class ToyModel(torch.nn.Module):
 class InPlaceCompilationTests(unittest.TestCase):
 
     def test_compilation(self):
-        # CompileCounter is not working for in place API but works normally
+        # Test that compilation actually occured
         model = ToyModel()
         cnt = CompileCounter()
-        print(cnt.frame_count)
         model.compile(backend=cnt)
         x = torch.randn(10, 10)
         model(x)
@@ -29,10 +28,8 @@ class InPlaceCompilationTests(unittest.TestCase):
 
     def test_overwrite_call_impl(self):
         model = ToyModel()
-        model(torch.randn(1, 10))
         self.assertTrue(model._compiled_call_impl is None)
         model.compile()
-        model(torch.rand(1, 10))
         self.assertTrue(model._compiled_call_impl is not None)
 
     def test_compiled_model_can_be_saved_and_loaded(self):
@@ -42,9 +39,11 @@ class InPlaceCompilationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(model, os.path.join(tmpdirname, "model.pt"))
-            torch.load(os.path.join(tmpdirname, "model.pt"))
+            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            loaded_model(torch.randn(1, 10))
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(model.state_dict(), os.path.join(tmpdirname, "model.pt"))
             loaded_model = ToyModel()
             loaded_model.load_state_dict(torch.load(os.path.join(tmpdirname, "model.pt")))
+            loaded_model(torch.randn(1, 10))
