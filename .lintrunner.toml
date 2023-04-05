@@ -804,6 +804,27 @@ command = [
 ]
 
 [[linter]]
+code = 'ROUND'
+include_patterns = [
+    'c10/**',
+    'aten/**',
+    'torch/csrc/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=std::round',
+    '--linter-name=ROUND',
+    '--error-name=invalid round',
+    '--replace-pattern=s/std::round/std::nearbyint/',
+    """--error-description=\
+        Use of std::round is inconsistent with conventions and should be replaced with std::nearbyint\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'WORKFLOWSYNC'
 include_patterns = [
     '.github/workflows/pull.yml',
