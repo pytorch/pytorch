@@ -1,4 +1,3 @@
---------
 def get_blas_gomp_arch_deps():
     return [
         ("x86_64", [
