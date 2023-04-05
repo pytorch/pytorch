@@ -1,5 +1,7 @@
 import builtins
 import collections
+import importlib
+import itertools
 import logging
 import math
 import os
@@ -35,7 +37,6 @@ from .utils import (
     istype,
     np,
     orig_code_map,
-    rename_implicit,
     tensor_always_has_static_shape,
     tensor_static_reason_to_message,
     tuple_iterator_getitem,
@@ -53,6 +54,10 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___check_type_id", check_type_id),
         ("___check_obj_id", check_obj_id),
         ("___is_grad_enabled", torch.is_grad_enabled),
+        (
+            "___are_deterministic_algorithms_enabled",
+            torch.are_deterministic_algorithms_enabled,
+        ),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
@@ -60,6 +65,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
+        ("__load_module", lambda name: importlib.import_module(name)),
     ]
 )
 
@@ -67,10 +73,23 @@ CLOSURE_VARS = collections.OrderedDict(
 def strip_function_call(name):
     """
     "___odict_getitem(a, 1)" => "a"
+    "a.layers[slice(2)][0]._xyz" ==> "a"
+    "getattr(a.layers[slice(2)][0]._abc, '0')" ==> "a"
+    "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
+    "a.layers[slice(None, -1, None)][0]._xyz" ==> "a"
     """
-    m = re.search(r"([a-z0-9_]+)\(([^(),]+)[^()]*\)", name)
-    if m and m.group(1) != "slice":
-        return strip_function_call(m.group(2))
+    # recursively find valid object name in fuction
+    valid_name = re.compile("[A-Za-z_].*")
+    curr = ""
+    for char in name:
+        if char in " (":
+            curr = ""
+        elif char in "),[]":
+            if curr and curr != "None" and valid_name.match(curr):
+                return strip_function_call(curr)
+        else:
+            curr += char
+
     return strip_getattr_getitem(name)
 
 
@@ -87,18 +106,18 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
-        scope: Optional[Dict[str, object]],
+        user_scope: Optional[Dict[str, object]],
         check_fn_manager: "CheckFunctionManager",
-        renames=True,
+        *,
+        local: bool,
     ):
         self.id_ref = id_ref
         self.source_ref = source_ref
-        if scope:
-            if renames:
-                scope = {rename_implicit(k): v for k, v in scope.items()}
+        if user_scope:
+            scope = {"L" if local else "G": user_scope}
         else:
-            scope = dict()
-        self.scope: Dict[str, object] = scope
+            scope = {"L" if local else "G": dict()}
+        self.scope: Dict[str, Dict[str, object]] = scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -158,9 +177,10 @@ class GuardBuilder(GuardBuilderBase):
             name = guard.name
         base = strip_getattr_getitem(strip_function_call(name))
         if base not in self.argnames:
-            if re.match(r"^\d+$", base):
-                log.warning(f"invalid var name: {guard}")
-            self.argnames.append(base)
+            if re.match(r"[a-zA-Z0-9_]+", base):
+                if re.match(r"^\d+$", base):
+                    log.warning(f"invalid var name: {guard}")
+                self.argnames.append(base)
 
         return name
 
@@ -201,7 +221,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.__name__ == {obj.__name__}"
+        code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
         self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
@@ -239,27 +259,33 @@ class GuardBuilder(GuardBuilderBase):
             if HAS_NUMPY
             else ()
         )
-        assert istype(
-            val,
-            (
-                int,
-                float,
-                bool,
-                type(None),
-                str,
-                type,
-                list,
-                tuple,
-                set,
-                slice,
-                frozenset,
-                range,
-                torch.Size,
-                torch.device,
-                torch.dtype,
+        ok_types = (
+            int,
+            float,
+            bool,
+            type(None),
+            str,
+            type,
+            list,
+            tuple,
+            set,
+            slice,
+            frozenset,
+            range,
+            torch.Size,
+            torch.device,
+            torch.dtype,
+            *np_types,
+        )
+        if istype(val, dict):
+            assert all(
+                istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
             )
-            + np_types,
-        ), t.__name__
+        else:
+            assert istype(
+                val,
+                ok_types,
+            ), t.__name__
 
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it
@@ -414,6 +440,16 @@ class GuardBuilder(GuardBuilderBase):
             code = "not ___is_grad_enabled()"
         self._produce_guard_code(guard, [code])
 
+    def DETERMINISTIC_ALGORITHMS(self, guard: Guard):
+        """Guard on the initial determinism algorithms state"""
+        assert guard.source is GuardSource.GLOBAL
+        code = None
+        if convert_frame.initial_deterministic_algorithms_state:
+            code = "___are_deterministic_algorithms_enabled()"
+        else:
+            code = "not ___are_deterministic_algorithms_enabled()"
+        self._produce_guard_code(guard, [code])
+
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
         # shape variables to sources from tracked_fakes.  This must happen after
@@ -523,9 +559,10 @@ class GuardBuilder(GuardBuilderBase):
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
             else:
-                assert not hasattr(
-                    value, "_dynamo_dynamic_indices"
-                ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
+                if not config.allow_ignore_mark_dynamic:
+                    assert not hasattr(
+                        value, "_dynamo_dynamic_indices"
+                    ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
 
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
@@ -625,11 +662,16 @@ class CheckFunctionManager:
             source_ref,
             combine_scopes(f_globals, f_locals),
             self,
-            renames=True,
+            local=True,
         )
         global_builder = GuardBuilder(
-            self.id_ref, source_ref, f_globals, self, renames=False
+            self.id_ref, source_ref, f_globals, self, local=False
         )
+        # We need to transplant a copy here, because some guards
+        # might get a cross ref between local and global, like L['mod_name'][G['some_key']]
+        # the inverse is illegal.
+        if "G" in global_builder.scope:
+            local_builder.scope["G"] = global_builder.scope["G"]
         # source_ref can cause a cycle, make sure we break it with weakref
         w_local = weakref.ref(local_builder)
         w_global = weakref.ref(global_builder)
@@ -655,8 +697,7 @@ class CheckFunctionManager:
     ):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
-        largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
-        largs += [a for a in local_builder.argnames if a != "___implicit0"]
+        largs = local_builder.argnames
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
 
@@ -725,13 +766,12 @@ class CheckFunctionManager:
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda {args}: {code}
+    return lambda L: {code}
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out: Dict[str, Any] = dict()
-        # print("RUNNING PY CODE", py_code)
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
@@ -739,7 +779,8 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
-        guard_fn.global_scope = global_builder.scope
+        # Grab only G, but preserve "G" because guards access it as "G"
+        guard_fn.global_scope = {"G": global_builder.scope["G"]}
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 
@@ -776,7 +817,7 @@ def guard_fail_hook(
     # Don't waste time computing the fail reason for guards we aren't going to report out.
     if not guard_fn.guard_fail_fn and not (first or last):
         return
-    scope = {rename_implicit(k): v for k, v in f_locals.items()}
+    scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     reason = None
     for part in guard_fn.verbose_code_parts:

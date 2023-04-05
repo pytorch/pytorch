@@ -1,5 +1,6 @@
 import os
 import textwrap
+from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
@@ -75,6 +76,23 @@ class Unsupported(TorchDynamoException):
 
 class RecompileError(TorchDynamoException):
     pass
+
+
+class UserErrorType(Enum):
+    DYNAMIC_CONTROL_FLOW = auto()
+
+
+class UserError(Unsupported):
+    def __init__(self, error_type: UserErrorType, msg):
+        """
+        Type of errors that would be valid in Eager, but not supported in TorchDynamo.
+        The error message should tell user about next actions.
+
+        error_type: Type of user error
+        msg: Actionable error message
+        """
+        super().__init__(msg)
+        self.error_type = error_type
 
 
 def unimplemented(msg: str):
