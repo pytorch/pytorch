@@ -2036,8 +2036,8 @@ class TestNestedTensorDeviceType(TestCase):
         nt_cont, nt_noncont = random_nt_noncontiguous_pair((2, 3, 6, 7))
         nt_empty = torch.empty_like(nt_cont)
         assert nt_cont.is_same_size(nt_empty)
-        with self.assertRaisesRegex(RuntimeError, "empty_like only supports contiguous memory format for Nested Tensors"):
-            nt_empty = torch.empty_like(nt_noncont)
+        nt_empty_non_contig = torch.empty_like(nt_noncont)
+        assert nt_noncont.is_same_size(nt_empty_non_contig)
 
 
 class TestNestedTensorAutograd(TestCase):

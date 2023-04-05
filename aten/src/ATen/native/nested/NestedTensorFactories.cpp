@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorFactories.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
@@ -32,10 +33,6 @@ TensorOptions verify_empty_parameters(
       " instead.");
 
   TORCH_CHECK(
-      self.is_contiguous(),
-      "empty_like only supports contiguous memory format for Nested Tensors");
-
-  TORCH_CHECK(
       !(options.layout() != kStrided && optional_memory_format.has_value()),
       "memory format option is only supported by strided tensors");
   return options;
@@ -51,7 +48,9 @@ Tensor empty_like_nested(
   auto options = verify_empty_parameters(
       self, dtype, layout, device, pin_memory, optional_memory_format);
   auto self_nt = get_nested_tensor_impl(self);
-  Tensor new_buffer = at::empty_like(self_nt->get_buffer(), options);
+  // Since we clone sizes, strides, and offsets it should be safe to use
+  // get_unsafe_storage_as_tensor for the call to empty like.
+  Tensor new_buffer = at::empty_like(self_nt->get_unsafe_storage_as_tensor(), options);
   auto nested_size = self_nt->get_nested_sizes().clone();
   auto nested_strides = self_nt->get_nested_strides().clone();
   auto offsets = self_nt->get_storage_offsets().clone();
