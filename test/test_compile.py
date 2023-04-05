@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import torch
+from torch._dynamo.testing import CompileCounter
 import tempfile
 import os
 import unittest
@@ -14,6 +15,16 @@ class ToyModel(torch.nn.Module):
         return self.linear(x)
 
 class TorchCompileTests(unittest.TestCase):
+    def test_compilation(self):
+        model = ToyModel()
+        cnt = CompileCounter()
+        # opt_mod = torch._dynamo.optimize(cnt)(model)
+        model.compile(backend=cnt)
+        x = torch.randn(10, 10)
+        model(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+
     def test_compiled_model_can_be_saved(self):
         model = ToyModel()
         model(torch.randn(1, 10))
