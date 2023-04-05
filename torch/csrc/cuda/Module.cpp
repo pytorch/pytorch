@@ -97,12 +97,24 @@ PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
   }
 
   torch::utils::cuda_lazy_init();
-  auto current_device = c10::cuda::current_device();
-  if (current_device != device) {
-    THCPModule_setDevice(device);
+  int current_device = c10::cuda::ExchangeDevice(device);
+
+  return THPUtils_packInt32(current_device);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
+  int64_t device = THPUtils_unpackLong(arg);
+  if (device < 0) {
+    return THPUtils_packInt32(-1);
   }
 
-  return THPUtils_packInt32(static_cast<int>(current_device));
+  torch::utils::cuda_lazy_init();
+  int current_device = c10::cuda::MaybeExchangeDevice(device);
+
+  return THPUtils_packInt32(current_device);
   END_HANDLE_TH_ERRORS
 }
 
@@ -896,7 +908,7 @@ void removeStorageDeleterFns(
     auto allocated_pointer = definitely_stale_pointers.find(ptr);
     TORCH_CHECK(allocated_pointer != definitely_stale_pointers.end());
     auto t = c10::cuda::CUDACachingAllocator::get();
-    bool succeeded = stale_storage->data_ptr().compare_exchange_deleter(
+    bool succeeded = stale_storage->mutable_data_ptr().compare_exchange_deleter(
         t->raw_deleter(), &c10::detail::deleteNothing);
 
     TORCH_CHECK(
@@ -1046,7 +1058,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     auto data_ptr = storage_impl->data_ptr().get();
-    bool succeeded = storage_impl->data_ptr().compare_exchange_deleter(
+    bool succeeded = storage_impl->mutable_data_ptr().compare_exchange_deleter(
         alloc->raw_deleter(), c10::detail::deleteNothing);
     TORCH_CHECK("Expected standard deleter");
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
@@ -1269,6 +1281,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_init", THCPModule_initExtension, METH_NOARGS, nullptr},
     {"_cuda_setDevice", THCPModule_setDevice_wrap, METH_O, nullptr},
     {"_cuda_exchangeDevice", THCPModule_exchangeDevice, METH_O, nullptr},
+    {"_cuda_maybeExchangeDevice",
+     THCPModule_maybeExchangeDevice,
+     METH_O,
+     nullptr},
     {"_cuda_getDevice", THCPModule_getDevice_wrap, METH_NOARGS, nullptr},
     {"_cuda_getDeviceCount",
      THCPModule_getDeviceCount_wrap,

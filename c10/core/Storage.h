@@ -62,12 +62,12 @@ struct C10_API Storage {
 
   template <typename T>
   T* data() const {
-    return storage_impl_->data<T>();
+    return unsafe_data<T>();
   }
 
   template <typename T>
   T* unsafe_data() const {
-    return storage_impl_->unsafe_data<T>();
+    return static_cast<T*>(storage_impl_->mutable_data());
   }
 
   // TODO: remove later
@@ -97,7 +97,7 @@ struct C10_API Storage {
   }
 
   at::DataPtr& data_ptr() {
-    return storage_impl_->data_ptr();
+    return storage_impl_->mutable_data_ptr();
   }
 
   const at::DataPtr& data_ptr() const {
