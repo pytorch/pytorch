@@ -50,6 +50,8 @@ def gh_fetch_url(
             )
         elif err.code == 404:
             # if we don't find anything just return nothing
+            print(
+                f"404: error Nothing found at {url}")
             return None
         raise
 
