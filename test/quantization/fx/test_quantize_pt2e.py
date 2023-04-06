@@ -23,13 +23,16 @@ from torch.ao.quantization.backend_config import (
 )
 from torch.ao.quantization.backend_config._qnnpack_pt2e import get_qnnpack_pt2e_backend_config
 from torch.ao.quantization.backend_config._x86_inductor_pt2e import get_x86_inductor_pt2e_backend_config
-from torch.ao.quantization.quantize_fx import prepare_fx, convert_to_reference_fx
+from torch.ao.quantization.backend_config.x86 import get_x86_backend_config
+from torch.ao.quantization.quantize_fx import prepare_fx, convert_to_reference_fx, convert_fx
 from torch.ao.quantization._quantize_pt2e import prepare_pt2e, convert_pt2e
 from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
 import copy
 import itertools
+from torch._inductor.compile_fx import compile_fx
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
@@ -192,6 +195,49 @@ class TestQuantizePT2E(QuantizationTestCase):
             code_after_recompile = m.code
             self.assertTrue(code_before_recompile == code_after_recompile, error_msg)
 
+    @xfailIfPython311
+    def test_transposed_conv_bn_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_trans = torch.nn.ConvTranspose2d(10, 20, 3)
+                # channels for batchnorm is the same as the out_channels for convtranspose
+                self.bn = torch.nn.BatchNorm2d(20)
+
+            def forward(self, x):
+                return self.bn(self.conv_trans(x))
+
+        with override_quantized_engine("qnnpack"):
+            m = M().eval()
+            example_inputs = (torch.randn(10, 10, 10, 10),)
+            # program capture
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="real",
+            )
+
+            node_occurrence = {
+                ns.call_function(torch.ops.aten.convolution.default): 1,
+                ns.call_function(torch.ops.aten.native_batch_norm.default): 1,
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+            qconfig = get_default_qconfig("qnnpack")
+            qconfig_mapping = QConfigMapping().set_global(qconfig)
+            backend_config = get_qnnpack_pt2e_backend_config()
+            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            # make sure it runs
+            m(*example_inputs)
+
+            # make sure bn is fused into conv
+            node_occurrence = {
+                ns.call_function(torch.ops.aten.convolution.default): 1,
+                ns.call_function(torch.ops.aten.native_batch_norm.default): 0,
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
 @skipIfNoQNNPACK
 class TestQuantizePT2EX86Inductor(QuantizationTestCase):
     @skipIfNoX86
@@ -261,6 +307,22 @@ class TestQuantizePT2EX86Inductor(QuantizationTestCase):
                     self.checkGraphModuleNodes(convert_module,
                                                expected_node_occurrence=node_occurrence,
                                                expected_node_list=node_list)
+
+                    # Step1: Ref result in 1.X fx path
+                    backend_config_1_x = get_x86_backend_config()
+                    m_copy = copy.deepcopy(m)
+                    m_prepare_fx = prepare_fx(m_copy, qconfig_mapping, example_inputs, backend_config=backend_config_1_x)
+                    after_prepare_result_fx = m_prepare_fx(*example_inputs)
+                    m_convert_fx = convert_fx(m_prepare_fx, backend_config=backend_config_1_x)
+                    ref_result = m_convert_fx(*example_inputs)
+
+                    # Step2: Start to lowering into Inductor
+                    run = compile_fx(convert_module, example_inputs)
+                    # Inductor first run
+                    inductor_res = run(*example_inputs)
+                    # Inductor second run
+                    inductor_res = run(*example_inputs)
+                    self.assertEqual(ref_result, inductor_res, atol=5e-2, rtol=5e-2)
 
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
