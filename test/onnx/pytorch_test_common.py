@@ -9,6 +9,7 @@ import unittest
 from typing import Optional
 
 import numpy as np
+import packaging.version
 
 import torch
 from torch.autograd import function
@@ -157,14 +158,32 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
     return skip_dec
 
 
+def skip_unsupported_min_ort_version(min_opset_version: str):
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if (
+                packaging.version.parse(self.ort_version).release
+                < packaging.version.parse(min_opset_version).release
+            ):
+                raise unittest.SkipTest(
+                    f"Unsupported onnxruntime version: {self.ort_version} < {min_opset_version}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
 def skip_dynamic_fx_test(reason: str):
     """Skip dynamic exporting test.
 
     Args:
-        reason: The reason for skipping scripting test.
+        reason: The reason for skipping dynamic exporting test.
 
     Returns:
-        A decorator for skipping scripting test.
+        A decorator for skipping dynamic exporting test.
     """
 
     def skip_dec(func):

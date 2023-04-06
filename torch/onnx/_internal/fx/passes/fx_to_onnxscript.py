@@ -258,10 +258,10 @@ def _fill_tensor_meta(
 
 
 @_beartype.beartype
-def _separate_input_attributes_from_arguments(
+def _fill_in_default_kwargs(
     node: torch.fx.Node,
 ) -> Tuple[List[_type_utils.Argument], Dict[str, _type_utils.Argument]]:
-    """Separate input attributes from arguments."""
+    """Find and Fill in the not provided kwargs with default values."""
 
     # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
     # overloadpacket for some reasons.
@@ -289,7 +289,7 @@ def _separate_input_attributes_from_arguments(
                 # Get default from schema.
                 complete_kwargs[expected_arg.name] = expected_arg.default_value
 
-    return (complete_args, complete_kwargs)
+    return complete_args, complete_kwargs
 
 
 @_beartype.beartype
@@ -309,7 +309,7 @@ def _wrap_fx_args_as_onnxscript_args(
     )
     onnxscript_kwargs = filter_incompatible_and_dtype_convert_kwargs(complete_kwargs)
 
-    return (onnxscript_args, onnxscript_kwargs)
+    return onnxscript_args, onnxscript_kwargs
 
 
 @_beartype.beartype
@@ -327,7 +327,6 @@ def _export_fx_node_to_onnxscript(
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
     options: ResolvedExportOptions,
-    node_with_fixed_shape: torch.fx.Node,
 ):
     # Record stack trace of node in diagnostic.
     node_stack_trace = node.stack_trace
@@ -434,8 +433,8 @@ def _export_fx_node_to_onnxscript(
             raise RuntimeError(f"Cannot find function for {exporter_key}")
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
-        complete_args, complete_kwargs = _separate_input_attributes_from_arguments(node)
-        (onnx_args, onnx_kwargs) = _wrap_fx_args_as_onnxscript_args(
+        complete_args, complete_kwargs = _fill_in_default_kwargs(node)
+        onnx_args, onnx_kwargs = _wrap_fx_args_as_onnxscript_args(
             complete_args, complete_kwargs, fx_name_to_onnxscript_value, tracer
         )
         with evaluator.default_as(tracer):
@@ -453,22 +452,27 @@ def _export_fx_node_to_onnxscript(
         assert isinstance(output, (graph_building.TorchScriptTensor, tuple)), type(
             output
         )
+        # NOTE(titaiwang): We bypass two kinds of ops as it's not meaningful to
+        # validate them with op level debug.
+        # 1. aten::sym_size: The op is simply get item from a list of tensors.
+        # 2. BuiltinFunction: It doesn't supported tensor
         if (
             options.op_level_debug
-            and not isinstance(node.target, torch._ops.OpOverloadPacket)
+            and node.target != torch.ops.aten.sym_size
             and not isinstance(node.target, types.BuiltinFunctionType)
         ):
+            node_with_static_shape = node.meta["node_with_static_shape"]
             (
                 node_with_fixed_shape_args,
                 node_with_fixed_shape_kwargs,
-            ) = _separate_input_attributes_from_arguments(node_with_fixed_shape)
+            ) = _fill_in_default_kwargs(node_with_static_shape)
             # TODO(titaiwang): Why some ops failed on op-level validation, but
             # successfully exported?
-            (torch_args, torch_kwargs) = op_validation.wrap_fx_args_as_torch_args(
+            torch_args, torch_kwargs = op_validation.wrap_fx_args_as_torch_args(
                 node_with_fixed_shape_args, node_with_fixed_shape_kwargs
             )
             op_validation.validate_op_between_ort_torch(
-                node_with_fixed_shape, symbolic_fn, torch_args, torch_kwargs
+                node_with_static_shape, symbolic_fn, torch_args, torch_kwargs
             )
         fx_name_to_onnxscript_value[node.name] = output
     elif node.op == "output":
@@ -521,7 +525,6 @@ def _export_fx_node_to_onnxscript(
 @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
 def export_fx_to_onnxscript(
     fx_module_with_metadata: torch.fx.GraphModule,
-    static_reference_graph: torch.fx.Graph,
     options: ResolvedExportOptions,
 ):
     """
@@ -529,8 +532,6 @@ def export_fx_to_onnxscript(
 
     Args:
         fx_module_with_metadata: A torch.fx.GraphModule with metadata.
-        static_reference_graph: torch.fx.graph object with real shape information to be
-            used as a reference in op_level_debug mode.
         export_options: Export options.
 
     Returns:
@@ -555,9 +556,7 @@ def export_fx_to_onnxscript(
         ],
     ] = {}
     # node_fixed_shape is only used on op_level_debug purpose.
-    for node, node_fixed_shape in zip(
-        fx_module_with_metadata.graph.nodes, static_reference_graph.nodes
-    ):
+    for node in fx_module_with_metadata.graph.nodes:
         _export_fx_node_to_onnxscript(
             node,
             onnxscript_graph,
@@ -565,7 +564,6 @@ def export_fx_to_onnxscript(
             tracer,
             fx_module_with_metadata,
             options,
-            node_fixed_shape,
         )
 
     return onnxscript_graph

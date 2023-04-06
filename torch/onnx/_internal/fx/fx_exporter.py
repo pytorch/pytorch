@@ -29,15 +29,16 @@ class FXGraphModuleExporter(torch.onnx._internal.exporter.Exporter, abc.ABC):
             self.decomposition_table,
             enable_dynamic_axes=self.options.dynamic_shapes,
         ).run(*fx_module_args)
-        # Run FakeTensorProp to get fixed shape of nodes for op_level_debug purposes.
-        # NOTE: torch.fx.Transformer makes a copy of the graph only but shares weights
-        # with the original module.
-        static_reference_graph_module = torch.fx.Transformer(
-            decomposed_module
-        ).transform()
-        static_reference_graph_module = passes.ShapeInferenceWithFakeTensor(
-            static_reference_graph_module
-        ).run(*fx_module_args)
+
+        # Run ShapeInferenceWithFakeTensor  to get static shape of nodes for op_level_debug purposes.
+        # The pass added nodes with static shape into original node metadata:
+        # node.meta["node_with_static_shape"]: torch.fx.Node
+        # TODO(titaiwang): refactor the pass to stop relying on Transformer.transform()
+        if self.options.op_level_debug:
+            decomposed_module = passes.ShapeInferenceWithFakeTensor(
+                decomposed_module
+            ).run(*fx_module_args)
+
         # We want to pass list of ints and floats to TorchScript graph correctly
         # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
         # receive FakeTensor and results runtime error. In addition, TorchScript-based
@@ -45,7 +46,7 @@ class FXGraphModuleExporter(torch.onnx._internal.exporter.Exporter, abc.ABC):
         # with FakeTensorMode.
         with torch.utils._mode_utils.no_dispatch():
             onnxscript_graph = passes.export_fx_to_onnxscript(
-                decomposed_module, static_reference_graph_module.graph, self.options
+                decomposed_module, self.options
             )
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(self.options.opset_version)
