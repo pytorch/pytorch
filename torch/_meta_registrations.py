@@ -79,7 +79,7 @@ def meta_randperm(n, *, generator=None, out):
 
 
 @register_meta(aten._assert_async.default)
-def assert_async(val):
+def assert_async_meta(val, *, assert_message=None):
     return
 
 

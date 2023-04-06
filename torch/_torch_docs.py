@@ -13623,7 +13623,7 @@ Example::
 add_docstr(
     torch._assert_async,
     r"""
-_assert_async(tensor) -> void
+_assert_async(tensor, *, assert_msg=None) -> void
 
 Asynchronously assert that the contents of tensor are nonzero.  For CPU tensors,
 this is equivalent to ``assert tensor`` or ``assert tensor.is_nonzero()``; for

@@ -165,7 +165,7 @@
 # Not assert because it's a keyword; not Assert because FX already
 # took that syntax
 # TODO: need to specify this is side-effectful somehow
-- func: _assert_async(Tensor self) -> ()
+- func: _assert_async(Tensor self, *, str? assert_message=None) -> ()
   dispatch:
     CPU: _assert_async_cpu
     CUDA: _assert_async_cuda

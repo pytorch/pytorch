@@ -402,12 +402,12 @@ Tensor isfinite(const Tensor& self) {
   });
 }
 
-void _assert_async_cpu(const Tensor& self) {
-  TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
+void _assert_async_cpu(const Tensor& self, c10::optional<c10::string_view> assert_msg) {
+  TORCH_CHECK(native::is_nonzero(self), assert_msg.has_value() ? assert_msg.value() : "Assertion is failed");
 }
 
 Tensor _assert_async_functional_cpu(const Tensor& self, const Tensor& victim_tensor) {
-  TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
+  TORCH_CHECK(native::is_nonzero(self), "Assertion is failed");
   return victim_tensor;
 }
 

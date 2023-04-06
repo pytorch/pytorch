@@ -736,23 +736,6 @@ def export(
                 r.node.meta["val"] = self.current_node.meta["val"]
             return r
 
-    # Replace torch._assert with torch._assert_async
-    for node in graph.graph.nodes:
-        if node.target == torch._assert:
-            with graph.graph.inserting_before(node):
-                scalar_to_tensor = graph.graph.call_function(
-                    torch.ops.aten.scalar_tensor.default, args=(node.args[0],)
-                )
-            with graph.graph.inserting_after(node):
-                new_node = graph.graph.call_function(
-                    torch.ops.aten._assert_async.default, args=(scalar_to_tensor,)
-                )
-                node.replace_all_uses_with(new_node)
-                new_node.meta = node.meta.copy()
-                graph.graph.erase_node(node)
-
-    graph.recompile()
-
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):

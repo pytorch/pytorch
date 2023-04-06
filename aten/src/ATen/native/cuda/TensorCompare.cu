@@ -113,7 +113,7 @@ __global__ void _assert_async_cuda_kernel(c10::complex<double>* input) {
   CUDA_KERNEL_ASSERT(input[0] != c10::complex<double>(0, 0));
 }
 
-void _assert_async_cuda(const Tensor& self_tensor) {
+void _assert_async_cuda(const Tensor& self_tensor, c10::optional<c10::string_view> assert_msg) {
   const TensorBase &self = get_tensor_base(self_tensor);
   auto n = self.numel();
   TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");

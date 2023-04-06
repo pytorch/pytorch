@@ -2137,6 +2137,15 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.export(my_dyn_fn, x)
 
     @config.patch(dynamic_shapes=True)
+    def test_symbool(self):
+        def f(x):
+            a = torch.scalar_tensor(x.shape[0] > 4)
+            return x.sin().sum() + a.sum()
+
+        gm, _  = torch._dynamo.export(f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic")
+        self.assertEqual(gm(torch.ones(3, 4)), f(torch.ones(3, 4)))
+
+    @config.patch(dynamic_shapes=True)
     def test_export_multi_dynamic_dim_constraint(self):
         x = torch.randn([3, 3, 3])
         y = torch.randn([2, 2, 2])
@@ -2278,14 +2287,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     @config.patch(dynamic_shapes=True)
     def test_export_persist_assert(self):
         def f(x):
-            assert x.shape[0] > 4
+            assert x.shape[0] > 4, "Shape must be more than 4"
             return x.cos() + x.sin()
 
         gm, guard = torch._dynamo.export(
             f, torch.randn(5, 4, 6), aten_graph=True, tracing_mode="symbolic"
         )
-
-        print(gm.graph)
 
         def has_aten_op(gm, op):
             for node in gm.graph.nodes:
@@ -2299,7 +2306,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         gm.recompile()
         self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.default))
 
-        gm(torch.randn(3, 4, 5))
+        with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
+            gm(torch.randn(3, 4, 5))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

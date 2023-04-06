@@ -1587,7 +1587,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
   } else if (torch::is_symbool(py::handle(obj))) {
     save_symint = true;
-    scalar = at::Scalar(1);
+    scalar = at::Scalar(true);
   } else {
     // NB: Are you here because you passed None to a Variable method,
     // and you expected an undefined tensor to be returned?   Don't add
