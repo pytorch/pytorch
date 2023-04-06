@@ -1992,7 +1992,8 @@ def main() -> None:
         message += '\nIf those updates are intentional, please add "submodule" keyword to PR title/description.'
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
-    pr.add_numbered_label("merging")
+    if "merging" not in pr.get_labels():
+        pr.add_numbered_label("merging")
     try:
         merge(
             args.pr_num,
