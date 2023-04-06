@@ -1032,11 +1032,13 @@ class GitHubPR:
 
     def add_numbered_label(self, label_base: str) -> None:
         labels = self.get_labels()
-        label = label_base
-        for i in range(len(labels) if labels is not None else 0):
-            if label in labels:
-                label = f"{label_base}X{i+2}"
-        gh_add_labels(self.org, self.project, self.pr_num, [label])
+        full_label = label_base
+        count = 0
+        for label in labels:
+            if label_base in label:
+                count += 1
+                full_label = f"{label_base}X{count}"
+        gh_add_labels(self.org, self.project, self.pr_num, [full_label])
 
     def merge_into(
         self,
