@@ -24,7 +24,7 @@ class IterGraph(fx.Graph):
     IterGraph subclass fx.Graph to override the necessary APIs that will be used
     when constructing a optimization, e.g., communication fusion. IterGraph also
     provides APIs that originally belong to fx.Node and all these APIs will have
-    ``node_`` prefix. For example, ``IterGraph.node_prepend`` is the equivalance
+    ``node_`` prefix. For example, ``IterGraph.node_prepend`` is the equivalence
     of ``fx.Node.prepend``. Note that all the optimizations must be constructed
     using these APIs.
     """
@@ -111,12 +111,12 @@ class IterGraph(fx.Graph):
         looks similar to SESE graph.
 
         1. Only one node has inputs/args from the external nodes (not in subgraph).
-        2. Only one node has a user from the the external nodes and the user must
+        2. Only one node has a user from the external nodes and the user must
            be output. The output condition is not strictly enforced due to the
            testing purpose.
 
         SESE graph is very restrict and is not applicable for all optimizations.
-        But this gives a good start point to explor cross-iteration optimizations.
+        But this gives a good start point to explore cross-iteration optimizations.
         """
         all_nodes: Set[fx.Node] = set(subgraph)
         for i, node in enumerate(subgraph):
@@ -127,7 +127,7 @@ class IterGraph(fx.Graph):
                     return False
             if i == len(subgraph) - 1:
                 # TODO: the only user must be the output. Otherwise, we don't
-                # know how to move this subgraph. We currently do not stricly
+                # know how to move this subgraph. We currently do not strictly
                 # force this attribute because some test code create fake output.
                 if len(node.users) > 1:
                     return False
@@ -176,7 +176,7 @@ class IterGraph(fx.Graph):
             )
 
         # The main graph must be the last one to be modified. Otherwise, the
-        # mapping may change and hence intorduce incorrect mapping for setup
+        # mapping may change and hence introduce incorrect mapping for setup
         # and cleanup graphs.
 
         # For the setup graph, no additional input is needed but additional
@@ -188,7 +188,7 @@ class IterGraph(fx.Graph):
 
         # For the cleanup graph, additional input is required to get the output
         # from the last iteration -- main graph. Additional nodes are also
-        # needed to perform the action moved from the last itertion.
+        # needed to perform the action moved from the last iteration.
         new_input_node = self.cleanup_graph.placeholder(nodes[0].name + "_input")
         target_cleanup_node = self._lookup_node(target_node, self.cleanup_graph)
         assert target_cleanup_node is not None, "The target_cleanup_node is None."
@@ -449,7 +449,7 @@ class IterGraph(fx.Graph):
 
     def functionalize_optim(self) -> None:
         # IterGraph can only support full graph (fwd+bwd+optim). As optimizer
-        # is not a functional call (it is inplace op), this mehod adds the of
+        # is not a functional call (it is inplace op), this method adds the of
         # the optimizer call. This method has strong assumption of the optimizer
         # and may not always be working. This method is intended be a temporary
         # solution only.
