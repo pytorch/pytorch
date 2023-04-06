@@ -1176,10 +1176,7 @@ def wrap_to_fake_tensor_and_record(
                 # Precedence: export constraints > eager constraints
                 constraint = dim2constraint.get(i)
                 if constraint is None:
-                    if (
-                        marked_dynamic
-                        and not config.allow_ignore_mark_dynamic
-                    ):
+                    if marked_dynamic and not config.allow_ignore_mark_dynamic:
                         constraint = RelaxedUnspecConstraint()
                 constraint_dims.append(constraint)
 
@@ -1189,11 +1186,7 @@ def wrap_to_fake_tensor_and_record(
                     # seems better to allow the user to override policy in this
                     # case
                     dynamic = DimDynamic.DYNAMIC
-                elif (
-                    static_shapes or
-                    config.assume_static_by_default or
-                    marked_static
-                ):
+                elif static_shapes or config.assume_static_by_default or marked_static:
                     dynamic = DimDynamic.STATIC
                 else:
                     dynamic = DimDynamic.DUCK
