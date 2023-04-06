@@ -34,7 +34,7 @@ def dl_open_guard():
 
 class OperatorBase:
     """
-    Base class for OpOverload (which represents C++ ATen operators) and PyOperator
+    Base class for OpOverload (which represents C++ ATen operators) and HigherOrderOperator
     (which represents Python-only operators that are unrepresentable in TorchScript).
     """
 
@@ -53,7 +53,7 @@ class OperatorBase:
         # NB: This name is hard-coded in torch/csrc/autograd/python_variable.cpp
         # for use with OpOverload; cache lookup is done entirely from C++
         # for speed.
-        # TODO: The cache is NOT currently used by PyOperator, but it should!
+        # TODO: The cache is NOT currently used by HigherOrderOperator, but it should!
         self._dispatch_cache: Dict[
             torch._C.DispatchKey, Union[torch._C.DispatchKey, Callable[..., Any]]
         ] = {}
@@ -81,7 +81,7 @@ class OperatorBase:
 
         # This table allows you to override the behavior of functorch
         # transformations.  NB: this currently only does something for
-        # PyOperator
+        # HigherOrderOperator
         self.functorch_table = {}
 
     def __call__(self, *args, **kwargs):
@@ -189,7 +189,7 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
 pyop_namespace = {}
 
 
-class PyOperator(OperatorBase):
+class HigherOrderOperator(OperatorBase):
     def __init__(self, name):
         super().__init__()
         self._name = name
@@ -228,7 +228,7 @@ class PyOperator(OperatorBase):
         final_key = resolve_key(self, dispatch_key)
 
         # This can current fail due to backend fallbacks.  You just have to
-        # register them by hand for PyOperator.
+        # register them by hand for HigherOrderOperator.
         assert final_key in self.py_kernels, f"{dispatch_key} -> {final_key}"
         self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         kernel = self.py_kernels[final_key]
