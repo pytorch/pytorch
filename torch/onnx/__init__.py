@@ -111,14 +111,6 @@ producer_version = _C_onnx.PRODUCER_VERSION
     since="1.12.0", removed_in="2.0", instructions="use `torch.onnx.export` instead"
 )
 def _export(*args, **kwargs):
-    """ For testing purpose. Check bad example docstring fails in CI.
-
-    Example::
-
-        # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
-        >>> 1 + 1
-        3
-    """
     return utils._export(*args, **kwargs)
 
 
