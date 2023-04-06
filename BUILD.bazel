@@ -1630,7 +1630,6 @@ cc_library(
         ":caffe2",
         ":torch_headers",
         "//caffe2/proto:torch_cc_proto",
-        "//c10/core/impl/cow:enable_instrumentation",
         "//c10/core/impl/cow:spy",
         "@kineto",
     ] + if_cuda([

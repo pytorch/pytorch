@@ -652,7 +652,6 @@ class TestCommon(TestCase):
             for i, (t, n) in enumerate(zip(t_grads, n_grads)):
                 self.assertEqual(t, n, msg=msg.format(i))
 
-    @unittest.skipIf(not torch._C._enable_cow_instrumentation(), "copy on write not instrumented")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))

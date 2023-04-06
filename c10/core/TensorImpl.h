@@ -518,15 +518,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class;
  *    tensor is fully initialized in all fields.  Please do not write new code
  *    that depends on these uninitialized states.
  */
-struct C10_API TensorImpl
-    : public c10::intrusive_ptr_target,
-      // Use the empty base class optimization because the
-      // ShadowStorageMixin is allowed to be toggled with a compiler
-      // flag. If it is off, it will add nothing to TensorImpl's size.
-      //
-      // See c10/core/impl/cow/README.md for a detailed description of
-      // what shadow storage is.
-      public impl::cow::ShadowStorageMixin {
+struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
   ~TensorImpl() override;
   // Note [Enum ImplType]
@@ -590,13 +582,6 @@ struct C10_API TensorImpl
   // Private constructor for lazily copying/viewing tensors.
   explicit TensorImpl(
       const TensorImpl& that,
-      intrusive_ptr<impl::cow::ShadowStorage> shadow_storage);
-
-  // Real constructor used by lazy-copy and view constructors.
-  TensorImpl(
-      Storage&& storage,
-      DispatchKeySet,
-      const caffe2::TypeMeta data_type,
       intrusive_ptr<impl::cow::ShadowStorage> shadow_storage);
 
  public:
@@ -2273,7 +2258,9 @@ struct C10_API TensorImpl
     device_opt_ = storage_.device();
     // We have a new storage, so any prior shadow storage we have is
     // no longer valid.
-    shadow_storage_ref().reset();
+    if (has_shadow_storage_) {
+      shadow_storage_ref().reset();
+    }
   }
 
   void set_storage_and_dtype(
@@ -2822,6 +2809,17 @@ struct C10_API TensorImpl
   // nothing.
   void maybe_bump_copy_on_write_generation();
 
+ private:
+  const impl::cow::ShadowStorage* shadow_storage() const;
+  impl::cow::ShadowStorage* mutable_shadow_storage() const;
+  c10::intrusive_ptr<impl::cow::ShadowStorage> shadow_storage_ptr();
+  const c10::intrusive_ptr<impl::cow::ShadowStorage>& shadow_storage_ref()
+      const;
+  c10::intrusive_ptr<impl::cow::ShadowStorage>& shadow_storage_ref();
+
+  const void* shadow_storage_address() const;
+  void* mutable_shadow_storage_address();
+
  protected:
   Storage storage_;
 
@@ -2909,6 +2907,7 @@ struct C10_API TensorImpl
     layout_policy_ = false;
     storage_access_should_throw_ = false;
     has_symbolic_sizes_strides_ = false;
+    has_shadow_storage_ = false;
   }
 
   // Tensor is contiguous
@@ -2999,6 +2998,8 @@ struct C10_API TensorImpl
 
   // Call into Python for layout()
   bool python_custom_layout_ : 1;
+
+  bool has_shadow_storage_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but

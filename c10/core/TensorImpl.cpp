@@ -104,17 +104,6 @@ TensorImpl::TensorImpl(
 // the Python and PythonTLSSnapshot dispatch keys will be set and all is well.
 // The point is to delay the dispatch key setting until that point.
 
-TensorImpl::TensorImpl(
-    ImplType type,
-    Storage&& storage,
-    DispatchKeySet key_set,
-    const caffe2::TypeMeta data_type)
-    : TensorImpl(
-          std::move(storage),
-          key_set,
-          data_type,
-          /*shadow_storage=*/nullptr) {}
-
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     DispatchKeySet key_set,
@@ -128,8 +117,7 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
     c10::optional<c10::Device> device_opt)
-    : ShadowStorageMixin(nullptr),
-      storage_(std::move(storage)),
+    : storage_(std::move(storage)),
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
@@ -179,20 +167,22 @@ TensorImpl::TensorImpl(
 TensorImpl::TensorImpl(
     const TensorImpl& that,
     intrusive_ptr<impl::cow::ShadowStorage> shadow_storage)
-    : TensorImpl(
-          Storage(that.storage()),
-          that.key_set(),
-          that.dtype(),
-          std::move(shadow_storage)) {}
+    : TensorImpl(Storage(that.storage()), that.key_set(), that.dtype()) {
+  if (shadow_storage == nullptr) {
+    return;
+  }
+  new (mutable_shadow_storage_address())
+      intrusive_ptr<impl::cow::ShadowStorage>(std::move(shadow_storage));
+  has_shadow_storage_ = true;
+}
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
+    ImplType type,
     Storage&& storage,
     DispatchKeySet key_set,
-    const caffe2::TypeMeta data_type,
-    intrusive_ptr<impl::cow::ShadowStorage> shadow_storage)
+    const caffe2::TypeMeta data_type)
     : intrusive_ptr_target(),
-      ShadowStorageMixin(std::move(shadow_storage)),
       storage_(std::move(storage)),
       numel_(0),
       data_type_(data_type),
@@ -206,14 +196,28 @@ TensorImpl::TensorImpl(
 }
 
 intrusive_ptr<TensorImpl> TensorImpl::take_view() const {
-  return make_intrusive<TensorImpl>(*this, shadow_storage_ref());
+  if (has_shadow_storage_) {
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    void* allocation = std::malloc(
+        sizeof(TensorImpl) + sizeof(intrusive_ptr<impl::cow::ShadowStorage>));
+    new (allocation) TensorImpl(*this, shadow_storage_ref());
+    return intrusive_ptr<TensorImpl>::unsafe_steal_from_new(
+        reinterpret_cast<TensorImpl*>(allocation));
+  } else {
+    return make_intrusive<TensorImpl>(*this, nullptr);
+  }
 }
 
 intrusive_ptr<TensorImpl> TensorImpl::simulate_copy_on_write() const {
-  return make_intrusive<TensorImpl>(
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+  void* allocation(std::malloc(
+      sizeof(TensorImpl) + sizeof(intrusive_ptr<impl::cow::ShadowStorage>)));
+  new (allocation) TensorImpl(
       *this,
       storage_.unsafeGetStorageImpl()->simulate_copy_on_write(
-          shadow_storage()));
+          mutable_shadow_storage()));
+  return intrusive_ptr<TensorImpl>::unsafe_steal_from_new(
+      reinterpret_cast<TensorImpl*>(allocation));
 }
 
 void TensorImpl::_change_backend_component_keys(c10::Device device) {
@@ -1287,7 +1291,56 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
 
 void TensorImpl::maybe_bump_copy_on_write_generation() {
   storage_.unsafeGetStorageImpl()->maybe_bump_copy_on_write_generation(
-      shadow_storage());
+      mutable_shadow_storage());
+}
+
+const impl::cow::ShadowStorage* TensorImpl::shadow_storage() const {
+  if (!has_shadow_storage_) {
+    return nullptr;
+  }
+  return &*shadow_storage_ref();
+}
+
+impl::cow::ShadowStorage* TensorImpl::mutable_shadow_storage() const {
+  if (!has_shadow_storage_) {
+    return nullptr;
+  }
+  return &*shadow_storage_ref();
+}
+
+c10::intrusive_ptr<impl::cow::ShadowStorage> TensorImpl::shadow_storage_ptr() {
+  if (!has_shadow_storage_) {
+    return nullptr;
+  }
+  return shadow_storage_ref();
+}
+
+const c10::intrusive_ptr<impl::cow::ShadowStorage>& TensorImpl::
+    shadow_storage_ref() const {
+  TORCH_INTERNAL_ASSERT(has_shadow_storage_);
+  auto& ret =
+      *reinterpret_cast<const c10::intrusive_ptr<impl::cow::ShadowStorage>*>(
+          shadow_storage_address());
+  TORCH_INTERNAL_ASSERT(ret != nullptr);
+  return ret;
+}
+
+c10::intrusive_ptr<impl::cow::ShadowStorage>& TensorImpl::shadow_storage_ref() {
+  TORCH_INTERNAL_ASSERT(has_shadow_storage_);
+  auto& ret = *reinterpret_cast<c10::intrusive_ptr<impl::cow::ShadowStorage>*>(
+      mutable_shadow_storage_address());
+  TORCH_INTERNAL_ASSERT(ret != nullptr);
+  return ret;
+}
+
+const void* TensorImpl::shadow_storage_address() const {
+  auto* allocation = reinterpret_cast<const std::byte*>(this);
+  return allocation + sizeof(*this);
+}
+
+void* TensorImpl::mutable_shadow_storage_address() {
+  auto* allocation = reinterpret_cast<std::byte*>(this);
+  return allocation + sizeof(*this);
 }
 
 namespace impl {

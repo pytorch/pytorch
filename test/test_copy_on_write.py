@@ -6,7 +6,6 @@ import pytest
 
 import torch
 
-@pytest.mark.skipif(not torch._C._enable_cow_instrumentation(), reason="requires lazy-copy instrumentation")
 def test_copy_on_write_warns():
     t = torch.ones(4)
     u = t.reshape(2, 2)
@@ -26,7 +25,6 @@ def test_copy_on_write_warns():
     with pytest.warns(UserWarning, match='You have written through to both aliases created by calling reshape().'):
         u.add_(torch.ones(4).view(2, 2))
 
-@pytest.mark.skipif(not torch._C._enable_cow_instrumentation(), reason="requires lazy-copy instrumentation")
 def test_copy_on_write():
     t = torch.ones(4)
     assert torch._C._get_shadow_storage_generation(t) is None

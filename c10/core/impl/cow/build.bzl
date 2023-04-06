@@ -1,11 +1,5 @@
 def define_targets(rules):
     rules.cc_library(
-        name = "enable_instrumentation",
-        hdrs = ["enable_instrumentation.h"],
-        visibility = ["//:__pkg__"],  # for module torch._C
-    )
-
-    rules.cc_library(
         name = "shadow_storage",
         srcs = ["shadow_storage.cpp"],
         hdrs = ["shadow_storage.h"],
