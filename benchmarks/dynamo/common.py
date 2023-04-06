@@ -10,6 +10,7 @@ import itertools
 import logging
 import os
 import random
+import re
 import signal
 import subprocess
 import sys
@@ -170,11 +171,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
     "OPTForCausalLM",  # OOM
-    # TIMM
-    "cait_m36_384",  # Accuracy
-    "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "xcit_large_24_p8_224",  # TIMEOUT
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -233,15 +229,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "MT5ForConditionalGeneration",  # fails accuracy
-    # TIMM
-    "convit_base",  # fp64_OOM
-    "eca_halonext26ts",  # accuracy
-    "fbnetv3_b",  # accuracy
-    "levit_128",  # fp64_OOM
-    # https://github.com/pytorch/pytorch/issues/94066
-    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
-    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
-    "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
 # Skips for dynamic=True
@@ -1029,6 +1016,7 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
+        self.model_names = None
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
         self.optimizer = None
@@ -1126,17 +1114,20 @@ class BenchmarkRunner:
             equal_nan = False
         return equal_nan
 
-    def iter_models(self, args):
-        for model_name in self.iter_model_names(args):
-            for device in args.devices:
-                try:
-                    yield self.load_model(
-                        device,
-                        model_name,
-                        batch_size=args.batch_size,
-                    )
-                except NotImplementedError:
-                    continue  # bad benchmark implementation
+    def iter_model_names(self, args):
+        start, end = self.get_benchmark_indices(len(self.model_names))
+        for index, model_name in enumerate(self.model_names):
+            if index < start or index >= end:
+                continue
+            if (
+                not re.search("|".join(args.filter), model_name, re.I)
+                or re.search("|".join(args.exclude), model_name, re.I)
+                or model_name in args.exclude_exact
+                or model_name in self.skip_models
+            ):
+                continue
+
+            yield model_name
 
     def validate_model(self, model, example_inputs):
         """
@@ -2087,14 +2078,6 @@ def run(runner, args, original_dir=None):
                 "hf_Longformer",
                 "timm_nfnet",
                 "timm_efficientdet",
-                # timm
-                "beit_base_patch16_224",
-                "cait_m36_384",
-                "convmixer_768_32",
-                "deit_base_distilled_patch16_224",
-                "dm_nfnet_f0",
-                "dpn107",
-                "dm_nfnet_f0",
             }
         )
         if args.training:
