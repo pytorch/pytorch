@@ -83,6 +83,13 @@ def gh_add_labels(
     )
 
 
+def gh_remove_label(org: str, repo: str, pr_num: int, label: str) -> None:
+    gh_fetch_json(
+        f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels/{label}",
+        method="DELETE",
+    )
+
+
 def get_release_notes_labels(org: str, repo: str) -> List[str]:
     return [
         label

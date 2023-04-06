@@ -39,7 +39,12 @@ from gitutils import (
     GitRepo,
     patterns_to_regex,
 )
-from label_utils import gh_add_labels, has_required_labels, LABEL_ERR_MSG
+from label_utils import (
+    gh_add_labels,
+    gh_remove_label,
+    has_required_labels,
+    LABEL_ERR_MSG,
+)
 from trymerge_explainer import get_revert_message, TryMergeExplainer
 
 
@@ -1038,6 +1043,9 @@ class GitHubPR:
                 label = f"{label_base}X{i+2}"
         gh_add_labels(self.org, self.project, self.pr_num, [label])
 
+    def remove_label(self, label: str) -> None:
+        gh_remove_label(self.org, self.project, self.pr_num, label)
+
     def merge_into(
         self,
         repo: GitRepo,
@@ -1983,7 +1991,7 @@ def main() -> None:
         message += '\nIf those updates are intentional, please add "submodule" keyword to PR title/description.'
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
-
+    pr.add_numbered_label("merging")
     try:
         merge(
             args.pr_num,
@@ -2020,6 +2028,7 @@ def main() -> None:
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
+    pr.remove_label("merging")
 
 
 if __name__ == "__main__":

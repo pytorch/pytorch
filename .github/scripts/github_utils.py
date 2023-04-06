@@ -48,6 +48,9 @@ def gh_fetch_url(
                 Remaining: {err.headers['X-RateLimit-Remaining']}
                 Resets at: {err.headers['x-RateLimit-Reset']}"""
             )
+        elif err.code == 404:
+            # if we don't find anything just return nothing
+            return None
         raise
 
 
@@ -55,6 +58,7 @@ def gh_fetch_json(
     url: str,
     params: Optional[Dict[str, Any]] = None,
     data: Optional[Dict[str, Any]] = None,
+    method: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     headers = {"Accept": "application/vnd.github.v3+json"}
     if params is not None and len(params) > 0:
@@ -63,7 +67,7 @@ def gh_fetch_json(
         )
     return cast(
         List[Dict[str, Any]],
-        gh_fetch_url(url, headers=headers, data=data, reader=json.load),
+        gh_fetch_url(url, headers=headers, data=data, reader=json.load, method=method),
     )
 
 
@@ -127,4 +131,10 @@ def gh_post_commit_comment(
 
 def gh_delete_comment(org: str, repo: str, comment_id: int) -> None:
     url = f"https://api.github.com/repos/{org}/{repo}/issues/comments/{comment_id}"
-    gh_fetch_url(url, method="DELETE")
+    # gh_fetch_url(url, method="DELETE")
+    print(
+        cast(
+            List[Dict[str, Any]],
+            [],
+        )
+    )
