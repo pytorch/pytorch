@@ -1031,7 +1031,7 @@ class GitHubPR:
         return msg
 
     def add_numbered_label(self, label_base: str) -> None:
-        labels = self.get_labels()
+        labels = self.get_labels() if self.labels is not None else []
         full_label = label_base
         count = 0
         for label in labels:
