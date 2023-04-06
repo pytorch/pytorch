@@ -574,6 +574,8 @@ aten::affine_grid_generator
 aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
+aten::all_gather_into_tensor
+aten::all_reduce
 aten::allclose
 aten::angle
 aten::angle.out
@@ -1068,6 +1070,7 @@ aten::range.out
 aten::range.out_
 aten::range.step
 aten::record_stream
+aten::reduce_scatter_tensor
 aten::reflection_pad1d
 aten::reflection_pad1d.out
 aten::reflection_pad1d_backward
@@ -1338,6 +1341,7 @@ aten::view_copy
 aten::view_copy.dtype
 aten::view_copy.dtype_out
 aten::view_copy.out
+aten::wait_tensor
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out
