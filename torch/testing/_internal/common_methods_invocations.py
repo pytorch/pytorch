@@ -9251,11 +9251,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
-                    supports_sparse=True,
-                    supports_sparse_csr=True,
-                    supports_sparse_csc=True,
-                    supports_sparse_bsr=True,
-                    supports_sparse_bsc=True,
+                    # Specifying sample input function for sparse layout implies the sparse layout support:
                     sample_inputs_sparse_coo_func=partial(sample_inputs_elementwise_binary_operation_sparse,
                                                           layout=torch.sparse_coo),
                     sample_inputs_sparse_csr_func=partial(sample_inputs_elementwise_binary_operation_sparse,
@@ -13388,6 +13384,21 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
+            # https://github.com/pytorch/pytorch/issues/98431
+            # ROCM fails with Device-side assertion `target_val >= zero && target_val <= one' failed
+            # even though sample inputs for target are generated with low=0 and high=1
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFwdGradients",
+                "test_fn_fwgrad_bwgrad",
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestBwdGradients",
+                "test_fn_grad",
+                active_if=TEST_WITH_ROCM,
+            )
         ),
         skips=(
             # RuntimeError: expected int at position 0, but got: Tensor
@@ -19282,9 +19293,10 @@ python_ref_db = [
             # Reference result was farther (1.3343989849090576e-05)
             # from the precise computation than the torch result
             # was (9.592622518539429e-06)!
-            DecorateInfo(unittest.skip("Unstable expected failure. Skipped!"), 'TestCommon', 'test_python_ref',
+            # FIXME: enable dtype-based tolerances in test_ops.py:TestCommon._ref_test_helper
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.float16,), device_type="cpu"),
-            DecorateInfo(unittest.skip("Unstable expected failure. Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.float16,), device_type="cpu"),
         ),
     ),

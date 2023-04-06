@@ -314,7 +314,11 @@ class SizeVarAllocator:
             expr = sympy_subs(expr, self.inv_precomputed_replacements)
             free_symbols = expr.free_symbols
         out = sympy_subs(expr, self.var_to_val)
-        return int(out)
+        try:
+            return int(out)
+        except Exception:
+            log.warning(f"failed on: {out}")
+            raise
 
     def size_hints(self, exprs: List[Expr]) -> int:
         return tuple(self.size_hint(x) for x in exprs)
