@@ -1698,8 +1698,8 @@ class TritonScheduling:
 
     def define_kernel(self, src_code, node_schedule):
         wrapper = V.graph.wrapper_code
-        if src_code in wrapper.src_to_kernel:
-            kernel_name = wrapper.src_to_kernel[src_code]
+        if src_code in wrapper.kernels:
+            kernel_name = wrapper.kernels[src_code]
         else:
             fused_name = (
                 get_fused_kernel_name(node_schedule)
@@ -1710,8 +1710,7 @@ class TritonScheduling:
             kernel_name = "_".join(
                 ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
             )
-            # use the original src_code as the key
-            wrapper.src_to_kernel[src_code] = kernel_name
+            wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
 
@@ -1719,9 +1718,7 @@ class TritonScheduling:
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
 
-            basename, _, kernel_path = get_code_path(src_code, "py", extra="")
-            wrapper.kernel_to_hash[kernel_name] = basename
-
+            _, _, kernel_path = get_code_path(src_code, "py", extra="")
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline("async_compile.triton('''")
             compile_wrapper.splice(src_code, strip=True)

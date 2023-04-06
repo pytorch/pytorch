@@ -8,8 +8,8 @@ BlenderbotForCausalLM,0
 BlenderbotSmallForCausalLM,0
 BlenderbotSmallForConditionalGeneration,0
 CamemBert,0
-DebertaForMaskedLM,0
-DebertaForQuestionAnswering,0
+DebertaForMaskedLM,47
+DebertaForQuestionAnswering,47
 DebertaV2ForMaskedLM,0
 DistilBertForMaskedLM,0
 DistilBertForQuestionAnswering,0
