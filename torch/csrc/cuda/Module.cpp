@@ -2,6 +2,14 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <unordered_set>
+#include <c10/core/Device.h>
+#include <c10/core/TensorImpl.h>
+#include <c10/util/Optional.h>
+#include <ATen/core/TensorBody.h>
+#include <ATen/EmptyTensor.h>
+#include <pybind11/pytypes.h>
+#include <torch/csrc/utils/python_arg_parser.h>
+
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
@@ -884,6 +892,20 @@ static void registerCudaDeviceProperties(PyObject* module) {
       });
 }
 
+
+inline at::ScalarType scalartype(PyObject* obj) {
+  if (obj == (PyObject*)&PyFloat_Type) {
+    return at::ScalarType::Double;
+  }
+  if (obj == (PyObject*)&PyBool_Type) {
+    return at::ScalarType::Bool;
+  }
+  if (obj == (PyObject*)&PyLong_Type) {
+    return at::ScalarType::Long;
+  }
+  return reinterpret_cast<THPDtype*>(obj)->scalar_type;
+}
+
 // We choose to ignore certain blocks that are currently allocated
 // when we set the pool to its checkpoint. For those blocks, we need
 // to swap out the deleter function of their corresponding blocks
@@ -1058,6 +1080,114 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     auto data_ptr = storage_impl->data_ptr().get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
+
+  m.def("_Tensor_Weak_Ref", [](at::Tensor t) {
+    size_t ptr = reinterpret_cast<size_t>(c10::raw::intrusive_ptr::make_weak(t.unsafeGetTensorImpl()));
+    return ptr;
+  });
+
+
+  m.def("_Storage_Test", [](c10::Storage s) {
+    return s.nbytes();
+  });
+
+
+  m.def("_Tensor_New_With_Ptr", [](size_t ptr) {
+    // auto t_ptr = reinterpret_cast<c10::TensorImpl*>(ptr);
+    // auto tensor_impl = c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(t_ptr);
+    // if (true && tensor_impl.get() != at::UndefinedTensorImpl::singleton()) {
+    //   c10::raw::intrusive_ptr::incref(tensor_impl.get());
+    // }
+    // return at::Tensor(std::move(tensor_impl));
+    auto t_ptr = reinterpret_cast<c10::TensorImpl*>(ptr);
+    auto t_lock = c10::raw::weak_intrusive_ptr::lock(t_ptr);
+    TORCH_CHECK(t_lock);
+    auto tensor = c10::intrusive_ptr<at::TensorImpl>::reclaim(t_lock);
+    return at::Tensor(tensor);
+  });
+
+  m.def("_Tensor_Free_Ref", [](size_t ptr) {
+    auto t_ptr = reinterpret_cast<c10::TensorImpl*>(ptr);
+    c10::raw::weak_intrusive_ptr::decref(t_ptr);
+  });
+
+  m.def("_Tensor_Expired", [](size_t ptr) {
+    auto t_ptr = reinterpret_cast<c10::TensorImpl*>(ptr);
+    return c10::raw::weak_intrusive_ptr::use_count(t_ptr) == 0;
+  });
+
+    // const std::vector<c10::optional<c10::Storage>>& storages,
+    // const std::vector<c10::optional<py::dict>>& metadatas) {
+
+
+  m.def("_map_Storage_Refs", [](
+    const py::sequence& outputs,
+    const py::list& outputs_persistent_storage,
+    py::list output_refs,
+    py::list output_data_ptrs) {
+
+      TORCH_CHECK(outputs.size() == outputs_persistent_storage.size());
+
+      for (size_t i = 0, end = outputs.size(); i < end; ++i) {
+        if (!outputs_persistent_storage[i].is_none() || outputs[i].is_none()) {
+          output_refs.append(py::none());
+          output_data_ptrs.append(py::none());
+          continue;
+        }
+
+        auto t = outputs[i].cast<at::Tensor>();
+        c10::StorageImpl* storage = t.storage().unsafeGetStorageImpl();
+        auto weak = c10::raw::intrusive_ptr::make_weak(storage);
+        output_refs.append(reinterpret_cast<size_t>(weak));
+        output_data_ptrs.append(reinterpret_cast<size_t>(storage->data_ptr().get()));
+      }
+  });
+
+
+
+  m.def("_construct_Tensors_From_Storage_and_Metadata", [](
+    const py::list& storages,
+    const py::list& metadatas,
+    py::list& outputs) {
+
+      TORCH_CHECK(storages.size() == metadatas.size());
+      for (size_t i = 0, end = storages.size(); i < end; ++i) {
+          const auto& maybe_metadata = metadatas[i];
+
+          if (maybe_metadata.is_none()) {
+              outputs.append(py::none());
+              continue;
+          }
+
+          const py::dict& metadata = maybe_metadata.cast<py::dict>();
+          c10::Storage s;
+          if (storages[i].is_none()) {
+            s = c10::Storage(
+              c10::Storage::use_byte_size_t(),
+              metadata["nbytes"].cast<int64_t>(),
+              at::DataPtr(reinterpret_cast<void*>(metadata["data_ptr"].cast<size_t>()),
+              metadata["device"].cast<c10::Device>())
+            );
+          } else if (py::isinstance<py::int_>(storages[i])) {
+            s = outputs[storages[i].cast<int64_t>()].cast<at::Tensor>().storage();
+          } else {
+            s = storages[i].cast<c10::Storage>();
+          }
+
+          auto dtype_arg = metadata["dtype"].ptr();
+          auto meta = scalarTypeToTypeMeta(scalartype(dtype_arg));
+
+          constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
+          at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(
+            std::move(s), cuda_dks, meta
+          );
+
+          tensor.unsafeGetTensorImpl()->set_sizes_and_strides(metadata["size"].cast<std::vector<int64_t>>(), metadata["stride"].cast<std::vector<int64_t>>());
+          tensor.unsafeGetTensorImpl()->set_storage_offset(metadata["storage_offset"].cast<int64_t>());
+          outputs.append(std::move(tensor));
+      }
+  });
+
 
   m.def(
       "_cuda_beginAllocateCurrentStreamToPool",
