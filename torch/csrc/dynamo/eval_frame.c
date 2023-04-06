@@ -537,8 +537,6 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   }
 
   PyObject* valid = PyTuple_GetItem(result, 0);
-
-  Py_DECREF(valid);
   if (valid == Py_True) {
     // Keep the head as the most recently used cache entry.
     // If the hit cache entry is not the head of the linked list,
@@ -553,6 +551,8 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   }
   // valid == False
   PyObject* fail_code_part = PyTuple_GetItem(result, 1);
+  Py_INCREF(fail_code_part);
+  Py_DECREF(result);
   *code_part = fail_code_part;
   PyObject* lookup_result = lookup(e->next, frame, e, index + 1, code_part);
   return lookup_result;
