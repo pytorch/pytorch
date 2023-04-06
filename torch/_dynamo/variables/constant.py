@@ -136,9 +136,8 @@ class ConstantVariable(VariableTracker):
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        options = VariableTracker.propagate(self)
         result = hasattr(self.value, name)
-        return variables.ConstantVariable(result, **options)
+        return variables.ConstantVariable(result).add_options(self)
 
 
 class EnumVariable(VariableTracker):

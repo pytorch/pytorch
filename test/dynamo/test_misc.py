@@ -1078,7 +1078,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_constant_getattr(self):
         # https://github.com/pytorch/pytorch/issues/97480
         def fn():
-            return getattr(None, 'arg', 3)
+            return getattr(None, "arg", 3)
 
         cnt = torch._dynamo.testing.CompileCounter()
         optimized_fn = torch._dynamo.optimize(cnt)(fn)
