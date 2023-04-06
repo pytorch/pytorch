@@ -612,6 +612,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return d1["a"] + d2["c"] + 1
 
     @make_test
+    def test_call_dict6(x):
+        return dict(x=x+1)
+
+    @make_test
     def test_min_max(a, b):
         c = a + b
         a = a.sum()

@@ -2626,20 +2626,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    def test_call_dict_kwargs(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = torch.randn(4)
-
-            def forward(self, x):
-                outputs = torch.sin(x) + torch.cos(self.a)
-                return dict(x=x, outputs=outputs)
-
-        with self.assertNoLogs(logger="torch._dynamo", level=logging.WARNING):
-            foo = torch.compile(Foo())
-            foo(torch.randn(4))
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
