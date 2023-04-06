@@ -3174,6 +3174,13 @@ def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout
         if sample_input.input.ndim == 0:
             # scalar sparse tensors are not supported
             continue
+        if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+            if sample_input.input.ndim < 2:
+                # conversion to sparse compressed tensors requires at
+                # least 2 dimensional tensors
+                continue
+        if layout in {torch.sparse_bsr, torch.sparse_bsc} and blocksize is None:
+            blocksize = (1, 1)
 
         yield SampleInput(
             sample_input.input.detach().to_sparse(layout=layout,
