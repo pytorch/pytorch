@@ -13,6 +13,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyObjectSlot.h>
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/core/impl/cow/shadow_storage.h>
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
@@ -26,6 +27,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -62,6 +64,10 @@ struct Storage;
 } // namespace c10
 
 namespace c10 {
+
+namespace impl::cow {
+class Spy; // for friendship
+} // namespace impl::cow
 
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
@@ -512,7 +518,15 @@ class C10_TensorImpl_Size_Check_Dummy_Class;
  *    tensor is fully initialized in all fields.  Please do not write new code
  *    that depends on these uninitialized states.
  */
-struct C10_API TensorImpl : public c10::intrusive_ptr_target {
+struct C10_API TensorImpl
+    : public c10::intrusive_ptr_target,
+      // Use the empty base class optimization because the
+      // ShadowStorageMixin is allowed to be toggled with a compiler
+      // flag. If it is off, it will add nothing to TensorImpl's size.
+      //
+      // See c10/core/impl/cow/README.md for a detailed description of
+      // what shadow storage is.
+      public impl::cow::ShadowStorageMixin {
   TensorImpl() = delete;
   ~TensorImpl() override;
   // Note [Enum ImplType]
@@ -573,7 +587,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       const caffe2::TypeMeta data_type,
       c10::optional<c10::Device>);
 
+  // Private constructor for lazily copying/viewing tensors.
+  explicit TensorImpl(
+      const TensorImpl& that,
+      intrusive_ptr<impl::cow::ShadowStorage> shadow_storage);
+
+  // Real constructor used by lazy-copy and view constructors.
+  TensorImpl(
+      Storage&& storage,
+      DispatchKeySet,
+      const caffe2::TypeMeta data_type,
+      intrusive_ptr<impl::cow::ShadowStorage> shadow_storage);
+
  public:
+  // Takes a view of this tensor.
+  intrusive_ptr<TensorImpl> take_view() const;
+  // Simulates creating a lazy copy of this tensor.
+  intrusive_ptr<TensorImpl> simulate_copy_on_write() const;
+
   TensorImpl(const TensorImpl&) = delete;
   TensorImpl& operator=(const TensorImpl&) = delete;
   TensorImpl(TensorImpl&&) = delete;
@@ -2240,6 +2271,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         err_msg_tensor_metadata_change_not_allowed);
     storage_ = std::move(storage);
     device_opt_ = storage_.device();
+    // We have a new storage, so any prior shadow storage we have is
+    // no longer valid.
+    shadow_storage_ref().reset();
   }
 
   void set_storage_and_dtype(
@@ -2782,6 +2816,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     layout_policy_ = custom_layout_ || python_custom_layout_;
   }
 
+ public:
+  // Bumps the copy on write generation of the storage and the shadow
+  // storage, if a copy on write is being simulated. Otherwise, does
+  // nothing.
+  void maybe_bump_copy_on_write_generation();
+
  protected:
   Storage storage_;
 
@@ -2969,6 +3009,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   DispatchKeySet key_set_;
 
  private:
+  // We friend intrusive_ptr so that we may create an instance using a
+  // private constructor.
+  friend class intrusive_ptr<TensorImpl>;
+
+  // We friend this due to the temporary nature of the copy-on-write
+  // simulation, and so that we don't have any long-term accessors to
+  // what is logically private copy-on-write implementation details.
+  friend class impl::cow::Spy;
+
   // C10_TensorImpl_Size_Check_Dummy_Class needs to be friends with
   // TensorImpl so it can inspect the size of private fields
   template <

@@ -481,8 +481,15 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
                 unpacked_args=redispatch_args,
             )
         )
-        for r in cpp.return_names(f):
+        modified_args = cpp.return_names(f)
+        for r in modified_args:
             inplace_view_body.append(f"increment_version({r});")
+
+        # Add a statement to materialize any copy on write tensors. Because autograd is
+        # in a unique position to know which tensors are getting mutated in an operator,
+        # we insert this check here.
+        materialize_statement = f'torch::autograd::simulate_materialize_copies_on_write({{{", ".join(modified_args)}}});'
+        inplace_view_body = [materialize_statement] + inplace_view_body
     else:
         assert get_view_info(f) is not None
         inplace_view_body.append(

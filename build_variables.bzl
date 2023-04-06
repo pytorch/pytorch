@@ -103,6 +103,7 @@ jit_core_sources = [
 # list for the shared files.
 
 core_sources_common = [
+    "torch/csrc/autograd/VariableTypeUtils.cpp",
     "torch/csrc/autograd/autograd_meta.cpp",
     "torch/csrc/autograd/forward_grad.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
@@ -1019,6 +1020,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/VariableHooksInterface.cpp",
     "aten/src/ATen/core/Vitals.cpp",
     "aten/src/ATen/core/boxing/KernelFunction.cpp",
+    "aten/src/ATen/core/copy_on_write.cpp",
     "aten/src/ATen/core/custom_class.cpp",
     "aten/src/ATen/core/dispatch/DispatchKeyExtractor.cpp",
     "aten/src/ATen/core/dispatch/Dispatcher.cpp",

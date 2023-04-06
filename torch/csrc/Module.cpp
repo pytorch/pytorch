@@ -17,6 +17,9 @@
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/cow/enable_instrumentation.h>
+#include <c10/core/impl/cow/shadow_storage.h>
+#include <c10/core/impl/cow/spy.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
@@ -1642,6 +1645,40 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_BUILD_ABI), Py_None));
 #endif
 #undef SET_STR_DEFINE
+
+  py_module.def(
+      "_enable_cow_instrumentation",
+      [] { return c10::impl::cow::enable_instrumentation(); },
+      "Returns whether or not we are simulating copy-on-write tensors.");
+
+  py_module.def(
+      "_has_same_shadow_storage",
+      [](const at::Tensor& x, const at::Tensor& y) {
+        return c10::impl::cow::Spy::get_shadow_storage(
+                   *x.unsafeGetTensorImpl()) ==
+            c10::impl::cow::Spy::get_shadow_storage(*y.unsafeGetTensorImpl());
+      },
+      "Returns whether or not two tensors have the same shadow storages.");
+
+  py_module.def(
+      "_get_shadow_storage_generation",
+      [](const at::Tensor& x) -> std::optional<std::uint64_t> {
+        auto shadow_storage =
+            c10::impl::cow::Spy::get_shadow_storage(*x.unsafeGetTensorImpl());
+        return shadow_storage != nullptr
+            ? std::make_optional(
+                  const_cast<c10::impl::cow::ShadowStorage&>(*shadow_storage)
+                      .generation())
+            : std::nullopt;
+      },
+      "Gets the shadow storage generation.");
+
+  py_module.def(
+      "_get_storage_generation",
+      [](const at::Tensor& x) {
+        return c10::impl::cow::Spy::get_generation(x.storage());
+      },
+      "Gets the generation of the underlying storage.");
 
   py_module.def(
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });

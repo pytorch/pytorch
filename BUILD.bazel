@@ -332,6 +332,7 @@ intern_build_aten_ops(
     extra_impls = aten_ufunc_generated_cpu_kernel_sources("aten/src/ATen/{}"),
     deps = [
         ":aten_headers",
+        "//c10",
         "@fbgemm",
         "@mkl",
         "@sleef",
@@ -1629,6 +1630,8 @@ cc_library(
         ":caffe2",
         ":torch_headers",
         "//caffe2/proto:torch_cc_proto",
+        "//c10/core/impl/cow:enable_instrumentation",
+        "//c10/core/impl/cow:spy",
         "@kineto",
     ] + if_cuda([
         "@cuda//:nvToolsExt",

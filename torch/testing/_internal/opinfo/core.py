@@ -1,7 +1,9 @@
 import collections
 import collections.abc
+import functools
 import math
 import operator
+import typing
 import unittest
 from dataclasses import asdict, dataclass
 from enum import Enum
@@ -12,7 +14,7 @@ from typing import Any, Callable, Iterable, List, Optional, Tuple
 from torchgen.utils import dataclass_repr
 
 import torch
-from torch.testing import make_tensor
+from torch.testing import assert_close, make_tensor
 from torch.testing._internal.common_device_type import (
     skipCPUIfNoFFT,
     tol,
@@ -304,6 +306,35 @@ cannot specify additional metadata in keyword arguments"""
             return t
 
         return self.transform(to_noncontiguous)
+
+    def lazy_copy(self):
+        """Maps the sample inputs so we have a lazily copied arg."""
+
+        T = typing.TypeVar("T")
+
+        @functools.singledispatch
+        def to_lazy_copy(arg: T) -> T:
+            return arg
+
+        @to_lazy_copy.register
+        def _(t: torch.Tensor) -> torch.Tensor:
+            if t.is_sparse_csr:  # Sparse CSR tensors do not have strides
+                return t
+            assert torch._C._get_shadow_storage_generation(t) is None
+            ret = t.reshape(t.size())
+            assert torch._C._get_shadow_storage_generation(ret) is not None
+            assert_close(t, ret, equal_nan=True)
+            to_lazy_copy.made_lazy_copy = True
+            return ret
+
+        # Store this in the function because we can't capture this with a closure.
+        to_lazy_copy.made_lazy_copy = False
+
+        ret = self.transform(to_lazy_copy)
+        if not to_lazy_copy.made_lazy_copy:
+            # We didn't create any special inputs, so no need to run this test.
+            raise unittest.SkipTest("no tensor inputs to create lazy copies of")
+        return ret
 
 
 NumericsFilter = collections.namedtuple("NumericsFilter", ["condition", "safe_val"])

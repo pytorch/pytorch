@@ -940,8 +940,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self,
                                  IntArrayRef stride,
                                  c10::optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto result =
-      detail::make_tensor<TensorImpl>(c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+  auto result = Tensor::wrap_tensor_impl(self.unsafeGetTensorImpl()->take_view());
   setStrided(result, size, stride, storage_offset);
 
   // creating the view graph will be deferred until gatherViewTensor() or scatterViewTensor() are called.
