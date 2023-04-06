@@ -67,9 +67,7 @@ def get_selected_kernel_dtypes_code(
     ):
         body_parts = []
         for kernel_tag, dtypes in selective_builder.kernel_metadata.items():
-            conditions = list(
-                map(lambda x: "scalar_type == at::ScalarType::" + x, dtypes)
-            )
+            conditions = ["scalar_type == at::ScalarType::" + x for x in dtypes]
             body_parts.append(
                 if_condition_template.substitute(
                     kernel_tag_name=kernel_tag,

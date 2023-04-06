@@ -5,6 +5,7 @@ import gc
 import importlib
 import sys
 import unittest
+import warnings
 
 import torch
 
@@ -100,6 +101,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             config.triton.cudagraphs = True
             config.triton.cudagraph_trees = True
             self.device_idx = torch.rand([0], device="cuda").device.index
+            warnings.filterwarnings("ignore")
 
         def tearDown(self):
             super().tearDown()
@@ -109,6 +111,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             config.triton.cudagraph_trees = self.tapes_enabled
             self.assertIsNone(self.get_manager())
             self.assertEqual(all_live_block_count(), 0)
+            warnings.resetwarnings()
 
         def get_manager(self, device_index=None):
             return torch._inductor.cudagraph_trees.get_container(
@@ -533,6 +536,34 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             test()
             self.assertTrue(self.get_manager(device_index=1) is None)
+
+        def test_warnings_on_dealloc(self):
+            @torch.compile()
+            def foo(x):
+                return x * x * x
+
+            inp = torch.rand([4], device="cuda")
+            out = foo(inp)
+            warnings.resetwarnings()
+            with warnings.catch_warnings(record=True) as w:
+                foo(inp)
+
+            self.assertTrue(len(w) == 1)
+            self.assertTrue("x * x * x" in str(w[0]))
+
+        def test_single_stream_use(self):
+            @torch.compile()
+            def foo(x):
+                return (x * x * x).relu()
+
+            inp = torch.rand([4], device="cuda", requires_grad=True)
+            streams = set()
+
+            for _ in range(3):
+                foo(inp).sum().backward()
+
+            streams = {seg["stream"] for seg in get_all_cudagraph_segments()}
+            self.assertEqual(len(streams), 1)
 
         def test_forward_generation(self):
             def foo(x):

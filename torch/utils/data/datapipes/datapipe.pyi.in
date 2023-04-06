@@ -3,7 +3,7 @@
 # Note that, for mypy, .pyi file takes precedent over .py file, such that we must define the interface for other
 # classes/objects here, even though we are not injecting extra code into them at the moment.
 
-from typing import Any, Callable, Dict, Generic, Iterator, Optional, TypeVar
+from typing import Any, Callable, Dict, Generic, Iterator, List, Literal, Optional, TypeVar, Union
 
 from torch.utils.data import Dataset, default_collate, IterableDataset
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
