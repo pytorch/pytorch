@@ -6,7 +6,6 @@ from typing import Optional
 import torch
 import torch.fx
 from torch._subclasses import fake_tensor
-from torch.fx._compatibility import compatibility
 from torch.fx.experimental import proxy_tensor
 from torch.fx.node import map_aggregate
 from torch.nn.utils import stateless
@@ -19,7 +18,11 @@ class ShapeInferenceWithFakeTensor(_pass.Transform):
     @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         assert not kwargs, "`kwargs` is not supported."
-        module = self.module
+
+        # NOTE: torch.fx.Transformer makes a copy of the graph only but shares weights
+        # with the original module.
+        module = torch.fx.Transformer(self.module).transform()
+
         # NOTE(titaiwang): Usually fx graph should have all the node meta value we need,
         # so we don't have to run FakeTensorProp to fill in node meta values. However, this
         # can be used to validate op-level debugging when we only have symbolic shapes in
@@ -50,15 +53,20 @@ class ShapeInferenceWithFakeTensor(_pass.Transform):
         # Shape inference via FakeTensorProp
         with stateless._reparametrize_module(module, fake_parameters_and_buffers):
             # Assign output types and shapes to each node without meta values.
-            ValidationFakeProp(module, fake_tensor_mode).propagate(*args)
-        return module
+            FakeTensorPropGetStaticShapes(module, fake_tensor_mode).propagate(*args)
+
+        # NOTE: Embed the `nodes with static shape`` into original node metadata
+        for node, node_with_static_shapes in zip(
+            self.module.graph.nodes, module.graph.nodes
+        ):
+            node.meta["node_with_static_shape"] = node_with_static_shapes
+        return self.module
 
 
-@compatibility(is_backward_compatible=False)
-class ValidationFakeProp(torch.fx.Interpreter):
+class FakeTensorPropGetStaticShapes(torch.fx.Interpreter):
     """
     This is heavily referenced from torch.fx.passes.fake_tensor_prop.FakeTensorProp
-    The only difference is that ValidationFakeProp supports int/float/bool in
+    The only difference is that FakeTensorPropGetStaticShapes supports int/float/bool in
     node.meta["val"]
 
     Args:
