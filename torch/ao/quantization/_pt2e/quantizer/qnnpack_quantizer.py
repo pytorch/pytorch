@@ -230,7 +230,10 @@ class QNNPackQuantizer(Quantizer):
     @classmethod
     def get_supported_operator_for_operator_spec(cls, operator_spec: Optional[OperatorSpec]) -> List[str]:
         if operator_spec is None:
-            return [op for op in ops for _, ops in cls.supported_spec_and_operators]
+            all_ops = []
+            for _, ops in cls.supported_spec_and_operators:
+                all_ops.extend(ops)
+            return all_ops
 
         for spec, ops in cls.supported_spec_and_operators:
             # note: this assumes each entry in cls.supported_spec_and_operators
@@ -289,6 +292,7 @@ class QNNPackQuantizer(Quantizer):
             return
         relu_node = node
         conv_node = relu_node.args[0]
+        assert isinstance(conv_node, Node)
         if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
             return
         if _is_annotated([relu_node, conv_node]):
@@ -335,9 +339,11 @@ class QNNPackQuantizer(Quantizer):
         if addmm_node.op != "call_function" or addmm_node.target != torch.ops.aten.addmm.default:
             return
         view_node = addmm_node.args[1]
+        assert isinstance(view_node, Node)
         if view_node.op != "call_function" or view_node.target != torch.ops.aten.view.default:
             return
         t_node = addmm_node.args[2]
+        assert isinstance(t_node, Node)
         if t_node.op != "call_function" or t_node.target != torch.ops.aten.t.default:
             return
         if _is_annotated([addmm_node, view_node, t_node]):
@@ -369,6 +375,7 @@ class QNNPackQuantizer(Quantizer):
             return
         getitem_node = node
         maxpool_node = getitem_node.args[0]
+        assert isinstance(maxpool_node, Node)
         if maxpool_node.op != "call_function" or maxpool_node.target != torch.ops.aten.max_pool2d_with_indices.default:
             return
         if _is_annotated([getitem_node, maxpool_node]):
@@ -391,6 +398,7 @@ class QNNPackQuantizer(Quantizer):
             return
         relu_node = node
         add_node = relu_node.args[0]
+        assert isinstance(add_node, Node)
         if add_node.op != "call_function" or add_node.target not in [torch.ops.aten.add.Tensor, torch.ops.aten.add_.Tensor]:
             return
         if _is_annotated([relu_node, add_node]):
