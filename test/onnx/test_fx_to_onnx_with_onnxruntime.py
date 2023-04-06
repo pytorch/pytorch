@@ -514,11 +514,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
-        "1. flaky test: https://github.com/microsoft/onnx-script/issues/523. "
-        "Fixed in ORT==1.15"
-        "2. [ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while "
-        "running Concat node. Name:'Concat_203' Status Message: concat.cc:104 "
-        "PrepareForCompute Cannot concatenate scalars"
+        "flaky test: https://github.com/microsoft/onnx-script/issues/523. Fixed in ORT==1.15"
     )
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -541,7 +537,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_args=[],
             model_kwargs=inputs,
         ).export()
-
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
         ort_outputs = _run_ort(onnx_model, (input_ids, attention_mask))
         assert len(ref_outputs) == len(ort_outputs)

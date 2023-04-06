@@ -141,20 +141,22 @@ def _retrieve_or_adapt_input_to_graph_set(
         # is dynamic, each dimension would be variable (i.e., sym variable in Pytorch
         # FX graph. Note that sym variable is mapped to tensor in ONNX Script world)
         # calculated by other operators.
-        sequence_elements: List[Union[torch.Value, Tuple[torch._C.Value, ...]]] = []
+        sequence_elements: List[Union[graph_building.TorchScriptTensor, torch.Tensor]] = []  # type: ignore[no-redef]
         for tensor in onnx_tensor:
             if isinstance(tensor, torch.fx.Node) and isinstance(
                 tensor.meta["val"], torch.SymInt
             ):
                 sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
-            else:
-                sequence_elements.append(tensor)
+            elif isinstance(tensor, int):
+                # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
+                # dim, and onnx-script will promote it to tensot(int64)
+                sequence_elements.append([tensor])
         # Concat all the elements in the sequence.
         # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
         # so list of sym_ints is concatenated to a tensor before calling ONNX op.
 
         # For example:
-        #    inputs: [2, 4, fx.Node(SymIntA), 1, fx.Node(SymIntB)]
+        #    inputs: [[2], [4], fx.Node(SymIntA), [1], fx.Node(SymIntB)]
         #    outputs: op.Concat([op.Constant(2), op.Constant(4), TorchScriptTensor(A), op.Constant(1), TorchScriptTensor(B)])
 
         # onnx-script auto wraps python number with op.Constants,
@@ -164,7 +166,7 @@ def _retrieve_or_adapt_input_to_graph_set(
     elif isinstance(onnx_tensor, (tuple, list)) and all(
         isinstance(node, torch.fx.Node) for node in onnx_tensor
     ):
-        sequence_elements: List[Union[torch.Value, Tuple[torch._C.Value, ...]]] = []  # type: ignore[no-redef]
+        sequence_elements: List[Union[graph_building.TorchScriptTensor, Tuple[graph_building.TorchScriptTensor, ...]]] = []  # type: ignore[no-redef]
         for tensor in onnx_tensor:
             sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
         return sequence_elements
