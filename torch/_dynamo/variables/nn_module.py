@@ -644,13 +644,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        # TODO mlazos: only support __call__ for lazy modules
-        # until we can support a larger swath of python
-        if is_lazy_module(self.value) and self.source:
-            name = "__call__"
-        else:
-            name = "forward"
-
+        name = "__call__"
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
