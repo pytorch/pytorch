@@ -6,6 +6,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
+import functools
 import inspect
 import itertools
 import random
@@ -26,11 +27,6 @@ import torch._dynamo.utils
 import torch._functorch.config
 import torch.library
 
-try:
-    from test_minifier import requires_cuda
-except ImportError:
-    from .test_minifier import requires_cuda
-
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
@@ -44,6 +40,11 @@ _orig_module_call = torch.nn.Module.__call__
 lib = torch.library.Library("test_sample", "DEF")
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
+
+
+requires_cuda = functools.partial(
+    unittest.skipIf, not torch.cuda.is_available(), "requires cuda"
+)
 
 
 def is_fx_tracing_test() -> bool:
@@ -1434,6 +1435,42 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    def test_nullcontext1(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x, ctx):
+            x = x.sin()
+            with ctx:
+                x = x.cos()
+            x = x.sin()
+            return x
+
+        y = torch.randn(10)
+        self.assertTrue(same(fn(y, contextlib.nullcontext()), y.sin().cos().sin()))
+
+    def test_nullcontext2(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x, ctx):
+            x = x.sin()
+            with ctx():
+                x = x.cos()
+            x = x.sin()
+            return x
+
+        y = torch.randn(10)
+        self.assertTrue(same(fn(y, contextlib.nullcontext), y.sin().cos().sin()))
+
+    def test_no_grad_inline(self):
+        @torch.no_grad()
+        def a(x):
+            return x.sin()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def b(x):
+            return a(x).cos()
+
+        y = torch.randn(10)
+        self.assertTrue(same(b(y), y.sin().cos()))
+
     # AssertionError: ABCMeta
     @unittest.expectedFailure
     def test_numpy_list(self):
@@ -1494,6 +1531,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.ops.aten.absolute(x)
 
         fn(torch.randn(3))
+
+    def test_hf_gelu_inline(self):
+        class GELUActivation(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.act = nn.functional.gelu
+
+            def forward(self, input):
+                return self.act(input)
+
+        @torch._dynamo.optimize("eager", nopython=True)
+        def fn(x):
+            return GELUActivation()(x)
+
+        y = torch.randn(10)
+        self.assertTrue(same(fn(y), nn.functional.gelu(y)))
+
+        @torch._dynamo.optimize("eager", nopython=True)
+        def fn_returns(x):
+            return GELUActivation(), x + 1
+
+        act, _ = fn_returns(y)
+        self.assertIsInstance(act, GELUActivation)
+        self.assertIs(act.act, nn.functional.gelu)
+        self.assertTrue(hasattr(act, "_buffers"))  # check that __init__ got called
 
     def test_torch_tensor_ops(self):
         def fn(x):
@@ -2425,6 +2487,67 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(x2, y), opt_f(x2, y)))
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_dict_subclass_contains(self):
+        # pattern from huggingface
+        class ClassInstantier(collections.OrderedDict):
+            pass
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x, d):
+            if "key1" in d:
+                x = x + 2
+            if "key2" in d:
+                x = x + 4
+            x = x + 8
+            return x
+
+        result = f(torch.ones(8), ClassInstantier({"key1": torch.ones(8)}))
+        self.assertTrue(same(result, torch.full([8], 11.0)))
+
+        result = f(torch.ones(8), ClassInstantier({"key2": torch.ones(8)}))
+        self.assertTrue(same(result, torch.full([8], 13.0)))
+
+    def test_hf_classinstantier(self):
+        # hf activations.py
+        class ClassInstantier(collections.OrderedDict):
+            def __getitem__(self, key):
+                content = super().__getitem__(key)
+                cls, kwargs = content if isinstance(content, tuple) else (content, {})
+                return cls(**kwargs)
+
+        ACT2CLS = ClassInstantier(
+            {
+                "relu": (nn.ReLU, {"inplace": False}),
+                "tanh": nn.Tanh,
+            }
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x, act):
+            return ACT2CLS[act](x)
+
+        y = torch.randn(10)
+        self.assertTrue(same(f(y, "tanh"), torch.tanh(y)))
+        self.assertTrue(same(f(y, "relu"), torch.relu(y)))
+
+    def test_ephemeral_module(self):
+        # hf activations.py
+        class ReLUSquaredActivation(nn.Module):
+            def forward(self, input):
+                relu_applied = torch.nn.functional.relu(input)
+                squared = torch.square(relu_applied)
+                return squared
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            x = x + 0.2
+            x = ReLUSquaredActivation()(x)
+            x = x + 1
+            return x
+
+        y = torch.randn(10)
+        self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
         class Repro(torch.nn.Module):
@@ -2482,6 +2605,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue(same(buffer_ref, buffer_test))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_dynamic_shapes_right_side(self):
         def f(x):
             return torch.ones(5 * x.shape[0])
@@ -2577,6 +2701,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):
             return torch.split(x, x.shape[0] // 2, dim=0)[0]
@@ -2624,6 +2749,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_odict_get_item_index_name(self):
+        d = {float: torch.float32, np.float16: torch.float16}
+
+        @torch.compile
+        def f(x, y1, y2):
+            return torch.zeros(5, dtype=d[y1]), torch.zeros(5, dtype=d[y2])
+
+        f(torch.zeros(4), float, np.float16)
 
 
 if __name__ == "__main__":

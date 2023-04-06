@@ -40,6 +40,8 @@ at::DeprecatedTypeProperties* get_type_properties(
     backend = at::Backend::CUDA;
   } else if (device_type == at::kXPU) {
     backend = at::Backend::XPU;
+  } else if (device_type == at::kHPU) {
+    backend = at::Backend::HPU;
   } else if (device_type == at::kMPS) {
     backend = at::Backend::MPS;
   } else if (device_type == at::DeviceType::Meta) {
