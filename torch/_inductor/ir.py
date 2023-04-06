@@ -22,6 +22,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import identity
 from torch._prims_common import (
+    compute_required_storage_length,
     is_boolean_dtype,
     is_float_dtype,
     make_channels_last_strides_for,
@@ -1697,7 +1698,7 @@ class Layout(IRNode):
         )
 
     def storage_size(self) -> sympy.Expr:
-        return sympy_dot(self.size, self.stride) + self.offset
+        return compute_required_storage_length(self.size, self.stride, self.offset)
 
 
 class FixedLayout(Layout):

@@ -526,12 +526,15 @@ class IterationRangesRoot(IterationRanges):
     def ranges_code(self):
         size = self.kernel.indexing_size_str(self.index, self.prefix)
         index_dtype = self.kernel.index_dtype
-        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}.to({index_dtype})"
+        convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
+        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}{convert}"
 
-    def pid_cache_lookup(self, key):
-        if key in self.pid_cache:
-            return self.pid_cache[key]
-        return key
+    def get_pid(self):
+        key = f"tl.program_id({self.index})"
+        pid = self.pid_cache.get(key, key)
+        if self.kernel.index_dtype != "tl.int32":
+            return f"{pid}.to({self.kernel.index_dtype})"
+        return pid
 
     def codegen_header(self, code):
         x = self.prefix
@@ -543,11 +546,9 @@ class IterationRangesRoot(IterationRanges):
                 f"{self.name} = {self.ranges_code()}",
             )
         else:
-            pid = self.pid_cache_lookup(f"tl.program_id({self.index})")
-            index_dtype = self.kernel.index_dtype
             code.writelines(
                 [
-                    f"{x}offset = {pid}.to({index_dtype}) * {x.upper()}BLOCK",
+                    f"{x}offset = {self.get_pid()} * {x.upper()}BLOCK",
                     f"{self.name} = {x}offset + {self.ranges_code()}",
                 ]
             )
@@ -922,12 +923,10 @@ class TritonKernel(Kernel):
 
         if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             if copy_shape:
-                index_str = (
-                    f"{index_str} + tl.zeros({copy_shape}.shape, {self.index_dtype})"
-                )
+                index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
                 expand_str = f"{copy_shape}.shape"
             else:
-                index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, {self.index_dtype})"
+                index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
                 expand_str = self.dense_size_str()
             if isinstance(index, sympy.Integer):
                 return index_str, set(), "None", expand_str
@@ -935,9 +934,7 @@ class TritonKernel(Kernel):
                 mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
             mask_vars = dense_mask_vars
-            index_str = (
-                f"{index_str} + tl.zeros({copy_shape}.shape, {self.index_dtype})"
-            )
+            index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
 
         if override_mask:
             mask_vars = {override_mask}
@@ -1143,8 +1140,8 @@ class TritonKernel(Kernel):
                 self.suffix.writelines(
                     [
                         f"{accumulator_index}_reduce = "
-                        f"tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}].to({idx_dtype})",
-                        f"{accumulator_index}_mask = tl.arange(0, {reduction_range_prefix.upper()}BLOCK).to({idx_dtype})"
+                        f"tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}].to(tl.int32)",
+                        f"{accumulator_index}_mask = tl.arange(0, {reduction_range_prefix.upper()}BLOCK)"
                         f"[{', '.join(reduction_sizes)}] == {accumulator_index}_reduce",
                         f"{result_var} = tl.sum("
                         f"tl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim})[{', '.join(sizes)}]",
