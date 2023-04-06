@@ -1072,6 +1072,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def large_mem_models(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 

@@ -69,14 +69,13 @@ BATCH_SIZE_DIVISORS = {
 
 REQUIRE_HIGHER_TOLERANCE = {"botnet26t_256"}
 
-SKIP = set()
-
 NONDETERMINISTIC = {
     # https://github.com/pytorch/pytorch/issues/94066
     "sebotnet33ts_256",
 }
 
 REQUIRE_MORE_THAN_24GB = {
+    "convit_base",  # fp64_OOM
     "xcit_large_24_p8_224",
 }
 
@@ -184,10 +183,6 @@ class TimmRunnner(BenchmarkRunner):
         super().__init__()
         self.suite_name = "timm_models"
         self.model_names = sorted(TIMM_MODELS.keys())
-
-    @property
-    def skip_models(self):
-        return SKIP
 
     @property
     def large_mem_models(self):

@@ -4,7 +4,6 @@ beit_base_patch16_224,pass,9
 botnet26t_256,pass,11
 cait_m36_384,fp64_OOM,0
 coat_lite_mini,pass,9
-convit_base,fp64_OOM,0
 convmixer_768_32,pass,6
 convnext_base,pass,9
 crossvit_9_240,pass,9

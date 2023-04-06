@@ -72,11 +72,15 @@ def get_artifacts_urls(results, suites):
     return urls
 
 
-def normalize_suite_filename(suite_name):
+def normalize_suite_filename(suite_name, for_csv=False):
     assert suite_name.find("inductor_") == 0
-    subsuite = suite_name.split("_")[1]
+    if for_csv:
+        subsuite = suite_name.replace("inductor_", "")
+    else:
+        subsuite = suite_name.split("_")[1]
+
     if "timm" in subsuite:
-        subsuite = f"{subsuite}_models"
+        subsuite = subsuite.replace("timm", "timm_models")
     return subsuite
 
 
@@ -103,7 +107,7 @@ def download_artifacts_and_extract_csvs(urls):
 
 def write_filtered_csvs(root_path, dataframes):
     for (suite, phase), df in dataframes.items():
-        suite_fn = normalize_suite_filename(suite)
+        suite_fn = normalize_suite_filename(suite, for_csv=True)
         out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
         df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
 
@@ -119,8 +123,11 @@ if __name__ == "__main__":
     repo = "pytorch/pytorch"
     suites = {
         "inductor_huggingface",
+        "inductor_huggingface_dynamic",
         "inductor_timm",
+        "inductor_timm_dynamic",
         "inductor_torchbench",
+        "inductor_torchbench_dynamic",
     }
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"
