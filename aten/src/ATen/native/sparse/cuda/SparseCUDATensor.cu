@@ -1,13 +1,26 @@
-#include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/core/Tensor.h>
+#include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/ThrustAllocator.h>
+#include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
+#include <ATen/native/cuda/SortingCommon.cuh>
+#include <ATen/native/NonSymbolicBC.h>
+#include <ATen/native/SparseTensorUtils.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/accumulate.h>
 
-#include <THC/THCThrustAllocator.cuh>
-#include <THC/THCTensorSort.cuh>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_coalesce_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
@@ -16,20 +29,20 @@
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include <thrust/system/cuda/execution_policy.h>
 #include <thrust/transform.h>
 #include <thrust/unique.h>
 #include <thrust/system/cuda/execution_policy.h>
+#include <thrust/binary_search.h>
 #include <c10/macros/Macros.h>
 
 namespace at { namespace native {
 
 using namespace at::sparse;
 
-SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
+SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
-  if (self.is_coalesced()) {
-    return self;
-  }
+  TORCH_INTERNAL_ASSERT(!self.is_coalesced());
   // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (nnz < 2) {
@@ -39,7 +52,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
   // Replace instances with
 
@@ -52,10 +65,10 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 
   // indices will be modified by Thrust, so we have to clone or use new storage
   // here.
-  LongTensor indices1D = flatten_indices(self._indices(), self.sizes(), true);
+  Tensor indices1D = flatten_indices(self._indices(), self.sizes(), true);
 
-  LongTensor origIndices = at::empty({nnz}, self._indices().options());
-  LongTensor uniqueOffsets = at::empty({nnz}, self._indices().options());
+  Tensor origIndices = at::empty({nnz}, self._indices().options());
+  Tensor uniqueOffsets = at::empty({nnz}, self._indices().options());
 
   typedef thrust::device_ptr<int64_t> thrust_ptr;
   thrust_ptr indicesIter(indices1D.data_ptr<int64_t>());
@@ -72,7 +85,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 
   thrust::sort_by_key(policy,
     indicesIter, indicesIter + nnz,
-    origIndicesIter, ThrustLTOp<int64_t>()
+    origIndicesIter, LTOp<int64_t>()
   );
 
   // this forces device-host synchronization!
@@ -91,23 +104,24 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   if (newValues.numel() > 0) {
     const int SZ = 4;
     values = values.contiguous();
-    int64_t stride = at::prod_intlist(values.sizes().slice(1));
-    dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) C10_WARP_SIZE*SZ));
-    dim3 block(C10_WARP_SIZE, SZ);
-    AT_DISPATCH_ALL_TYPES_AND2(
-      at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "coalesce_sparse_cuda", [&] {
-          using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
-          apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-            uniqueOffsets.data_ptr<int64_t>(),
-            origIndices.data_ptr<int64_t>(),
-            values.data_ptr<scalar_t>(),
-            newValues.data_ptr<scalar_t>(),
-            nnz,
-            newNnz,
-            stride
-          );
-        });
+    int64_t stride = c10::multiply_integers(values.sizes().slice(1));
+    int warp_size = at::cuda::warp_size();
+    dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) warp_size*SZ));
+    dim3 block(warp_size, SZ);
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      at::ScalarType::ComplexHalf, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
+      values.scalar_type(), "coalesce_sparse_cuda", [&] {
+        using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
+        apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
+          uniqueOffsets.data_ptr<int64_t>(),
+          origIndices.data_ptr<int64_t>(),
+          values.data_ptr<scalar_t>(),
+          newValues.data_ptr<scalar_t>(),
+          nnz,
+          newNnz,
+          stride
+        );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   }
 
@@ -115,8 +129,8 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // to different sizes
   // int64_t blockX = min(stride, (int64_t) 512);
   // dim3 block(blockX, 512 / blockX);
-  // int64_t grid = min((int64_t) 1024, THCCeilDiv((int64_t) newNnz * stride, (int64_t) block.x * block.y));
-  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream>>>(
+  // int64_t grid = min((int64_t) 1024, ceil_div((int64_t) newNnz * stride, (int64_t) block.x * block.y));
+  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream> >>(
   //   THCIndexTensor_(data)(state, uniqueOffsets),
   //   THCIndexTensor_(data)(state, origIndices),
   //   THCTensor_(data)(state, values),
@@ -125,22 +139,20 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   //   newNnz,
   //   stride
   // );
+  // C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ////////////////////////////////////////////////////////////
   // unflatten indices if necessary
-  LongTensor newIndices;
+  Tensor newIndices;
   if (sparse_dim == 1) {
     newIndices = indices1D;
   } else {
     newIndices = at::empty({sparse_dim, newNnz}, origIndices.options());
     for (int64_t d = sparse_dim - 1; d >= 0; d--) {
       // NB: Not a select, so I can preserve the outer dimension
-      LongTensor indicesSlice = newIndices.narrow(0, d, 1);
-      // Note for the porting guide: THCTensor_(copy) does NOT do normal
-      // broadcasting logic; instead, it will blast the elements from one
-      // to the other so long as the numel is the same
+      Tensor indicesSlice = newIndices.narrow(0, d, 1);
       indicesSlice.copy_(indices1D);
-      indices1D.floor_divide_(self.size(d));
+      indices1D.divide_(self.size(d), "trunc");
       indicesSlice.add_(indices1D, -self.size(d));
     }
   }
@@ -150,7 +162,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // duplicates.
   SparseTensor dst = ::at::native::_sparse_coo_tensor_unsafe(newIndices, newValues, self.sizes())._coalesced_(true);
 
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return dst;
 }
 

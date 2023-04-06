@@ -38,7 +38,6 @@ import threading
 import atexit
 import time
 import collections
-import six
 import traceback
 
 from abc import ABCMeta, abstractmethod
@@ -85,7 +84,7 @@ def init_workers(
     return global_coordinator
 
 
-class Metrics(object):
+class Metrics:
     def __init__(self, external_loggers):
         self._metrics = collections.defaultdict(lambda: 0)
         self._external_loggers = external_loggers
@@ -110,7 +109,7 @@ class Metrics(object):
 
 
 class State():
-    six.add_metaclass(ABCMeta)
+    __metaclass__ = ABCMeta
 
     @abstractmethod
     def start(self):
@@ -125,7 +124,7 @@ class State():
         pass
 
 
-class WorkerCoordinator(object):
+class WorkerCoordinator:
     def __init__(
         self, worker_name, worker_ids, init_fun,
         state=None, shutdown_fun=None
@@ -192,7 +191,7 @@ class WorkerCoordinator(object):
         return self._worker_ids
 
 
-class GlobalWorkerCoordinator(object):
+class GlobalWorkerCoordinator:
     def __init__(self):
         self._coordinators = []
         self._fetcher_id_seq = 0
@@ -249,7 +248,7 @@ class GlobalWorkerCoordinator(object):
         atexit.register(cleanup)
 
 
-class Worker(object):
+class Worker:
     def __init__(
         self,
         coordinator,

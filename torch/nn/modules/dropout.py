@@ -3,6 +3,7 @@ from .. import functional as F
 
 from torch import Tensor
 
+__all__ = ['Dropout', 'Dropout1d', 'Dropout2d', 'Dropout3d', 'AlphaDropout', 'FeatureAlphaDropout']
 
 class _DropoutNd(Module):
     __constants__ = ['p', 'inplace']
@@ -10,7 +11,7 @@ class _DropoutNd(Module):
     inplace: bool
 
     def __init__(self, p: float = 0.5, inplace: bool = False) -> None:
-        super(_DropoutNd, self).__init__()
+        super().__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
@@ -58,6 +59,48 @@ class Dropout(_DropoutNd):
         return F.dropout(input, self.p, self.training, self.inplace)
 
 
+class Dropout1d(_DropoutNd):
+    r"""Randomly zero out entire channels (a channel is a 1D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 1D tensor :math:`\text{input}[i, j]`).
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
+
+    Usually the input comes from :class:`nn.Conv1d` modules.
+
+    As described in the paper
+    `Efficient Object Localization Using Convolutional Networks`_ ,
+    if adjacent pixels within feature maps are strongly correlated
+    (as is normally the case in early convolution layers) then i.i.d. dropout
+    will not regularize the activations and will otherwise just result
+    in an effective learning rate decrease.
+
+    In this case, :func:`nn.Dropout1d` will help promote independence between
+    feature maps and should be used instead.
+
+    Args:
+        p (float, optional): probability of an element to be zero-ed.
+        inplace (bool, optional): If set to ``True``, will do this operation
+            in-place
+
+    Shape:
+        - Input: :math:`(N, C, L)` or :math:`(C, L)`.
+        - Output: :math:`(N, C, L)` or :math:`(C, L)` (same shape as input).
+
+    Examples::
+
+        >>> m = nn.Dropout1d(p=0.2)
+        >>> input = torch.randn(20, 16, 32)
+        >>> output = m(input)
+
+    .. _Efficient Object Localization Using Convolutional Networks:
+       https://arxiv.org/abs/1411.4280
+    """
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.dropout1d(input, self.p, self.training, self.inplace)
+
+
 class Dropout2d(_DropoutNd):
     r"""Randomly zero out entire channels (a channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -82,9 +125,16 @@ class Dropout2d(_DropoutNd):
         inplace (bool, optional): If set to ``True``, will do this operation
             in-place
 
+    .. warning ::
+        Due to historical reasons, this class will perform 1D channel-wise dropout
+        for 3D inputs (as done by :class:`nn.Dropout1d`). Thus, it currently does NOT
+        support inputs without a batch dimension of shape :math:`(C, H, W)`. This
+        behavior will change in a future release to interpret 3D inputs as no-batch-dim
+        inputs. To maintain the old behavior, switch to :class:`nn.Dropout1d`.
+
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Output: :math:`(N, C, H, W)` (same shape as input)
+        - Input: :math:`(N, C, H, W)` or :math:`(N, C, L)`.
+        - Output: :math:`(N, C, H, W)` or :math:`(N, C, L)` (same shape as input).
 
     Examples::
 
@@ -125,8 +175,8 @@ class Dropout3d(_DropoutNd):
             in-place
 
     Shape:
-        - Input: :math:`(N, C, D, H, W)`
-        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`.
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input).
 
     Examples::
 
@@ -185,14 +235,14 @@ class AlphaDropout(_DropoutNd):
 
 
 class FeatureAlphaDropout(_DropoutNd):
-    r"""Randomly masks out entire channels (a channel is a feature map, 
-    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input 
-    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of 
-    setting activations to zero, as in regular Dropout, the activations are set 
+    r"""Randomly masks out entire channels (a channel is a feature map,
+    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
+    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of
+    setting activations to zero, as in regular Dropout, the activations are set
     to the negative saturation value of the SELU activation function. More details
     can be found in the paper `Self-Normalizing Neural Networks`_ .
 
-    Each element will be masked independently for each sample on every forward 
+    Each element will be masked independently for each sample on every forward
     call with probability :attr:`p` using samples from a Bernoulli distribution.
     The elements to be masked are randomized on every forward call, and scaled
     and shifted to maintain zero mean and unit variance.
@@ -215,8 +265,8 @@ class FeatureAlphaDropout(_DropoutNd):
             in-place
 
     Shape:
-        - Input: :math:`(N, C, D, H, W)`
-        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`.
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input).
 
     Examples::
 

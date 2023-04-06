@@ -28,13 +28,8 @@ class NCCLContext {
       // get stream priorities
       int lo_pri, hi_pri;
       CUDA_ENFORCE(cudaDeviceGetStreamPriorityRange(&lo_pri, &hi_pri));
-#ifndef __HIP_PLATFORM_HCC__
       CUDA_ENFORCE(cudaStreamCreateWithPriority(
           &streams_[i], cudaStreamNonBlocking, hi_pri));
-#else
-      CUDA_ENFORCE(cudaStreamCreateWithFlags(
-          &streams_[i], cudaStreamNonBlocking));
-#endif // __HIP_PLATFORM_HCC__
       CUDA_ENFORCE(cudaEventCreateWithFlags(
           &events_[i], cudaEventDefault | cudaEventDisableTiming));
     }
@@ -96,7 +91,7 @@ NCCLContext* getNCCLContext(const NCCLExecution& ex) {
     LOG(INFO) << "Creating NCCLContext for key: " << key;
     contexts[key].reset(new NCCLContext(ex));
   }
-  return CHECK_NOTNULL(contexts[key].get());
+  return TORCH_CHECK_NOTNULL(contexts[key].get());
 }
 
 template <typename T>
@@ -158,7 +153,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
       auto& comm = comms[i];
       auto& stream = streams[i];
 
-      DCHECK_EQ(ctx.device, GetGPUIDForPointer(ctx.src->raw_data()));
+      TORCH_DCHECK_EQ(ctx.device, GetGPUIDForPointer(ctx.src->raw_data()));
       CUDA_ENFORCE(cudaStreamWaitEvent(stream, context->master_event_, 0));
       f(ctx, comm, stream);
     }
@@ -182,7 +177,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
   // Now, wait on all the events in the original stream.
   CUDAGuard dg(ex.stream_gpu_id);
   for (auto& event : events) {
-    CUDA_ENFORCE(cudaStreamWaitEvent(CHECK_NOTNULL(ex.stream), event, 0));
+    CUDA_ENFORCE(cudaStreamWaitEvent(TORCH_CHECK_NOTNULL(ex.stream), event, 0));
   }
 }
 

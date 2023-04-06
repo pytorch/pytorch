@@ -1,21 +1,24 @@
 #include <ATen/Config.h>
 #if AT_PARALLEL_NATIVE
 #include <ATen/Parallel.h>
+#include <ATen/ParallelFuture.h>
 #include <ATen/PTThreadPool.h>
 
 #ifndef C10_MOBILE
 #include <c10/core/thread_pool.h>
+#include <c10/util/irange.h>
 #else
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #endif // C10_MOBILE
 
 #include <atomic>
+#include <utility>
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
 
@@ -26,16 +29,21 @@ namespace {
 thread_local bool in_parallel_region_ = false;
 
 // thread number (task_id) set by parallel primitive
-thread_local size_t thread_num_ = 0;
+thread_local int thread_num_ = 0;
 
 void _set_in_parallel_region(bool in_region) {
   in_parallel_region_ = in_region;
 }
 
-void _set_thread_num(size_t thread_num) {
+}  // namespace (anonymous)
+
+namespace internal {
+void set_thread_num(int thread_num) {
   thread_num_ = thread_num;
 }
+}
 
+namespace {
 void _unset_thread_num() {
   thread_num_ = 0;
 }
@@ -81,7 +89,7 @@ TaskThreadPoolBase& _get_intraop_pool() {
 // `fn` will be called with params: (thread_pool_task_id, task_id).
 void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
 #ifndef C10_MOBILE
-  for (size_t i = 1; i < range; ++i) {
+  for (const auto i : c10::irange(1, range)) {
     _get_intraop_pool().run([fn, i]() { fn((int)i, i); });
   }
   // Run the first task on the current thread directly.
@@ -101,8 +109,8 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
 
 // RAII guard helps to support in_parallel_region() and get_thread_num() API.
 struct ParallelRegionGuard {
-  ParallelRegionGuard(int64_t task_id) {
-    _set_thread_num(task_id);
+  ParallelRegionGuard(int task_id) {
+    internal::set_thread_num(task_id);
     _set_in_parallel_region(true);
   }
 
@@ -116,17 +124,32 @@ struct ParallelRegionGuard {
 
 namespace internal {
 
-void _parallel_run(
+inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
+    int64_t begin, int64_t end, int64_t grain_size) {
+  if ((end - begin) < grain_size) {
+    return std::make_tuple(1, std::max((int64_t)0, end - begin));
+  }
+  // Choose number of tasks based on grain size and number of threads.
+  size_t chunk_size = divup((end - begin), get_num_threads());
+  // Make sure each task is at least grain_size size.
+  chunk_size = std::max((size_t)grain_size, chunk_size);
+  size_t num_tasks = divup((end - begin), chunk_size);
+  return std::make_tuple(num_tasks, chunk_size);
+}
+
+void invoke_parallel(
   const int64_t begin,
   const int64_t end,
   const int64_t grain_size,
-  const std::function<void(int64_t, int64_t, size_t)>& f) {
+  const std::function<void(int64_t, int64_t)>& f) {
   at::internal::lazy_init_num_threads();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t num_tasks, chunk_size;
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct {
     std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
     std::exception_ptr eptr;
@@ -142,7 +165,7 @@ void _parallel_run(
       int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
       try {
         ParallelRegionGuard guard(task_id);
-        f(local_start, local_end, task_id);
+        f(local_start, local_end);
       } catch (...) {
         if (!state.err_flag.test_and_set()) {
           state.eptr = std::current_exception();
@@ -157,7 +180,7 @@ void _parallel_run(
     }
   };
   state.remaining = num_tasks;
-  _run_with_pool(task, num_tasks);
+  _run_with_pool(std::move(task), num_tasks);
 
   // Wait for all tasks to finish.
   {
@@ -178,7 +201,7 @@ void init_num_threads() {
   omp_set_num_threads(1);
 #endif
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
   mkl_set_num_threads(1);
 #endif
 
@@ -197,6 +220,7 @@ void set_num_threads(int nthreads) {
     int stored_nthreads = num_intraop_threads.load();
     if (stored_nthreads <= 0) {
       // plus one because of master thread
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       stored_nthreads = _get_intraop_pool().size() + 1;
     }
     if (stored_nthreads != nthreads) {
@@ -214,6 +238,7 @@ void set_num_threads(int nthreads) {
 }
 
 int get_num_threads() {
+  at::internal::lazy_init_num_threads();
 #ifndef C10_MOBILE
   // not initializing pool unnecessarily,
   // because pool cannot be resized after initialization
@@ -224,6 +249,7 @@ int get_num_threads() {
     return intraop_default_num_threads();
   } else {
     TORCH_INTERNAL_ASSERT(nthreads == CONSUMED);
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return _get_intraop_pool().size() + 1;
   }
 #else
@@ -252,7 +278,7 @@ bool in_parallel_region() {
 void intraop_launch(std::function<void()> func) {
 #ifndef C10_MOBILE
   if (!in_parallel_region() && get_num_threads() > 1) {
-    _get_intraop_pool().run(func);
+    _get_intraop_pool().run(std::move(func));
   } else {
     // execute inline if we're in parallel region
     func();
@@ -264,10 +290,10 @@ void intraop_launch(std::function<void()> func) {
 #endif // C10_MOBILE
 }
 
-std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
 #ifndef C10_MOBILE
-  auto future = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {
     _get_intraop_pool().run(
       [func, future]() {
@@ -283,7 +309,7 @@ std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
 #else
   // TODO: caffe2::PThreadPool only provides a data-parallel API.
   // Task parallelism is not currently supported.
-  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(c10::dynT<NoneType>());
   func();
   future->markCompleted();
   return future;

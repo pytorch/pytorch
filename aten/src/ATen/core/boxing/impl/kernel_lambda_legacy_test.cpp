@@ -31,7 +31,7 @@ using std::unique_ptr;
 namespace {
 
 void expectCallsIncrement(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
@@ -456,8 +456,8 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithStringList
   auto output = std::move(outputs[0]).toList();
 
   EXPECT_EQ(2, output.size());
-  EXPECT_EQ("value1", output.get(0).toString()->string());
-  EXPECT_EQ("value2", output.get(1).toString()->string());
+  EXPECT_EQ("value1", output.get(0).toStringRef());
+  EXPECT_EQ("value2", output.get(1).toStringRef());
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
@@ -494,7 +494,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ("value2", outputs[0].toString()->string());
+  EXPECT_EQ("value2", outputs[0].toStringRef());
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
@@ -552,7 +552,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedM
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ("value2", outputs[0].toString()->string());
+  EXPECT_EQ("value2", outputs[0].toStringRef());
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapOutput_whenRegistered_thenCanBeCalled) {
@@ -731,6 +731,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithou
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
   c10::optional<Tensor> called_arg2 = c10::nullopt;
   c10::optional<int64_t> called_arg3 = c10::nullopt;
@@ -770,6 +771,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
   c10::optional<Tensor> called_arg2 = c10::nullopt;
   c10::optional<int64_t> called_arg3 = c10::nullopt;
@@ -812,6 +814,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
   c10::optional<Tensor> called_arg2 = c10::nullopt;
   c10::optional<int64_t> called_arg3 = c10::nullopt;
@@ -829,7 +832,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
   EXPECT_EQ(3, outputs.size());
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(outputs[0].toTensor()));
   EXPECT_TRUE(outputs[1].isNone());
-  EXPECT_EQ("text", outputs[2].toString()->string());
+  EXPECT_EQ("text", outputs[2].toStringRef());
 
   outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::IValue(), 4, c10::IValue());
   EXPECT_EQ(3, outputs.size());
@@ -839,7 +842,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
 }
 
 void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});

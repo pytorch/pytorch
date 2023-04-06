@@ -40,7 +40,7 @@ only use the subset of Python supported in TorchScript. This section documents
 what is supported in TorchScript as if it were a language reference for a stand
 alone language. Any features of Python not mentioned in this reference are not
 part of TorchScript. See `Builtin Functions` for a complete reference of available
-Pytorch tensor methods, modules, and functions.
+PyTorch tensor methods, modules, and functions.
 
 As a subset of Python, any valid TorchScript function is also a valid Python
 function. This makes it possible to `disable TorchScript` and debug the
@@ -63,7 +63,7 @@ net models. In particular, TorchScript supports:
    :header: "Type", "Description"
 
    "``Tensor``", "A PyTorch tensor of any dtype, dimension, or backend"
-   "``Tuple[T0, T1, ...]``", "A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)"
+   "``Tuple[T0, T1, ..., TN]``", "A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)"
    "``bool``", "A boolean value"
    "``int``", "A scalar integer"
    "``float``", "A scalar floating point number"
@@ -74,6 +74,7 @@ net models. In particular, TorchScript supports:
    "``T``", "A `TorchScript Class`_"
    "``E``", "A `TorchScript Enum`_"
    "``NamedTuple[T0, T1, ...]``", "A :func:`collections.namedtuple <collections.namedtuple>` tuple type"
+   "``Union[T0, T1, ...]``", "One of the subtypes ``T0``, ``T1``, etc."
 
 Unlike Python, each variable in TorchScript function must have a single static type.
 This makes it easier to optimize TorchScript functions.
@@ -123,14 +124,14 @@ TorchScript does not support all features and types of the :mod:`typing` module.
 are more fundamental things that are unlikely to be added in the future while others
 may be added if there is enough user demand to make it a priority.
 
-These types and features from the :mod:`typing` module are unavailble in TorchScript.
+These types and features from the :mod:`typing` module are unavailable in TorchScript.
 
 .. csv-table::
    :header: "Item", "Description"
 
    ":any:`typing.Any`", ":any:`typing.Any` is currently in development but not yet released"
    ":any:`typing.NoReturn`", "Not implemented"
-   ":any:`typing.Union`", "Unlikely to be implemented (however :any:`typing.Optional` is supported)"
+   ":any:`typing.Sequence`", "Not implemented"
    ":any:`typing.Callable`", "Not implemented"
    ":any:`typing.Literal`", "Not implemented"
    ":any:`typing.ClassVar`", "Not implemented"
@@ -142,7 +143,7 @@ These types and features from the :mod:`typing` module are unavailble in TorchSc
    "NewType", "Unlikely to be implemented"
    "Generics", "Unlikely to be implemented"
 
-Any other functionality from the :any:`typing` module not explitily listed in this documentation is unsupported.
+Any other functionality from the :any:`typing` module not explicitly listed in this documentation is unsupported.
 
 Default Types
 ^^^^^^^^^^^^^
@@ -204,7 +205,7 @@ Example (type annotations for Python 3):
 
     class EmptyDataStructures(torch.nn.Module):
         def __init__(self):
-            super(EmptyDataStructures, self).__init__()
+            super().__init__()
 
         def forward(self, x: torch.Tensor) -> Tuple[List[Tuple[int, float]], Dict[str, int]]:
             # This annotates the list to be a `List[Tuple[int, float]]`
@@ -248,7 +249,7 @@ Example (refining types on parameters and locals):
         z: Optional[int]
 
         def __init__(self, z):
-            super(M, self).__init__()
+            super().__init__()
             # If `z` is None, its type cannot be inferred, so it must
             # be specified (above)
             self.z = z
@@ -566,7 +567,7 @@ calling its ``forward`` method (e.g. ``self.resnet.forward(input)``).
 
     class MyModule(nn.Module):
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             means = torch.tensor([103.939, 116.779, 123.68])
             self.means = torch.nn.Parameter(means.resize_(1, 3, 1, 1))
             resnet = torchvision.models.resnet18()
@@ -702,7 +703,7 @@ loop at compile time, with each member of the constant module list.
 
     class SubModule(torch.nn.Module):
         def __init__(self):
-            super(SubModule, self).__init__()
+            super().__init__()
             self.weight = nn.Parameter(torch.randn(2))
 
         def forward(self, input):
@@ -712,7 +713,7 @@ loop at compile time, with each member of the constant module list.
         __constants__ = ['mods']
 
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.mods = torch.nn.ModuleList([SubModule() for i in range(10)])
 
         def forward(self, v):
@@ -731,9 +732,9 @@ Break and Continue
 
     for i in range(5):
         if i == 1:
-        continue
+            continue
         if i == 3:
-        break
+            break
         print(i)
 
 Return
@@ -811,6 +812,8 @@ check the correctness of the model as you go.
 
 .. autofunction:: torch.jit.is_scripting
 
+.. autofunction:: torch.jit.is_tracing
+
 
 Attribute Lookup On Python Modules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -850,7 +853,7 @@ value should be treated as a constant.
         a : torch.jit.Final[int]
 
         def __init__(self):
-            super(Foo, self).__init__()
+            super().__init__()
             self.a = 1 + 4
 
         def forward(self, input):
@@ -884,7 +887,7 @@ available in TorchScript can be used as module attributes. Tensor attributes are
 semantically the same as buffers. The type of empty lists and dictionaries and ``None``
 values cannot be inferred and must be specified via
 `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
-If a type cannot be inferred and is not explicilty annotated, it will not be added as an attribute
+If a type cannot be inferred and is not explicitly annotated, it will not be added as an attribute
 to the resulting :class:`ScriptModule`.
 
 Example:
@@ -903,7 +906,7 @@ Example:
         some_dict: Dict[str, int]
 
         def __init__(self, a_dict):
-            super(Foo, self).__init__()
+            super().__init__()
             self.words = []
             self.some_dict = a_dict
 

@@ -5,7 +5,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <cstddef>
 #include <vector>
@@ -18,10 +18,10 @@ namespace detail {
 template <typename Derived>
 class _DropoutNd : public torch::nn::Cloneable<Derived> {
  public:
-  _DropoutNd(double p) : _DropoutNd(DropoutOptions().p(p)) {};
+  _DropoutNd(double p) : _DropoutNd(DropoutOptions().p(p)){};
 
-  explicit _DropoutNd(const DropoutOptions& options_ = {})
-    : options(options_) {
+  explicit _DropoutNd(const DropoutOptions& options_ = {}) : options(options_) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     reset();
   }
 
@@ -36,7 +36,7 @@ class _DropoutNd : public torch::nn::Cloneable<Derived> {
   DropoutOptions options;
 };
 
-}
+} // namespace detail
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Dropout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -52,7 +52,7 @@ class _DropoutNd : public torch::nn::Cloneable<Derived> {
 /// Dropout model(DropoutOptions().p(0.42).inplace(true));
 /// ```
 class TORCH_API DropoutImpl : public detail::_DropoutNd<DropoutImpl> {
-public:
+ public:
   using detail::_DropoutNd<DropoutImpl>::_DropoutNd;
 
   Tensor forward(Tensor input);
@@ -63,9 +63,9 @@ public:
 
 /// A `ModuleHolder` subclass for `DropoutImpl`.
 /// See the documentation for `DropoutImpl` class to learn what methods it
-/// provides, and examples of how to use `Dropout` with `torch::nn::DropoutOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Dropout` with
+/// `torch::nn::DropoutOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Dropout);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Dropout2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -82,7 +82,7 @@ TORCH_MODULE(Dropout);
 /// Dropout2d model(Dropout2dOptions().p(0.42).inplace(true));
 /// ```
 class TORCH_API Dropout2dImpl : public detail::_DropoutNd<Dropout2dImpl> {
-public:
+ public:
   using detail::_DropoutNd<Dropout2dImpl>::_DropoutNd;
 
   Tensor forward(Tensor input);
@@ -93,9 +93,9 @@ public:
 
 /// A `ModuleHolder` subclass for `Dropout2dImpl`.
 /// See the documentation for `Dropout2dImpl` class to learn what methods it
-/// provides, and examples of how to use `Dropout2d` with `torch::nn::Dropout2dOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Dropout2d` with
+/// `torch::nn::Dropout2dOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Dropout2d);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Dropout3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -112,7 +112,7 @@ TORCH_MODULE(Dropout2d);
 /// Dropout3d model(Dropout3dOptions().p(0.42).inplace(true));
 /// ```
 class TORCH_API Dropout3dImpl : public detail::_DropoutNd<Dropout3dImpl> {
-public:
+ public:
   using detail::_DropoutNd<Dropout3dImpl>::_DropoutNd;
 
   Tensor forward(Tensor input);
@@ -123,9 +123,9 @@ public:
 
 /// A `ModuleHolder` subclass for `Dropout3dImpl`.
 /// See the documentation for `Dropout3dImpl` class to learn what methods it
-/// provides, and examples of how to use `Dropout3d` with `torch::nn::Dropout3dOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Dropout3d` with
+/// `torch::nn::Dropout3dOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Dropout3d);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AlphaDropout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -134,15 +134,14 @@ TORCH_MODULE(Dropout3d);
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.AlphaDropout to learn
 /// about the exact behavior of this module.
 ///
-/// See the documentation for `torch::nn::AlphaDropoutOptions` class to learn what
-/// constructor arguments are supported for this module.
+/// See the documentation for `torch::nn::AlphaDropoutOptions` class to learn
+/// what constructor arguments are supported for this module.
 ///
 /// Example:
 /// ```
 /// AlphaDropout model(AlphaDropoutOptions(0.2).inplace(true));
 /// ```
-class TORCH_API AlphaDropoutImpl
-    : public detail::_DropoutNd<AlphaDropoutImpl> {
+class TORCH_API AlphaDropoutImpl : public detail::_DropoutNd<AlphaDropoutImpl> {
  public:
   using detail::_DropoutNd<AlphaDropoutImpl>::_DropoutNd;
 
@@ -154,15 +153,16 @@ class TORCH_API AlphaDropoutImpl
 
 /// A `ModuleHolder` subclass for `AlphaDropoutImpl`.
 /// See the documentation for `AlphaDropoutImpl` class to learn what methods it
-/// provides, and examples of how to use `AlphaDropout` with `torch::nn::AlphaDropoutOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `AlphaDropout` with
+/// `torch::nn::AlphaDropoutOptions`. See the documentation for `ModuleHolder`
+/// to learn about PyTorch's module storage semantics.
 TORCH_MODULE(AlphaDropout);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FeatureAlphaDropout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FeatureAlphaDropout
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// See the documentation for `torch::nn::FeatureAlphaDropoutOptions` class to learn what
-/// constructor arguments are supported for this module.
+/// See the documentation for `torch::nn::FeatureAlphaDropoutOptions` class to
+/// learn what constructor arguments are supported for this module.
 ///
 /// Example:
 /// ```
@@ -180,10 +180,10 @@ class TORCH_API FeatureAlphaDropoutImpl
 };
 
 /// A `ModuleHolder` subclass for `FeatureAlphaDropoutImpl`.
-/// See the documentation for `FeatureAlphaDropoutImpl` class to learn what methods it
-/// provides, and examples of how to use `FeatureAlphaDropout` with `torch::nn::FeatureAlphaDropoutOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// See the documentation for `FeatureAlphaDropoutImpl` class to learn what
+/// methods it provides, and examples of how to use `FeatureAlphaDropout` with
+/// `torch::nn::FeatureAlphaDropoutOptions`. See the documentation for
+/// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(FeatureAlphaDropout);
 
 } // namespace nn

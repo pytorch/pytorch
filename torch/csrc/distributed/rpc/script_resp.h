@@ -14,7 +14,7 @@ class TORCH_API ScriptResp final : public RpcCommandBase {
   explicit ScriptResp(at::IValue&& values);
 
   const at::IValue& value();
-  Message toMessageImpl() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<ScriptResp> fromMessage(const Message& message);
 
  private:

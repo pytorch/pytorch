@@ -9,23 +9,16 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-namespace {
-
-using torch::jit::Pickler;
-using torch::jit::Unpickler;
-
-} // namespace
-
 ScriptResp::ScriptResp(at::IValue&& value) : value_(value) {}
 
 const at::IValue& ScriptResp::value() {
   return value_;
 }
 
-Message ScriptResp::toMessageImpl() && {
+c10::intrusive_ptr<Message> ScriptResp::toMessageImpl() && {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(value_, &tensor_table);
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_RET);
 }
 
@@ -36,7 +29,7 @@ std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
       payload,
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
+      message.tensors());
   return std::make_unique<ScriptResp>(std::move(value));
 }
 

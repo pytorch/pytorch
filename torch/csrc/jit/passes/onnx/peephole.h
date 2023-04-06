@@ -10,5 +10,5 @@ void PeepholeOptimizeONNX(
     int opset_version,
     bool fixed_batch_size);
 
-}
+} // namespace jit
 } // namespace torch

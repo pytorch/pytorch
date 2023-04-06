@@ -30,8 +30,8 @@ def heatmap_approx_keypoint_ref(maps, rois):
 
 def c10_op_ref(maps, rois):
     keypoints = torch.ops._caffe2.HeatmapMaxKeypoint(
-        torch.Tensor(maps),
-        torch.Tensor(rois),
+        torch.tensor(maps),
+        torch.tensor(rois),
         should_output_softmax=True,
     )
     return [keypoints.numpy()]
@@ -39,7 +39,7 @@ def c10_op_ref(maps, rois):
 
 class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
     def setUp(self):
-        super(TestHeatmapMaxKeypointOp, self).setUp()
+        super().setUp()
         np.random.seed(0)
 
         # initial coordinates and interpolate HEATMAP_SIZE from it

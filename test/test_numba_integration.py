@@ -1,16 +1,15 @@
+# Owner(s): ["module: unknown"]
+
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import TEST_NUMBA, TEST_NUMPY
+from torch.testing._internal.common_utils import TEST_NUMPY
 from torch.testing._internal.common_cuda import TEST_NUMBA_CUDA, TEST_CUDA, TEST_MULTIGPU
 
 import torch
 
 if TEST_NUMPY:
     import numpy
-
-if TEST_NUMBA:
-    import numba
 
 if TEST_NUMBA_CUDA:
     import numba.cuda
@@ -232,6 +231,7 @@ class TestNumbaIntegration(common.TestCase):
                 numba.cuda.as_cuda_array(cudat), numba.cuda.devicearray.DeviceNDArray
             )
 
+    @unittest.skip("Test is temporary disabled, see https://github.com/pytorch/pytorch/issues/54418")
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
@@ -311,12 +311,13 @@ class TestNumbaIntegration(common.TestCase):
             numpy.uint8,
         ]
         for dtype in dtypes:
-            numpy_ary = numpy.arange(6).reshape(2, 3).astype(dtype),
+            numpy_ary = numpy.arange(6).reshape(2, 3).astype(dtype)
             numba_ary = numba.cuda.to_device(numpy_ary)
             self.assertTrue(numba_ary.is_c_contiguous())
             torch_ary = torch.as_tensor(numba_ary, device="cuda")
             self.assertTrue(torch_ary.is_contiguous())
 
+    @unittest.skip("Test is temporary disabled, see https://github.com/pytorch/pytorch/issues/54418")
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
@@ -328,6 +329,7 @@ class TestNumbaIntegration(common.TestCase):
         del numba_ary
         self.assertEqual(torch_ary.cpu().data.numpy(), numpy.arange(6))  # `torch_ary` is still alive
 
+    @unittest.skip("Test is temporary disabled, see https://github.com/pytorch/pytorch/issues/54418")
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")

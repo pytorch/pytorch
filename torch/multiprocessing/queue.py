@@ -1,11 +1,10 @@
 import io
-import multiprocessing
 import multiprocessing.queues
 from multiprocessing.reduction import ForkingPickler
 import pickle
 
 
-class ConnectionWrapper(object):
+class ConnectionWrapper:
     """Proxy class for _multiprocessing.Connection which uses ForkingPickler to
     serialize objects"""
 
@@ -31,9 +30,9 @@ class ConnectionWrapper(object):
 class Queue(multiprocessing.queues.Queue):
 
     def __init__(self, *args, **kwargs):
-        super(Queue, self).__init__(*args, **kwargs)
-        self._reader = ConnectionWrapper(self._reader)
-        self._writer = ConnectionWrapper(self._writer)
+        super().__init__(*args, **kwargs)
+        self._reader: ConnectionWrapper = ConnectionWrapper(self._reader)
+        self._writer: ConnectionWrapper = ConnectionWrapper(self._writer)
         self._send = self._writer.send
         self._recv = self._reader.recv
 
@@ -42,6 +41,6 @@ class SimpleQueue(multiprocessing.queues.SimpleQueue):
 
     def _make_methods(self):
         if not isinstance(self._reader, ConnectionWrapper):
-            self._reader = ConnectionWrapper(self._reader)
-            self._writer = ConnectionWrapper(self._writer)
-        super(SimpleQueue, self)._make_methods()
+            self._reader: ConnectionWrapper = ConnectionWrapper(self._reader)
+            self._writer: ConnectionWrapper = ConnectionWrapper(self._writer)
+        super()._make_methods()  # type: ignore[misc]

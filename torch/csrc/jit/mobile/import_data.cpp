@@ -1,35 +1,45 @@
 #include <torch/csrc/jit/mobile/import_data.h>
 
+#include <ATen/Functions.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
+#include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/file_format.h>
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/import_export_common.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
 
+#include <caffe2/serialize/in_memory_adapter.h>
 #include <exception>
 #include <fstream>
 #include <string>
 #include <vector>
 
-namespace c10 {
-// std::string serializeType(const Type &t);
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
-
 namespace torch {
 namespace jit {
+using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
+using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
 namespace {
 
-// The deserializer class which loads the bytecode package from bc files.
-class BytecodeDeserializer final {
+/**
+ * Given a ZIP file containing a file named "data.pkl", uses Pickle to
+ * deserialize the file and returns the IValue inside it.
+ */
+class IValueUnpickler final {
  public:
-  explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
+  explicit IValueUnpickler(std::unique_ptr<PyTorchStreamReader> reader);
   c10::IValue deserialize(c10::optional<at::Device> device);
 
  private:
@@ -42,25 +52,25 @@ class BytecodeDeserializer final {
   std::unique_ptr<PyTorchStreamReader> reader_;
 };
 
-BytecodeDeserializer::BytecodeDeserializer(
-    std::unique_ptr<PyTorchStreamReader> reader)
+IValueUnpickler::IValueUnpickler(std::unique_ptr<PyTorchStreamReader> reader)
     : compilation_unit_(std::make_shared<CompilationUnit>()),
       reader_(std::move(reader)) {}
 
-c10::IValue BytecodeDeserializer::deserialize(
-    c10::optional<at::Device> device) {
+c10::IValue IValueUnpickler::deserialize(c10::optional<at::Device> device) {
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return readArchive("data", mcu, std::move(device));
 }
 
-c10::IValue BytecodeDeserializer::readArchive(
+c10::IValue IValueUnpickler::readArchive(
     const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mcu,
     c10::optional<at::Device> device) {
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t pickle_size;
   std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
 
@@ -125,7 +135,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       size_t ndict = dict.size();
       auto obj = c10::ivalue::Object::create(type, ndict);
       auto it = dict.begin();
-      for (size_t i = 0; i < ndict; ++i) {
+      for (const auto i : c10::irange(ndict)) {
         std::stringstream name;
         name << it->key();
         cls->addOrCheckAttribute(name.str(), it->key().type());
@@ -147,104 +157,131 @@ c10::IValue BytecodeDeserializer::readArchive(
       std::move(type_resolver),
       std::move(obj_loader),
       std::move(read_record),
-      std::move(device));
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      std::move(device),
+      false,
+      nullptr);
   return unpickler.parse_ivalue();
 }
 
-} // namespace
-
-namespace mobile {
-
-mobile::Module _load_data(std::istream& in, c10::optional<at::Device> device) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  return _load_data(std::move(rai), std::move(device));
-}
-
-mobile::Module _load_data(
-    const std::string& filename,
-    c10::optional<at::Device> device) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _load_data(std::move(rai), std::move(device));
-}
-
-mobile::Module _load_data(
-    std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device) {
-  auto observer = torch::observerConfig().getModuleObserver();
-  auto instance_key = std::rand();
-  if (observer) {
-    observer->onEnterLoadModel(instance_key);
-  }
-  try {
-    auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-    BytecodeDeserializer deserializer(std::move(reader));
-    auto mcu = std::make_shared<mobile::CompilationUnit>();
-    mobile::Module result = mobile::Module(
-        deserializer.deserialize(std::move(device)).toObject(), mcu);
-    std::unordered_map<std::string, std::string> copied_metadata =
-        result.metadata();
-    if (result.metadata().find("model_name") == result.metadata().end()) {
-      copied_metadata["model_name"] = result.name();
-    }
-    if (observer) {
-      observer->onExitLoadModel(instance_key, copied_metadata);
-    }
-    return result;
-  } catch (c10::Error& error) {
-    if (observer) {
-      observer->onFailLoadModel(instance_key, error.what());
-    }
-    TORCH_RETHROW(error);
-  } catch (...) {
-    auto currentException = std::current_exception();
-    try {
-      if (!currentException) {
-        TORCH_CHECK(false, "Unknown exception");
-      } else {
-        try {
-          std::rethrow_exception(currentException);
-        } catch (const std::exception& e) {
-          TORCH_CHECK(false, e.what());
-        }
-      }
-    } catch (c10::Error& error) {
-      if (observer) {
-        observer->onFailLoadModel(instance_key, error.what());
-      }
-      TORCH_RETHROW(error);
-    }
-  }
-}
-
-} // namespace mobile
-
-std::map<std::string, at::Tensor> _load_parameters(
-    std::istream& in,
-    c10::optional<at::Device> device) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  return _load_parameters(std::move(rai), std::move(device));
-}
-
-std::map<std::string, at::Tensor> _load_parameters(
-    const std::string& filename,
-    c10::optional<at::Device> device) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _load_parameters(std::move(rai), std::move(device));
-}
-
-std::map<std::string, at::Tensor> _load_parameters(
+/**
+ * Extracts and returns the parameter map serialized as ZIP + Pickle in @p rai.
+ */
+std::map<std::string, at::Tensor> load_parameters_from_zip(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
-  auto result = deserializer.deserialize(std::move(device)).toGenericDict();
+  IValueUnpickler unpickler(std::move(reader));
+  auto result = unpickler.deserialize(device).toGenericDict();
   std::map<std::string, at::Tensor> map;
   for (const auto& e : result) {
-    auto key = e.key().toString()->string();
+    auto key = e.key().toStringRef();
     auto value = e.value().toTensor().tensor_data();
     map[key] = value;
   }
   return map;
+}
+
+} // namespace
+
+/**
+ * Extracts the parameter map stored in @p module. Expects a layout
+ * compatible with the one created by #_save_parameters().
+ */
+std::map<std::string, at::Tensor> mobile_module_to_parameter_map(
+    const mobile::Module& module) {
+  // Safely look for a slot with the expected name. Note that
+  // c10::ivalue::Object::getAttr() is not safe if the attribute isn't present.
+  auto obj = module._ivalue();
+  const std::vector<IValue>& slots = obj->slots();
+  for (const auto i : c10::irange(slots.size())) {
+    if (obj->type()->getAttributeName(i) ==
+        mobile::internal::kSavedParametersAttributeName) {
+      // Found a slot with the right name; make sure it's a
+      // Dict<string, Tensor>.
+      c10::IValue data = slots[i];
+      if (data.isGenericDict()) {
+        auto data_dict = data.toGenericDict();
+
+        // The key and value should be DynamicTypes that wrap String and Tensor.
+        c10::DynamicType* keyType =
+            data_dict.keyType()->castRaw<c10::DynamicType>();
+        c10::DynamicType* valueType =
+            data_dict.valueType()->castRaw<c10::DynamicType>();
+        if (keyType != nullptr &&
+            keyType->fallback()->kind() == TypeKind::StringType &&
+            valueType != nullptr &&
+            valueType->fallback()->kind() == TypeKind::TensorType) {
+          // Name and type are good; copy the contents to the output map.
+          std::map<std::string, at::Tensor> params;
+          for (const auto& e : data_dict) {
+            // The source Tensor points into the flatbuffer data associated with
+            // the Module. But, this Tensor needs to outlive the Module, since
+            // the caller of _load_parameters() won't have a pointer to the
+            // Module. So, return a deep copy.
+            const auto& source = e.value().toTensor();
+            at::Tensor copy = at::empty_like(source); // Must be the same shape.
+            copy.copy_(source);
+
+            params[e.key().toStringRef()] = copy;
+          }
+          return params;
+        }
+      }
+    }
+  }
+
+  TORCH_CHECK(
+      false,
+      "Could not find Dict<string, Tensor> named '",
+      mobile::internal::kSavedParametersAttributeName,
+      "' in deserialized mobile::Module");
+}
+
+std::map<std::string, at::Tensor> _load_parameters_bytes(
+    std::shared_ptr<char> data,
+    size_t size,
+    c10::optional<at::Device> device) {
+  TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecognized data format");
+  FileFormat format = getFileFormat(data.get());
+  // Call the appropriate parser.
+  std::map<std::string, at::Tensor> map;
+  switch (format) {
+    case FileFormat::FlatbufferFileFormat: {
+      auto m = parse_flatbuffer_no_object(data, size, device);
+      map = mobile_module_to_parameter_map(m);
+      break;
+    }
+
+    case FileFormat::ZipFileFormat: {
+      auto rai = std::make_unique<caffe2::serialize::MemoryReadAdapter>(
+          data.get(), size);
+      map = load_parameters_from_zip(std::move(rai), device);
+      break;
+    }
+
+    default:
+      TORCH_CHECK(false, "Unrecognized data format");
+  }
+  return map;
+}
+
+std::map<std::string, at::Tensor> _load_parameters(
+    std::istream& in,
+    c10::optional<at::Device> device) {
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_stream_content(in);
+  return _load_parameters_bytes(std::move(data), size, device);
+}
+
+std::map<std::string, at::Tensor> _load_parameters(
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_file_content(filename.c_str());
+  return _load_parameters_bytes(std::move(data), size, device);
 }
 
 } // namespace jit

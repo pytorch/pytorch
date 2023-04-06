@@ -21,7 +21,7 @@ template <typename T>
 __global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     c10::cuda::compat::sincos(__ldg(X + i), S + i, C + i);
 #else
     c10::cuda::compat::sincos(X[i], S + i, C + i);
@@ -29,7 +29,7 @@ __global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
   }
 }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 
 template <typename TAlpha, typename TData>
 __global__ void AxpyCUDAKernel(
@@ -105,7 +105,7 @@ __global__ void AxpyCUDAKernel(
 DELEGATE_HALF_AXPY_CUDA_KERNEL(float, fmaf)
 #undef DELEGATE_HALF_AXPY_CUDA_KERNEL
 
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 
 template <typename TAlpha, typename TData>
 __global__ void AxpbyCUDAKernel(
@@ -305,7 +305,7 @@ CAFFE2_SPECIALIZED_HALF_SCALE_CUDA_KERNEL(float)
       return;                                                             \
     }                                                                     \
     if (alpha == T(0)) {                                                  \
-      cudaMemsetAsync(Y, 0, sizeof(T) * N, context->cuda_stream());       \
+      C10_CUDA_CHECK(cudaMemsetAsync(Y, 0, sizeof(T) * N, context->cuda_stream()));       \
     } else {                                                              \
       thrust::fill(                                                       \
           thrust::cuda::par.on(context->cuda_stream()), Y, Y + N, alpha); \
@@ -340,6 +340,7 @@ CAFFE2_SPECIALIZED_CUDA_SET(at::BFloat16)
   }
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Exp, expf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Log, logf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Log1p, log1pf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sin, sinf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Asin, asinf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cos, cosf)
@@ -416,6 +417,7 @@ DELEGATE_CUDA_POWX(float, powf)
       SinCosCUDAKernel<T>                                             \
           <<<K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>( \
               N, X, S, C);                                            \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                 \
     }                                                                 \
   }
 CAFFE2_SPECIALIZED_CUDA_SINCOS(float)
@@ -442,6 +444,7 @@ CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
       ScaleCUDAKernel<T, T>                                                  \
           <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
               N, alpha, X, Y);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
     }                                                                        \
   }                                                                          \
   template <>                                                                \
@@ -463,13 +466,14 @@ CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
       ScaleCUDAKernel<T, T>                                                  \
           <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
               N, alpha, X, Y);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
     }                                                                        \
   }
 DELEGATE_CUDA_SCALE(float, cublasSscal)
 DELEGATE_CUDA_SCALE(double, cublasDscal)
 #undef DELEGATE_CUDA_SCALE
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 #define DELEGATE_CUDA_SCALE_EX(                                              \
     TAlpha, TData, kAlphaType, kDataType, kExecutionType)                    \
@@ -500,6 +504,7 @@ DELEGATE_CUDA_SCALE(double, cublasDscal)
       ScaleCUDAKernel<TAlpha, TData>                                         \
           <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
               N, alpha, X, Y);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
     }                                                                        \
   }                                                                          \
   template <>                                                                \
@@ -529,13 +534,14 @@ DELEGATE_CUDA_SCALE(double, cublasDscal)
       ScaleCUDAKernel<TAlpha, TData>                                         \
           <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
               N, alpha, X, Y);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
     }                                                                        \
   }
 DELEGATE_CUDA_SCALE_EX(float, double, CUDA_R_32F, CUDA_R_64F, CUDA_R_64F)
 DELEGATE_CUDA_SCALE_EX(float, at::Half, CUDA_R_32F, CUDA_R_16F, CUDA_R_32F)
 #undef DELEGATE_CUDA_SCALE_EX
 
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 
 #define CAFFE2_SPECIALIZED_CUDA_SCALE(TAlpha, TData)                         \
   template <>                                                                \
@@ -550,6 +556,7 @@ DELEGATE_CUDA_SCALE_EX(float, at::Half, CUDA_R_32F, CUDA_R_16F, CUDA_R_32F)
       ScaleCUDAKernel<TAlpha, TData>                                         \
           <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
               N, alpha, X, Y);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
     }                                                                        \
   }                                                                          \
   template <>                                                                \
@@ -564,15 +571,16 @@ DELEGATE_CUDA_SCALE_EX(float, at::Half, CUDA_R_32F, CUDA_R_16F, CUDA_R_32F)
       ScaleCUDAKernel<TAlpha, TData>                                         \
           <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
               N, *alpha, X, Y);                                              \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
     }                                                                        \
   }
 CAFFE2_SPECIALIZED_CUDA_SCALE(std::int32_t, std::int32_t)
 CAFFE2_SPECIALIZED_CUDA_SCALE(std::int64_t, std::int64_t)
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 CAFFE2_SPECIALIZED_CUDA_SCALE(float, double)
 CAFFE2_SPECIALIZED_CUDA_SCALE(float, at::Half)
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 #undef CAFFE2_SPECIALIZED_CUDA_SCALE
 
 #define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(T, Func, DeviceFunc)        \
@@ -785,7 +793,7 @@ DELEGATE_SIMPLE_CUDA_COMPARE_FUNCTION(
 DELEGATE_CUDA_AXPY(float, cublasSaxpy)
 #undef DELEGATE_CUDA_AXPY
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 #define DELEGATE_CUDA_AXPY_EX(                                  \
     TAlpha, TData, kAlphaType, kDataType, kExecutionType)       \
@@ -837,7 +845,7 @@ DELEGATE_CUDA_AXPY_EX(float, double, CUDA_R_32F, CUDA_R_64F, CUDA_R_64F)
 DELEGATE_CUDA_AXPY_EX(float, at::Half, CUDA_R_32F, CUDA_R_16F, CUDA_R_32F)
 #undef DELEGATE_CUDA_AXPY_EX
 
-#else // __HIP_PLATFORM_HCC__
+#else // USE_ROCM
 
 #define CAFFE2_SPECIALIZED_CUDA_AXPY(TAlpha, TData)                        \
   template <>                                                              \
@@ -851,6 +859,7 @@ DELEGATE_CUDA_AXPY_EX(float, at::Half, CUDA_R_32F, CUDA_R_16F, CUDA_R_32F)
     AxpyCUDAKernel<TAlpha, TData>                                          \
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
             N, alpha, X, Y);                                               \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
   }                                                                        \
   template <>                                                              \
   CAFFE2_CUDA_EXPORT void Axpy<TAlpha, TData, CUDAContext>(                \
@@ -863,12 +872,13 @@ DELEGATE_CUDA_AXPY_EX(float, at::Half, CUDA_R_32F, CUDA_R_16F, CUDA_R_32F)
     AxpyCUDAKernel<TAlpha, TData>                                          \
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
             N, alpha, X, Y);                                               \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
   }
 CAFFE2_SPECIALIZED_CUDA_AXPY(float, double)
 CAFFE2_SPECIALIZED_CUDA_AXPY(float, at::Half)
 #undef CAFFE2_SPECIALIZED_CUDA_AXPY
 
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 
 #define CAFFE2_SPECIALIZED_CUDA_AXPBY(TAlpha, TData)                       \
   template <>                                                              \
@@ -883,6 +893,7 @@ CAFFE2_SPECIALIZED_CUDA_AXPY(float, at::Half)
     AxpbyCUDAKernel<TAlpha, TData>                                         \
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
             N, alpha, X, beta, Y);                                         \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
   }                                                                        \
   template <>                                                              \
   CAFFE2_CUDA_EXPORT void Axpby<TAlpha, TData, CUDAContext>(               \
@@ -896,6 +907,7 @@ CAFFE2_SPECIALIZED_CUDA_AXPY(float, at::Half)
     AxpbyCUDAKernel<TAlpha, TData>                                         \
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
             N, alpha, X, beta, Y);                                         \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
   }
 CAFFE2_SPECIALIZED_CUDA_AXPBY(float, float)
 CAFFE2_SPECIALIZED_CUDA_AXPBY(float, double)

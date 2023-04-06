@@ -1,10 +1,11 @@
 """
 For procedural tests needed for __torch_function__, we use this function
 to export method names and signatures as needed by the tests in
-test/test_overrides.py. 
+test/test_overrides.py.
 
-python -m tools.autograd.gen_autograd \
-       build/aten/src/ATen/Declarations.yaml \
+python -m tools.autograd.gen_annotated_fn_args \
+       aten/src/ATen/native/native_functions.yaml \
+       aten/src/ATen/native/tags.yaml \
        $OUTPUT_DIR \
        tools/autograd
 
@@ -13,64 +14,97 @@ generated.  In the full build system, OUTPUT_DIR is
 torch/testing/_internal/generated
 """
 
-from .utils import write, CodeTemplate
-from .gen_python_functions import (
-    get_py_nn_functions,
-    get_py_torch_functions,
-    get_py_variable_methods,
-    op_name,
-)
+import argparse
+import os
 import textwrap
-from .gen_autograd import load_aten_declarations
+from collections import defaultdict
+
+from typing import Any, Dict, List
+
+import torchgen.api.python as python
+from torchgen.context import with_native_function
+
+from torchgen.gen import parse_native_yaml
+from torchgen.model import BaseOperatorName, NativeFunction
+from torchgen.utils import FileManager
+
+from .gen_python_functions import (
+    is_py_fft_function,
+    is_py_linalg_function,
+    is_py_nn_function,
+    is_py_special_function,
+    is_py_torch_function,
+    is_py_variable_method,
+    should_generate_py_binding,
+)
 
 
-def gen_annotated(aten_path, out, template_path):
-    declarations = load_aten_declarations(aten_path)
-    annotated_args = []
-    for func in recurse_dict(get_py_torch_functions(declarations)):
-        annotated_args.append(process_func("torch._C._VariableFunctions", func))
+def gen_annotated(
+    native_yaml_path: str, tags_yaml_path: str, out: str, autograd_dir: str
+) -> None:
+    native_functions = parse_native_yaml(
+        native_yaml_path, tags_yaml_path
+    ).native_functions
+    mappings = (
+        (is_py_torch_function, "torch._C._VariableFunctions"),
+        (is_py_nn_function, "torch._C._nn"),
+        (is_py_linalg_function, "torch._C._linalg"),
+        (is_py_special_function, "torch._C._special"),
+        (is_py_fft_function, "torch._C._fft"),
+        (is_py_variable_method, "torch.Tensor"),
+    )
+    annotated_args: List[str] = []
+    for pred, namespace in mappings:
+        groups: Dict[BaseOperatorName, List[NativeFunction]] = defaultdict(list)
+        for f in native_functions:
+            if not should_generate_py_binding(f) or not pred(f):
+                continue
+            groups[f.func.name.name].append(f)
+        for group in groups.values():
+            for f in group:
+                annotated_args.append(f"{namespace}.{gen_annotated_args(f)}")
 
-    for func in recurse_dict(get_py_nn_functions(declarations)):
-        annotated_args.append(process_func("torch._C._nn", func))
+    template_path = os.path.join(autograd_dir, "templates")
+    fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
+    fm.write_with_template(
+        "annotated_fn_args.py",
+        "annotated_fn_args.py.in",
+        lambda: {
+            "annotated_args": textwrap.indent("\n".join(annotated_args), "    "),
+        },
+    )
 
-    for func in recurse_dict(get_py_variable_methods(declarations)):
-        annotated_args.append(process_func("torch.Tensor", func))
 
-    annotated_args = textwrap.indent("\n".join(annotated_args), "    ")
-    env = {"annotated_args": annotated_args}
-    PY_ANNOTATED_ARGS = CodeTemplate.from_file(template_path + '/templates/annotated_fn_args.py')
-    write(out, 'annotated_fn_args.py', PY_ANNOTATED_ARGS, env)
-
-
-def process_func(namespace, func):
-    args = func["arguments"]
-    out_args = []
-    for arg in args:
-        if 'default' in arg or arg.get('kwarg_only', False) or arg.get('output', False):
+@with_native_function
+def gen_annotated_args(f: NativeFunction) -> str:
+    out_args: List[Dict[str, Any]] = []
+    for arg in f.func.arguments.flat_positional:
+        if arg.default is not None:
             continue
-        out_args.append({k: arg[k] for k in ('name', 'simple_type', 'size') if k in arg})
+        out_arg: Dict[str, Any] = {}
+        out_arg["name"] = arg.name
+        out_arg["simple_type"] = python.argument_type_str(arg.type, simple_type=True)
+        size = python.argument_type_size(arg.type)
+        if size:
+            out_arg["size"] = size
+        out_args.append(out_arg)
 
-    return f"{namespace}.{op_name(func)}: {out_args!r},"
+    return f"{f.func.name.name}: {repr(out_args)},"
 
 
-def recurse_dict(d):
-    for e in d.values():
-        for i in e:
-            yield i
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description='Generate annotated_fn_args script')
-    parser.add_argument('declarations', metavar='DECL',
-                        help='path to Declarations.yaml')
-    parser.add_argument('out', metavar='OUT',
-                        help='path to output directory')
-    parser.add_argument('autograd', metavar='AUTOGRAD',
-                        help='path to template directory')
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate annotated_fn_args script")
+    parser.add_argument(
+        "native_functions", metavar="NATIVE", help="path to native_functions.yaml"
+    )
+    parser.add_argument("tags", metavar="TAGS", help="path to tags.yaml")
+    parser.add_argument("out", metavar="OUT", help="path to output directory")
+    parser.add_argument(
+        "autograd", metavar="AUTOGRAD", help="path to template directory"
+    )
     args = parser.parse_args()
-    gen_annotated(args.declarations, args.out, args.autograd)
+    gen_annotated(args.native_functions, args.tags, args.out, args.autograd)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

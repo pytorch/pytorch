@@ -1,9 +1,10 @@
 import torch
-from torch._six import nan
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property
 
+__all__ = ['Categorical']
 
 class Categorical(Distribution):
     r"""
@@ -16,29 +17,35 @@ class Categorical(Distribution):
 
     Samples are integers from :math:`\{0, \ldots, K-1\}` where `K` is ``probs.size(-1)``.
 
-    If :attr:`probs` is 1-dimensional with length-`K`, each element is the relative
-    probability of sampling the class at that index.
+    If `probs` is 1-dimensional with length-`K`, each element is the relative probability
+    of sampling the class at that index.
 
-    If :attr:`probs` is N-dimensional, the first N-1 dimensions are treated as a batch of 
+    If `probs` is N-dimensional, the first N-1 dimensions are treated as a batch of
     relative probability vectors.
 
-    .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-              and it will be normalized to sum to 1 along the last dimension.
+    .. note:: The `probs` argument must be non-negative, finite and have a non-zero sum,
+              and it will be normalized to sum to 1 along the last dimension. :attr:`probs`
+              will return this normalized value.
+              The `logits` argument will be interpreted as unnormalized log probabilities
+              and can therefore be any real number. It will likewise be normalized so that
+              the resulting probabilities sum to 1 along the last dimension. :attr:`logits`
+              will return this normalized value.
 
     See also: :func:`torch.multinomial`
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Categorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
         tensor(3)
 
     Args:
         probs (Tensor): event probabilities
-        logits (Tensor): event log-odds
+        logits (Tensor): event log probabilities (unnormalized)
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
+                       'logits': constraints.real_vector}
     has_enumerate_support = True
 
     def __init__(self, probs=None, logits=None, validate_args=None):
@@ -56,7 +63,7 @@ class Categorical(Distribution):
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
         batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
-        super(Categorical, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Categorical, _instance)
@@ -76,7 +83,7 @@ class Categorical(Distribution):
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=True, event_dim=0)
     def support(self):
         return constraints.integer_interval(0, self._num_events - 1)
 
@@ -95,6 +102,10 @@ class Categorical(Distribution):
     @property
     def mean(self):
         return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
+
+    @property
+    def mode(self):
+        return self.probs.argmax(axis=-1)
 
     @property
     def variance(self):

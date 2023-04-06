@@ -145,7 +145,7 @@ TEST(IRParserTest, InferredTypeIsTensor) {
 graph(%a):
   return (%a))IR",
       &*graph);
-  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
+  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
 }
 
 TEST(IRParserTest, ValueReuse) {
@@ -240,6 +240,7 @@ graph():
 }
 
 TEST(IRParserTest, MalformedShapeAnnotation) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(checkRoundtrip(
       R"IR(
 graph(%0 : Tensor,
@@ -259,7 +260,7 @@ TEST(IRParserTest, FileCheck) {
       return (%a))IR";
 
   parseIR(text, &*graph);
-  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
+  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
   torch::jit::testing::FileCheck().run(text, *graph);
 }
 
@@ -300,7 +301,7 @@ graph(%a : Float(4, 5),
 TEST(IRParserTest, MalformedStrides) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
-  bool error_thrown = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(parseIR(
       R"IR(
 graph(%a : Float(4, strides=[5], 5)):
@@ -351,6 +352,7 @@ graph():
   AT_ASSERT(n->kindOf(attr::value) == AttributeKind::ival);
   const auto& genericList = n->ival(attr::value).toList();
   std::vector<int> int_vals;
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const IValue& ival : genericList) {
     int_vals.push_back(ival.toInt());
   }

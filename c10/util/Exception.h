@@ -2,8 +2,9 @@
 #define C10_UTIL_EXCEPTION_H_
 
 #include <c10/macros/Macros.h>
-#include <c10/util/StringUtil.h>
 #include <c10/util/Deprecated.h>
+#include <c10/util/StringUtil.h>
+#include <c10/util/variant.h>
 
 #include <cstddef>
 #include <exception>
@@ -69,10 +70,7 @@ class C10_API Error : public std::exception {
       const void* caller = nullptr);
 
   // Base constructor
-  Error(
-      std::string msg,
-      std::string backtrace,
-      const void* caller = nullptr);
+  Error(std::string msg, std::string backtrace, const void* caller = nullptr);
 
   // Add some new context to the message stack.  The last added context
   // will be formatted at the end of the context list upon printing.
@@ -115,17 +113,66 @@ class C10_API Error : public std::exception {
   std::string compute_what(bool include_backtrace) const;
 };
 
-class C10_API WarningHandler {
-  public:
-  virtual ~WarningHandler() noexcept(false) {}
-  /// The default warning handler. Prints the message to stderr.
-  virtual void process(
+class C10_API Warning {
+ public:
+  class C10_API UserWarning {};
+  class C10_API DeprecationWarning {};
+
+  using warning_variant_t = c10::variant<UserWarning, DeprecationWarning>;
+
+  Warning(
+      warning_variant_t type,
       const SourceLocation& source_location,
-      const std::string& msg,
-      const bool verbatim);
+      std::string msg,
+      bool verbatim);
+
+  Warning(
+      warning_variant_t type,
+      SourceLocation source_location,
+      const char* msg,
+      bool verbatim);
+
+  Warning(
+      warning_variant_t type,
+      SourceLocation source_location,
+      ::c10::detail::CompileTimeEmptyString msg,
+      bool verbatim);
+
+  // Getters for members
+  warning_variant_t type() const;
+  const SourceLocation& source_location() const;
+  const std::string& msg() const;
+  bool verbatim() const;
+
+ private:
+  // The type of warning
+  warning_variant_t type_;
+
+  // Where the warning happened.
+  SourceLocation source_location_;
+
+  // The actual warning message.
+  std::string msg_;
+
+  // See note: [Verbatim Warnings]
+  bool verbatim_;
 };
 
-namespace Warning {
+using UserWarning = Warning::UserWarning;
+using DeprecationWarning = Warning::DeprecationWarning;
+
+// Issue a warning with a given message. Dispatched to the current
+// warning handler.
+void C10_API warn(const Warning& warning);
+
+class C10_API WarningHandler {
+ public:
+  virtual ~WarningHandler() = default;
+  /// The default warning handler. Prints the message to stderr.
+  virtual void process(const Warning& warning);
+};
+
+namespace WarningUtils {
 
 // Note: [Verbatim Warnings]
 // Warnings originating in C++ code can appear out-of-place to Python users:
@@ -140,11 +187,6 @@ namespace Warning {
 // context in their warnings should set verbatim to true so their warnings
 // appear without modification.
 
-/// Issue a warning with a given message. Dispatched to the current
-/// warning handler.
-C10_API void warn(SourceLocation source_location,
-    const std::string& msg,
-    bool verbatim);
 /// Sets the global warning handler. This is not thread-safe, so it should
 /// generally be called once during initialization or while holding the GIL
 /// for programs that use python.
@@ -154,7 +196,37 @@ C10_API void set_warning_handler(WarningHandler* handler) noexcept(true);
 /// Gets the global warning handler.
 C10_API WarningHandler* get_warning_handler() noexcept(true);
 
-} // namespace Warning
+class C10_API WarningHandlerGuard {
+  WarningHandler* prev_handler_;
+
+ public:
+  WarningHandlerGuard(WarningHandler* new_handler)
+      : prev_handler_(c10::WarningUtils::get_warning_handler()) {
+    c10::WarningUtils::set_warning_handler(new_handler);
+  }
+  ~WarningHandlerGuard() {
+    c10::WarningUtils::set_warning_handler(prev_handler_);
+  }
+};
+
+/// The TORCH_WARN_ONCE macro is difficult to test for. Use
+/// setWarnAlways(true) to turn it into TORCH_WARN, which can be
+/// tested for more easily.
+C10_API void set_warnAlways(bool) noexcept(true);
+C10_API bool get_warnAlways(void) noexcept(true);
+
+// A RAII guard that sets warn_always (not thread-local) on
+// construction, and sets it back to the original value upon destruction.
+struct C10_API WarnAlways {
+ public:
+  explicit WarnAlways(bool setting = true);
+  ~WarnAlways();
+
+ private:
+  bool prev_setting;
+};
+
+} // namespace WarningUtils
 
 // Used in ATen for out-of-bound indices that can reasonably only be detected
 // lazily inside a kernel (See: advanced indexing).  These turn into
@@ -175,6 +247,12 @@ class C10_API TypeError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for functionality that is not implemented.  These turn into
+// NotImplementedError when they cross to Python.
+class C10_API NotImplementedError : public Error {
+  using Error::Error;
+};
+
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
 class C10_API EnforceFiniteError : public Error {
@@ -187,37 +265,40 @@ class C10_API OnnxfiBackendSystemError : public Error {
   using Error::Error;
 };
 
+// Used for numerical errors from the linalg module. These
+// turn into LinAlgError when they cross into Python.
+class C10_API LinAlgError : public Error {
+  using Error::Error;
+};
+
+class C10_API OutOfMemoryError : public Error {
+  using Error::Error;
+};
+
+// Used for collective communication library errors from the distributed module.
+// These turn into DistBackendError when they cross into Python.
+class C10_API DistBackendError : public Error {
+  using Error::Error;
+};
+
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
-
-namespace detail {
-
-// Return x if it is non-empty; otherwise return y.
-inline std::string if_empty_then(std::string x, std::string y) {
-  if (x.empty()) {
-    return y;
-  } else {
-    return x;
-  }
-}
-
-}
-
 
 } // namespace c10
 
 // Private helper macro for implementing TORCH_INTERNAL_ASSERT and TORCH_CHECK
 //
-// Note: In the debug build With MSVC, __LINE__ might be of long type (a.k.a int32_t),
-// which is different from the definition of `SourceLocation` that requires
-// unsigned int (a.k.a uint32_t) and may cause a compile error with the message:
-// error C2397: conversion from 'long' to 'uint32_t' requires a narrowing conversion
-// Here the static cast is used to pass the build.
-// if this is used inside a lambda the __func__ macro expands to operator(),
-// which isn't very useful, but hard to fix in a macro so suppressing the warning.
+// Note: In the debug build With MSVC, __LINE__ might be of long type (a.k.a
+// int32_t), which is different from the definition of `SourceLocation` that
+// requires unsigned int (a.k.a uint32_t) and may cause a compile error with the
+// message: error C2397: conversion from 'long' to 'uint32_t' requires a
+// narrowing conversion Here the static cast is used to pass the build. if this
+// is used inside a lambda the __func__ macro expands to operator(), which isn't
+// very useful, but hard to fix in a macro so suppressing the warning.
 #define C10_THROW_ERROR(err_type, msg) \
-  throw ::c10::err_type({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
+  throw ::c10::err_type(               \
+      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
 // Private helper macro for workaround MSVC misexpansion of nested macro
 // invocations involving __VA_ARGS__.  See
@@ -227,13 +308,14 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // On nvcc, C10_UNLIKELY thwarts missing return statement analysis.  In cases
 // where the unlikely expression may be a constant, use this macro to ensure
 // return statement analysis keeps working (at the cost of not getting the
-// likely/unlikely annotation on nvcc). https://github.com/pytorch/pytorch/issues/21418
+// likely/unlikely annotation on nvcc).
+// https://github.com/pytorch/pytorch/issues/21418
 //
 // Currently, this is only used in the error reporting macros below.  If you
 // want to use it more generally, move me to Macros.h
 //
-// TODO: Brian Vaughan observed that we might be able to get this to work on nvcc
-// by writing some sort of C++ overload that distinguishes constexpr inputs
+// TODO: Brian Vaughan observed that we might be able to get this to work on
+// nvcc by writing some sort of C++ overload that distinguishes constexpr inputs
 // from non-constexpr.  Since there isn't any evidence that losing C10_UNLIKELY
 // in nvcc is causing us perf problems, this is not yet implemented, but this
 // might be an interesting piece of C++ code for an intrepid bootcamper to
@@ -244,7 +326,6 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define C10_UNLIKELY_OR_CONST(e) C10_UNLIKELY(e)
 #endif
 
-
 // ----------------------------------------------------------------------------
 // Error reporting macros
 // ----------------------------------------------------------------------------
@@ -252,10 +333,10 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_RETHROW(e, ...) throw
 #else
-#define TORCH_RETHROW(e, ...)      \
-  do { \
+#define TORCH_RETHROW(e, ...)               \
+  do {                                      \
     e.add_context(::c10::str(__VA_ARGS__)); \
-    throw; \
+    throw;                                  \
   } while (false)
 #endif
 
@@ -279,24 +360,30 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // (unlike assert()).
 //
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_INTERNAL_ASSERT(cond, ...)      \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error,                    \
-        #cond " INTERNAL ASSERT FAILED at"    \
-        C10_STRINGIZE(__FILE__)               \
-    );                                        \
+#define TORCH_INTERNAL_ASSERT(cond, ...)                              \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
+    ::c10::detail::torchCheckFail(                                    \
+        __func__,                                                     \
+        __FILE__,                                                     \
+        static_cast<uint32_t>(__LINE__),                              \
+        #cond " INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE__)); \
   }
 #else
-#define TORCH_INTERNAL_ASSERT(cond, ...)      \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error, ::c10::str(        \
-        #cond " INTERNAL ASSERT FAILED at "   \
-        C10_STRINGIZE(__FILE__)               \
-        ":"                                   \
-        C10_STRINGIZE(__LINE__)               \
-        ", please report a bug to PyTorch. ", \
-        ::c10::str(__VA_ARGS__)               \
-    ));                                       \
+// It would be nice if we could build a combined string literal out of
+// the TORCH_INTERNAL_ASSERT prefix and a user-provided string literal
+// as the first argument, but there doesn't seem to be any good way to
+// do that while still supporting having a first argument that isn't a
+// string literal.
+#define TORCH_INTERNAL_ASSERT(cond, ...)                                         \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                                          \
+    ::c10::detail::torchInternalAssertFail(                                      \
+        __func__,                                                                \
+        __FILE__,                                                                \
+        static_cast<uint32_t>(__LINE__),                                         \
+        #cond                                                                    \
+        " INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE__) ":" C10_STRINGIZE( \
+            __LINE__) ", please report a bug to PyTorch. ",                      \
+        c10::str(__VA_ARGS__));                                                  \
   }
 #endif
 
@@ -324,35 +411,114 @@ inline std::string if_empty_then(std::string x, std::string y) {
   TORCH_CHECK_WITH_MSG(error_t, cond, "", __VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)  \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                 \
-    C10_THROW_ERROR(Error,                              \
-        #cond #type " CHECK FAILED at "                 \
-        C10_STRINGIZE(__FILE__)                         \
-    );                                                  \
-  }
-#else
+#define TORCH_CHECK_MSG(cond, type, ...) \
+  (#cond #type " CHECK FAILED at " C10_STRINGIZE(__FILE__))
 #define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
-    C10_THROW_ERROR(error_t,                                          \
-      ::c10::detail::if_empty_then(                                   \
-        ::c10::str(__VA_ARGS__),                                      \
-        "Expected " #cond " to be true, but got false.  "             \
-        "(Could this error message be improved?  If so, "             \
-        "please report an enhancement request to PyTorch.)"           \
-      )                                                               \
-    );                                                                \
+    C10_THROW_ERROR(Error, TORCH_CHECK_MSG(cond, type, __VA_ARGS__)); \
+  }
+#else
+namespace c10 {
+namespace detail {
+template <typename... Args>
+decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
+  return ::c10::str(args...);
+}
+inline C10_API const char* torchCheckMsgImpl(const char* msg) {
+  return msg;
+}
+// If there is just 1 user-provided C-string argument, use it.
+inline C10_API const char* torchCheckMsgImpl(
+    const char* /*msg*/,
+    const char* args) {
+  return args;
+}
+} // namespace detail
+} // namespace c10
+
+#define TORCH_CHECK_MSG(cond, type, ...)                   \
+  (::c10::detail::torchCheckMsgImpl(                       \
+      "Expected " #cond                                    \
+      " to be true, but got false.  "                      \
+      "(Could this error message be improved?  If so, "    \
+      "please report an enhancement request to PyTorch.)", \
+      ##__VA_ARGS__))
+#define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)                  \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
+    C10_THROW_ERROR(error_t, TORCH_CHECK_MSG(cond, type, __VA_ARGS__)); \
   }
 #endif
-#define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
 
-// An utility macro that does what `TORCH_CHECK` does if compiled in the host code,
-// otherwise does nothing. Supposed to be used in the code shared between host and
-// device code as an alternative for `TORCH_CHECK`.
+namespace c10 {
+namespace detail {
+
+[[noreturn]] C10_API void torchCheckFail(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const std::string& msg);
+[[noreturn]] C10_API void torchCheckFail(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg);
+
+// The c10::str() call that creates userMsg can have 1 of 3 return
+// types depending on the number and types of arguments passed to
+// TORCH_INTERNAL_ASSERT.  0 arguments will get a
+// CompileTimeEmptyString, 1 const char * will be passed straight
+// through, and anything else will get converted to std::string.
+[[noreturn]] C10_API void torchInternalAssertFail(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* condMsg,
+    const char* userMsg);
+[[noreturn]] inline C10_API void torchInternalAssertFail(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* condMsg,
+    ::c10::detail::CompileTimeEmptyString /*userMsg*/) {
+  torchCheckFail(func, file, line, condMsg);
+}
+[[noreturn]] C10_API void torchInternalAssertFail(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* condMsg,
+    const std::string& userMsg);
+
+} // namespace detail
+} // namespace c10
+
+#ifdef STRIP_ERROR_MESSAGES
+#define TORCH_CHECK(cond, ...)                   \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {          \
+    ::c10::detail::torchCheckFail(               \
+        __func__,                                \
+        __FILE__,                                \
+        static_cast<uint32_t>(__LINE__),         \
+        TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
+  }
+#else
+#define TORCH_CHECK(cond, ...)                     \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {            \
+    ::c10::detail::torchCheckFail(                 \
+        __func__,                                  \
+        __FILE__,                                  \
+        static_cast<uint32_t>(__LINE__),           \
+        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
+  }
+#endif
+
+// An utility macro that does what `TORCH_CHECK` does if compiled in the host
+// code, otherwise does nothing. Supposed to be used in the code shared between
+// host and device code as an alternative for `TORCH_CHECK`.
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...)
 #else
-#define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...) TORCH_CHECK(cond, __VA_ARGS__)
+#define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...) TORCH_CHECK(cond, ##__VA_ARGS__)
 #endif
 
 // Debug only version of TORCH_INTERNAL_ASSERT. This macro only checks in debug
@@ -372,6 +538,10 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
 
+// Like TORCH_CHECK, but raises LinAlgError instead of Error.
+#define TORCH_CHECK_LINALG(cond, ...) \
+  TORCH_CHECK_WITH_MSG(LinAlgError, cond, "LINALG", __VA_ARGS__)
+
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
 #define TORCH_CHECK_INDEX(cond, ...) \
   TORCH_CHECK_WITH_MSG(IndexError, cond, "INDEX", __VA_ARGS__)
@@ -384,83 +554,131 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define TORCH_CHECK_TYPE(cond, ...) \
   TORCH_CHECK_WITH_MSG(TypeError, cond, "TYPE", __VA_ARGS__)
 
+// Like TORCH_CHECK, but raises NotImplementedErrors instead of Errors.
+#define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
+  TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
+
+#ifdef STRIP_ERROR_MESSAGES
+#define WARNING_MESSAGE_STRING(...) \
+  ::c10::detail::CompileTimeEmptyString {}
+#else
+#define WARNING_MESSAGE_STRING(...) ::c10::str(__VA_ARGS__)
+#endif
+
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-#define TORCH_WARN(...) \
-  ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__), false)
+#ifdef DISABLE_WARN
+#define _TORCH_WARN_WITH(...) ((void)0);
+#else
+#define _TORCH_WARN_WITH(warning_t, ...)                     \
+  ::c10::warn(::c10::Warning(                                \
+      warning_t(),                                           \
+      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
+      WARNING_MESSAGE_STRING(__VA_ARGS__),                   \
+      false));
+#endif
+
+#define TORCH_WARN(...) _TORCH_WARN_WITH(::c10::UserWarning, __VA_ARGS__);
+
+#define TORCH_WARN_DEPRECATION(...) \
+  _TORCH_WARN_WITH(::c10::DeprecationWarning, __VA_ARGS__);
 
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-#define TORCH_WARN_ONCE(...) \
-  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
-    ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__), false); \
-    return true; \
-  }()
+#define _TORCH_WARN_ONCE(...)                                             \
+  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = \
+      [&] {                                                               \
+        TORCH_WARN(__VA_ARGS__);                                          \
+        return true;                                                      \
+      }()
 
+#ifdef DISABLE_WARN
+#define TORCH_WARN_ONCE(...) ((void)0);
+#else
+#define TORCH_WARN_ONCE(...)                   \
+  if (::c10::WarningUtils::get_warnAlways()) { \
+    TORCH_WARN(__VA_ARGS__);                   \
+  } else {                                     \
+    _TORCH_WARN_ONCE(__VA_ARGS__);             \
+  }
+#endif
+
+// Report an error with a specific argument
+// NOTE: using the argument name in TORCH_CHECK's message is preferred
+#define TORCH_CHECK_ARG(cond, argN, ...) \
+  TORCH_CHECK(cond, "invalid argument ", argN, ": ", __VA_ARGS__)
 
 // ----------------------------------------------------------------------------
 // Deprecated macros
 // ----------------------------------------------------------------------------
 
-namespace c10 { namespace detail {
+namespace c10 {
+namespace detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg) instead.")
+C10_DEPRECATED_MESSAGE("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
+instead.")
 */
 inline void deprecated_AT_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
-                       "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
+C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an
+internal invariant failure, use " \
+                       "TORCH_INTERNAL_ASSERT instead; if you mean to do user
+error checking, use " \ "TORCH_CHECK.  See
+https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERT() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an internal invariant failure, use " \
-                       "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
+C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an
+internal invariant failure, use " \
+                       "TORCH_INTERNAL_ASSERT instead; if you mean to do user
+error checking, use " \ "TORCH_CHECK.  See
+https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERTM() {}
 
-}} // namespace c10::detail
+} // namespace detail
+} // namespace c10
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
 // using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK
-// instead. See https://github.com/pytorch/pytorch/issues/20287 for more details.
+// instead. See https://github.com/pytorch/pytorch/issues/20287 for more
+// details.
 #define AT_ASSERT(...)                                              \
   do {                                                              \
     ::c10::detail::deprecated_AT_ASSERT();                          \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__)); \
   } while (false)
 
-// Deprecated alias, like AT_ASSERT.  The new TORCH_INTERNAL_ASSERT macro supports
-// both 0-ary and variadic calls, so having a separate message-accepting macro
-// is not necessary.
+// Deprecated alias, like AT_ASSERT.  The new TORCH_INTERNAL_ASSERT macro
+// supports both 0-ary and variadic calls, so having a separate
+// message-accepting macro is not necessary.
 //
 // NB: we MUST include cond explicitly here, as MSVC will miscompile the macro
 // expansion, shunting all of __VA_ARGS__ to cond.  An alternate workaround
 // can be seen at
 // https://stackoverflow.com/questions/5134523/msvc-doesnt-expand-va-args-correctly
-#define AT_ASSERTM(cond, ...)                                                 \
-  do {                                                                        \
-    ::c10::detail::deprecated_AT_ASSERTM();                                   \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__));     \
+#define AT_ASSERTM(cond, ...)                                             \
+  do {                                                                    \
+    ::c10::detail::deprecated_AT_ASSERTM();                               \
+    C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__)); \
   } while (false)
 
 // Deprecated alias; this alias was deprecated because it represents extra API
 // surface that makes it hard for people to understand what macro to use.
 // Use TORCH_CHECK(false, ...) or TORCH_INTERNAL_ASSERT(false, ...) to
 // unconditionally fail at a line of code.
-#define AT_ERROR(...)                                                         \
-  do {                                                                        \
-    ::c10::detail::deprecated_AT_ERROR();                                     \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(false, ::c10::str(__VA_ARGS__)));  \
+#define AT_ERROR(...)                                                        \
+  do {                                                                       \
+    ::c10::detail::deprecated_AT_ERROR();                                    \
+    C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(false, ::c10::str(__VA_ARGS__))); \
   } while (false)
 
 #endif // C10_UTIL_EXCEPTION_H_

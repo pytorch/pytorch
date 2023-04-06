@@ -1,17 +1,21 @@
-import torch
-from collections import defaultdict
-from torch._six import container_abcs
-import warnings
+from collections import defaultdict, abc
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
+import inspect
+import warnings
+
+import torch
+from .common import amp_definitely_not_available
 
 
-class _MultiDeviceReplicator(object):
+__all__ = ["OptState", "GradScaler"]
+
+class _MultiDeviceReplicator:
     """
     Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.
     """
     def __init__(self, master_tensor: torch.Tensor) -> None:
-        assert master_tensor.is_cuda
+        assert master_tensor.is_cuda or master_tensor.device.type == 'xla'
         self.master = master_tensor
         self._per_device_tensors: Dict[torch.device, torch.Tensor] = {}
 
@@ -38,7 +42,7 @@ def _refresh_per_optimizer_state():
     return {"stage": OptState.READY, "found_inf_per_device": {}}
 
 
-class GradScaler(object):
+class GradScaler:
     _scale: Optional[torch.Tensor]
     _grows_tracker: Optional[torch.Tensor]
     _per_optimizer_states: Dict[int, Dict[str, Any]]
@@ -94,7 +98,7 @@ class GradScaler(object):
     value calibrates.  ``scaler.step`` will skip the underlying ``optimizer.step()`` for these
     iterations.  After that, step skipping should occur rarely (once every few hundred or thousand iterations).
 
-    Arguments:
+    Args:
         init_scale (float, optional, default=2.**16):  Initial scale factor.
         growth_factor (float, optional, default=2.0):  Factor by which the scale is multiplied during
             :meth:`update` if no inf/NaN gradients occur for ``growth_interval`` consecutive iterations.
@@ -102,8 +106,9 @@ class GradScaler(object):
             :meth:`update` if inf/NaN gradients occur in an iteration.
         growth_interval (int, optional, default=2000):  Number of consecutive iterations without inf/NaN gradients
             that must occur for the scale to be multiplied by ``growth_factor``.
-        enabled (bool, optional, default=True):  If ``False``, disables gradient scaling. :meth:`step` simply
+        enabled (bool, optional):  If ``False``, disables gradient scaling. :meth:`step` simply
             invokes the underlying ``optimizer.step()``, and other methods become no-ops.
+            Default: ``True``
     """
     def __init__(self,
                  init_scale=2.**16,
@@ -111,7 +116,7 @@ class GradScaler(object):
                  backoff_factor=0.5,
                  growth_interval=2000,
                  enabled=True):
-        if enabled and not torch.cuda.is_available():
+        if enabled and amp_definitely_not_available():
             warnings.warn("torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.")
             self._enabled = False
         else:
@@ -140,8 +145,8 @@ class GradScaler(object):
 
     def _lazy_init_scale_growth_tracker(self, dev):
         assert self._growth_tracker is None, "_growth_tracker initialized before _scale"
-        self._scale = torch.full((1,), self._init_scale, dtype=torch.float32, device=dev)
-        self._growth_tracker = torch.full((1,), self._init_growth_tracker, dtype=torch.int32, device=dev)
+        self._scale = torch.full((), self._init_scale, dtype=torch.float32, device=dev)
+        self._growth_tracker = torch.full((), self._init_growth_tracker, dtype=torch.int32, device=dev)
 
     def scale(self, outputs):
         """
@@ -150,7 +155,7 @@ class GradScaler(object):
         Returns scaled outputs.  If this instance of :class:`GradScaler` is not enabled, outputs are returned
         unmodified.
 
-        Arguments:
+        Args:
             outputs (Tensor or iterable of Tensors):  Outputs to scale.
         """
         if not self._enabled:
@@ -158,7 +163,7 @@ class GradScaler(object):
 
         # Short-circuit for the common case.
         if isinstance(outputs, torch.Tensor):
-            assert outputs.is_cuda
+            assert outputs.is_cuda or outputs.device.type == 'xla'
             if self._scale is None:
                 self._lazy_init_scale_growth_tracker(outputs.device)
             assert self._scale is not None
@@ -169,16 +174,16 @@ class GradScaler(object):
 
         def apply_scale(val):
             if isinstance(val, torch.Tensor):
-                assert val.is_cuda
+                assert val.is_cuda or val.device.type == 'xla'
                 if len(stash) == 0:
                     if self._scale is None:
                         self._lazy_init_scale_growth_tracker(val.device)
                     assert self._scale is not None
                     stash.append(_MultiDeviceReplicator(self._scale))
                 return val * stash[0].get(val.device)
-            elif isinstance(val, container_abcs.Iterable):
+            elif isinstance(val, abc.Iterable):
                 iterable = map(apply_scale, val)
-                if isinstance(val, list) or isinstance(val, tuple):
+                if isinstance(val, (list, tuple)):
                     return type(val)(iterable)
                 else:
                     return iterable
@@ -245,7 +250,7 @@ class GradScaler(object):
             scaler.step(optimizer)
             scaler.update()
 
-        Arguments:
+        Args:
             optimizer (torch.optim.Optimizer):  Optimizer that owns the gradients to be unscaled.
 
         .. note::
@@ -274,10 +279,18 @@ class GradScaler(object):
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
         assert self._scale is not None
         inv_scale = self._scale.double().reciprocal().float()
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
+        found_inf = torch.full((), 0.0, dtype=torch.float32, device=self._scale.device)
 
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(optimizer, inv_scale, found_inf, False)
         optimizer_state["stage"] = OptState.UNSCALED
+
+    def _maybe_opt_step(self, optimizer, optimizer_state, *args, **kwargs):
+        retval = None
+        # NOTE(crcrpar): Gradients could be inf/nan after `GradScaler.unscale_(optimizer)`
+        # especially when gradient clipping is applied.
+        if not sum(v.item() for v in self._check_inf_per_device(optimizer).values()):
+            retval = optimizer.step(*args, **kwargs)
+        return retval
 
     def step(self, optimizer, *args, **kwargs):
         """
@@ -292,7 +305,7 @@ class GradScaler(object):
 
         Returns the return value of ``optimizer.step(*args, **kwargs)``.
 
-        Arguments:
+        Args:
             optimizer (torch.optim.Optimizer):  Optimizer that applies the gradients.
             args:  Any arguments.
             kwargs:  Any keyword arguments.
@@ -320,8 +333,35 @@ class GradScaler(object):
             # The contract with custom optimizers is that their step() should accept an additional,
             # optional grad_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:
             # it can query its own state, invoke unscale_ on itself, etc
-            retval = optimizer.step(*args, **dict(kwargs, grad_scaler=self))
+            # The contract above is being deprecated to avoid introducing `grad_scaler: GradScaler` argument
+            # to `Optimizer.step`. The new behavior is going to add two Tensor attributes of `grad_scale`
+            # and `found_inf` to the passed optimizer so that the optimizer can utilize those
+            # to skip the parameter updates or unscale gradients before updating parameters in
+            # the fused kernel, e.g. `FusedAdamMathFunctor`.
+            kwargs_ = kwargs
+            has_grad_scaler_kwarg = "grad_scaler" in inspect.signature(optimizer.step).parameters
+            if has_grad_scaler_kwarg:
+                warnings.warn(
+                    "GradScaler is going to stop passing itself as a keyword argument to the passed "
+                    "optimizer. In the near future GradScaler registers `grad_scale: Tensor` and "
+                    "`found_inf: Tensor` to the passed optimizer and let the optimizer use them directly.",
+                    FutureWarning)
+                kwargs_.update({"grad_scaler": self})
+            else:
+                scaler = self._get_scale_async()
+                found_inf = cast(
+                    torch.Tensor,
+                    sum([
+                        t.to(scaler.device, non_blocking=True) for t in self._check_inf_per_device(optimizer).values()
+                    ])
+                )
+                optimizer.grad_scale = None if optimizer_state["stage"] == OptState.UNSCALED else scaler
+                optimizer.found_inf = found_inf
+            retval = optimizer.step(*args, **kwargs_)
             optimizer_state["stage"] = OptState.STEPPED
+            if not has_grad_scaler_kwarg:
+                del optimizer.grad_scale
+                del optimizer.found_inf
             return retval
 
         if optimizer_state["stage"] is OptState.READY:
@@ -329,8 +369,7 @@ class GradScaler(object):
 
         assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
 
-        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
-            retval = optimizer.step(*args, **kwargs)
+        retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
 
         optimizer_state["stage"] = OptState.STEPPED
 
@@ -344,9 +383,12 @@ class GradScaler(object):
         to reduce it. If ``growth_interval`` unskipped iterations occurred consecutively,
         the scale is multiplied by ``growth_factor`` to increase it.
 
-        Passing ``new_scale`` sets the scale directly.
+        Passing ``new_scale`` sets the new scale value manually. (``new_scale`` is not
+        used directly, it's used to fill GradScaler's internal scale tensor. So if
+        ``new_scale`` was a tensor, later in-place changes to that tensor will not further
+        affect the scale GradScaler uses internally.)
 
-        Arguments:
+        Args:
             new_scale (float or :class:`torch.cuda.FloatTensor`, optional, default=None):  New scale factor.
 
         .. warning::
@@ -361,13 +403,13 @@ class GradScaler(object):
         if new_scale is not None:
             # Accept a new user-defined scale.
             if isinstance(new_scale, float):
-                self._scale = torch.full((1,), new_scale, dtype=torch.float32, device=_scale.device)
+                self._scale.fill_(new_scale)  # type: ignore[union-attr]
             else:
                 reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor with requires_grad=False."
                 assert isinstance(new_scale, torch.cuda.FloatTensor), reason  # type: ignore[attr-defined]
                 assert new_scale.numel() == 1, reason
                 assert new_scale.requires_grad is False, reason
-                self._scale = new_scale
+                self._scale.copy_(new_scale)  # type: ignore[union-attr]
         else:
             # Consume shared inf/nan data collected from optimizers to update the scale.
             # If all found_inf tensors are on the same device as self._scale, this operation is asynchronous.
@@ -382,12 +424,12 @@ class GradScaler(object):
                 for i in range(1, len(found_infs)):
                     found_inf_combined += found_infs[i]
 
-            self._scale = torch._amp_update_scale(_growth_tracker,
-                                                  _scale,
-                                                  found_inf_combined,
-                                                  self._growth_factor,
-                                                  self._backoff_factor,
-                                                  self._growth_interval)
+            torch._amp_update_scale_(_scale,
+                                     _growth_tracker,
+                                     found_inf_combined,
+                                     self._growth_factor,
+                                     self._backoff_factor,
+                                     self._growth_interval)
 
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
         self._per_optimizer_states = defaultdict(_refresh_per_optimizer_state)
@@ -415,7 +457,7 @@ class GradScaler(object):
 
     def set_growth_factor(self, new_factor):
         r"""
-        Arguments:
+        Args:
             new_scale (float):  Value to use as the new scale growth factor.
         """
         self._growth_factor = new_factor
@@ -428,7 +470,7 @@ class GradScaler(object):
 
     def set_backoff_factor(self, new_factor):
         r"""
-        Arguments:
+        Args:
             new_scale (float):  Value to use as the new scale backoff factor.
         """
         self._backoff_factor = new_factor
@@ -441,7 +483,7 @@ class GradScaler(object):
 
     def set_growth_interval(self, new_interval):
         r"""
-        Arguments:
+        Args:
             new_interval (int):  Value to use as the new growth interval.
         """
         self._growth_interval = new_interval
@@ -484,7 +526,7 @@ class GradScaler(object):
         r"""
         Loads the scaler state.  If this instance is disabled, :meth:`load_state_dict` is a no-op.
 
-        Arguments:
+        Args:
            state_dict(dict): scaler state.  Should be an object returned from a call to :meth:`state_dict`.
         """
         if not self._enabled:
@@ -524,8 +566,8 @@ class GradScaler(object):
     def _check_inf_per_device(self, optimizer):
         _scale, _ = self._check_scale_growth_tracker("_check_inf_per_device")
 
-        dummy_inv_scale = torch.full((1,), 1.0, dtype=torch.float32, device=_scale.device)
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=_scale.device)
+        dummy_inv_scale = torch.full((), 1.0, dtype=torch.float32, device=_scale.device)
+        found_inf = torch.full((), 0.0, dtype=torch.float32, device=_scale.device)
 
         self._per_optimizer_states[id(optimizer)]["found_inf_per_device"] = \
             self._unscale_grads_(optimizer, dummy_inv_scale, found_inf, True)

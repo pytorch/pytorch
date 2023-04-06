@@ -21,6 +21,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/string_utils.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 C10_DEFINE_string(
     caffe2_cuda_memory_pool,
@@ -89,9 +90,9 @@ void CUDAContext::CopyBytesAsync(
   // events, so it's fine.  In order to make it a standalone function proper
   // synchronization between stream is required
   int gpu_id = 0;
-  if (dst_device.type() == DeviceType::CUDA) {
+  if (dst_device.is_cuda()) {
     gpu_id = dst_device.index();
-  } else if (src_device.type() == DeviceType::CUDA) {
+  } else if (src_device.is_cuda()) {
     gpu_id = src_device.index();
   } else {
     LOG(FATAL) << "shouldn't be called with non-cuda device";
@@ -234,7 +235,7 @@ static void Caffe2InitializeCuda() {
         // a reserved flag for cudaDeviceEnablePeerAccess that should always be
         // zero currently.
         // It is ok if peer access is already enabled...
-        cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
+        cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaDeviceEnablePeerAccess(j, 0));
         if ((err != cudaErrorPeerAccessAlreadyEnabled) &&
             (err != cudaSuccess)) {
           CAFFE_THROW(cudaGetErrorString(err));
@@ -350,7 +351,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
       CUDA_ENFORCE(cudaHostUnregister(data));
       GetDefaultCPUAllocator()->raw_deleter()(data);
     } else {
-      cudaError_t err = cudaFreeHost(data);
+      cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaFreeHost(data));
       profiledCPUMemoryReporter().Delete(data);
       if (err == cudaErrorInvalidValue) {
         free(data);
@@ -436,7 +437,7 @@ CUDAContext::CUDAContext(const DeviceOption& option)
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
-  DCHECK_EQ(option.device_type(), PROTO_CUDA);
+  TORCH_DCHECK_EQ(option.device_type(), PROTO_CUDA);
 }
 
 CUDAContext::~CUDAContext() {
@@ -560,12 +561,12 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           // some models that are currently running with the thc
           // allocator fit in memory.  We will need to find some
           // way of resolving this problem.
-          cuda::CUDAStreamGuard g(
+          c10::cuda::CUDAStreamGuard g(
             Stream(
               Stream::DEFAULT,
               Device(kCUDA, CaffeCudaGetDevice())
             ));
-          ptr = cuda::CUDACachingAllocator::raw_alloc(nbytes);
+          ptr = c10::cuda::CUDACachingAllocator::raw_alloc(nbytes);
         }
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
@@ -597,7 +598,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
     switch (g_cuda_memory_pool_type) {
       case CudaMemoryPoolType::NONE: {
         // If memory pool is not set up, use simple cudaFree.
-        cudaError_t error = cudaFree(ptr);
+        cudaError_t error = C10_CUDA_ERROR_HANDLED(cudaFree(ptr));
         // For some reason, in Python runtime we sometimes delete a data pointer
         // after the cuda runtime exits - this is odd but is probably caused by
         // a static workspace that pycaffe2 uses, and the destruction got
@@ -624,7 +625,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         break;
       }
       case CudaMemoryPoolType::THC: {
-        cuda::CUDACachingAllocator::raw_delete(ptr);
+        c10::cuda::CUDACachingAllocator::raw_delete(ptr);
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_cuda_device_affiliation.erase(g_cuda_device_affiliation.find(ptr));
         }

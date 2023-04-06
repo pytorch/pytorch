@@ -1,7 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("@//tools/rules:cu.bzl", "cu_library")
-load("@//third_party:substitution.bzl", "template_rule")
-load("@//tools/config:defs.bzl", "if_cuda")
+load("@pytorch//tools/rules:cu.bzl", "cu_library")
+load("@pytorch//third_party:substitution.bzl", "template_rule")
+load("@pytorch//tools/config:defs.bzl", "if_cuda")
 
 template_rule(
     name = "gloo_config_cmake_macros",
@@ -20,6 +20,8 @@ template_rule(
         "cmakedefine01 GLOO_USE_MPI": "define GLOO_USE_MPI 0",
         "cmakedefine01 GLOO_USE_AVX": "define GLOO_USE_AVX 0",
         "cmakedefine01 GLOO_USE_LIBUV": "define GLOO_USE_LIBUV 0",
+        # The `GLOO_HAVE_TRANSPORT_TCP_TLS` line should go above the `GLOO_HAVE_TRANSPORT_TCP` in order to properly substitute the template.
+        "cmakedefine01 GLOO_HAVE_TRANSPORT_TCP_TLS": "define GLOO_HAVE_TRANSPORT_TCP_TLS 1",
         "cmakedefine01 GLOO_HAVE_TRANSPORT_TCP": "define GLOO_HAVE_TRANSPORT_TCP 1",
         "cmakedefine01 GLOO_HAVE_TRANSPORT_IBVERBS": "define GLOO_HAVE_TRANSPORT_IBVERBS 0",
         "cmakedefine01 GLOO_HAVE_TRANSPORT_UV": "define GLOO_HAVE_TRANSPORT_UV 0",
@@ -35,6 +37,7 @@ cc_library(
             "gloo/rendezvous/*.h",
             "gloo/transport/*.h",
             "gloo/transport/tcp/*.h",
+            "gloo/transport/tcp/tls/*.h",
         ],
         exclude = [
             "gloo/rendezvous/redis_store.h",
@@ -48,8 +51,8 @@ cc_library(
 cu_library(
     name = "gloo_cuda",
     srcs = [
-        "gloo/cuda.cu.cc",
-        "gloo/cuda_private.cu.cc",
+        "gloo/cuda.cu",
+        "gloo/cuda_private.cu",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -72,11 +75,10 @@ cc_library(
             "gloo/cuda*.cc",
             "gloo/common/win.cc",
             "gloo/rendezvous/redis_store.cc",
-        ],
-    ),
+        ]
+    ) + if_cuda(glob(["gloo/cuda*.cc"])),
     copts = [
-        "-std=gnu++11",
-        "-std=c++11",
+        "-std=c++17",
     ],
     visibility = ["//visibility:public"],
     deps = [":gloo_headers"] + if_cuda(

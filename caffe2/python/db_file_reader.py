@@ -66,7 +66,7 @@ class DBFileReader(Reader):
 
         # Before self._init_reader_schema(...),
         # self.db_path and self.db_type are required to be set.
-        super(DBFileReader, self).__init__(self._init_reader_schema(field_names))
+        super().__init__(self._init_reader_schema(field_names))
         self.ds = Dataset(self._schema, self.name + '_dataset')
         self.ds_reader = None
 
@@ -118,7 +118,7 @@ class DBFileReader(Reader):
             )
         )
         col_names = [
-            blob_name[len(blob_prefix):] for blob_name in workspace.Blobs()
+            blob_name[len(blob_prefix):] for blob_name in sorted(workspace.Blobs())
             if blob_name.startswith(blob_prefix)
         ]
         schema = from_column_list(col_names)

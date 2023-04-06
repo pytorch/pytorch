@@ -80,3 +80,15 @@
 #if defined(_MSC_VER)
 #define __builtin_prefetch
 #endif
+
+#if defined(__GNUC__)
+  #define PYTORCH_QNNP_UNALIGNED __attribute__((__aligned__(1)))
+#elif defined(_MSC_VER)
+  #if defined(_M_IX86)
+    #define PYTORCH_QNNP_UNALIGNED
+  #else
+    #define PYTORCH_QNNP_UNALIGNED __unaligned
+  #endif
+#else
+  #error "Platform-specific implementation of PYTORCH_QNNP_UNALIGNED required"
+#endif

@@ -9,9 +9,16 @@ namespace at {
 namespace cuda {
 
 inline Device getDeviceFromPtr(void* ptr) {
-  cudaPointerAttributes attr;
+  cudaPointerAttributes attr{};
+
   AT_CUDA_CHECK(cudaPointerGetAttributes(&attr, ptr));
-  return {DeviceType::CUDA, static_cast<int16_t>(attr.device)};
+
+#if !defined(USE_ROCM)
+  TORCH_CHECK(attr.type != cudaMemoryTypeUnregistered,
+    "The specified pointer resides on host memory and is not registered with any CUDA device.");
+#endif
+
+  return {DeviceType::CUDA, static_cast<DeviceIndex>(attr.device)};
 }
 
 }} // namespace at::cuda

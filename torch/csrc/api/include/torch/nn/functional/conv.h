@@ -9,31 +9,44 @@ namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
+
+inline std::string padding_unwrap(enumtype::kValid) {
+  return "valid";
+}
+
+inline std::string padding_unwrap(enumtype::kSame) {
+  return "same";
+}
+
+template <size_t D>
+IntArrayRef padding_unwrap(const ExpandingArray<D>& array) {
+  return array;
+}
+
 inline Tensor conv1d(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
     ExpandingArray<1> stride,
-    ExpandingArray<1> padding,
+    const Conv1dFuncOptions::padding_t& padding,
     ExpandingArray<1> dilation,
     int64_t groups) {
-  return torch::conv1d(
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    groups);
+  return c10::visit(
+      [&](const auto& pad) {
+        return torch::conv1d(
+            input, weight, bias, stride, padding_unwrap(pad), dilation, groups);
+      },
+      padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv1d
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv1d
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::Conv1dFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::Conv1dFuncOptions` class
+/// to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -45,13 +58,13 @@ inline Tensor conv1d(
     const Tensor& weight,
     const Conv1dFuncOptions& options = {}) {
   return detail::conv1d(
-    input,
-    weight,
-    options.bias(),
-    options.stride(),
-    options.padding(),
-    options.dilation(),
-    options.groups());
+      input,
+      weight,
+      options.bias(),
+      options.stride(),
+      options.padding(),
+      options.dilation(),
+      options.groups());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -61,26 +74,25 @@ inline Tensor conv2d(
     const Tensor& weight,
     const Tensor& bias,
     ExpandingArray<2> stride,
-    ExpandingArray<2> padding,
+    const Conv2dFuncOptions::padding_t& padding,
     ExpandingArray<2> dilation,
     int64_t groups) {
-  return torch::conv2d(
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    groups);
+  return c10::visit(
+      [&](const auto& pad) {
+        return torch::conv2d(
+            input, weight, bias, stride, padding_unwrap(pad), dilation, groups);
+      },
+      padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv2d
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv2d
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::Conv2dFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::Conv2dFuncOptions` class
+/// to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -92,13 +104,13 @@ inline Tensor conv2d(
     const Tensor& weight,
     const Conv2dFuncOptions& options = {}) {
   return detail::conv2d(
-    input,
-    weight,
-    options.bias(),
-    options.stride(),
-    options.padding(),
-    options.dilation(),
-    options.groups());
+      input,
+      weight,
+      options.bias(),
+      options.stride(),
+      options.padding(),
+      options.dilation(),
+      options.groups());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -108,26 +120,25 @@ inline Tensor conv3d(
     const Tensor& weight,
     const Tensor& bias,
     ExpandingArray<3> stride,
-    ExpandingArray<3> padding,
+    const Conv3dFuncOptions::padding_t& padding,
     ExpandingArray<3> dilation,
     int64_t groups) {
-  return torch::conv3d(
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    groups);
+  return c10::visit(
+      [&](const auto& pad) {
+        return torch::conv3d(
+            input, weight, bias, stride, padding_unwrap(pad), dilation, groups);
+      },
+      padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv3d
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv3d
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::Conv3dFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::Conv3dFuncOptions` class
+/// to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -139,33 +150,40 @@ inline Tensor conv3d(
     const Tensor& weight,
     const Conv3dFuncOptions& options = {}) {
   return detail::conv3d(
-    input,
-    weight,
-    options.bias(),
-    options.stride(),
-    options.padding(),
-    options.dilation(),
-    options.groups());
+      input,
+      weight,
+      options.bias(),
+      options.stride(),
+      options.padding(),
+      options.dilation(),
+      options.groups());
 }
 
 // ============================================================================
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
-                               const Tensor& bias, IntArrayRef stride,
-                               IntArrayRef padding, IntArrayRef output_padding,
-                               int64_t groups, IntArrayRef dilation) {
+inline Tensor conv_transpose1d(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    int64_t groups,
+    IntArrayRef dilation) {
   return torch::conv_transpose1d(
-    input, weight, bias, stride, padding, output_padding, groups, dilation);
+      input, weight, bias, stride, padding, output_padding, groups, dilation);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose1d
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose1d
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::ConvTranspose1dFuncOptions` class to learn what
+/// See the documentation for
+/// `torch::nn::functional::ConvTranspose1dFuncOptions` class to learn what
 /// optional arguments are supported for this functional.
 ///
 /// Example:
@@ -173,31 +191,44 @@ inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
 /// namespace F = torch::nn::functional;
 /// F::conv_transpose1d(x, weight, F::ConvTranspose1dFuncOptions().stride(1));
 /// ```
-inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
-                               const ConvTranspose1dFuncOptions& options = {}) {
+inline Tensor conv_transpose1d(
+    const Tensor& input,
+    const Tensor& weight,
+    const ConvTranspose1dFuncOptions& options = {}) {
   return detail::conv_transpose1d(
-    input, weight,
-    options.bias(), options.stride(),
-    options.padding(), options.output_padding(),
-    options.groups(), options.dilation());
+      input,
+      weight,
+      options.bias(),
+      options.stride(),
+      options.padding(),
+      options.output_padding(),
+      options.groups(),
+      options.dilation());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
-                               const Tensor& bias, IntArrayRef stride,
-                               IntArrayRef padding, IntArrayRef output_padding,
-                               int64_t groups, IntArrayRef dilation) {
+inline Tensor conv_transpose2d(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    int64_t groups,
+    IntArrayRef dilation) {
   return torch::conv_transpose2d(
-    input, weight, bias, stride, padding, output_padding, groups, dilation);
+      input, weight, bias, stride, padding, output_padding, groups, dilation);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose2d
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose2d
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::ConvTranspose2dFuncOptions` class to learn what
+/// See the documentation for
+/// `torch::nn::functional::ConvTranspose2dFuncOptions` class to learn what
 /// optional arguments are supported for this functional.
 ///
 /// Example:
@@ -205,31 +236,44 @@ inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
 /// namespace F = torch::nn::functional;
 /// F::conv_transpose2d(x, weight, F::ConvTranspose2dFuncOptions().stride(1));
 /// ```
-inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
-                               const ConvTranspose2dFuncOptions& options = {}) {
+inline Tensor conv_transpose2d(
+    const Tensor& input,
+    const Tensor& weight,
+    const ConvTranspose2dFuncOptions& options = {}) {
   return detail::conv_transpose2d(
-    input, weight,
-    options.bias(), options.stride(),
-    options.padding(), options.output_padding(),
-    options.groups(), options.dilation());
+      input,
+      weight,
+      options.bias(),
+      options.stride(),
+      options.padding(),
+      options.output_padding(),
+      options.groups(),
+      options.dilation());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
-                               const Tensor& bias, IntArrayRef stride,
-                               IntArrayRef padding, IntArrayRef output_padding,
-                               int64_t groups, IntArrayRef dilation) {
+inline Tensor conv_transpose3d(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    int64_t groups,
+    IntArrayRef dilation) {
   return torch::conv_transpose3d(
-    input, weight, bias, stride, padding, output_padding, groups, dilation);
+      input, weight, bias, stride, padding, output_padding, groups, dilation);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose3d
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose3d
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::ConvTranspose3dFuncOptions` class to learn what
+/// See the documentation for
+/// `torch::nn::functional::ConvTranspose3dFuncOptions` class to learn what
 /// optional arguments are supported for this functional.
 ///
 /// Example:
@@ -237,13 +281,19 @@ inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
 /// namespace F = torch::nn::functional;
 /// F::conv_transpose3d(x, weight, F::ConvTranspose3dFuncOptions().stride(1));
 /// ```
-inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
-                               const ConvTranspose3dFuncOptions& options = {}) {
+inline Tensor conv_transpose3d(
+    const Tensor& input,
+    const Tensor& weight,
+    const ConvTranspose3dFuncOptions& options = {}) {
   return detail::conv_transpose3d(
-    input, weight,
-    options.bias(), options.stride(),
-    options.padding(), options.output_padding(),
-    options.groups(), options.dilation());
+      input,
+      weight,
+      options.bias(),
+      options.stride(),
+      options.padding(),
+      options.output_padding(),
+      options.groups(),
+      options.dilation());
 }
 
 } // namespace functional

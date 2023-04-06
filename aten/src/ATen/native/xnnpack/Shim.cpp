@@ -1,6 +1,7 @@
 #ifndef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
+#include <ATen/core/Tensor.h>
 
 //
 // This file is here so as to provide an implementation even in cases where
@@ -31,7 +32,7 @@ bool available() {
 bool use_convolution2d(
     const Tensor&,
     const Tensor&,
-    const Tensor&,
+    const at::OptionalIntArrayRef,
     const IntArrayRef,
     const IntArrayRef,
     const IntArrayRef,
@@ -69,7 +70,7 @@ bool use_max_pool2d(
     const Tensor&,
     const IntArrayRef,
     const IntArrayRef,
-    const IntArrayRef,
+    IntArrayRef,
     const IntArrayRef,
     const bool,
     const float,
@@ -81,7 +82,7 @@ Tensor max_pool2d(
     const Tensor&,
     const IntArrayRef,
     const IntArrayRef,
-    const IntArrayRef,
+    IntArrayRef,
     const IntArrayRef,
     const bool,
     const float,

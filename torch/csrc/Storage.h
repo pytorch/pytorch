@@ -1,79 +1,96 @@
 #ifndef THP_STORAGE_INC
 #define THP_STORAGE_INC
 
-#define THPStorageStr TH_CONCAT_STRING_3(torch.,Real,Storage)
-#define THPStorageClass TH_CONCAT_3(THP,Real,StorageClass)
-#define THPStorage_(NAME) TH_CONCAT_4(THP,Real,Storage_,NAME)
+#include <torch/csrc/Types.h>
 
-#define THPDoubleStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPDoubleStorageClass)
-#define THPFloatStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPFloatStorageClass)
-#define THPHalfStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPFloatStorageClass)
-#define THPLongStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPLongStorageClass)
-#define THPIntStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPIntStorageClass)
-#define THPShortStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPShortStorageClass)
-#define THPCharStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPCharStorageClass)
-#define THPByteStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPByteStorageClass)
-#define THPBoolStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPBoolStorageClass)
-#define THPQUInt8Storage_Check(obj) \
-    PyObject_IsInstance(obj, THPQUInt8StorageClass)
-#define THPQInt8Storage_Check(obj) \
-    PyObject_IsInstance(obj, THPQInt8StorageClass)
-#define THPQInt32Storage_Check(obj) \
-    PyObject_IsInstance(obj, THPQInt32StorageClass)
-#define THPBFloat16Storage_Check(obj) \
-    PyObject_IsInstance(obj, THPBFloat16StorageClass)
-#define THPComplexDoubleStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPComplexDoubleStorageClass)
-#define THPComplexFloatStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPComplexFloatStorageClass)
-#define THPQUInt4x2Storage_Check(obj) \
-    PyObject_IsInstance(obj, THPQUInt8StorageClass)
+#define THPStorageStr "torch.UntypedStorage"
 
-#define THPDoubleStorage_CData(obj)         (obj)->cdata
-#define THPFloatStorage_CData(obj)          (obj)->cdata
-#define THPHalfStorage_CData(obj)           (obj)->cdata
-#define THPLongStorage_CData(obj)           (obj)->cdata
-#define THPIntStorage_CData(obj)            (obj)->cdata
-#define THPShortStorage_CData(obj)          (obj)->cdata
-#define THPCharStorage_CData(obj)           (obj)->cdata
-#define THPByteStorage_CData(obj)           (obj)->cdata
-#define THPBoolStorage_CData(obj)           (obj)->cdata
-#define THPQUInt8Storage_CData(obj)         (obj)->cdata
-#define THPQInt8Storage_CData(obj)          (obj)->cdata
-#define THPQInt32Storage_CData(obj)         (obj)->cdata
-#define THPBFloat16Storage_CData(obj)       (obj)->cdata
-#define THPComplexDoubleStorage_CData(obj)  (obj)->cdata
-#define THPComplexFloatStorage_CData(obj)   (obj)->cdata
-#define THPQUInt4x2Storage_CData(obj)       (obj)->cdata
+namespace c10 {
 
-#define THPStorageType TH_CONCAT_3(THP,Real,StorageType)
-#define THPStorageBaseStr TH_CONCAT_STRING_2(Real,StorageBase)
+template <>
+struct MaybeOwnedTraits<c10::Storage> {
+  using owned_type = c10::Storage;
+  using borrow_type = c10::Storage;
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateAllTypes.h>
+  static borrow_type createBorrow(const owned_type& from) {
+    return borrow_type(from);
+  }
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateComplexTypes.h>
+  static void assignBorrow(borrow_type& lhs, const borrow_type& rhs) {
+    lhs.unsafeReleaseStorageImpl();
+    lhs = borrow_type(rhs);
+  }
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateHalfType.h>
+  static void destroyBorrow(borrow_type& toDestroy) {
+    toDestroy.unsafeReleaseStorageImpl(); // "leak" it, but it was already +0.
+  }
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateBoolType.h>
+  static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
+    return borrow;
+  }
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateBFloat16Type.h>
+  static const owned_type* pointerFromBorrow(const borrow_type& borrow) {
+    return &borrow;
+  }
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateQTypes.h>
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
+    return true;
+  }
+};
+
+template <>
+struct ExclusivelyOwnedTraits<c10::Storage> {
+  using repr_type = c10::Storage;
+  using pointer_type = c10::Storage*;
+  using const_pointer_type = const c10::Storage*;
+
+  static repr_type nullRepr() {
+    return c10::Storage();
+  }
+
+  template <class... Args>
+  static repr_type createInPlace(Args&&... args) {
+    return c10::Storage(std::forward<Args>(args)...);
+  }
+
+  static repr_type moveToRepr(c10::Storage&& x) {
+    return std::move(x);
+  }
+
+  static c10::Storage take(c10::Storage& x) {
+    return std::move(x);
+  }
+
+  static pointer_type getImpl(repr_type& x) {
+    return &x;
+  }
+
+  static const_pointer_type getImpl(const repr_type& x) {
+    return &x;
+  }
+};
+
+} // namespace c10
+
+struct THPStorage {
+  PyObject_HEAD;
+  c10::MaybeOwned<c10::Storage> cdata;
+};
+
+TORCH_PYTHON_API PyObject* THPStorage_New(c10::Storage storage);
+extern PyObject* THPStorageClass;
+
+bool THPStorage_init(PyObject* module);
+void THPStorage_postInit(PyObject* module);
+
+extern PyTypeObject THPStorageType;
+
+inline const c10::Storage& THPStorage_Unpack(THPStorage* storage) {
+  return *storage->cdata;
+}
+
+inline const c10::Storage& THPStorage_Unpack(PyObject* obj) {
+  return THPStorage_Unpack(reinterpret_cast<THPStorage*>(obj));
+}
 
 #endif

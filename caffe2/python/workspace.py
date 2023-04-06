@@ -45,6 +45,7 @@ CreateOfflineTensor = C.create_offline_tensor
 operator_tracebacks = defaultdict(dict)
 
 is_asan = C.is_asan
+has_fbgemm = C.has_fbgemm
 has_cuda_support = C.has_cuda_support
 has_hip_support = C.has_hip_support
 has_gpu_support = C.has_gpu_support
@@ -63,12 +64,16 @@ if has_cuda_support:
     GetDeviceProperties = C.get_device_properties
     GetGPUMemoryInfo = C.get_gpu_memory_info
 else:
+    # pyre-fixme[9]: incompatible type assignment
     NumCudaDevices = lambda: 0 # noqa
+    # pyre-fixme[9]: incompatible type assignment
     GetCUDAVersion = lambda: 0 # noqa
+    # pyre-fixme[9]: incompatible type assignment
     GetCuDNNVersion = lambda: 0 # noqa
 
 if has_hip_support:
     GpuDeviceType = caffe2_pb2.HIP
+    # pyre-fixme[9]: incompatible type assignment
     NumGpuDevices = C.num_hip_devices
     GetHIPVersion = C.get_hip_version
 
@@ -81,9 +86,11 @@ if not has_gpu_support:
     # setting cuda as the default GpuDeviceType as some tests
     # like core, scope tests use GpuDeviceType even without gpu support
     GpuDeviceType = caffe2_pb2.CUDA
+    # pyre-fixme[9]: incompatible type assignment
     NumGpuDevices = lambda: 0 # noqa
     GetDeviceProperties = lambda x: None # noqa
     GetGpuPeerAccessPattern = lambda: np.array([]) # noqa
+    # pyre-fixme[9]: incompatible type assignment
     GetGPUMemoryInfo = lambda: None # noqa
 
 IsNUMAEnabled = C.is_numa_enabled
@@ -335,7 +342,7 @@ def StringifyNetName(name):
 def GetNetName(net):
     if isinstance(net, basestring):
         return net
-    if type(net).__name__ == "Net":
+    if type(net).__name__ == "Net" or type(net).__name__ == "NetWithShapeInference":
         return net.Name()
     if isinstance(net, caffe2_pb2.NetDef):
         return net.name
@@ -431,6 +438,10 @@ def FetchInt8BlobRealVal(name):
         np.float32) * int8_blob.scale
 
 
+def RemoveBlob(name) -> None:
+    ws = C.Workspace.current
+    _Workspace_remove_blob(ws, name)
+
 def _Workspace_fetch_int8_blob(ws, name):
     """Fetches an Int8 blob from the workspace. It shared backend implementation
     with FetchBlob but it is recommended when fetching Int8 Blobs
@@ -519,7 +530,7 @@ def GetNameScope():
     return scope.CurrentNameScope()
 
 
-class _BlobDict(object):
+class _BlobDict:
     """Provides python dict compatible way to do fetching and feeding"""
 
     def __getitem__(self, key):

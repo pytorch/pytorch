@@ -1,4 +1,4 @@
-from typing import Tuple, Dict
+from typing import Dict, Tuple
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -34,8 +34,7 @@ class JitDistAutogradTest(RpcAgentTestFixture):
         dst_rank = self.rank
 
         @torch.jit.script
-        def dist_get_gradients(context_id):
-            # type: (int) -> (Dict[Tensor, Tensor])
+        def dist_get_gradients(context_id: int) -> (Dict[Tensor, Tensor]):
             return dist_autograd.get_gradients(context_id)
 
         FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))
@@ -98,7 +97,7 @@ class JitDistAutogradTest(RpcAgentTestFixture):
             res1 = res1_fut.wait()  # After this, the script runs in a new JIT thread.
             loss1 = res1.sum()
 
-            # SendRpcBackward is not attched, since DistAutogradContext is lost here.
+            # SendRpcBackward is not attached, since DistAutogradContext is lost here.
             res2_fut = rpc.rpc_async(dst_worker_name, local_add, (t2, t2))
             res2 = res2_fut.wait()
             loss2 = res2.sum()

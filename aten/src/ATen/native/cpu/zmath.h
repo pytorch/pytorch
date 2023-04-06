@@ -3,10 +3,11 @@
 // Complex number math operations that act as no-ops for other dtypes.
 #include <c10/util/complex.h>
 #include <c10/util/math_compat.h>
+#include <c10/util/MathConstants.h>
 #include<ATen/NumericUtils.h>
 
 namespace at { namespace native {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 inline VALUE_TYPE zabs (SCALAR_TYPE z) {
@@ -33,9 +34,18 @@ inline double zabs <c10::complex<double>, double> (c10::complex<double> z) {
   return std::abs(z);
 }
 
+// This overload corresponds to non-complex dtypes.
+// The function is consistent with its NumPy equivalent
+// for non-complex dtypes where `pi` is returned for
+// negative real numbers and `0` is returned for 0 or positive
+// real numbers.
+// Note: `nan` is propagated.
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
-  return 0;
+  if (at::_isnan(z)) {
+    return z;
+  }
+  return z < 0 ? c10::pi<double> : 0;
 }
 
 template<>
@@ -84,7 +94,7 @@ constexpr double real_impl <c10::complex<double>, double> (c10::complex<double> 
 }
 
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
-constexpr VALUE_TYPE imag_impl (SCALAR_TYPE z) {
+constexpr VALUE_TYPE imag_impl (SCALAR_TYPE /*z*/) {
   return 0;
 }
 
@@ -111,6 +121,11 @@ constexpr double imag_impl <c10::complex<double>, double> (c10::complex<double> 
 template <typename TYPE>
 inline TYPE conj_impl (TYPE z) {
   return z; //No-Op
+}
+
+template<>
+inline c10::complex<at::Half> conj_impl <c10::complex<at::Half>> (c10::complex<at::Half> z) {
+  return c10::complex<at::Half>{z.real(), -z.imag()};
 }
 
 template<>

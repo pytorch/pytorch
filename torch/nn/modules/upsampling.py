@@ -5,6 +5,8 @@ from torch import Tensor
 from typing import Optional
 from ..common_types import _size_2_t, _ratio_2_t, _size_any_t, _ratio_any_t
 
+__all__ = ['Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d']
+
 
 class Upsample(Module):
     r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
@@ -31,7 +33,16 @@ class Upsample(Module):
         align_corners (bool, optional): if ``True``, the corner pixels of the input
             and output tensors are aligned, and thus preserving the values at
             those pixels. This only has effect when :attr:`mode` is
-            ``'linear'``, ``'bilinear'``, or ``'trilinear'``. Default: ``False``
+            ``'linear'``, ``'bilinear'``, ``'bicubic'``, or ``'trilinear'``.
+            Default: ``False``
+        recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
+            interpolation calculation. If `recompute_scale_factor` is ``True``, then
+            `scale_factor` must be passed in and `scale_factor` is used to compute the
+            output `size`. The computed output `size` will be used to infer new scales for
+            the interpolation. Note that when `scale_factor` is floating-point, it may differ
+            from the recomputed `scale_factor` due to rounding and precision issues.
+            If `recompute_scale_factor` is ``False``, then `size` or `scale_factor` will
+            be used directly for interpolation.
 
     Shape:
         - Input: :math:`(N, C, W_{in})`, :math:`(N, C, H_{in}, W_{in})` or :math:`(N, C, D_{in}, H_{in}, W_{in})`
@@ -63,71 +74,74 @@ class Upsample(Module):
 
         >>> input = torch.arange(1, 5, dtype=torch.float32).view(1, 1, 2, 2)
         >>> input
-        tensor([[[[ 1.,  2.],
-                  [ 3.,  4.]]]])
+        tensor([[[[1., 2.],
+                  [3., 4.]]]])
 
         >>> m = nn.Upsample(scale_factor=2, mode='nearest')
         >>> m(input)
-        tensor([[[[ 1.,  1.,  2.,  2.],
-                  [ 1.,  1.,  2.,  2.],
-                  [ 3.,  3.,  4.,  4.],
-                  [ 3.,  3.,  4.,  4.]]]])
+        tensor([[[[1., 1., 2., 2.],
+                  [1., 1., 2., 2.],
+                  [3., 3., 4., 4.],
+                  [3., 3., 4., 4.]]]])
 
+        >>> # xdoctest: +IGNORE_WANT("other tests seem to modify printing styles")
         >>> m = nn.Upsample(scale_factor=2, mode='bilinear')  # align_corners=False
         >>> m(input)
-        tensor([[[[ 1.0000,  1.2500,  1.7500,  2.0000],
-                  [ 1.5000,  1.7500,  2.2500,  2.5000],
-                  [ 2.5000,  2.7500,  3.2500,  3.5000],
-                  [ 3.0000,  3.2500,  3.7500,  4.0000]]]])
+        tensor([[[[1.0000, 1.2500, 1.7500, 2.0000],
+                  [1.5000, 1.7500, 2.2500, 2.5000],
+                  [2.5000, 2.7500, 3.2500, 3.5000],
+                  [3.0000, 3.2500, 3.7500, 4.0000]]]])
 
         >>> m = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         >>> m(input)
-        tensor([[[[ 1.0000,  1.3333,  1.6667,  2.0000],
-                  [ 1.6667,  2.0000,  2.3333,  2.6667],
-                  [ 2.3333,  2.6667,  3.0000,  3.3333],
-                  [ 3.0000,  3.3333,  3.6667,  4.0000]]]])
+        tensor([[[[1.0000, 1.3333, 1.6667, 2.0000],
+                  [1.6667, 2.0000, 2.3333, 2.6667],
+                  [2.3333, 2.6667, 3.0000, 3.3333],
+                  [3.0000, 3.3333, 3.6667, 4.0000]]]])
 
         >>> # Try scaling the same data in a larger tensor
-        >>>
         >>> input_3x3 = torch.zeros(3, 3).view(1, 1, 3, 3)
         >>> input_3x3[:, :, :2, :2].copy_(input)
-        tensor([[[[ 1.,  2.],
-                  [ 3.,  4.]]]])
+        tensor([[[[1., 2.],
+                  [3., 4.]]]])
         >>> input_3x3
-        tensor([[[[ 1.,  2.,  0.],
-                  [ 3.,  4.,  0.],
-                  [ 0.,  0.,  0.]]]])
+        tensor([[[[1., 2., 0.],
+                  [3., 4., 0.],
+                  [0., 0., 0.]]]])
 
+        >>> # xdoctest: +IGNORE_WANT("seems to fail when other tests are run in the same session")
         >>> m = nn.Upsample(scale_factor=2, mode='bilinear')  # align_corners=False
         >>> # Notice that values in top left corner are the same with the small input (except at boundary)
         >>> m(input_3x3)
-        tensor([[[[ 1.0000,  1.2500,  1.7500,  1.5000,  0.5000,  0.0000],
-                  [ 1.5000,  1.7500,  2.2500,  1.8750,  0.6250,  0.0000],
-                  [ 2.5000,  2.7500,  3.2500,  2.6250,  0.8750,  0.0000],
-                  [ 2.2500,  2.4375,  2.8125,  2.2500,  0.7500,  0.0000],
-                  [ 0.7500,  0.8125,  0.9375,  0.7500,  0.2500,  0.0000],
-                  [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]]]])
+        tensor([[[[1.0000, 1.2500, 1.7500, 1.5000, 0.5000, 0.0000],
+                  [1.5000, 1.7500, 2.2500, 1.8750, 0.6250, 0.0000],
+                  [2.5000, 2.7500, 3.2500, 2.6250, 0.8750, 0.0000],
+                  [2.2500, 2.4375, 2.8125, 2.2500, 0.7500, 0.0000],
+                  [0.7500, 0.8125, 0.9375, 0.7500, 0.2500, 0.0000],
+                  [0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000]]]])
 
         >>> m = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         >>> # Notice that values in top left corner are now changed
         >>> m(input_3x3)
-        tensor([[[[ 1.0000,  1.4000,  1.8000,  1.6000,  0.8000,  0.0000],
-                  [ 1.8000,  2.2000,  2.6000,  2.2400,  1.1200,  0.0000],
-                  [ 2.6000,  3.0000,  3.4000,  2.8800,  1.4400,  0.0000],
-                  [ 2.4000,  2.7200,  3.0400,  2.5600,  1.2800,  0.0000],
-                  [ 1.2000,  1.3600,  1.5200,  1.2800,  0.6400,  0.0000],
-                  [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]]]])
+        tensor([[[[1.0000, 1.4000, 1.8000, 1.6000, 0.8000, 0.0000],
+                  [1.8000, 2.2000, 2.6000, 2.2400, 1.1200, 0.0000],
+                  [2.6000, 3.0000, 3.4000, 2.8800, 1.4400, 0.0000],
+                  [2.4000, 2.7200, 3.0400, 2.5600, 1.2800, 0.0000],
+                  [1.2000, 1.3600, 1.5200, 1.2800, 0.6400, 0.0000],
+                  [0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000]]]])
     """
-    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
+    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name', 'recompute_scale_factor']
     name: str
     size: Optional[_size_any_t]
     scale_factor: Optional[_ratio_any_t]
     mode: str
     align_corners: Optional[bool]
+    recompute_scale_factor: Optional[bool]
 
     def __init__(self, size: Optional[_size_any_t] = None, scale_factor: Optional[_ratio_any_t] = None,
-                 mode: str = 'nearest', align_corners: Optional[bool] = None) -> None:
-        super(Upsample, self).__init__()
+                 mode: str = 'nearest', align_corners: Optional[bool] = None,
+                 recompute_scale_factor: Optional[bool] = None) -> None:
+        super().__init__()
         self.name = type(self).__name__
         self.size = size
         if isinstance(scale_factor, tuple):
@@ -136,16 +150,18 @@ class Upsample(Module):
             self.scale_factor = float(scale_factor) if scale_factor else None
         self.mode = mode
         self.align_corners = align_corners
+        self.recompute_scale_factor = recompute_scale_factor
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
+        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners,
+                             recompute_scale_factor=self.recompute_scale_factor)
 
     def extra_repr(self) -> str:
         if self.scale_factor is not None:
-            info = 'scale_factor=' + str(self.scale_factor)
+            info = 'scale_factor=' + repr(self.scale_factor)
         else:
-            info = 'size=' + str(self.size)
-        info += ', mode=' + self.mode
+            info = 'size=' + repr(self.size)
+        info += ', mode=' + repr(self.mode)
         return info
 
 
@@ -180,18 +196,18 @@ class UpsamplingNearest2d(Upsample):
 
         >>> input = torch.arange(1, 5, dtype=torch.float32).view(1, 1, 2, 2)
         >>> input
-        tensor([[[[ 1.,  2.],
-                  [ 3.,  4.]]]])
+        tensor([[[[1., 2.],
+                  [3., 4.]]]])
 
         >>> m = nn.UpsamplingNearest2d(scale_factor=2)
         >>> m(input)
-        tensor([[[[ 1.,  1.,  2.,  2.],
-                  [ 1.,  1.,  2.,  2.],
-                  [ 3.,  3.,  4.,  4.],
-                  [ 3.,  3.,  4.,  4.]]]])
+        tensor([[[[1., 1., 2., 2.],
+                  [1., 1., 2., 2.],
+                  [3., 3., 4., 4.],
+                  [3., 3., 4., 4.]]]])
     """
     def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
-        super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
+        super().__init__(size, scale_factor, mode='nearest')
 
 
 class UpsamplingBilinear2d(Upsample):
@@ -226,15 +242,16 @@ class UpsamplingBilinear2d(Upsample):
 
         >>> input = torch.arange(1, 5, dtype=torch.float32).view(1, 1, 2, 2)
         >>> input
-        tensor([[[[ 1.,  2.],
-                  [ 3.,  4.]]]])
+        tensor([[[[1., 2.],
+                  [3., 4.]]]])
 
+        >>> # xdoctest: +IGNORE_WANT("do other tests modify the global state?")
         >>> m = nn.UpsamplingBilinear2d(scale_factor=2)
         >>> m(input)
-        tensor([[[[ 1.0000,  1.3333,  1.6667,  2.0000],
-                  [ 1.6667,  2.0000,  2.3333,  2.6667],
-                  [ 2.3333,  2.6667,  3.0000,  3.3333],
-                  [ 3.0000,  3.3333,  3.6667,  4.0000]]]])
+        tensor([[[[1.0000, 1.3333, 1.6667, 2.0000],
+                  [1.6667, 2.0000, 2.3333, 2.6667],
+                  [2.3333, 2.6667, 3.0000, 3.3333],
+                  [3.0000, 3.3333, 3.6667, 4.0000]]]])
     """
     def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
-        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
+        super().__init__(size, scale_factor, mode='bilinear', align_corners=True)

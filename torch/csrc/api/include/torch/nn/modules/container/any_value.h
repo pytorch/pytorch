@@ -39,13 +39,14 @@ class AnyValue {
 
   /// Constructs the `AnyValue` from value type.
   template <typename T>
+  // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
   explicit AnyValue(T&& value)
       : content_(
             torch::make_unique<Holder<decay_t<T>>>(std::forward<T>(value))) {}
 
-  /// Returns a pointer to the value contained in the `AnyValue` if the type passed
-  /// as template parameter matches the type of the value stored, and returns a
-  /// null pointer otherwise.
+  /// Returns a pointer to the value contained in the `AnyValue` if the type
+  /// passed as template parameter matches the type of the value stored, and
+  /// returns a null pointer otherwise.
   template <typename T>
   T* try_get() {
     static_assert(
@@ -60,9 +61,9 @@ class AnyValue {
     return nullptr;
   }
 
-  /// Returns the value contained in the `AnyValue` if the type passed as template
-  /// parameter matches the type of the value stored, and throws an exception
-  /// otherwise.
+  /// Returns the value contained in the `AnyValue` if the type passed as
+  /// template parameter matches the type of the value stored, and throws an
+  /// exception otherwise.
   template <typename T>
   T get() {
     if (auto* maybe_value = try_get<T>()) {
@@ -105,6 +106,7 @@ class AnyValue {
   struct Holder : public Placeholder {
     /// A template because T&& would not be universal reference here.
     template <typename U>
+    // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
     explicit Holder(U&& value_) noexcept
         : Placeholder(typeid(T)), value(std::forward<U>(value_)) {}
     std::unique_ptr<Placeholder> clone() const override {

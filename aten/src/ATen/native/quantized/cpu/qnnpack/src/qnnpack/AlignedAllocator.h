@@ -6,6 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#pragma once
+
 #include <cstddef>
 #include <limits>
 
@@ -48,7 +50,7 @@ class AlignedAllocator {
   };
 
  public:
-  inline AlignedAllocator() noexcept {}
+  inline AlignedAllocator() noexcept = default;
 
   template <class U>
   inline AlignedAllocator(

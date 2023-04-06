@@ -40,6 +40,12 @@ c10::optional<Use> getClampScalarInputUse(Value* v);
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
 
+// Clones the method by the name of orig_method_name into new_method_name method
+TORCH_API void cloneMethod(
+    Module& module,
+    const std::string& orig_method_name,
+    const std::string& new_method_name);
+
 // Check if a value in the graph is a Scalar value
 TORCH_API bool isScalar(Value* v);
 
@@ -47,9 +53,9 @@ TORCH_API bool isScalar(Value* v);
 TORCH_API bool hitGraphInput(Value* value);
 
 // Converts a mangled name, such as
-//   __torch__.torch.nn.quantized.modules.conv.___torch_mangle_7.Conv2d
+//   __torch__.torch.ao.nn.quantized.modules.conv.___torch_mangle_7.Conv2d
 // into an unmangled name, such as
-//   __torch__.torch.nn.quantized.modules.conv.Conv2d
+//   __torch__.torch.ao.nn.quantized.modules.conv.Conv2d
 TORCH_API std::string removeTorchMangle(const std::string& orig_name);
 
 // Return the module name that corresponds to the value.
@@ -70,7 +76,7 @@ TORCH_API bool isClamp(Node* n);
 // the input tensor is quantized or not, example: aten::size
 TORCH_API bool isTensorInfoNode(Node* n);
 
-// Check if this the the propaagate op that has single input, e.g. aten::cat
+// Check if this the propagate op that has single input, e.g. aten::cat
 TORCH_API bool isPropagateQuantSingleInputOp(Node* n);
 
 // Check if this is the propagate op that has two inputs, e.g. aten::add
@@ -170,10 +176,6 @@ bool is_functional_relu(
 
 // filter to check if the module is torch.nn.ReLU
 bool is_relu_module(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap);
-
-bool is_functional_linear(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 

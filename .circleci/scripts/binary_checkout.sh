@@ -33,6 +33,11 @@ else
   export BUILDER_ROOT="$workdir/builder"
 fi
 
+# Try to extract PR number from branch if not already set
+if [[ -z "${CIRCLE_PR_NUMBER:-}" ]]; then
+  CIRCLE_PR_NUMBER="$(echo ${CIRCLE_BRANCH} | sed -E -n 's/pull\/([0-9]*).*/\1/p')"
+fi
+
 # Clone the Pytorch branch
 retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
 pushd "$PYTORCH_ROOT"
@@ -44,8 +49,9 @@ if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   git reset --hard "$CIRCLE_SHA1"
 elif [[ -n "${CIRCLE_SHA1:-}" ]]; then
   # Scheduled workflows & "smoke" binary build on master on PR merges
+  DEFAULT_BRANCH="$(git remote show $CIRCLE_REPOSITORY_URL | awk '/HEAD branch/ {print $NF}')"
   git reset --hard "$CIRCLE_SHA1"
-  git checkout -q -B master
+  git checkout -q -B $DEFAULT_BRANCH
 else
   echo "Can't tell what to checkout"
   exit 1

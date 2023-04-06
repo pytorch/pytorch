@@ -18,9 +18,9 @@ namespace detail {
 // `Iterator` consists of a `ValidIterator` and a `SentinelIterator`. A
 // `ValidIterator` yields new batches until the `DataLoader` is exhausted. While
 // the `DataLoader` is not exhausted, `ValidIterator`s compare equal if they are
-// the same object. When the `ValidIterator` becomes exhausted, it compares equal
-// to the `SentinelIterator`, but not before. Half the code here is to implement
-// double dispatch for the comparison. Got damnit, C++.
+// the same object. When the `ValidIterator` becomes exhausted, it compares
+// equal to the `SentinelIterator`, but not before. Half the code here is to
+// implement double dispatch for the comparison. Got damnit, C++.
 
 template <typename Batch>
 struct ValidIterator;

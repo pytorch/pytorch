@@ -9,6 +9,7 @@ namespace caffe2 {
 
 namespace {
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 constexpr char kLCDoc[] = R"DOC(
 Note that other parameters, such as the stride and
 kernel size, or the pads' sizes in each direction are not necessary for input
@@ -119,6 +120,7 @@ class GetLocallyConnectedGradient : public GradientMakerBase {
     CAFFE_ENFORCE(def_.input_size() == 3 || def_.input_size() == 2);
     ArgumentHelper argsHelper(def_);
     const bool compute_dX =
+        // NOLINTNEXTLINE(modernize-use-bool-literals)
         !argsHelper.GetSingleArgument<bool>("no_gradient_to_input", 0);
 
     if (def_.input_size() == 3) {

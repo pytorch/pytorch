@@ -12,9 +12,7 @@ Note that ONNX-TRT enforce an NCHW input!
 
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python.onnx.helper import c2_native_run_net, c2_native_run_op
-from caffe2.python import core, workspace
-import caffe2.python.onnx.frontend as c2_front
+from caffe2.python import workspace
 import caffe2.python._import_c_extension as C
 import numpy as np
 
@@ -31,8 +29,8 @@ def _get_output_shapes(output_value_infos):
 def check_gpu_():
     try:
         C.get_cuda_version()
-    except Exception as _:
-       raise Exception("TensorRT related functions require CUDA support")
+    except Exception as e:
+        raise Exception("TensorRT related functions require CUDA support") from e
 
 def convert_onnx_model_to_trt_op(onnx_model,
         max_batch_size=64,
@@ -108,4 +106,3 @@ def transform_caffe2_net(
     pred_net_cut = caffe2_pb2.NetDef()
     pred_net_cut.ParseFromString(pred_net_str)
     return pred_net_cut
-

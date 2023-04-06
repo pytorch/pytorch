@@ -60,20 +60,20 @@ android {
     //}
     flavorDimensions "model", "build", "activity"
     productFlavors {
-        mbq {
+        mnet {
             dimension "model"
-            applicationIdSuffix ".mbq"
-            buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
-            addManifestPlaceholders([APP_NAME: "MBQ"])
-            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mbq\"")
+            applicationIdSuffix ".mnet"
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"mnet.pt\"")
+            addManifestPlaceholders([APP_NAME: "MNET"])
+            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mnet\"")
         }
-        mbvulkan {
+        mnetVulkan {
             dimension "model"
-            applicationIdSuffix ".mbvulkan"
-            buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet2-vulkan.pt\"")
+            applicationIdSuffix ".mnet_vulkan"
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"mnet_vulkan.pt\"")
             buildConfigField("boolean", "USE_VULKAN_DEVICE", 'true')
-            addManifestPlaceholders([APP_NAME: "MBQ"])
-            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mbvulkan\"")
+            addManifestPlaceholders([APP_NAME: "MNET_VULKAN"])
+            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mnet-vulkan\"")
         }
         resnet18 {
             dimension "model"
@@ -139,7 +139,7 @@ tasks.all { task ->
 
 dependencies {
     implementation 'com.android.support:appcompat-v7:28.0.0'
-    implementation 'com.facebook.soloader:nativeloader:0.8.0'
+    implementation 'com.facebook.soloader:nativeloader:0.10.5'
 
     localImplementation project(':pytorch_android')
     localImplementation project(':pytorch_android_torchvision')
@@ -149,13 +149,13 @@ dependencies {
     //nativeBuildImplementation(name: 'pytorch_android_torchvision-release', ext: 'aar')
     //extractForNativeBuild(name: 'pytorch_android-release', ext: 'aar')
 
-    nightlyImplementation 'org.pytorch:pytorch_android:1.8.0-SNAPSHOT'
-    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.8.0-SNAPSHOT'
+    nightlyImplementation 'org.pytorch:pytorch_android:1.12.0-SNAPSHOT'
+    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.12.0-SNAPSHOT'
 
     aarImplementation(name:'pytorch_android', ext:'aar')
     aarImplementation(name:'pytorch_android_torchvision', ext:'aar')
-    aarImplementation 'com.facebook.soloader:nativeloader:0.8.0'
-    aarImplementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
+    aarImplementation 'com.facebook.soloader:nativeloader:0.10.5'
+    aarImplementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
 
     def camerax_version = "1.0.0-alpha05"
     cameraImplementation "androidx.camera:camera-core:$camerax_version"

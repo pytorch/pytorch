@@ -1,17 +1,20 @@
 try:
     from urllib.parse import urlparse, urlunparse
-except ImportError:
-    from urlparse import urlparse, urlunparse
+except ImportError as e:
+    raise ImportError(
+        "urllib cannot be found, urlparse from python2 is no longer supported."
+    ) from e
 
-import torch._six as six
 import numbers
 import os
 import sys
-from . import FileStore
+from datetime import timedelta
+from typing import Dict, Optional
+
+from torch.distributed import FileStore, PrefixStore, Store, TCPStore
+
 from .constants import default_pg_timeout
 
-if sys.platform != 'win32':
-    from . import TCPStore
 
 _rendezvous_handlers = {}
 
@@ -32,7 +35,7 @@ def register_rendezvous_handler(scheme, handler):
     Pick a unique name and use the URL scheme to identify it when
     calling the `rendezvous()` function.
 
-    Arguments:
+    Args:
         scheme (str): URL scheme to identify your rendezvous handler.
         handler (function): Handler that is invoked when the
             `rendezvous()` function is called with a URL that uses
@@ -47,34 +50,37 @@ def register_rendezvous_handler(scheme, handler):
     _rendezvous_handlers[scheme] = handler
 
 
-def rendezvous(url, rank=-1, world_size=-1, **kwargs):
-    if not isinstance(url, six.string_classes):
-        raise RuntimeError("`url` must be a string. {}: {}".format(type(url), url))
+# Query will have format "rank=0&world_size=1" and is
+# converted into {"rank": 0, "world_size": 1}
+def _query_to_dict(query: str) -> Dict[str, str]:
+    return {pair[0]: pair[1] for pair in (pair.split("=") for pair in filter(None, query.split("&")))}
 
-    if not isinstance(rank, numbers.Integral):
-        raise RuntimeError("`rank` must be an integer. {}".format(rank))
 
-    if not isinstance(world_size, numbers.Integral):
-        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
-
-    # Append node-specific arguments.
+def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwargs):
     result = urlparse(url)
-    if rank != -1 or world_size != -1:
-        query_dict = dict(
-            pair.split("=") for pair in filter(None, result.query.split("&"))
-        )
+    if world_size_opt is None:
+        world_size = -1
+        if result.scheme == "env":
+            rank = int(os.environ.get("RANK", rank))
+            # If the world_size env variable is not present then it is a dynamic group
+            world_size = int(os.environ.get("WORLD_SIZE", world_size))
+    else:
+        world_size = world_size_opt
+    if rank != -1 or world_size != -1 or world_size_opt is None:
+        query_dict = _query_to_dict(result.query)
         assert (
             "rank" not in query_dict and "world_size" not in query_dict
         ), "The url: {url} has node-specific arguments(rank, world_size) already.".format(
             url=url
         )
         if rank != -1:
-            query_dict["rank"] = rank
-        if world_size != -1:
-            query_dict["world_size"] = world_size
-
+            query_dict["rank"] = str(rank)
+        if world_size != -1 or world_size_opt is None:
+            query_dict["world_size"] = str(world_size)
         result = result._replace(
-            query="{}".format("&".join(["{}={}".format(k, v) for k, v in query_dict.items()]))
+            query="{}".format(
+                "&".join(["{}={}".format(k, v) for k, v in query_dict.items()])
+            )
         )
         url = urlunparse(result)
 
@@ -83,30 +89,53 @@ def rendezvous(url, rank=-1, world_size=-1, **kwargs):
     return _rendezvous_handlers[result.scheme](url, **kwargs)
 
 
+def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
+    if not isinstance(url, (str, bytes)):
+        raise RuntimeError("`url` must be a string. {}: {}".format(type(url), url))
+
+    if not isinstance(rank, numbers.Integral):
+        raise RuntimeError("`rank` must be an integer. {}".format(rank))
+
+    if not isinstance(world_size, numbers.Integral):
+        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
+
+    return _rendezvous_helper(url, rank, world_size, **kwargs)
+
+
+def _create_store_from_options(backend_options, rank):
+    store, _, _ = next(_rendezvous_helper(backend_options.init_method, rank, None))
+    return store
+
+
 def _rendezvous_error(msg):
     return ValueError("Error initializing torch.distributed using " + msg)
 
 
-def _file_rendezvous_handler(url, **kwargs):
+def _file_rendezvous_handler(url: str, **kwargs):
     def _error(msg):
         return _rendezvous_error("file:// rendezvous: " + msg)
 
     result = urlparse(url)
     path = result.path
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
         import urllib.request
-        path = urllib.request.url2pathname(result.path)
+
+        full_path = result.netloc + result.path
+        path = urllib.request.url2pathname(full_path)
+        if path:
+            # Normalizing an empty string produces ".", which is not expected.
+            path = os.path.normpath(path)
 
     if not path:
         raise _error("path missing")
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
-    if "rank" not in query:
+    query_dict = _query_to_dict(result.query)
+    if "rank" not in query_dict:
         raise _error("rank parameter missing")
-    if "world_size" not in query:
+    if "world_size" not in query_dict:
         raise _error("world size parameter missing")
 
-    rank = int(query["rank"])
-    world_size = int(query["world_size"])
+    rank = int(query_dict["rank"])
+    world_size = int(query_dict["world_size"])
     store = FileStore(path, world_size)
     yield (store, rank, world_size)
 
@@ -114,76 +143,113 @@ def _file_rendezvous_handler(url, **kwargs):
     raise RuntimeError("Unable to perform rerendezvous using file:// method")
 
 
-def _tcp_rendezvous_handler(url, timeout=default_pg_timeout, **kwargs):
+def _torchelastic_use_agent_store() -> bool:
+    return os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None) == str(True)
+
+
+def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
+    """
+    Smartly creates a c10d Store object on ``rank`` based on whether
+    we need to re-use agent store. The TCPStore server is assumed to be hosted
+    on ``hostname:port``.
+
+    If ``torchelastic_use_agent_store()`` is ``True``, then it is assumed that
+    the agent leader (node rank 0) hosts the TCPStore server (for which the
+    endpoint is specified by the given ``hostname:port``). Hence
+    ALL ranks will create and return a TCPStore client (e.g. ``start_daemon=False``).
+
+    If ``torchelastic_use_agent_store()`` is ``False``, then rank 0 will host
+    the TCPStore (with multi-tenancy) and it is assumed that rank 0's hostname
+    and port are correctly passed via ``hostname`` and ``port``. All
+    non-zero ranks will create and return a TCPStore client.
+    """
+    # check if port is uint16_t
+    if not 0 <= port < 2**16:
+        raise ValueError(f"port must have value from 0 to 65535 but was {port}.")
+
+    if _torchelastic_use_agent_store():
+        attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]
+        tcp_store = TCPStore(hostname, port, world_size, False, timeout)
+        return PrefixStore(f"/worker/attempt_{attempt}", tcp_store)
+    else:
+        start_daemon = rank == 0
+        return TCPStore(
+            hostname, port, world_size, start_daemon, timeout, multi_tenant=True
+        )
+
+
+def _tcp_rendezvous_handler(
+    url: str, timeout: timedelta = default_pg_timeout, **kwargs
+):
     def _error(msg):
         return _rendezvous_error("tcp:// rendezvous: " + msg)
 
     result = urlparse(url)
     if not result.port:
         raise _error("port number missing")
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
-    if "rank" not in query:
+    query_dict = _query_to_dict(result.query)
+    if "rank" not in query_dict:
         raise _error("rank parameter missing")
-    if "world_size" not in query:
+    if "world_size" not in query_dict:
         raise _error("world size parameter missing")
 
-    rank = int(query["rank"])
-    world_size = int(query["world_size"])
-    start_daemon = rank == 0
-    store = TCPStore(result.hostname, result.port, world_size, start_daemon, timeout)
+    rank = int(query_dict["rank"])
+    world_size = int(query_dict["world_size"])
+    assert result.hostname is not None
+
+    store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout)
+
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
-    raise RuntimeError("Unable to perform rerendezvous using tcp:// method")
+    raise RuntimeError("Unable to perform re-rendezvous using tcp:// method")
 
 
-def _env_rendezvous_handler(url, timeout=default_pg_timeout, **kwargs):
+def _env_rendezvous_handler(
+    url: str, timeout: timedelta = default_pg_timeout, **kwargs
+):
     def _error(msg):
         return _rendezvous_error("env:// rendezvous: " + msg)
 
     def _env_error(var):
         return _error("environment variable %s expected, but not set" % var)
 
+    def _get_env_or_raise(env_var: str) -> str:
+        env_val = os.environ.get(env_var, None)
+        if not env_val:
+            raise _env_error(env_var)
+        else:
+            return env_val
+
     result = urlparse(url)
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
+    query_dict = _query_to_dict(result.query)
 
-    if "rank" in query:
-        rank = int(query["rank"])
+    rank: int
+    world_size: int
+    master_port: int
+    master_addr: str
+
+    if "rank" in query_dict:
+        rank = int(query_dict["rank"])
     else:
-        rank = os.environ.get("RANK", None)
-        if rank is None:
-            raise _env_error("RANK")
+        rank = int(_get_env_or_raise("RANK"))
 
-    if "world_size" in query:
-        world_size = int(query["world_size"])
+    if "world_size" in query_dict:
+        world_size = int(query_dict["world_size"])
     else:
-        world_size = os.environ.get("WORLD_SIZE", None)
-        if world_size is None:
-            raise _env_error("WORLD_SIZE")
+        world_size = int(_get_env_or_raise("WORLD_SIZE"))
 
-    master_addr = os.environ.get("MASTER_ADDR", None)
-    if master_addr is None:
-        raise _env_error("MASTER_ADDR")
+    master_addr = _get_env_or_raise("MASTER_ADDR")
+    master_port = int(_get_env_or_raise("MASTER_PORT"))
 
-    master_port = os.environ.get("MASTER_PORT", None)
-    if master_port is None:
-        raise _env_error("MASTER_PORT")
+    store = _create_c10d_store(master_addr, master_port, rank, world_size, timeout)
 
-    # Converting before creating the store
-    rank = int(rank)
-    world_size = int(world_size)
-    master_port = int(master_port)
-
-    # Now start the TCP store daemon on the rank 0
-    start_daemon = rank == 0
-    store = TCPStore(master_addr, master_port, world_size, start_daemon, timeout)
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
-    raise RuntimeError("Unable to perform rerendezvous using env:// method")
+    raise RuntimeError("Unable to perform re-rendezvous using env:// method")
 
-if sys.platform != 'win32':
-    register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
-    register_rendezvous_handler("env", _env_rendezvous_handler)
 
+register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
+register_rendezvous_handler("env", _env_rendezvous_handler)
 register_rendezvous_handler("file", _file_rendezvous_handler)

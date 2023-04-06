@@ -13,6 +13,12 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+
+// For the record I don't think this is a correct pimpl idiom.
+// Including Impl header in interface header defeats the purpose
+// because you can't change Impl private members without forcing
+// everything that included the interface to rebuild.
+// Impl should be forward-declared in the interface header instead.
 #include <c10/core/GeneratorImpl.h>
 
 /**
@@ -31,7 +37,6 @@
  *
  * By default, there is one generator per device, and a device's generator is
  * lazily created. A user can use the torch.Generator() api to create their own generator.
- * Currently torch.Generator() can only create a CPUGeneratorImpl.
  */
 
 /**
@@ -43,7 +48,7 @@
  * Please use the public mutex_ when using any methods from these classes, except for the
  * read-only methods. You can learn about the usage by looking into the unittests
  * (aten/src/ATen/cpu_generator_test.cpp) and other places where we have used lock_guard.
- * 
+ *
  * TODO: Look into changing the threading semantics of Generators in ATen (e.g., making
  * them non-thread safe and instead making the generator state splittable, to accommodate
  * forks into other threads).
@@ -51,8 +56,10 @@
 
 namespace at {
 
-struct CAFFE2_API Generator {
-  Generator() {}
+class Tensor;
+
+struct TORCH_API Generator {
+  Generator() = default;
 
   explicit Generator(c10::intrusive_ptr<c10::GeneratorImpl> gen_impl)
    : impl_(std::move(gen_impl)) {
@@ -91,6 +98,12 @@ struct CAFFE2_API Generator {
 
   uint64_t seed() { return impl_->seed(); }
 
+  // Implementation not inlined to prevent cycle reference between
+  // `ATen/core/Generator.h` and `ATen/core/Tensor.h`
+  void set_state(const at::Tensor& new_state);
+
+  at::Tensor get_state() const;
+
   std::mutex& mutex() {
     return impl_->mutex_;
   }
@@ -125,5 +138,47 @@ Generator make_generator(Args&&... args) {
   return Generator(c10::make_intrusive<Impl>(std::forward<Args>(args)...));
 }
 
-} // namespace at
+/**
+ * Utility function to static cast input Generator* to
+ * the backend generator type (CPU/CUDAGeneratorImpl etc.)
+ */
+template <typename T>
+static inline T * check_generator(c10::optional<Generator> gen) {
+  TORCH_CHECK(gen.has_value(), "Expected Generator but received nullopt");
+  TORCH_CHECK(gen->defined(), "Generator with undefined implementation is not allowed");
+  TORCH_CHECK(T::device_type() == gen->device().type(), "Expected a '", T::device_type(), "' device type for generator but found '", gen->device().type(), "'");
+  return gen->get<T>();
+}
 
+/**
+ * Utility function used in tensor implementations, which
+ * supplies the default generator to tensors, if an input generator
+ * is not supplied. The input Generator* is also static casted to
+ * the backend generator type (CPU/CUDAGeneratorImpl etc.)
+ */
+template <typename T>
+static inline T* get_generator_or_default(const c10::optional<Generator>& gen, const Generator& default_gen) {
+  return gen.has_value() && gen->defined() ? check_generator<T>(gen) : check_generator<T>(default_gen);
+}
+
+namespace detail {
+
+/**
+ * Helper function for checking the validity of new random generator
+ * state. Right now following conditions are checked:
+ *
+ * - The new state tensor must be a torch.ByteTensor
+ * - Data of the new state tensor must be contiguous
+ */
+static inline void check_rng_state(const c10::TensorImpl& new_state) {
+  TORCH_CHECK_TYPE(
+    new_state.layout() == kStrided && new_state.device().type() == kCPU && new_state.dtype() == kByte,
+    "RNG state must be a torch.ByteTensor"
+  );
+
+  TORCH_CHECK(new_state.is_contiguous(), "RNG state must be contiguous");
+}
+
+} // namespace detail
+
+} // namespace at

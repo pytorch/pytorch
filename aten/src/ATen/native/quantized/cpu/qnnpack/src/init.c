@@ -25,6 +25,7 @@
 #include <qnnpack/q8dwconv.h>
 #include <qnnpack/q8gavgpool.h>
 #include <qnnpack/q8gemm.h>
+#include <qnnpack/q8gemm_sparse.h>
 #include <qnnpack/q8vadd.h>
 #include <qnnpack/u8clamp.h>
 #include <qnnpack/u8lut32norm.h>
@@ -58,6 +59,34 @@ static void init(void) {
       .nr = 8,
       .kr = 1,
   };
+  pytorch_qnnp_params.q8gemm_sparse_c1x4 = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = NULL,
+      .packedA_w32_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w32__aarch32_neon,
+      .packedA_w16_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w16__aarch32_neon,
+      .packedA_w8_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w8__aarch32_neon,
+      .packA = pytorch_q8gemm_sparse_packA_ukernel_4x4__aarch32_neon,
+      .mr = 4,
+      .nr = 8,
+      .kr = 4,
+      .log2_mr = 2,
+      .log2_row_block_size = 0,
+      .row_block_size = 1,
+      .col_block_size = 4,
+  };
+  pytorch_qnnp_params.q8gemm_sparse_c8x1 = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = NULL,
+      .packedA_w32_gemm_dq = pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA_w32__aarch32_neon,
+      .packedA_w16_gemm_dq = pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA_w16__aarch32_neon,
+      .packedA_w8_gemm_dq = pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA_w8__aarch32_neon,
+      .packA = pytorch_q8gemm_sparse_packA_ukernel_4x4__aarch32_neon,
+      .mr = 4,
+      .nr = 8,
+      .kr = 4, // kr is really 1 but we set it to 4 because we resuse 4x4 prepacking kernel
+      .log2_mr = 2,
+      .log2_row_block_size = 3,
+      .row_block_size = 8,
+      .col_block_size = 1,
+  };
 #if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
   pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
       .gemm = pytorch_q8gemm_xzp_ukernel_4x8c2__aarch32_neon,
@@ -89,14 +118,19 @@ static void init(void) {
       .kthreshold = SIZE_MAX,
   };
 #endif
-  pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv_up_parameters){
+  pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv2d_up_parameters){
       .updw = pytorch_q8dwconv_ukernel_up8x9__aarch32_neon,
-      .updw_per_channel = pytorch_q8dwconv_ukernel_up8x9_per_channel__aarch32_neon,
+      .updw_per_channel =
+          pytorch_q8dwconv_ukernel_up8x9_per_channel__aarch32_neon,
       .cr = 8,
   };
-  pytorch_qnnp_params.q8dw25 = (struct pytorch_q8dwconv_mp_parameters){
+  pytorch_qnnp_params.q8dw25 = (struct pytorch_q8dwconv2d_mp_parameters){
       .mpdw = pytorch_q8dwconv_ukernel_mp8x25__neon,
       .mpdw_per_channel = pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon,
+      .cr = 8,
+  };
+  pytorch_qnnp_params.q8dw27 = (struct pytorch_q8dwconv3d_mp_parameters){
+      .mpdw = pytorch_q8dwconv_ukernel_mp8x27__neon,
       .cr = 8,
   };
   pytorch_qnnp_params.q8sum_rows = (struct pytorch_q8sum_rows_parameters){
@@ -137,6 +171,34 @@ static void init(void) {
   pytorch_qnnp_params.u8lut32norm = pytorch_u8lut32norm_ukernel__scalar;
   pytorch_qnnp_params.x8lut = pytorch_x8lut_ukernel__scalar;
 #elif CPUINFO_ARCH_ARM64
+  pytorch_qnnp_params.q8gemm_sparse_c1x4 = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = NULL,
+      .packedA_w32_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA_w32__aarch64_neon,
+      .packedA_w16_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA_w16__aarch64_neon,
+      .packedA_w8_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA_w8__aarch64_neon,
+      .packA = pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch64_neon,
+      .mr = 8,
+      .nr = 8,
+      .kr = 4,
+      .log2_mr = 3,
+      .log2_row_block_size = 0,
+      .row_block_size = 1,
+      .col_block_size = 4,
+  };
+  pytorch_qnnp_params.q8gemm_sparse_c8x1 = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = NULL,
+      .packedA_w32_gemm_dq = pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w32__aarch64_neon,
+      .packedA_w16_gemm_dq = pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w16__aarch64_neon,
+      .packedA_w8_gemm_dq = pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w8__aarch64_neon,
+      .packA = pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch64_neon,
+      .mr = 8,
+      .nr = 8,
+      .kr = 4, // kr is really 1 but we set it to 4 because we resuse 4x4 prepacking kernel
+      .log2_mr = 3,
+      .log2_row_block_size = 3,
+      .row_block_size = 8,
+      .col_block_size = 1,
+  };
   pytorch_qnnp_params.q8conv = (struct pytorch_q8conv_parameters){
       .gemm = pytorch_q8gemm_ukernel_8x8__aarch64_neon,
       .conv = pytorch_q8conv_ukernel_8x8__aarch64_neon,
@@ -148,14 +210,18 @@ static void init(void) {
   pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
       .kthreshold = SIZE_MAX,
   };
-  pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv_up_parameters){
+  pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv2d_up_parameters){
       .updw = pytorch_q8dwconv_ukernel_up8x9__neon,
       .updw_per_channel = pytorch_q8dwconv_ukernel_up8x9_per_channel__neon,
       .cr = 8,
   };
-  pytorch_qnnp_params.q8dw25 = (struct pytorch_q8dwconv_mp_parameters){
+  pytorch_qnnp_params.q8dw25 = (struct pytorch_q8dwconv2d_mp_parameters){
       .mpdw = pytorch_q8dwconv_ukernel_mp8x25__neon,
       .mpdw_per_channel = pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon,
+      .cr = 8,
+  };
+  pytorch_qnnp_params.q8dw27 = (struct pytorch_q8dwconv3d_mp_parameters){
+      .mpdw = pytorch_q8dwconv_ukernel_mp8x27__neon,
       .cr = 8,
   };
   pytorch_qnnp_params.q8vadd = pytorch_q8vadd_ukernel__neon;
@@ -205,17 +271,49 @@ static void init(void) {
       .nr = 4,
       .kr = 2,
   };
+  pytorch_qnnp_params.q8gemm_sparse_c1x4 = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = NULL,
+      .packedA_w32_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2,
+      .packedA_w16_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w16__sse2,
+      .packedA_w8_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w8__sse2,
+      .packA = pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
+      .mr = 8,
+      .nr = 4,
+      .kr = 4,
+      .log2_mr = 3,
+      .log2_row_block_size = 0,
+      .row_block_size = 1,
+      .col_block_size = 4,
+  };
+  pytorch_qnnp_params.q8gemm_sparse_c8x1 = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = NULL,
+      .packedA_w32_gemm_dq = NULL,
+      .packedA_w16_gemm_dq = NULL,
+      .packedA_w8_gemm_dq = NULL,
+      .packA = NULL,
+      .mr = 4,
+      .nr = 8,
+      .kr = 1,
+      .log2_mr = 2,
+      .log2_row_block_size = 3,
+      .row_block_size = 8,
+      .col_block_size = 1,
+  };
   pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
       .kthreshold = SIZE_MAX,
   };
-  pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv_up_parameters){
+  pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv2d_up_parameters){
       .updw = pytorch_q8dwconv_ukernel_up8x9__sse2,
       .updw_per_channel = pytorch_q8dwconv_ukernel_up8x9_per_channel__sse2,
       .cr = 8,
   };
-  pytorch_qnnp_params.q8dw25 = (struct pytorch_q8dwconv_mp_parameters){
+  pytorch_qnnp_params.q8dw25 = (struct pytorch_q8dwconv2d_mp_parameters){
       .mpdw = pytorch_q8dwconv_ukernel_mp8x25__sse2,
       .mpdw_per_channel = pytorch_q8dwconv_ukernel_mp8x25_per_channel__sse2,
+      .cr = 8,
+  };
+  pytorch_qnnp_params.q8dw27 = (struct pytorch_q8dwconv3d_mp_parameters){
+      .mpdw = pytorch_q8dwconv_ukernel_mp8x27__sse2,
       .cr = 8,
   };
   pytorch_qnnp_params.q8vadd = pytorch_q8vadd_ukernel__sse2;

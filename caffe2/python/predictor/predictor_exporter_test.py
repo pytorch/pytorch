@@ -7,7 +7,6 @@ import tempfile
 import unittest
 import numpy as np
 from caffe2.python import cnn, workspace, core
-from future.utils import viewitems
 
 from caffe2.python.predictor_constants import predictor_constants as pc
 import caffe2.python.predictor.predictor_exporter as pe
@@ -113,7 +112,7 @@ class PredictorExporterTest(unittest.TestCase):
             )
 
     def test_meta_net_def_net_runs(self):
-        for param, value in viewitems(self.params):
+        for param, value in self.params.items():
             workspace.FeedBlob(param, value)
 
         extra_init_net = core.Net('extra_init')

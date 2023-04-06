@@ -1,27 +1,23 @@
 #include <torch/csrc/jit/ir/constants.h>
+
 #include <ATen/core/functional.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
-
-namespace {
-c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
-  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
-}
-} // namespace
+namespace torch::jit {
 
 bool insertableTensor(const at::Tensor& ten) {
-  return !ten.requires_grad();
+  // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
+  // or gradients because we have no way of serializing them & are mutable
+  return !ten.requires_grad() && ten.has_storage() && !ten.is_nested();
 }
 
 bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
-      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice() ||
-      ivalue.isEnum()) {
+      ivalue.isDouble() || ivalue.isComplexDouble() || ivalue.isString() ||
+      ivalue.isDevice() || ivalue.isEnum()) {
     return true;
   }
   if (ivalue.isTensor()) {
@@ -30,7 +26,7 @@ bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isList() || ivalue.isTuple()) {
     c10::ArrayRef<IValue> elems;
     if (ivalue.isTuple()) {
-      elems = ivalue.toTuple()->elements();
+      elems = ivalue.toTupleRef().elements();
     } else {
       elems = ivalue.toListRef();
     }
@@ -53,7 +49,7 @@ Value* insertConstant(
     const IValue& val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  auto value = tryInsertConstant(g, val, loc, scope);
+  auto value = tryInsertConstant(g, val, std::move(loc), std::move(scope));
   if (value) {
     return *value;
   }
@@ -70,8 +66,7 @@ c10::optional<Value*> tryInsertConstant(
   Node* n = g.create(prim::Constant);
   if (val.isTensor()) {
     at::Tensor ref = val.toTensor();
-    if (!ref.has_storage()) {
-      // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
+    if (!insertableTensor(val.toTensor())) {
       n->destroy();
       return c10::nullopt;
     }
@@ -89,6 +84,9 @@ c10::optional<Value*> tryInsertConstant(
   } else if (val.isDouble()) {
     n->f_(attr::value, val.toDouble());
     n->output()->setType(FloatType::get());
+  } else if (val.isComplexDouble()) {
+    n->c_(attr::value, val.toComplexDouble());
+    n->output()->setType(ComplexType::get());
   } else if (val.isBool()) {
     n->i_(attr::value, val.toBool());
     n->output()->setType(BoolType::get());
@@ -103,7 +101,7 @@ c10::optional<Value*> tryInsertConstant(
       return c10::nullopt;
     }
   } else if (val.isString()) {
-    n->s_(attr::value, val.toString()->string());
+    n->s_(attr::value, val.toStringRef());
     n->output()->setType(StringType::get());
   } else if (val.isDevice()) {
     std::stringstream ss;
@@ -111,8 +109,8 @@ c10::optional<Value*> tryInsertConstant(
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
   } else if (val.isStream()) {
-    auto stream = val.toStream();
-    n->i_(attr::value, stream.pack());
+    // packing into int64_t removed
+    n->ival_(attr::value, val);
     n->output()->setType(StreamObjType::get());
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
@@ -124,10 +122,19 @@ c10::optional<Value*> tryInsertConstant(
       n->destroy();
       return c10::nullopt;
     };
-  } else if (val.isGenericDict() && insertableIValue(val)) {
-    n->ival_(attr::value, val);
-    n->output()->setType(val.type());
-  } else if (val.isEnum()) {
+  } else if (val.isObject()) {
+    const auto& ref = val.toObjectRef();
+    // see: [Constant Object Weak CompilationUnit Reference]
+    if (!ref.type()->is_module() &&
+        (ref.is_weak_compilation_ref() ||
+         ref.is_empty_strong_compilation_ref())) {
+      n->ival_(attr::value, val);
+      n->output()->setType(val.type());
+    } else {
+      n->destroy();
+      return c10::nullopt;
+    }
+  } else if ((val.isGenericDict() && insertableIValue(val)) || (val.isEnum())) {
     n->ival_(attr::value, val);
     n->output()->setType(val.type());
   } else {
@@ -147,18 +154,22 @@ c10::optional<IValue> toIValue(const Value* v) {
   }
   const Node* node = v->node();
   const TypePtr& type = v->type();
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->isSubtypeOf(*TensorType::get())) {
     return node->t(attr::value);
-  } else if (type->isSubtypeOf(BoolType::get())) {
+  } else if (type->isSubtypeOf(*BoolType::get())) {
     return (bool)node->i(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::i) {
     return node->i(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::f) {
     return node->f(attr::value);
+  } else if (
+      type->isSubtypeOf(*NumberType::get()) &&
+      node->kindOf(attr::value) == AttributeKind::c) {
+    return node->c(attr::value);
   } else if (
       type->cast<ListType>() &&
       node->kindOf(attr::value) == AttributeKind::ival) {
@@ -184,13 +195,17 @@ c10::optional<IValue> toIValue(const Value* v) {
     auto d = c10::Device(node->s(attr::value));
     return d;
   } else if (type == StreamObjType::get()) {
-    auto s = c10::Stream::unpack(node->i(attr::value));
+    // int64_t packing removed
+    auto s = node->ival(attr::value).toStream();
     return s;
   } else if (node->mustBeNone()) {
     return IValue();
   } else if (type->cast<EnumType>()) {
     const auto& enum_val = node->ival(attr::value);
     return enum_val;
+  } else if (type->cast<ClassType>() && !type->is_module()) {
+    const auto& class_val = node->ival(attr::value);
+    return class_val;
   } else {
     std::stringstream ss;
     ss << "constant literal not supported for: " << type->str();
@@ -198,5 +213,4 @@ c10::optional<IValue> toIValue(const Value* v) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

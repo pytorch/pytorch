@@ -9,48 +9,59 @@ and it will directly output root ops as the allowlist.
 """
 
 import argparse
-import yaml
 
 from collections import defaultdict
+from typing import Dict, List, Set
+
+import yaml
+
+DepGraph = Dict[str, Set[str]]
 
 
-def canonical_name(opname):
+def canonical_name(opname: str) -> str:
     # Skip the overload name part as it's not supported by code analyzer yet.
-    return opname.split('.', 1)[0]
+    return opname.split(".", 1)[0]
 
 
-def load_op_dep_graph(fname):
-    with open(fname, 'r') as stream:
+def load_op_dep_graph(fname: str) -> DepGraph:
+    with open(fname, "r") as stream:
         result = defaultdict(set)
         for op in yaml.safe_load(stream):
-            op_name = canonical_name(op['name'])
-            for dep in op.get('depends', []):
-                dep_name = canonical_name(dep['name'])
+            op_name = canonical_name(op["name"])
+            for dep in op.get("depends", []):
+                dep_name = canonical_name(dep["name"])
                 result[op_name].add(dep_name)
-        return result
+        return dict(result)
 
 
-def load_root_ops(fname):
+def load_root_ops(fname: str) -> List[str]:
     result = []
-    with open(fname, 'r') as stream:
+    with open(fname, "r") as stream:
         for op in yaml.safe_load(stream):
             result.append(canonical_name(op))
     return result
 
 
-def gen_transitive_closure(dep_graph, root_ops):
+def gen_transitive_closure(
+    dep_graph: DepGraph,
+    root_ops: List[str],
+    train: bool = False,
+) -> List[str]:
     result = set(root_ops)
     queue = root_ops[:]
 
     # The dependency graph might contain a special entry with key = `__BASE__`
     # and value = (set of `base` ops to always include in custom build).
-    queue.append('__BASE__')
+    queue.append("__BASE__")
 
     # The dependency graph might contain a special entry with key = `__ROOT__`
     # and value = (set of ops reachable from C++ functions). Insert the special
     # `__ROOT__` key to include ops which can be called from C++ code directly,
     # in addition to ops that are called from TorchScript model.
-    queue.append('__ROOT__')
+    # '__ROOT__' is only needed for full-jit. Keep it only for training.
+    # TODO: when FL is migrated from full-jit to lite trainer, remove '__ROOT__'
+    if train:
+        queue.append("__ROOT__")
 
     while queue:
         cur = queue.pop()
@@ -61,21 +72,25 @@ def gen_transitive_closure(dep_graph, root_ops):
 
     return sorted(result)
 
-def gen_transitive_closure_str(dep_graph, root_ops):
-    return ' '.join(gen_transitive_closure(dep_graph, root_ops))
+
+def gen_transitive_closure_str(dep_graph: DepGraph, root_ops: List[str]) -> str:
+    return " ".join(gen_transitive_closure(dep_graph, root_ops))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Util to produce transitive dependencies for custom build')
+        description="Util to produce transitive dependencies for custom build"
+    )
     parser.add_argument(
-        '--op-dependency',
-        help='input yaml file of op dependency graph '
-             '- can be omitted for custom build with static dispatch')
+        "--op-dependency",
+        help="input yaml file of op dependency graph "
+        "- can be omitted for custom build with static dispatch",
+    )
     parser.add_argument(
-        '--root-ops',
+        "--root-ops",
         required=True,
-        help='input yaml file of root (directly used) operators')
+        help="input yaml file of root (directly used) operators",
+    )
     args = parser.parse_args()
 
     deps = load_op_dep_graph(args.op_dependency) if args.op_dependency else {}

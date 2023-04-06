@@ -1,11 +1,12 @@
 import math
 
 import torch
-from torch._six import inf, nan
+from torch import inf, nan
 from torch.distributions import Chi2, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, broadcast_all
 
+__all__ = ['StudentT']
 
 class StudentT(Distribution):
     r"""
@@ -14,6 +15,7 @@ class StudentT(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = StudentT(torch.tensor([2.0]))
         >>> m.sample()  # Student's t-distributed with degrees of freedom=2
         tensor([ 0.1046])
@@ -34,6 +36,10 @@ class StudentT(Distribution):
         return m
 
     @property
+    def mode(self):
+        return self.loc
+
+    @property
     def variance(self):
         m = self.df.clone(memory_format=torch.contiguous_format)
         m[self.df > 2] = self.scale[self.df > 2].pow(2) * self.df[self.df > 2] / (self.df[self.df > 2] - 2)
@@ -45,7 +51,7 @@ class StudentT(Distribution):
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
         self._chi2 = Chi2(self.df)
         batch_shape = self.df.size()
-        super(StudentT, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(StudentT, _instance)

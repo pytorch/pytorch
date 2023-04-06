@@ -1,11 +1,12 @@
 #pragma once
 
-#include <ATen/ATen.h>
-
 #ifdef USE_XNNPACK
 
 #include <xnnpack.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <c10/util/ArrayRef.h>
+#include <limits>
+#include <memory>
 
 namespace at {
 namespace native {
@@ -25,10 +26,7 @@ struct ContextLinear final {
 
   ContextLinear() = delete;
 
-  ContextLinear(Operator&& o, int64_t o_channels) {
-    op = std::move(o);
-    output_channels = o_channels;
-  }
+  ContextLinear(Operator&& o, int64_t o_channels) : op(std::move(o)), output_channels(o_channels) {}
   static constexpr float kMin = -std::numeric_limits<float>::infinity();
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
@@ -41,9 +39,6 @@ struct ContextConv2D final {
   std::array<int64_t, 2> output_padding_;
   std::array<int64_t, 2> stride_;
   std::array<int64_t, 2> dilation_;
-  const float* cached_input_ptr{nullptr};
-  const float* cached_output_ptr{nullptr};
-  size_t input_height{0}, input_width{0}, batch_size{0}, input_channels{0};
   bool transposed_;
   int64_t groups_;
 
@@ -69,6 +64,9 @@ struct ContextConv2D final {
   static constexpr float kMin = -std::numeric_limits<float>::infinity();
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
+
+
+bool available();
 
 namespace internal {
 
@@ -124,9 +122,6 @@ struct Layout final {
     static constexpr size_t width = 1u;
   };
 };
-
-bool available();
-
 } // namespace internal
 } // namespace xnnpack
 } // namespace native

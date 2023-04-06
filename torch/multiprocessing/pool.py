@@ -1,4 +1,3 @@
-import multiprocessing
 import multiprocessing.pool
 import multiprocessing.util as util
 

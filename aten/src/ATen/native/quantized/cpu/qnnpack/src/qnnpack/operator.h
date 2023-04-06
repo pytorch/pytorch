@@ -28,6 +28,8 @@ enum pytorch_qnnp_ukernel_type {
   pytorch_qnnp_ukernel_type_conv,
   pytorch_qnnp_ukernel_type_dwconv,
   pytorch_qnnp_ukernel_type_gemm,
+  pytorch_qnnp_ukernel_type_gemm_sparse_dq,
+  pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq,
   pytorch_qnnp_ukernel_type_global_average_pooling,
   pytorch_qnnp_ukernel_type_lut,
   pytorch_qnnp_ukernel_type_max_pooling,
@@ -35,18 +37,37 @@ enum pytorch_qnnp_ukernel_type {
   pytorch_qnnp_ukernel_type_xzp_gemm,
 };
 
+typedef struct {
+  union {
+    const uint32_t* col_indices_w32;
+    const uint16_t* col_indices_w16;
+    const uint8_t* col_indices_w8;
+  };
+  union {
+    const uint32_t* row_values_w32;
+    const uint16_t* row_values_w16;
+    const uint8_t* row_values_w8;
+  };
+  const uint8_t* values;
+  uint32_t row_block_size;
+  uint32_t col_block_size;
+  enum pytorch_qnnp_sparse_matrix_indices_dtype indices_dtype;
+} sparse_matrix_t;
+
 struct pytorch_qnnp_operator {
   size_t batch_size;
-  uint32_t input_padding_top;
-  uint32_t input_padding_right;
-  uint32_t input_padding_bottom;
-  uint32_t input_padding_left;
+  uint32_t input_padding_depth;
+  uint32_t input_padding_height;
+  uint32_t input_padding_width;
   uint32_t adjustment_height;
   uint32_t adjustment_width;
+  uint32_t kernel_depth;
   uint32_t kernel_height;
   uint32_t kernel_width;
+  uint32_t stride_depth;
   uint32_t stride_height;
   uint32_t stride_width;
+  uint32_t dilation_depth;
   uint32_t dilation_height;
   uint32_t dilation_width;
   uint32_t groups;
@@ -56,6 +77,7 @@ struct pytorch_qnnp_operator {
   size_t group_output_channels;
   size_t channels;
 
+  size_t input_depth;
   size_t input_height;
   size_t input_width;
   size_t input_pixel_stride;
@@ -63,9 +85,14 @@ struct pytorch_qnnp_operator {
   const void** indirection_buffer;
   void* a_sum;
 
+  size_t step_depth;
+  size_t step_height;
+  size_t step_width;
+
   size_t input2_pixel_stride;
   const void* input2;
 
+  size_t output_depth;
   size_t output_height;
   size_t output_width;
   size_t output_pixel_stride;
@@ -100,6 +127,13 @@ struct pytorch_qnnp_operator {
   enum pytorch_qnnp_format format;
 
   bool per_channel;
+  bool transpose;
+
+  // Sparsity support
+  sparse_matrix_t sparse_matrix;
+  const void* bias;
+  struct pytorch_qnnp_conv_dynamic_quantization_params dynamic_conv_quantization_params;
+  uint8_t* prepacked_a;
 };
 
 static inline uint32_t pytorch_qnnp_operator_get_log2_output_element_size(

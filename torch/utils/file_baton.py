@@ -1,11 +1,5 @@
 import os
-import sys
 import time
-
-if sys.version < '3.3':
-    # Note(jiayq): in Python 2, FileExistsError is not defined and the
-    # error manifests it as OSError.
-    FileExistsError = OSError
 
 
 class FileBaton:
@@ -17,7 +11,7 @@ class FileBaton:
 
         Args:
             lock_file_path: The path to the file used for locking.
-            wait_seconds: The seconds to periorically sleep (spin) when
+            wait_seconds: The seconds to periodically sleep (spin) when
                 calling ``wait()``.
         '''
         self.lock_file_path = lock_file_path

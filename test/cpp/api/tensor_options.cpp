@@ -58,10 +58,12 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
   options = TensorOptions(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
-  options = TensorOptions(getDeprecatedTypeProperties(Backend::SparseCPU, kFloat));
+  options =
+      TensorOptions(getDeprecatedTypeProperties(Backend::SparseCPU, kFloat));
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparse);
 
-  options = TensorOptions(getDeprecatedTypeProperties(Backend::SparseCPU, kByte));
+  options =
+      TensorOptions(getDeprecatedTypeProperties(Backend::SparseCPU, kByte));
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
@@ -69,7 +71,8 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTensors) {
   auto options = empty(5, kDouble).options();
   REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
 
-  options = empty(5, getDeprecatedTypeProperties(Backend::SparseCPU, kByte)).options();
+  options = empty(5, getDeprecatedTypeProperties(Backend::SparseCPU, kByte))
+                .options();
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
@@ -111,12 +114,13 @@ TEST(DeviceTest, ParsesCorrectlyFromString) {
   device = Device("hip");
   ASSERT_EQ(device, Device(DeviceType::HIP));
 
-  device = Device("hip:321");
-  ASSERT_EQ(device, Device(DeviceType::HIP, 321));
+  device = Device("hip:123");
+  ASSERT_EQ(device, Device(DeviceType::HIP, 123));
 
   std::vector<std::string> badnesses = {
       "", "cud:1", "cuda:", "cpu::1", ":1", "3", "tpu:4", "??"};
   for (const auto& badness : badnesses) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     ASSERT_ANY_THROW({ Device d(badness); });
   }
 }

@@ -5,19 +5,19 @@
 #include <torch/csrc/jit/frontend/mini_environment.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
-#include <torch/csrc/jit/passes/inline_forked_closures.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // At the beginning of the pass the Graph has already undergone type checking,
 // and writes or reads to a variable are emitted as Loads and Stores in the
-// graph. a = 1 print(a) is represented as:
-//
-// %a.1 : int = prim::Constant[value=1]()
-// prim::Store[name="a"](%a.1)
-// %a : int = prim::Load[name="a"]()
-// prim::Print(%a)
+// graph.
+//     a = 1
+//     print(a)
+// is represented as:
+//     %a.1 : int = prim::Constant[value=1]()
+//     prim::Store[name="a"](%a.1)
+//     %a : int = prim::Load[name="a"]()
+//     prim::Print(%a)
 //
 // First, this pass recursively adds the Loads & Stores to control flow nodes
 // Then the graph is converted to SSA form.
@@ -92,10 +92,8 @@ struct ControlFlowLoadStores {
     for (const auto& x : mutated_variables) {
       auto true_type = true_vars->findInAnyFrame(x);
       auto false_type = false_vars->findInAnyFrame(x);
-      auto unified = unifyTypes(true_type, false_type);
-      if (!unified) {
-        continue;
-      }
+      auto unified =
+          unifyTypes(true_type, false_type, /*default_to_union=*/true);
 
       addBlockOutput(true_block, true_type, x);
       addBlockOutput(false_block, false_type, x);
@@ -149,7 +147,7 @@ struct ControlFlowLoadStores {
         case prim::Loop: {
           addLoopLoadStores(n);
         } break;
-        case prim::Function: {
+        case prim::Closure: {
           for (auto b : n->blocks()) {
             addControlFlowLoadStores(b);
           }
@@ -157,7 +155,7 @@ struct ControlFlowLoadStores {
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input()->type());
         } break;
-        case prim::LocalVariableScope: {
+        case prim::ComprehensionScope: {
           addControlFlowLoadStores(n->blocks().at(0));
         } break;
       }
@@ -182,8 +180,8 @@ struct ControlFlowLoadStores {
   std::shared_ptr<TypeEnvironment> environment_stack = nullptr;
 };
 
-// Given a graph where outputs have been added to control flow nodes, and
-// loads and stores are represented in the graph, erases the Loads & Stores.
+// Given a graph where 1) outputs have been added to control flow nodes and
+// 2) loads and stores are represented in the graph, erase the Loads & Stores.
 struct EraseLoadStores {
   void eraseBlockLoadStores(Block* block) {
     pushFrame(block);
@@ -204,7 +202,7 @@ struct EraseLoadStores {
           n->output()->replaceAllUsesWith(var);
           n->destroy();
         } break;
-        case prim::LocalVariableScope: {
+        case prim::ComprehensionScope: {
           // writes within a local variable scope do not leak into
           // the rest of the graph
           auto body = n->blocks().at(0);
@@ -260,6 +258,7 @@ struct LoopContinuations {
   void addLoopCarriedOutputs(Node* n) {
     auto g = n->owningGraph();
     WithInsertPoint insert(n);
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     auto continuation = curr_loop_->blocks().at(0)->return_node();
     for (auto out : continuation->inputs()) {
       auto load_node = out->node();
@@ -279,7 +278,7 @@ struct LoopContinuations {
           assignExitContinuations(n->blocks().at(0));
           assignExitContinuations(n->blocks().at(1));
         } break;
-        case prim::Function: {
+        case prim::Closure: {
           LoopContinuations closure_block;
           closure_block.run(n->blocks().at(0));
         } break;
@@ -293,6 +292,7 @@ struct LoopContinuations {
           auto loop_continuation =
               graph_->create(prim::LoopContinuation, 0)->insertAfter(n);
           auto header_block = loop_continuation->addBlock();
+          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
           auto pre_header = curr_loop_->blocks().at(1);
           header_block->cloneFrom(pre_header, [](Value* v) { return v; });
           InlineBlockBeforeNode(n, header_block);
@@ -344,5 +344,4 @@ void ConvertToSSA(std::shared_ptr<Graph>& graph) {
   TransformExits(graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

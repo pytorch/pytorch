@@ -3,7 +3,7 @@
 #include <ATen/miopen/Exceptions.h>
 
 #include <ATen/miopen/miopen-wrapper.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 
 namespace at { namespace native {
@@ -15,20 +15,6 @@ inline int dataSize(miopenDataType_t dataType)
     case miopenFloat: return 4;
     case miopenBFloat16: return 2;
     default: return 8;
-  }
-}
-
-// This function modifies 'stride' in place so that the stride for
-// dim i is the product of the sizes of dims i+1 to the end.
-static inline void fixSizeOneDimStride(int dim, const int *size, int *stride) {
-  int64_t z = 1;
-  for(int d = dim-1; d >= 0; d--)
-  {
-    if (size[d] == 1) {
-      stride[d] = z;
-    } else {
-      z *= size[d];
-    }
   }
 }
 
@@ -96,7 +82,6 @@ public:
 
 private:
   void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
-    fixSizeOneDimStride(dim, size, stride);
     MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
@@ -108,12 +93,15 @@ class FilterDescriptor
                       &miopenCreateTensorDescriptor,
                       &miopenDestroyTensorDescriptor>
 {
-public:
-  void set(const at::Tensor &t, int64_t pad = 0);
+ public:
+  void set(const at::Tensor &t, int64_t pad = 0) {
+    set(t, at::MemoryFormat::Contiguous, pad);
+  }
+
+  void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
 private:
   void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
-    fixSizeOneDimStride(dim, size, stride);
     MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };

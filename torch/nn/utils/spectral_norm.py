@@ -6,6 +6,8 @@ from torch.nn.functional import normalize
 from typing import Any, Optional, TypeVar
 from ..modules import Module
 
+__all__ = ['SpectralNorm', 'SpectralNormLoadStateDictPreHook', 'SpectralNormStateDictHook',
+           'spectral_norm', 'remove_spectral_norm']
 
 class SpectralNorm:
     # Invariant before and after each forward call:
@@ -108,7 +110,7 @@ class SpectralNorm:
         # Tries to returns a vector `v` s.t. `u = normalize(W @ v)`
         # (the invariant at top of this class) and `u @ W @ v = sigma`.
         # This uses pinverse in case W^T W is not invertible.
-        v = torch.chain_matmul(weight_mat.t().mm(weight_mat).pinverse(), weight_mat.t(), u.unsqueeze(1)).squeeze(1)
+        v = torch.linalg.multi_dot([weight_mat.t().mm(weight_mat).pinverse(), weight_mat.t(), u.unsqueeze(1)]).squeeze(1)
         return v.mul_(target_sigma / torch.dot(u, torch.mv(weight_mat, v)))
 
     @staticmethod
@@ -120,6 +122,8 @@ class SpectralNorm:
 
         fn = SpectralNorm(name, n_power_iterations, dim, eps)
         weight = module._parameters[name]
+        if weight is None:
+            raise ValueError(f'`SpectralNorm` cannot be applied as parameter `{name}` is None')
         if isinstance(weight, torch.nn.parameter.UninitializedParameter):
             raise ValueError(
                 'The module passed to `SpectralNorm` can\'t have uninitialized parameters. '
@@ -250,6 +254,14 @@ def spectral_norm(module: T_module,
 
     Returns:
         The original module with the spectral norm hook
+
+    .. note::
+        This function has been reimplemented as
+        :func:`torch.nn.utils.parametrizations.spectral_norm` using the new
+        parametrization functionality in
+        :func:`torch.nn.utils.parametrize.register_parametrization`. Please use
+        the newer version. This function will be deprecated in a future version
+        of PyTorch.
 
     Example::
 

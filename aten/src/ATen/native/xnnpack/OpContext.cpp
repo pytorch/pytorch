@@ -3,6 +3,8 @@
 #include <ATen/native/xnnpack/Linear.h>
 #include <ATen/native/xnnpack/OpContext.h>
 
+#include <ATen/Context.h>
+
 namespace at {
 namespace native {
 namespace xnnpack {
@@ -11,8 +13,8 @@ c10::intrusive_ptr<LinearOpContext>
 XNNPackLinearOpContext::create_context(
     at::Tensor&& weight,
     c10::optional<at::Tensor>&& bias,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   auto linear_op_context =
       c10::make_intrusive<XNNPackLinearOpContext>(
           std::move(weight),
@@ -27,7 +29,17 @@ XNNPackLinearOpContext::create_context(
               output_max ? output_max->to<float>()
                          : xnnpack::ContextLinear::kMax)
           );
+  if (at::globalContext().releaseWeightsWhenPrepacking()) {
+    linear_op_context->free_orig_weight_and_bias();
+  }
+
   return linear_op_context;
+}
+
+void XNNPackLinearOpContext::free_orig_weight_and_bias() {
+  orig_weight_and_bias_freed_ = true;
+  orig_weight_.reset();
+  orig_bias_.reset();
 }
 
 Tensor XNNPackLinearOpContext::run(const Tensor& input) {
@@ -41,8 +53,8 @@ XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   auto op_context =
       xnnpack::internal::convolution2d::create(
           weight,
@@ -70,6 +82,10 @@ XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
           output_max,
           std::move(op_context));
 
+  if (at::globalContext().releaseWeightsWhenPrepacking()) {
+    conv2d_op_context->free_orig_weight_and_bias();
+  }
+
   return conv2d_op_context;
 }
 
@@ -81,8 +97,8 @@ XNNPackTransposeConv2dOpContext::create_context(at::Tensor&& weight,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   auto op_context =
       xnnpack::internal::convolution2d::create(
           weight,
@@ -111,15 +127,33 @@ XNNPackTransposeConv2dOpContext::create_context(at::Tensor&& weight,
           output_max,
           std::move(op_context));
 
+  if (at::globalContext().releaseWeightsWhenPrepacking()) {
+    conv2d_op_context->free_orig_weight_and_bias();
+  }
+
   return conv2d_op_context;
 }
 
 Tensor XNNPackConv2dOpContext::run(const Tensor& input) {
+  std::lock_guard<std::mutex> lock(xnnp_mutex_);
   return xnnpack::internal::convolution2d::run(op_context_, input);
 }
 
 Tensor XNNPackTransposeConv2dOpContext::run(const Tensor& input) {
+  std::lock_guard<std::mutex> lock(xnnp_mutex_);
   return xnnpack::internal::convolution2d::run(op_context_, input);
+}
+
+void XNNPackConv2dOpContext::free_orig_weight_and_bias() {
+  orig_weight_and_bias_freed_ = true;
+  orig_weight_.reset();
+  orig_bias_.reset();
+}
+
+void XNNPackTransposeConv2dOpContext::free_orig_weight_and_bias() {
+  orig_weight_and_bias_freed_ = true;
+  orig_weight_.reset();
+  orig_bias_.reset();
 }
 
 } // namespace xnnpack

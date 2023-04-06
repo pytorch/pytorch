@@ -3,7 +3,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Optional.h>
-#include <iostream>
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
@@ -21,20 +20,20 @@ namespace utils {
  * to exist is that std::bitset misses a find_first_set() method.
  */
 struct bitset final {
-private:
-  #if defined(_MSC_VER)
-    // MSVCs _BitScanForward64 expects int64_t
-    using bitset_type = int64_t;
-  #else
-    // POSIX ffsll expects long long int
-    using bitset_type = long long int;
-  #endif
-public:
+ private:
+#if defined(_MSC_VER)
+  // MSVCs _BitScanForward64 expects int64_t
+  using bitset_type = int64_t;
+#else
+  // POSIX ffsll expects long long int
+  using bitset_type = long long int;
+#endif
+ public:
   static constexpr size_t NUM_BITS() {
     return 8 * sizeof(bitset_type);
   }
 
-  constexpr bitset() noexcept : bitset_(0) {}
+  constexpr bitset() noexcept = default;
   constexpr bitset(const bitset&) noexcept = default;
   constexpr bitset(bitset&&) noexcept = default;
   // there is an issure for gcc 5.3.0 when define default function as constexpr
@@ -64,7 +63,7 @@ public:
     bitset cur = *this;
     size_t index = cur.find_first_set();
     while (0 != index) {
-      // -1 because find_first_set() is not one-indiced.
+      // -1 because find_first_set() is not one-indexed.
       index -= 1;
       func(index);
       cur.unset(index);
@@ -72,44 +71,45 @@ public:
     }
   }
 
-private:
-  // Return the index of the first set bit. The returned index is one-indiced
-  // (i.e. if the very first bit is set, this function returns '1'), and a return
-  // of '0' means that there was no bit set.
+ private:
+  // Return the index of the first set bit. The returned index is one-indexed
+  // (i.e. if the very first bit is set, this function returns '1'), and a
+  // return of '0' means that there was no bit set.
   size_t find_first_set() const {
-    #if defined(_MSC_VER) && defined(_M_X64)
-      unsigned long result;
-      bool has_bits_set = (0 != _BitScanForward64(&result, bitset_));
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_ARM64))
+    unsigned long result;
+    bool has_bits_set = (0 != _BitScanForward64(&result, bitset_));
+    if (!has_bits_set) {
+      return 0;
+    }
+    return result + 1;
+#elif defined(_MSC_VER) && defined(_M_IX86)
+    unsigned long result;
+    if (static_cast<uint32_t>(bitset_) != 0) {
+      bool has_bits_set =
+          (0 != _BitScanForward(&result, static_cast<uint32_t>(bitset_)));
       if (!has_bits_set) {
         return 0;
       }
       return result + 1;
-    #elif defined(_MSC_VER) && defined(_M_IX86)
-      unsigned long result;
-      if (static_cast<uint32_t>(bitset_) != 0) {
-        bool has_bits_set = (0 != _BitScanForward(&result, static_cast<uint32_t>(bitset_)));
-        if (!has_bits_set) {
-          return 0;
-        }
-        return result + 1;
+    } else {
+      bool has_bits_set =
+          (0 != _BitScanForward(&result, static_cast<uint32_t>(bitset_ >> 32)));
+      if (!has_bits_set) {
+        return 32;
       }
-      else {
-        bool has_bits_set = (0 != _BitScanForward(&result, static_cast<uint32_t>(bitset_ >> 32)));
-        if (!has_bits_set) {
-          return 32;
-        }
-        return result + 33;
-      }
-    #else
-      return __builtin_ffsll(bitset_);
-    #endif
+      return result + 33;
+    }
+#else
+    return __builtin_ffsll(bitset_);
+#endif
   }
 
   friend bool operator==(bitset lhs, bitset rhs) noexcept {
     return lhs.bitset_ == rhs.bitset_;
   }
-  
-  bitset_type bitset_;
+
+  bitset_type bitset_{0};
 };
 
 inline bool operator!=(bitset lhs, bitset rhs) noexcept {

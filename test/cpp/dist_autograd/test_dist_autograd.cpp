@@ -20,10 +20,11 @@ class DistAutogradTest : public ::testing::Test {
     autogradContainer_ = &DistAutogradContainer::init(0);
   }
 
-  virtual void TearDown() {
-    autogradContainer_->releaseContext(autogradContainer_->currentContext()->contextId());
+  void TearDown() override {
+    autogradContainer_->releaseContext(
+        autogradContainer_->currentContext()->contextId());
   }
-  
+
   static DistAutogradContainer* autogradContainer_;
 };
 
@@ -39,8 +40,7 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
   rpc::worker_id_t worker_id = 1;
-  addSendRpcBackward(
-      autogradContext, AutogradMetadata(1, 1), tensors);
+  addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);
   autogradContext->addKnownWorkerId(worker_id);
   auto send_function = autogradContext->sendFunctions()[1];
 
@@ -65,15 +65,14 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   auto& engine = DistEngine::getInstance();
   ASSERT_EQ(0, engine.numBackwardPasses());
 
-  // Attach appropriate grad fn.
-  auto options = at::TensorOptions().requires_grad(true);
-  auto t = torch::autograd::make_variable(torch::ones({1}, options), true);
-  const auto& e = torch::autograd::impl::gradient_edge(t);
-  torch::autograd::impl::set_gradient_edge(t, e);
-  ASSERT_NE(nullptr, t.grad_fn());
+  // Build autograd graph
+  auto x = torch::randn({2, 2}, torch::requires_grad());
+  auto y = torch::randn({2, 2}, torch::requires_grad());
+  auto z = (x * x + y * y).sum();
+  ASSERT_NE(nullptr, z.grad_fn());
 
   // Execute engine.
-  engine.execute(contextId, {t}, /* retainGraph */ false);
+  engine.execute(contextId, {z}, /* retainGraph */ false);
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());

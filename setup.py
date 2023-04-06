@@ -21,9 +21,7 @@
 #     default behavior of autogoo and cmake build systems.)
 #
 #   CC
-#     the C/C++ compiler to use (NB: the CXX flag has no effect for distutils
-#     compiles, because distutils always uses CC to compile, even for C++
-#     files.
+#     the C/C++ compiler to use
 #
 # Environment variables for feature toggles:
 #
@@ -32,6 +30,9 @@
 #
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
+#
+#   USE_KINETO=0
+#     disables usage of libkineto library for profiling
 #
 #   USE_NUMPY=0
 #     disables the NumPy build
@@ -42,8 +43,17 @@
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
+#   USE_MKLDNN_ACL
+#     enables use of Compute Library backend for MKLDNN on Arm;
+#     USE_MKLDNN must be explicitly enabled.
+#
 #   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
+#
+#   USE_STATIC_MKL
+#     Prefer to link with MKL statically - Unix only
+#   USE_ITT=0
+#     disable use of Intel(R) VTune Profiler's ITT functionality
 #
 #   USE_NNPACK=0
 #     disables NNPACK build
@@ -53,6 +63,15 @@
 #
 #   USE_DISTRIBUTED=0
 #     disables distributed (c10d, gloo, mpi, etc.) build
+#
+#   USE_TENSORPIPE=0
+#     disables distributed Tensorpipe backend build
+#
+#   USE_GLOO=0
+#     disables distributed gloo backend build
+#
+#   USE_MPI=0
+#     disables distributed MPI backend build
 #
 #   USE_SYSTEM_NCCL=0
 #     disables use of system-wide nccl (we will use our submoduled
@@ -76,6 +95,9 @@
 #   USE_FFMPEG
 #     enables use of ffmpeg for additional operators
 #
+#   USE_FLASH_ATTENTION=0
+#     disables building flash attention for scaled dot product attention
+#
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
@@ -84,6 +106,12 @@
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
+#
+#   ATEN_AVX512_256=TRUE
+#     ATen AVX2 kernels can use 32 ymm registers, instead of the default 16.
+#     This option can be used if AVX512 doesn't perform well on a machine.
+#     The FBGEMM library also uses AVX512_256 kernels on Xeon D processors,
+#     but it also has some (optimized) assembly code.
 #
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER
@@ -96,12 +124,16 @@
 #     These are not CUDA versions, instead, they specify what
 #     classes of NVIDIA hardware we should generate PTX for.
 #
+#   PYTORCH_ROCM_ARCH
+#     specify which AMD GPU targets to build for.
+#     ie `PYTORCH_ROCM_ARCH="gfx900;gfx906"`
+#
 #   ONNX_NAMESPACE
 #     specify a namespace for ONNX built here rather than the hard-coded
 #     one in this file; needed to build with other frameworks that share ONNX.
 #
 #   BLAS
-#     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, or OpenBLAS. If set
+#     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, FlexiBLAS, or OpenBLAS. If set
 #     then the build will fail if the requested BLAS is not found, otherwise
 #     the BLAS will be chosen based on what is found on your system.
 #
@@ -143,8 +175,14 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
+#   NVFUSER_SOURCE_DIR
+#     specify nvfuser root directory
+#
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
+#
+#   ACL_ROOT_DIR
+#     specify where Compute Library is installed
 #
 #   LIBRARY_PATH
 #   LD_LIBRARY_PATH
@@ -159,6 +197,9 @@
 #
 #   USE_TBB
 #      enable TBB support
+#
+#   USE_SYSTEM_TBB
+#      Use system-provided Intel TBB.
 #
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
@@ -176,32 +217,32 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 6, 1)
+python_min_version = (3, 8, 0)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
                                                                      python_min_version_str))
     sys.exit(-1)
 
-from setuptools import setup, Extension, distutils, find_packages
+from setuptools import setup, Extension, find_packages
 from collections import defaultdict
-from distutils import core
-from distutils.core import Distribution
-from distutils.errors import DistutilsArgError
+from setuptools.dist import Distribution
 import setuptools.command.build_ext
 import setuptools.command.install
-import distutils.command.clean
-import distutils.sysconfig
+import setuptools.command.sdist
 import filecmp
 import shutil
+import subprocess
 import os
 import json
 import glob
 import importlib
+import time
+import sysconfig
 
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
-                                     check_env_flag, build_type)
+                                     build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.generate_torch_version import get_torch_version
 
@@ -234,7 +275,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean' or arg == 'egg_info':
+    if arg in ['clean', 'egg_info', 'sdist']:
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -246,68 +287,122 @@ else:
     def report(*args):
         pass
 
+    # Make distutils respect --quiet too
+    setuptools.distutils.log.warn = report
+
 # Constant known variables used throughout this file
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 caffe2_build_dir = os.path.join(cwd, "build")
-# lib/pythonx.x/site-packages
-rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
-# full absolute path to the dir above
-full_site_packages = distutils.sysconfig.get_python_lib()
+
 # CMAKE: full path to python library
 if IS_WINDOWS:
     cmake_python_library = "{}/libs/python{}.lib".format(
-        distutils.sysconfig.get_config_var("prefix"),
-        distutils.sysconfig.get_config_var("VERSION"))
+        sysconfig.get_config_var("prefix"),
+        sysconfig.get_config_var("VERSION"))
     # Fix virtualenv builds
-    # TODO: Fix for python < 3.3
     if not os.path.exists(cmake_python_library):
         cmake_python_library = "{}/libs/python{}.lib".format(
             sys.base_prefix,
-            distutils.sysconfig.get_config_var("VERSION"))
+            sysconfig.get_config_var("VERSION"))
 else:
     cmake_python_library = "{}/{}".format(
-        distutils.sysconfig.get_config_var("LIBDIR"),
-        distutils.sysconfig.get_config_var("INSTSONAME"))
-cmake_python_include_dir = distutils.sysconfig.get_python_inc()
+        sysconfig.get_config_var("LIBDIR"),
+        sysconfig.get_config_var("INSTSONAME"))
+cmake_python_include_dir = sysconfig.get_path("include")
 
 
 ################################################################################
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
+package_type = os.getenv('PACKAGE_TYPE', 'wheel')
 version = get_torch_version()
 report("Building wheel {}-{}".format(package_name, version))
 
 cmake = CMake()
 
+
+def get_submodule_folders():
+    git_modules_path = os.path.join(cwd, ".gitmodules")
+    default_modules_path = [os.path.join(third_party_path, name) for name in [
+                            "gloo", "cpuinfo", "tbb", "onnx",
+                            "foxi", "QNNPACK", "fbgemm", "cutlass"
+                            ]]
+    if not os.path.exists(git_modules_path):
+        return default_modules_path
+    with open(git_modules_path) as f:
+        return [os.path.join(cwd, line.split("=", 1)[1].strip()) for line in
+                f.readlines() if line.strip().startswith("path")]
+
+
+def check_submodules():
+    def check_for_files(folder, files):
+        if not any(os.path.exists(os.path.join(folder, f)) for f in files):
+            report("Could not find any of {} in {}".format(", ".join(files), folder))
+            report("Did you run 'git submodule update --init --recursive'?")
+            sys.exit(1)
+
+    def not_exists_or_empty(folder):
+        return not os.path.exists(folder) or (os.path.isdir(folder) and len(os.listdir(folder)) == 0)
+
+    if bool(os.getenv("USE_SYSTEM_LIBS", False)):
+        return
+    folders = get_submodule_folders()
+    # If none of the submodule folders exists, try to initialize them
+    if all(not_exists_or_empty(folder) for folder in folders):
+        try:
+            print(' --- Trying to initialize submodules')
+            start = time.time()
+            subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=cwd)
+            end = time.time()
+            print(' --- Submodule initialization took {:.2f} sec'.format(end - start))
+        except Exception:
+            print(' --- Submodule initalization failed')
+            print('Please run:\n\tgit submodule update --init --recursive')
+            sys.exit(1)
+    for folder in folders:
+        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE", "LICENSE.md", "LICENSE.txt"])
+    check_for_files(os.path.join(third_party_path, 'fbgemm', 'third_party',
+                                 'asmjit'), ['CMakeLists.txt'])
+    check_for_files(os.path.join(third_party_path, 'onnx', 'third_party',
+                                 'benchmark'), ['CMakeLists.txt'])
+
+
+# Windows has very bad support for symbolic links.
+# Instead of using symlinks, we're going to copy files over
+def mirror_files_into_torchgen():
+    # (new_path, orig_path)
+    # Directories are OK and are recursively mirrored.
+    paths = [
+        ('torchgen/packaged/ATen/native/native_functions.yaml', 'aten/src/ATen/native/native_functions.yaml'),
+        ('torchgen/packaged/ATen/native/tags.yaml', 'aten/src/ATen/native/tags.yaml'),
+        ('torchgen/packaged/ATen/templates', 'aten/src/ATen/templates'),
+    ]
+    for new_path, orig_path in paths:
+        # Create the dirs involved in new_path if they don't exist
+        if not os.path.exists(new_path):
+            os.makedirs(os.path.dirname(new_path), exist_ok=True)
+
+        # Copy the files from the orig location to the new location
+        if os.path.isfile(orig_path):
+            shutil.copyfile(orig_path, new_path)
+            continue
+        if os.path.isdir(orig_path):
+            if os.path.exists(new_path):
+                # copytree fails if the tree exists already, so remove it.
+                shutil.rmtree(new_path)
+            shutil.copytree(orig_path, new_path)
+            continue
+        raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
+
 # all the work we need to do _before_ setup runs
 def build_deps():
     report('-- Building version ' + version)
 
-    def check_file(f):
-        if bool(os.getenv("USE_SYSTEM_LIBS", False)):
-            return
-        if not os.path.exists(f):
-            report("Could not find {}".format(f))
-            report("Did you run 'git submodule update --init --recursive'?")
-            sys.exit(1)
-
-    check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
-    check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
-    check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'foxi', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'fbgemm', 'third_party',
-                            'asmjit', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'onnx', 'third_party',
-                            'benchmark', 'CMakeLists.txt'))
-
+    check_submodules()
     check_pydep('yaml', 'pyyaml')
-    check_pydep('typing', 'typing')
 
     build_caffe2(version=version,
                  cmake_python_library=cmake_python_library,
@@ -324,8 +419,16 @@ def build_deps():
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
-    sym_files = ['tools/shared/_utils_internal.py']
-    orig_files = ['torch/_utils_internal.py']
+    sym_files = [
+        'tools/shared/_utils_internal.py',
+        'torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h',
+        'torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h',
+    ]
+    orig_files = [
+        'torch/_utils_internal.py',
+        'third_party/valgrind-headers/callgrind.h',
+        'third_party/valgrind-headers/valgrind.h',
+    ]
     for sym_file, orig_file in zip(sym_files, orig_files):
         same = False
         if os.path.exists(sym_file):
@@ -340,12 +443,6 @@ def build_deps():
 # Building dependent libraries
 ################################################################################
 
-# the list of runtime dependencies required by this built package
-install_requires = [
-    'typing_extensions',
-    'dataclasses; python_version < "3.7"'
-]
-
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
@@ -355,11 +452,46 @@ Please install it via `conda install {module}` or `pip install {module}`
 def check_pydep(importname, module):
     try:
         importlib.import_module(importname)
-    except ImportError:
-        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+    except ImportError as e:
+        raise RuntimeError(missing_pydep.format(importname=importname, module=module)) from e
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
+
+    # Copy libiomp5.dylib inside the wheel package on OS X
+    def _embed_libiomp(self):
+
+        lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
+        libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
+        if not os.path.exists(libtorch_cpu_path):
+            return
+        # Parse libtorch_cpu load commands
+        otool_cmds = subprocess.check_output(['otool', '-l', libtorch_cpu_path]).decode('utf-8').split('\n')
+        rpaths, libs = [], []
+        for idx, line in enumerate(otool_cmds):
+            if line.strip() == 'cmd LC_LOAD_DYLIB':
+                lib_name = otool_cmds[idx + 2].strip()
+                assert lib_name.startswith('name ')
+                libs.append(lib_name.split(' ', 1)[1].rsplit('(', 1)[0][:-1])
+
+            if line.strip() == 'cmd LC_RPATH':
+                rpath = otool_cmds[idx + 2].strip()
+                assert rpath.startswith('path ')
+                rpaths.append(rpath.split(' ', 1)[1].rsplit('(', 1)[0][:-1])
+
+        omp_lib_name = 'libiomp5.dylib'
+        if os.path.join('@rpath', omp_lib_name) not in libs:
+            return
+
+        # Copy libiomp5 from rpath locations
+        for rpath in rpaths:
+            source_lib = os.path.join(rpath, omp_lib_name)
+            if not os.path.exists(source_lib):
+                continue
+            target_lib = os.path.join(self.build_lib, 'torch', 'lib', omp_lib_name)
+            self.copy_file(source_lib, target_lib)
+            break
+
     def run(self):
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists and we can get an
         # accurate report on what is used and what is not.
@@ -379,6 +511,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Not using CUDA')
         if cmake_cache_vars['USE_MKLDNN']:
             report('-- Using MKLDNN')
+            if cmake_cache_vars['USE_MKLDNN_ACL']:
+                report('-- Using Compute Library for the Arm architecture with MKLDNN')
+            else:
+                report('-- Not using Compute Library for the Arm architecture with MKLDNN')
             if cmake_cache_vars['USE_MKLDNN_CBLAS']:
                 report('-- Using CBLAS in MKLDNN')
             else:
@@ -396,18 +532,40 @@ class build_ext(setuptools.command.build_ext.build_ext):
             if IS_WINDOWS:
                 report('-- Building without distributed package')
             else:
-                report('-- Building with distributed package ')
+                report('-- Building with distributed package: ')
+                report('  -- USE_TENSORPIPE={}'.format(cmake_cache_vars['USE_TENSORPIPE']))
+                report('  -- USE_GLOO={}'.format(cmake_cache_vars['USE_GLOO']))
+                report('  -- USE_MPI={}'.format(cmake_cache_vars['USE_OPENMPI']))
         else:
             report('-- Building without distributed package')
+        if cmake_cache_vars['STATIC_DISPATCH_BACKEND']:
+            report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
+        if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
+            report('-- Using lightweight dispatch')
+        if cmake_cache_vars['BUILD_EXECUTORCH']:
+            report('-- Building Executorch')
 
-        # Do not use clang to compile exensions if `-fstack-clash-protection` is defined
+        if cmake_cache_vars['USE_ITT']:
+            report('-- Using ITT')
+        else:
+            report('-- Not using ITT')
+
+        if cmake_cache_vars['BUILD_NVFUSER']:
+            report('-- Building nvfuser')
+        else:
+            report('-- Not Building nvfuser')
+
+        # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
-        system_c_flags = distutils.sysconfig.get_config_var('CFLAGS')
-        if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
-            os.environ['CC'] = distutils.sysconfig.get_config_var('CC')
+        c_flags = str(os.getenv('CFLAGS', ''))
+        if IS_LINUX and '-fstack-clash-protection' in c_flags and 'clang' in os.environ.get('CC', ''):
+            os.environ['CC'] = str(os.environ['CC'])
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
+
+        if IS_DARWIN and package_type != 'conda':
+            self._embed_libiomp()
 
         # Copy the essential export library to compile C++ extensions.
         if IS_WINDOWS:
@@ -456,7 +614,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             filename = self.get_ext_filename(fullname)
             report("\nCopying extension {}".format(ext.name))
 
-            src = os.path.join("torch", rel_site_packages, filename)
+            relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip(os.path.sep)
+            src = os.path.join("torch", relative_site_packages, filename)
             if not os.path.exists(src):
                 report("{} does not exist".format(src))
                 del self.extensions[i]
@@ -468,10 +627,44 @@ class build_ext(setuptools.command.build_ext.build_ext):
                     os.makedirs(dst_dir)
                 self.copy_file(src, dst)
                 i += 1
-        distutils.command.build_ext.build_ext.build_extensions(self)
+
+        # Copy functorch extension
+        for i, ext in enumerate(self.extensions):
+            if ext.name != "functorch._C":
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            fileext = os.path.splitext(filename)[1]
+            src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
+            dst = os.path.join(os.path.realpath(self.build_lib), filename)
+            if os.path.exists(src):
+                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+
+        # Copy nvfuser extension
+        for i, ext in enumerate(self.extensions):
+            if ext.name != "nvfuser._C":
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            fileext = os.path.splitext(filename)[1]
+            src = os.path.join(os.path.dirname(filename), "nvfuser" + fileext)
+            dst = os.path.join(os.path.realpath(self.build_lib), filename)
+            if os.path.exists(src):
+                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+
+        setuptools.command.build_ext.build_ext.build_extensions(self)
+
 
     def get_outputs(self):
-        outputs = distutils.command.build_ext.build_ext.get_outputs(self)
+        outputs = setuptools.command.build_ext.build_ext.get_outputs(self)
         outputs.append(os.path.join(self.build_lib, "caffe2"))
         report("setup.py::get_outputs returning {}".format(outputs))
         return outputs
@@ -503,13 +696,74 @@ class build_ext(setuptools.command.build_ext.build_ext):
             with open('compile_commands.json', 'w') as f:
                 f.write(new_contents)
 
+class concat_license_files():
+    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
+
+    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
+    from all the licenses found in ./third_party/. We concatenate them so there
+    is a single license file in the sdist and wheels with all of the necessary
+    licensing info.
+    """
+    def __init__(self, include_files=False):
+        self.f1 = 'LICENSE'
+        self.f2 = 'third_party/LICENSES_BUNDLED.txt'
+        self.include_files = include_files
+
+    def __enter__(self):
+        """Concatenate files"""
+
+        old_path = sys.path
+        sys.path.append(third_party_path)
+        try:
+            from build_bundled import create_bundled
+        finally:
+            sys.path = old_path
+
+        with open(self.f1, 'r') as f1:
+            self.bsd_text = f1.read()
+
+        with open(self.f1, 'a') as f1:
+            f1.write('\n\n')
+            create_bundled(os.path.relpath(third_party_path), f1,
+                           include_files=self.include_files)
+
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        """Restore content of f1"""
+        with open(self.f1, 'w') as f:
+            f.write(self.bsd_text)
+
+
+try:
+    from wheel.bdist_wheel import bdist_wheel
+except ImportError:
+    # This is useful when wheel is not installed and bdist_wheel is not
+    # specified on the command line. If it _is_ specified, parsing the command
+    # line will fail before wheel_concatenate is needed
+    wheel_concatenate = None
+else:
+    # Need to create the proper LICENSE.txt for the wheel
+    class wheel_concatenate(bdist_wheel):
+        """ check submodules on sdist to prevent incomplete tarballs """
+        def run(self):
+            with concat_license_files(include_files=True):
+                super().run()
+
 
 class install(setuptools.command.install.install):
     def run(self):
-        setuptools.command.install.install.run(self)
+        super().run()
 
 
-class clean(distutils.command.clean.clean):
+class clean(setuptools.Command):
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
     def run(self):
         import glob
         import re
@@ -524,14 +778,29 @@ class clean(distutils.command.clean.clean):
                         break
                     # Ignore lines which begin with '#'.
                 else:
+                    # Don't remove absolute paths from the system
+                    wildcard = wildcard.lstrip('./')
+
                     for filename in glob.glob(wildcard):
                         try:
                             os.remove(filename)
                         except OSError:
                             shutil.rmtree(filename, ignore_errors=True)
 
-        # It's an old-style class in Python 2.7...
-        distutils.command.clean.clean.run(self)
+
+class sdist(setuptools.command.sdist.sdist):
+    def run(self):
+        with concat_license_files():
+            super().run()
+
+
+def get_cmake_cache_vars():
+    try:
+        return defaultdict(lambda: False, cmake.get_cmake_cache_variables())
+    except FileNotFoundError:
+        # CMakeCache.txt does not exist. Probably running "python setup.py clean" over a clean directory.
+        return defaultdict(lambda: False)
+
 
 def configure_extension_build():
     r"""Configures extension build options according to system environment and user's choice.
@@ -540,11 +809,7 @@ def configure_extension_build():
       The input to parameters ext_modules, cmdclass, packages, and entry_points as required in setuptools.setup.
     """
 
-    try:
-        cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
-    except FileNotFoundError:
-        # CMakeCache.txt does not exist. Probably running "python setup.py clean" over a clean directory.
-        cmake_cache_vars = defaultdict(lambda: False)
+    cmake_cache_vars = get_cmake_cache_vars()
 
     ################################################################################
     # Configure compile flags
@@ -560,12 +825,7 @@ def configure_extension_build():
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
         # /EHsc is about standard C++ exception handling
-        # /DNOMINMAX removes builtin min/max functions
-        # /wdXXXX disables warning no. XXXX
-        extra_compile_args = ['/MD', '/EHsc', '/DNOMINMAX',
-                              '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
-                              '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
-                              '/wd4275']
+        extra_compile_args = ['/MD', '/FS', '/EHsc']
     else:
         extra_link_args = []
         extra_compile_args = [
@@ -574,7 +834,6 @@ def configure_extension_build():
             '-Wno-strict-overflow',
             '-Wno-unused-parameter',
             '-Wno-missing-field-initializers',
-            '-Wno-write-strings',
             '-Wno-unknown-pragmas',
             # This is required for Python 2 declarations that are deprecated in 3.
             '-Wno-deprecated-declarations',
@@ -587,8 +846,6 @@ def configure_extension_build():
             # https://bugs.llvm.org/show_bug.cgi?id=21629
             '-Wno-missing-braces',
         ]
-        if check_env_flag('WERROR'):
-            extra_compile_args.append('-Werror')
 
     library_dirs.append(lib_path)
 
@@ -600,9 +857,6 @@ def configure_extension_build():
     if cmake_cache_vars['USE_CUDA']:
         library_dirs.append(
             os.path.dirname(cmake_cache_vars['CUDA_CUDA_LIB']))
-
-    if cmake_cache_vars['USE_NUMPY']:
-        extra_install_requires += ['numpy']
 
     if build_type.is_debug():
         if IS_WINDOWS:
@@ -620,21 +874,47 @@ def configure_extension_build():
             extra_compile_args += ['-g']
             extra_link_args += ['-g']
 
+    # special CUDA 11.7 package that requires installation of cuda runtime, cudnn and cublas
+    pytorch_extra_install_requirements = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS", "")
+    if pytorch_extra_install_requirements:
+        report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}")
+        extra_install_requires += pytorch_extra_install_requirements.split("|")
 
-    def make_relative_rpath(path):
+
+    # Cross-compile for M1
+    if IS_DARWIN:
+        macos_target_arch = os.getenv('CMAKE_OSX_ARCHITECTURES', '')
+        if macos_target_arch in ['arm64', 'x86_64']:
+            macos_sysroot_path = os.getenv('CMAKE_OSX_SYSROOT')
+            if macos_sysroot_path is None:
+                macos_sysroot_path = subprocess.check_output([
+                    'xcrun', '--show-sdk-path', '--sdk', 'macosx'
+                ]).decode('utf-8').strip()
+            extra_compile_args += ['-arch', macos_target_arch, '-isysroot', macos_sysroot_path]
+            extra_link_args += ['-arch', macos_target_arch]
+
+
+    def make_relative_rpath_args(path):
         if IS_DARWIN:
-            return '-Wl,-rpath,@loader_path/' + path
+            return ['-Wl,-rpath,@loader_path/' + path]
         elif IS_WINDOWS:
-            return ''
+            return []
         else:
-            return '-Wl,-rpath,$ORIGIN/' + path
+            return ['-Wl,-rpath,$ORIGIN/' + path]
 
     ################################################################################
     # Declare extensions and package
     ################################################################################
 
     extensions = []
-    packages = find_packages(exclude=('tools', 'tools.*'))
+    excludes = ['tools', 'tools.*']
+    if not cmake_cache_vars['BUILD_CAFFE2']:
+        excludes.extend(['caffe2', 'caffe2.*'])
+    if not cmake_cache_vars['BUILD_FUNCTORCH']:
+        excludes.extend(['functorch', 'functorch.*'])
+    if not cmake_cache_vars['BUILD_NVFUSER']:
+        excludes.extend(['nvfuser', 'nvfuser.*'])
+    packages = find_packages(exclude=excludes)
     C = Extension("torch._C",
                   libraries=main_libraries,
                   sources=main_sources,
@@ -642,45 +922,62 @@ def configure_extension_build():
                   extra_compile_args=main_compile_args + extra_compile_args,
                   include_dirs=[],
                   library_dirs=library_dirs,
-                  extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')])
+                  extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
-
-    if not IS_WINDOWS:
-        DL = Extension("torch._dl",
-                       sources=["torch/csrc/dl.c"],
-                       language='c')
-        extensions.append(DL)
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
-    extensions.append(
-        Extension(
-            name=str('caffe2.python.caffe2_pybind11_state'),
-            sources=[]),
-    )
-    if cmake_cache_vars['USE_CUDA']:
+    if cmake_cache_vars['USE_ROCM']:
+        triton_req_file = os.path.join(cwd, ".github", "requirements", "triton-requirements-rocm.txt")
+        if os.path.exists(triton_req_file):
+            with open(triton_req_file) as f:
+                triton_req = f.read().strip()
+                extra_install_requires.append(triton_req)
+
+    if cmake_cache_vars['BUILD_CAFFE2']:
         extensions.append(
             Extension(
-                name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+                name=str('caffe2.python.caffe2_pybind11_state'),
                 sources=[]),
         )
-    if cmake_cache_vars['USE_ROCM']:
+        if cmake_cache_vars['USE_CUDA']:
+            extensions.append(
+                Extension(
+                    name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+                    sources=[]),
+            )
+        if cmake_cache_vars['USE_ROCM']:
+            extensions.append(
+                Extension(
+                    name=str('caffe2.python.caffe2_pybind11_state_hip'),
+                    sources=[]),
+            )
+    if cmake_cache_vars['BUILD_FUNCTORCH']:
         extensions.append(
             Extension(
-                name=str('caffe2.python.caffe2_pybind11_state_hip'),
+                name=str('functorch._C'),
+                sources=[]),
+        )
+    if cmake_cache_vars['BUILD_NVFUSER']:
+        extensions.append(
+            Extension(
+                name=str('nvfuser._C'),
                 sources=[]),
         )
 
     cmdclass = {
+        'bdist_wheel': wheel_concatenate,
         'build_ext': build_ext,
         'clean': clean,
         'install': install,
+        'sdist': sdist,
     }
 
     entry_points = {
         'console_scripts': [
             'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
             'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
+            'torchrun = torch.distributed.run:main',
         ]
     }
 
@@ -707,19 +1004,42 @@ def print_box(msg):
         print('|{}{}|'.format(l, ' ' * (size - len(l))))
     print('-' * (size + 2))
 
-if __name__ == '__main__':
-    # Parse the command line and check the arguments
-    # before we proceed with building deps and setup
+
+def main():
+    # the list of runtime dependencies required by this built package
+    install_requires = [
+        'filelock',
+        'typing-extensions',
+        'sympy',
+        'networkx',
+        'jinja2',
+    ]
+
+    extras_require = {
+        'opt-einsum': ['opt-einsum>=3.3']
+    }
+    if platform.system() == 'Linux':
+        triton_pin_file = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", "triton.txt")
+        triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
+        if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
+            with open(triton_pin_file) as f:
+                triton_pin = f.read().strip()
+            with open(triton_version_file) as f:
+                triton_version = f.read().strip()
+            extras_require['dynamo'] = ['pytorch-triton==' + triton_version + '+' + triton_pin[:10], 'jinja2']
+
+    # Parse the command line and check the arguments before we proceed with
+    # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
-    dist.script_name = sys.argv[0]
+    dist.script_name = os.path.basename(sys.argv[0])
     dist.script_args = sys.argv[1:]
     try:
-        ok = dist.parse_command_line()
-    except DistutilsArgError as msg:
-        raise SystemExit(core.gen_usage(dist.script_name) + "\nerror: %s" % msg)
-    if not ok:
-        sys.exit()
+        dist.parse_command_line()
+    except setuptools.distutils.errors.DistutilsArgError as e:
+        print(e)
+        sys.exit(1)
 
+    mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
 
@@ -731,6 +1051,188 @@ if __name__ == '__main__':
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
+    version_range_max = max(sys.version_info[1], 10) + 1
+    torch_package_data = [
+        'py.typed',
+        'bin/*',
+        'test/*',
+        '_C/*.pyi',
+        'cuda/*.pyi',
+        'optim/*.pyi',
+        'autograd/*.pyi',
+        'nn/*.pyi',
+        'nn/modules/*.pyi',
+        'nn/parallel/*.pyi',
+        'utils/data/*.pyi',
+        'utils/data/datapipes/*.pyi',
+        'lib/*.so*',
+        'lib/*.dylib*',
+        'lib/*.dll',
+        'lib/*.lib',
+        'lib/*.pdb',
+        'lib/torch_shm_manager',
+        'lib/*.h',
+        'include/*.h',
+        'include/ATen/*.h',
+        'include/ATen/cpu/*.h',
+        'include/ATen/cpu/vec/vec256/*.h',
+        'include/ATen/cpu/vec/vec256/vsx/*.h',
+        'include/ATen/cpu/vec/vec512/*.h',
+        'include/ATen/cpu/vec/*.h',
+        'include/ATen/core/*.h',
+        'include/ATen/cuda/*.cuh',
+        'include/ATen/cuda/*.h',
+        'include/ATen/cuda/detail/*.cuh',
+        'include/ATen/cuda/detail/*.h',
+        'include/ATen/cudnn/*.h',
+        'include/ATen/functorch/*.h',
+        'include/ATen/ops/*.h',
+        'include/ATen/hip/*.cuh',
+        'include/ATen/hip/*.h',
+        'include/ATen/hip/detail/*.cuh',
+        'include/ATen/hip/detail/*.h',
+        'include/ATen/hip/impl/*.h',
+        'include/ATen/miopen/*.h',
+        'include/ATen/detail/*.h',
+        'include/ATen/native/*.h',
+        'include/ATen/native/cpu/*.h',
+        'include/ATen/native/cuda/*.h',
+        'include/ATen/native/cuda/*.cuh',
+        'include/ATen/native/hip/*.h',
+        'include/ATen/native/hip/*.cuh',
+        'include/ATen/native/quantized/*.h',
+        'include/ATen/native/quantized/cpu/*.h',
+        'include/ATen/quantized/*.h',
+        'include/caffe2/serialize/*.h',
+        'include/c10/*.h',
+        'include/c10/macros/*.h',
+        'include/c10/core/*.h',
+        'include/ATen/core/boxing/*.h',
+        'include/ATen/core/boxing/impl/*.h',
+        'include/ATen/core/dispatch/*.h',
+        'include/ATen/core/op_registration/*.h',
+        'include/c10/core/impl/*.h',
+        'include/c10/util/*.h',
+        'include/c10/cuda/*.h',
+        'include/c10/cuda/impl/*.h',
+        'include/c10/hip/*.h',
+        'include/c10/hip/impl/*.h',
+        'include/torch/*.h',
+        'include/torch/csrc/*.h',
+        'include/torch/csrc/api/include/torch/*.h',
+        'include/torch/csrc/api/include/torch/data/*.h',
+        'include/torch/csrc/api/include/torch/data/dataloader/*.h',
+        'include/torch/csrc/api/include/torch/data/datasets/*.h',
+        'include/torch/csrc/api/include/torch/data/detail/*.h',
+        'include/torch/csrc/api/include/torch/data/samplers/*.h',
+        'include/torch/csrc/api/include/torch/data/transforms/*.h',
+        'include/torch/csrc/api/include/torch/detail/*.h',
+        'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
+        'include/torch/csrc/api/include/torch/nn/*.h',
+        'include/torch/csrc/api/include/torch/nn/functional/*.h',
+        'include/torch/csrc/api/include/torch/nn/options/*.h',
+        'include/torch/csrc/api/include/torch/nn/modules/*.h',
+        'include/torch/csrc/api/include/torch/nn/modules/container/*.h',
+        'include/torch/csrc/api/include/torch/nn/parallel/*.h',
+        'include/torch/csrc/api/include/torch/nn/utils/*.h',
+        'include/torch/csrc/api/include/torch/optim/*.h',
+        'include/torch/csrc/api/include/torch/optim/schedulers/*.h',
+        'include/torch/csrc/api/include/torch/serialize/*.h',
+        'include/torch/csrc/autograd/*.h',
+        'include/torch/csrc/autograd/functions/*.h',
+        'include/torch/csrc/autograd/generated/*.h',
+        'include/torch/csrc/autograd/utils/*.h',
+        'include/torch/csrc/cuda/*.h',
+        'include/torch/csrc/distributed/c10d/*.h',
+        'include/torch/csrc/distributed/c10d/*.hpp',
+        'include/torch/csrc/distributed/rpc/*.h',
+        'include/torch/csrc/distributed/autograd/context/*.h',
+        'include/torch/csrc/distributed/autograd/functions/*.h',
+        'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
+        'include/torch/csrc/jit/*.h',
+        'include/torch/csrc/jit/backends/*.h',
+        'include/torch/csrc/jit/generated/*.h',
+        'include/torch/csrc/jit/passes/*.h',
+        'include/torch/csrc/jit/passes/quantization/*.h',
+        'include/torch/csrc/jit/passes/utils/*.h',
+        'include/torch/csrc/jit/runtime/*.h',
+        'include/torch/csrc/jit/ir/*.h',
+        'include/torch/csrc/jit/frontend/*.h',
+        'include/torch/csrc/jit/api/*.h',
+        'include/torch/csrc/jit/serialization/*.h',
+        'include/torch/csrc/jit/python/*.h',
+        'include/torch/csrc/jit/mobile/*.h',
+        'include/torch/csrc/jit/testing/*.h',
+        'include/torch/csrc/jit/tensorexpr/*.h',
+        'include/torch/csrc/jit/tensorexpr/operators/*.h',
+        'include/torch/csrc/jit/codegen/cuda/*.h',
+        'include/torch/csrc/jit/codegen/cuda/ops/*.h',
+        'include/torch/csrc/jit/codegen/cuda/scheduler/*.h',
+        'include/torch/csrc/onnx/*.h',
+        'include/torch/csrc/profiler/*.h',
+        'include/torch/csrc/profiler/orchestration/*.h',
+        'include/torch/csrc/profiler/stubs/*.h',
+        'include/torch/csrc/utils/*.h',
+        'include/torch/csrc/tensor/*.h',
+        'include/torch/csrc/lazy/backend/*.h',
+        'include/torch/csrc/lazy/core/*.h',
+        'include/torch/csrc/lazy/core/internal_ops/*.h',
+        'include/torch/csrc/lazy/core/ops/*.h',
+        'include/torch/csrc/lazy/ts_backend/*.h',
+        'include/pybind11/*.h',
+        'include/pybind11/detail/*.h',
+        'include/TH/*.h*',
+        'include/TH/generic/*.h*',
+        'include/THC/*.cuh',
+        'include/THC/*.h*',
+        'include/THC/generic/*.h',
+        'include/THH/*.cuh',
+        'include/THH/*.h*',
+        'include/THH/generic/*.h',
+        'include/sleef.h',
+        "_inductor/codegen/*.h",
+        'share/cmake/ATen/*.cmake',
+        'share/cmake/Caffe2/*.cmake',
+        'share/cmake/Caffe2/public/*.cmake',
+        'share/cmake/Caffe2/Modules_CUDA_fix/*.cmake',
+        'share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake',
+        'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
+        'share/cmake/Gloo/*.cmake',
+        'share/cmake/Tensorpipe/*.cmake',
+        'share/cmake/Torch/*.cmake',
+        'utils/benchmark/utils/*.cpp',
+        'utils/benchmark/utils/valgrind_wrapper/*.cpp',
+        'utils/benchmark/utils/valgrind_wrapper/*.h',
+        'utils/model_dump/skeleton.html',
+        'utils/model_dump/code.js',
+        'utils/model_dump/*.mjs',
+    ]
+    if get_cmake_cache_vars()['BUILD_NVFUSER']:
+        torch_package_data.extend([
+            'share/cmake/nvfuser/*.cmake',
+            'include/nvfuser/*.h',
+            'include/nvfuser/kernel_db/*.h',
+            'include/nvfuser/multidevice/*.h',
+            'include/nvfuser/ops/*.h',
+            'include/nvfuser/python_frontend/*.h',
+            'include/nvfuser/scheduler/*.h',
+        ])
+
+    if get_cmake_cache_vars()['BUILD_CAFFE2']:
+        torch_package_data.extend([
+            'include/caffe2/**/*.h',
+            'include/caffe2/utils/*.h',
+            'include/caffe2/utils/**/*.h',
+        ])
+    torchgen_package_data = [
+        # Recursive glob doesn't work in setup.py,
+        # https://github.com/pypa/setuptools/issues/1806
+        # To make this robust we should replace it with some code that
+        # returns a list of everything under packaged/
+        'packaged/ATen/*',
+        'packaged/ATen/native/*',
+        'packaged/ATen/templates/*',
+    ]
     setup(
         name=package_name,
         version=version,
@@ -743,129 +1245,10 @@ if __name__ == '__main__':
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
+        extras_require=extras_require,
         package_data={
-            'torch': [
-                'py.typed',
-                'bin/*',
-                'test/*',
-                '_C/*.pyi',
-                'cuda/*.pyi',
-                'optim/*.pyi',
-                'autograd/*.pyi',
-                'utils/data/*.pyi',
-                'nn/*.pyi',
-                'nn/modules/*.pyi',
-                'nn/parallel/*.pyi',
-                'lib/*.so*',
-                'lib/*.dylib*',
-                'lib/*.dll',
-                'lib/*.lib',
-                'lib/*.pdb',
-                'lib/torch_shm_manager',
-                'lib/*.h',
-                'include/ATen/*.h',
-                'include/ATen/cpu/*.h',
-                'include/ATen/cpu/vec256/*.h',
-                'include/ATen/core/*.h',
-                'include/ATen/cuda/*.cuh',
-                'include/ATen/cuda/*.h',
-                'include/ATen/cuda/detail/*.cuh',
-                'include/ATen/cuda/detail/*.h',
-                'include/ATen/cudnn/*.h',
-                'include/ATen/hip/*.cuh',
-                'include/ATen/hip/*.h',
-                'include/ATen/hip/detail/*.cuh',
-                'include/ATen/hip/detail/*.h',
-                'include/ATen/hip/impl/*.h',
-                'include/ATen/detail/*.h',
-                'include/ATen/native/*.h',
-                'include/ATen/native/cpu/*.h',
-                'include/ATen/native/cuda/*.h',
-                'include/ATen/native/cuda/*.cuh',
-                'include/ATen/native/hip/*.h',
-                'include/ATen/native/hip/*.cuh',
-                'include/ATen/native/quantized/*.h',
-                'include/ATen/native/quantized/cpu/*.h',
-                'include/ATen/quantized/*.h',
-                'include/caffe2/utils/*.h',
-                'include/caffe2/utils/**/*.h',
-                'include/c10/*.h',
-                'include/c10/macros/*.h',
-                'include/c10/core/*.h',
-                'include/ATen/core/boxing/*.h',
-                'include/ATen/core/boxing/impl/*.h',
-                'include/ATen/core/dispatch/*.h',
-                'include/ATen/core/op_registration/*.h',
-                'include/c10/core/impl/*.h',
-                'include/c10/util/*.h',
-                'include/c10/cuda/*.h',
-                'include/c10/cuda/impl/*.h',
-                'include/c10/hip/*.h',
-                'include/c10/hip/impl/*.h',
-                'include/c10d/*.hpp',
-                'include/caffe2/**/*.h',
-                'include/torch/*.h',
-                'include/torch/csrc/*.h',
-                'include/torch/csrc/api/include/torch/*.h',
-                'include/torch/csrc/api/include/torch/data/*.h',
-                'include/torch/csrc/api/include/torch/data/dataloader/*.h',
-                'include/torch/csrc/api/include/torch/data/datasets/*.h',
-                'include/torch/csrc/api/include/torch/data/detail/*.h',
-                'include/torch/csrc/api/include/torch/data/samplers/*.h',
-                'include/torch/csrc/api/include/torch/data/transforms/*.h',
-                'include/torch/csrc/api/include/torch/detail/*.h',
-                'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
-                'include/torch/csrc/api/include/torch/nn/*.h',
-                'include/torch/csrc/api/include/torch/nn/functional/*.h',
-                'include/torch/csrc/api/include/torch/nn/options/*.h',
-                'include/torch/csrc/api/include/torch/nn/modules/*.h',
-                'include/torch/csrc/api/include/torch/nn/modules/container/*.h',
-                'include/torch/csrc/api/include/torch/nn/parallel/*.h',
-                'include/torch/csrc/api/include/torch/nn/utils/*.h',
-                'include/torch/csrc/api/include/torch/optim/*.h',
-                'include/torch/csrc/api/include/torch/serialize/*.h',
-                'include/torch/csrc/autograd/*.h',
-                'include/torch/csrc/autograd/functions/*.h',
-                'include/torch/csrc/autograd/generated/*.h',
-                'include/torch/csrc/autograd/utils/*.h',
-                'include/torch/csrc/cuda/*.h',
-                'include/torch/csrc/jit/*.h',
-                'include/torch/csrc/jit/backends/*.h',
-                'include/torch/csrc/jit/generated/*.h',
-                'include/torch/csrc/jit/passes/*.h',
-                'include/torch/csrc/jit/passes/quantization/*.h',
-                'include/torch/csrc/jit/passes/utils/*.h',
-                'include/torch/csrc/jit/runtime/*.h',
-                'include/torch/csrc/jit/ir/*.h',
-                'include/torch/csrc/jit/frontend/*.h',
-                'include/torch/csrc/jit/api/*.h',
-                'include/torch/csrc/jit/serialization/*.h',
-                'include/torch/csrc/jit/python/*.h',
-                'include/torch/csrc/jit/testing/*.h',
-                'include/torch/csrc/onnx/*.h',
-                'include/torch/csrc/utils/*.h',
-                'include/pybind11/*.h',
-                'include/pybind11/detail/*.h',
-                'include/TH/*.h*',
-                'include/TH/generic/*.h*',
-                'include/THC/*.cuh',
-                'include/THC/*.h*',
-                'include/THC/generic/*.h',
-                'include/THCUNN/*.cuh',
-                'include/THCUNN/generic/*.h',
-                'include/THH/*.cuh',
-                'include/THH/*.h*',
-                'include/THH/generic/*.h',
-                'share/cmake/ATen/*.cmake',
-                'share/cmake/Caffe2/*.cmake',
-                'share/cmake/Caffe2/public/*.cmake',
-                'share/cmake/Caffe2/Modules_CUDA_fix/*.cmake',
-                'share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake',
-                'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
-                'share/cmake/Gloo/*.cmake',
-                'share/cmake/Tensorpipe/*.cmake',
-                'share/cmake/Torch/*.cmake',
-            ],
+            'torch': torch_package_data,
+            'torchgen': torchgen_package_data,
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
             ],
@@ -890,9 +1273,13 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Programming Language :: C++',
             'Programming Language :: Python :: 3',
-        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], 9)],
+        ] + ['Programming Language :: Python :: 3.{}'.format(i) for i in range(python_min_version[1], version_range_max)],
         license='BSD-3',
-        keywords='pytorch machine learning',
+        keywords='pytorch, machine learning',
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)
+
+
+if __name__ == '__main__':
+    main()

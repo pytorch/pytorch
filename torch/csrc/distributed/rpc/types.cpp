@@ -60,7 +60,7 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
   TORCH_INTERNAL_ASSERT(
       ivalue.isTuple(),
       "GloballyUniqueId::fromIValue expected ivalue to be a tuple.");
-  auto ivalues = ivalue.toTuple()->elements();
+  const auto& ivalues = ivalue.toTupleRef().elements();
   TORCH_CHECK(
       ivalues.size() == 2,
       "Constructing GloballyUniqueId from ivalue "

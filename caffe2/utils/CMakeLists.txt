@@ -1,14 +1,17 @@
-if((NOT BUILD_CAFFE2) OR (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
+if(NOT BUILD_CAFFE2 OR INTERN_BUILD_MOBILE)
   list(APPEND Caffe2_CPU_SRCS
     utils/string_utils.cc
     utils/threadpool/ThreadPool.cc
   )
 
   if(USE_PTHREADPOOL AND NOT USE_INTERNAL_PTHREADPOOL_IMPL)
-    list(APPEND Caffe2_CPU_SRCS utils/threadpool/pthreadpool-cpp.cc)
+    list(APPEND Caffe2_CPU_SRCS
+      utils/threadpool/pthreadpool-cpp.cc
+      utils/threadpool/thread_pool_guard.cpp
+    )
   endif()
 
-  if(NOT BUILD_CAFFE2)
+  if(NOT BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
     list(APPEND Caffe2_CPU_SRCS
       utils/proto_wrap.cc
     )
@@ -27,7 +30,6 @@ list(APPEND Caffe2_CPU_SRCS
   utils/math/utils.cc
   utils/math_cpu.cc
   utils/murmur_hash3.cc
-  utils/proto_convert.cc
   utils/proto_utils.cc
   utils/proto_wrap.cc
   utils/threadpool/ThreadPool.cc
@@ -37,7 +39,8 @@ list(APPEND Caffe2_CPU_SRCS
 
 if(USE_PTHREADPOOL)
   list(APPEND Caffe2_CPU_SRCS
-    utils/threadpool/pthreadpool-cpp.cc)
+    utils/threadpool/pthreadpool-cpp.cc
+    utils/threadpool/thread_pool_guard.cpp)
   if(USE_INTERNAL_PTHREADPOOL_IMPL)
     list(APPEND Caffe2_CPU_SRCS
       utils/threadpool/pthreadpool.cc

@@ -126,8 +126,10 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.is_shared`,None
    ":meth:`Tensor.is_signed`, :func:`torch.is_signed`",None
    :attr:`Tensor.is_sparse`,None
+   :attr:`Tensor.is_sparse_csr`,None
    :func:`torch.is_tensor`,None
    :meth:`Tensor.item`,None
+   :attr:`Tensor.itemsize`,None
    ":meth:`Tensor.kthvalue`, :func:`torch.kthvalue`",:ref:`removes_dimensions-doc`
    ":meth:`Tensor.le`, :func:`torch.le`",:ref:`unifies_names_from_inputs-doc`
    ":meth:`Tensor.log`, :func:`torch.log`",:ref:`keeps_input_names-doc`
@@ -159,6 +161,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    ":meth:`Tensor.mv`, :func:`torch.mv`",:ref:`contracts_away_dims-doc`
    :attr:`Tensor.names`,See documentation
    ":meth:`Tensor.narrow`, :func:`torch.narrow`",:ref:`keeps_input_names-doc`
+   :attr:`Tensor.nbytes`,None
    :attr:`Tensor.ndim`,None
    :meth:`Tensor.ndimension`,None
    ":meth:`Tensor.ne`, :func:`torch.ne`",:ref:`unifies_names_from_inputs-doc`
@@ -207,6 +210,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    ":meth:`Tensor.asinh`, :func:`torch.asinh`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.asinh_`,None
    :meth:`Tensor.size`,None
+   ":meth:`Tensor.softmax`, :func:`torch.softmax`",:ref:`keeps_input_names-doc`
    ":meth:`Tensor.split`, :func:`torch.split`",:ref:`keeps_input_names-doc`
    ":meth:`Tensor.sqrt`, :func:`torch.sqrt`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.sqrt_`,None
@@ -466,7 +470,7 @@ A tensor specified as an ``out=`` tensor has the following behavior:
   must be exactly equal to the existing names. Otherwise, the operation errors.
 
 All in-place methods modify inputs to have names equal to the computed names
-from name inference. For example,
+from name inference. For example:
 
 ::
 

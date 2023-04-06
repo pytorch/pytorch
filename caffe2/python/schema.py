@@ -25,12 +25,11 @@ from caffe2.python import workspace
 from caffe2.python.core import BlobReference
 from collections import OrderedDict, namedtuple
 from past.builtins import basestring
-from future.utils import viewitems, viewkeys, viewvalues
 from itertools import islice
-from six import StringIO
+from io import StringIO
+from typing import Sequence
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 FIELD_SEPARATOR = ':'
 
@@ -68,6 +67,7 @@ FeatureSpec = namedtuple(
     ]
 )
 
+# pyre-fixme[16]: `FeatureSpec.__new__` has no attribute `__defaults__`
 FeatureSpec.__new__.__defaults__ = (None, None, None, None, None, None)
 
 
@@ -88,15 +88,18 @@ class Metadata(
     `feature_specs` - information about the features that contained in this
     field. For example if field have more than 1 feature it can have list of
     feature names contained in this field."""
-    __slots__ = ()
+    __slots__: Sequence[str] = ()
 
 
+# pyre-fixme[16]: `Metadata.__new__` has no attribute `__defaults__`
 Metadata.__new__.__defaults__ = (None, None, None)
 
 
-class Field(object):
+class Field:
     """Represents an abstract field type in a dataset.
     """
+
+    __slots__: Sequence[str] = ("_parent", "_field_offsets")
 
     def __init__(self, children):
         """Derived classes must call this after their initialization."""
@@ -204,6 +207,8 @@ class List(Field):
     the parent domain.
     """
 
+    __slots__: Sequence[str] = ("lengths", "_items")
+
     def __init__(self, values, lengths_blob=None):
         if isinstance(lengths_blob, Field):
             assert isinstance(lengths_blob, Scalar)
@@ -213,7 +218,7 @@ class List(Field):
         self._items = _normalize_field(values)
         self.lengths._set_parent(self, 0)
         self._items._set_parent(self, 1)
-        Field.__init__(self, [self.lengths, self._items])
+        super().__init__([self.lengths, self._items])
 
     def field_names(self):
         value_fields = self._items.field_names()
@@ -281,13 +286,16 @@ class ListWithEvicted(List):
     This class is similar with List, but containing extra field evicted_values for
     LRU Hashing.
     """
+
+    __slots__: Sequence[str] = ("_evicted_values",)
+
     def __init__(self, values, lengths_blob=None, evicted_values=None):
         if isinstance(evicted_values, Field):
             assert isinstance(evicted_values, Scalar)
             self._evicted_values = _normalize_field(evicted_values)
         else:
             self._evicted_values = Scalar(np.int64, evicted_values)
-        List.__init__(self, values, lengths_blob=lengths_blob)
+        super().__init__(values, lengths_blob=lengths_blob)
 
     def field_names(self):
         value_fields = self._items.field_names()
@@ -323,8 +331,8 @@ class ListWithEvicted(List):
         self.lengths._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
         str_buffer.write('  ' * (indent + 1) + "_items=\n")
         self._items._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
-        str_buffer.write('  ' * (indent + 1) + "_evicted_Values=\n")
-        self._items._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
+        str_buffer.write('  ' * (indent + 1) + "_evicted_values=\n")
+        self._evicted_values._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
         str_buffer.write('  ' * indent + ")\n")
 
 
@@ -361,6 +369,8 @@ class ListWithEvicted(List):
 class Struct(Field):
     """Represents a named list of fields sharing the same domain.
     """
+
+    __slots__: Sequence[str] = ("fields", "_frozen")
 
     def __init__(self, *fields):
         """ fields is a list of tuples in format of (name, field). The name is
@@ -406,9 +416,9 @@ class Struct(Field):
             ):
                 raise ValueError('Duplicate field name: %s' % name)
             self.fields[name] = self.fields[name] + field
-        for id, (_, field) in enumerate(viewitems(self.fields)):
+        for id, (_, field) in enumerate(self.fields.items()):
             field._set_parent(self, id)
-        Field.__init__(self, viewvalues(self.fields))
+        super().__init__(self.fields.values())
         self._frozen = True
 
     def _struct_from_nested_name(self, nested_name, field):
@@ -425,45 +435,45 @@ class Struct(Field):
         return names[0], create_internal(names[1], field)
 
     def get_children(self):
-        return list(viewitems(self.fields))
+        return list(self.fields.items())
 
     def field_names(self):
         names = []
-        for name, field in viewitems(self.fields):
+        for name, field in self.fields.items():
             names += [_join_field_name(name, f) for f in field.field_names()]
         return names
 
     def field_types(self):
         types = []
-        for _, field in viewitems(self.fields):
+        for field in self.fields.values():
             types += field.field_types()
         return types
 
     def field_metadata(self):
         metadata = []
-        for _, field in viewitems(self.fields):
+        for field in self.fields.values():
             metadata += field.field_metadata()
         return metadata
 
     def field_blobs(self):
         blobs = []
-        for _, field in viewitems(self.fields):
+        for field in self.fields.values():
             blobs += field.field_blobs()
         return blobs
 
     def all_scalars(self):
         scalars = []
-        for _, field in viewitems(self.fields):
+        for field in self.fields.values():
             scalars += field.all_scalars()
         return scalars
 
     def has_blobs(self):
-        return all(field.has_blobs() for field in viewvalues(self.fields))
+        return all(field.has_blobs() for field in self.fields.values())
 
     def clone(self, keep_blobs=True):
         normalized_fields = [
             (k, _normalize_field(v, keep_blobs=keep_blobs))
-            for k, v in viewitems(self.fields)
+            for k, v in self.fields.items()
         ]
         return type(self)(*normalized_fields)
 
@@ -484,7 +494,7 @@ class Struct(Field):
 
     def _pprint_impl(self, indent, str_buffer):
         str_buffer.write('  ' * indent + "Struct( \n")
-        for name, field in viewitems(self.fields):
+        for name, field in self.fields.items():
             str_buffer.write('  ' * (indent + 1) + "{}=".format(name) + "\n")
             field._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
         str_buffer.write('  ' * indent + ") \n")
@@ -504,7 +514,7 @@ class Struct(Field):
         Struct.
         """
         if isinstance(item, list) or isinstance(item, tuple):
-            keys = list(viewkeys(self.fields))
+            keys = list(self.fields.keys())
             return Struct(
                 * [
                     (
@@ -514,7 +524,7 @@ class Struct(Field):
                 ]
             )
         elif isinstance(item, int):
-            return next(islice(viewvalues(self.fields), item, None))
+            return next(islice(self.fields.values(), item, None))
         else:
             field = self._get_field_by_nested_name(item)
             if field is None:
@@ -534,9 +544,9 @@ class Struct(Field):
         if item.startswith('__'):
             raise AttributeError(item)
         try:
-            return self.__dict__['fields'][item]
-        except KeyError:
-            raise AttributeError(item)
+            return super().__getattribute__("fields")[item]
+        except KeyError as e:
+            raise AttributeError(item) from e
 
     def __setattr__(self, key, value):
         # Disable setting attributes after initialization to prevent false
@@ -545,7 +555,7 @@ class Struct(Field):
         # post initialization.
         if getattr(self, '_frozen', None) and not key.startswith('_'):
             raise TypeError('Struct.__setattr__() is disabled after __init__()')
-        super(Struct, self).__setattr__(key, value)
+        super().__setattr__(key, value)
 
     def __add__(self, other):
         """
@@ -592,7 +602,7 @@ class Struct(Field):
                     ", must both the Struct to allow merging of the field, " + name)
             children[name] = left_field + right_field
 
-        return Struct(*(viewitems(children)))
+        return Struct(*(children.items()))
 
     def __sub__(self, other):
         """
@@ -710,10 +720,12 @@ class Scalar(Field):
     a conversion to numpy.ndarray is attempted.
     """
 
+    __slots__: Sequence[str] = ("_metadata", "dtype", "_original_dtype", "_blob")
+
     def __init__(self, dtype=None, blob=None, metadata=None):
         self._metadata = None
         self.set(dtype, blob, metadata, unsafe=True)
-        Field.__init__(self, [])
+        super().__init__([])
 
     def field_names(self):
         return ['']
@@ -967,8 +979,10 @@ def from_dtype(dtype, _outer_shape=()):
     return Struct(*struct_fields)
 
 
-class _SchemaNode(object):
+class _SchemaNode:
     """This is a private class used to represent a Schema Node"""
+
+    __slots__: Sequence[str] = ("name", "children", "type_str", "field")
 
     def __init__(self, name, type_str=''):
         self.name = name
@@ -1122,7 +1136,7 @@ def as_record(value):
         else:
             return Tuple(* [as_record(f) for f in value])
     elif isinstance(value, dict):
-        return Struct(* [(k, as_record(v)) for k, v in viewitems(value)])
+        return Struct(* [(k, as_record(v)) for k, v in value.items()])
     else:
         return _normalize_field(value)
 

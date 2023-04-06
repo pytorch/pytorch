@@ -1,7 +1,16 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/cudnn_affine_grid_generator_native.h>
+#include <ATen/ops/cudnn_affine_grid_generator_backward_native.h>
+#endif
 
 #if !AT_CUDNN_ENABLED()
 
@@ -52,7 +61,8 @@ Tensor cudnn_affine_grid_generator_forward(
     const Tensor& theta_t,
     int64_t N, int64_t C, int64_t H, int64_t W)
 {
-  TensorArg theta{ theta_t.contiguous(), "theta", 1 };
+  auto theta_t_contig = theta_t.contiguous();
+  TensorArg theta{ theta_t_contig, "theta", 1 };
   CheckedFrom c = "cudnn_affine_grid_generator_forward";
   checkContiguous(c, theta);
   checkSize(c, theta, {N, 2, 3});
@@ -73,7 +83,8 @@ Tensor cudnn_affine_grid_generator_backward(
     const Tensor& grad_grid_t,
     int64_t N, int64_t C, int64_t H, int64_t W)
 {
-  TensorArg grad_grid{ grad_grid_t.contiguous(), "grad_grid", 1 };
+  auto grad_grid_contig = grad_grid_t.contiguous();
+  TensorArg grad_grid{ grad_grid_contig, "grad_grid", 1 };
   CheckedFrom c = "cudnn_affine_grid_generator_backward";
   checkContiguous(c, grad_grid);
   checkSize(c, grad_grid, {N, H, W, 2});

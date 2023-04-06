@@ -2,13 +2,16 @@
 
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace torch {
 namespace throughput_benchmark {
 
-std::ostream& operator<<(std::ostream& os, const BenchmarkExecutionStats& value) {
-    return os << "Average latency / iter (ms): " << value.latency_avg_ms
-              << "\n Total number of iters: " << value.num_iters;
+std::ostream& operator<<(
+    std::ostream& os,
+    const BenchmarkExecutionStats& value) {
+  return os << "Average latency / iter (ms): " << value.latency_avg_ms
+            << "\n Total number of iters: " << value.num_iters;
 }
 
 void ThroughputBenchmark::addInput(py::args args, py::kwargs kwargs) {
@@ -21,7 +24,7 @@ void ThroughputBenchmark::addInput(py::args args, py::kwargs kwargs) {
   }
 }
 
-py::object ThroughputBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)  {
+py::object ThroughputBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs) {
   CHECK(script_module_.initialized() ^ module_.initialized());
   if (script_module_.initialized()) {
     c10::IValue result;
@@ -36,12 +39,10 @@ py::object ThroughputBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)  {
   }
 }
 
-ThroughputBenchmark::ThroughputBenchmark(
-    jit::Module script_module)
+ThroughputBenchmark::ThroughputBenchmark(jit::Module script_module)
     : script_module_(script_module) {}
 
-ThroughputBenchmark::ThroughputBenchmark(
-    py::object module)
+ThroughputBenchmark::ThroughputBenchmark(py::object module)
     : module_(std::move(module)) {}
 
 BenchmarkExecutionStats ThroughputBenchmark::benchmark(
@@ -54,9 +55,10 @@ BenchmarkExecutionStats ThroughputBenchmark::benchmark(
     return script_module_.benchmark(config);
   } else {
     CHECK(module_.initialized());
-    TORCH_WARN("Starting benchmark on an nn.Module. This can be slow due "
-    "to Python GIL.For proper inference simulation you might want to switch to "
-    "a ScriptModule instead");
+    TORCH_WARN(
+        "Starting benchmark on an nn.Module. This can be slow due "
+        "to Python GIL.For proper inference simulation you might want to switch to "
+        "a ScriptModule instead");
     return module_.benchmark(config);
   }
 }
@@ -79,6 +81,7 @@ ScriptModuleOutput ScriptModuleBenchmark::runOnce(
   ScriptModuleInput stack = jit::createStackForSchema(
       function.getSchema(),
       std::move(args),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(kwargs),
       model_._ivalue());
   return function(std::move(stack));
@@ -104,6 +107,7 @@ void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
   jit::Stack stack = jit::createStackForSchema(
       model_.get_method("forward").function().getSchema(),
       std::move(args),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(kwargs),
       model_._ivalue());
   inputs_.emplace_back(std::move(stack));
@@ -137,4 +141,4 @@ ScriptModuleInput cloneInput<ScriptModuleInput>(
 } // namespace detail
 
 } // namespace throughput_benchmark
-} // namepsace torch
+} // namespace torch

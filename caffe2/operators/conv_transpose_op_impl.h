@@ -46,7 +46,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
   auto* Y = Output(0, Y_dims, at::dtype<T>());
   if (X.numel() == 0) {
-    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    VLOG(2) << "Number of elements is 0 in ConvTransposeOp";
     return true;
   }
 
@@ -78,7 +78,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         buffer_shape,
         at::dtype<T>().device(Context::GetDeviceType()));
     T* col_buffer_data = col_buffer->template mutable_data<T>();
-    for (int image_id = 0; image_id < N; ++image_id) {
+    for (const auto image_id : c10::irange(N)) {
       // Weight term
       if (G == 1) {
         math::Gemm<T, Context>(
@@ -200,7 +200,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
   auto* Y = Output(0, Y_dims, at::dtype<T>());
   if (X.numel() == 0) {
-    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    VLOG(2) << "Number of elements is 0 in ConvTransposeOp";
     return true;
   }
 
@@ -231,7 +231,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         buffer_shape,
         at::dtype<T>().device(Context::GetDeviceType()));
     T* col_buffer_data = col_buffer_.template mutable_data<T>();
-    for (int image_id = 0; image_id < N; ++image_id) {
+    for (const auto image_id : c10::irange(N)) {
       // Weight term
       if (G == 1) {
         math::Gemm<T, Context>(
@@ -247,7 +247,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             col_buffer_data,
             &context_);
       } else {
-        for (int group_id = 0; group_id < G; ++group_id) {
+        for (const auto group_id : c10::irange(G)) {
           math::GemmEx<T, Context>(
               CblasNoTrans,
               CblasNoTrans,
@@ -361,7 +361,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   math::Set<T, Context>(filter.numel(), T(0), dfilter_data, &context_);
 
   if (X.numel() == 0) {
-    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    VLOG(2) << "Number of elements is 0 in ConvTransposeOp";
     if (dbias_data != nullptr) {
       math::Set<T, Context>(C, T(0), dbias_data, &context_);
     }
@@ -374,7 +374,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       at::dtype<T>().device(Context::GetDeviceType()));
   T* col_buffer_data = col_buffer_.template mutable_data<T>();
 
-  for (int image_id = 0; image_id < N; ++image_id) {
+  for (const auto image_id : c10::irange(N)) {
     // gradient w.r.t. filters. Im2Col followed by Gemm
     // Im2Col.
     math::Im2Col<T, Context, StorageOrder::NCHW>(
@@ -526,7 +526,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   math::Set<T, Context>(filter.numel(), T(0), dfilter_data, &context_);
 
   if (X.numel() == 0) {
-    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    VLOG(2) << "Number of elements is 0 in ConvTransposeOp";
     if (dbias_data != nullptr) {
       math::Set<T, Context>(C, T(0), dbias_data, &context_);
     }
@@ -539,7 +539,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       at::dtype<T>().device(Context::GetDeviceType()));
   T* col_buffer_data = col_buffer_.template mutable_data<T>();
 
-  for (int image_id = 0; image_id < N; ++image_id) {
+  for (const auto image_id : c10::irange(N)) {
     // gradient w.r.t. filters. Im2Col followed by Gemm
     // Im2Col.
     math::Im2Col<T, Context, StorageOrder::NHWC>(
@@ -575,7 +575,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           dfilter_data,
           &context_);
     } else {
-      for (int group_id = 0; group_id < G; ++group_id) {
+      for (const auto group_id : c10::irange(G)) {
         math::GemmEx<T, Context>(
             CblasTrans,
             CblasNoTrans,
@@ -610,7 +610,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             dX_data + image_id * M * X_HxW,
             &context_);
       } else {
-        for (int group_id = 0; group_id < G; ++group_id) {
+        for (const auto group_id : c10::irange(G)) {
           math::GemmEx<T, Context>(
               CblasNoTrans,
               CblasTrans,

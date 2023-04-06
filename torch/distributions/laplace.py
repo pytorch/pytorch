@@ -4,6 +4,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Laplace']
 
 class Laplace(Distribution):
     r"""
@@ -11,6 +12,7 @@ class Laplace(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Laplace(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # Laplace distributed with loc=0, scale=1
         tensor([ 0.1046])
@@ -28,6 +30,10 @@ class Laplace(Distribution):
         return self.loc
 
     @property
+    def mode(self):
+        return self.loc
+
+    @property
     def variance(self):
         return 2 * self.scale.pow(2)
 
@@ -41,7 +47,7 @@ class Laplace(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
-        super(Laplace, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Laplace, _instance)
@@ -75,8 +81,6 @@ class Laplace(Distribution):
         return 0.5 - 0.5 * (value - self.loc).sign() * torch.expm1(-(value - self.loc).abs() / self.scale)
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         term = value - 0.5
         return self.loc - self.scale * (term).sign() * torch.log1p(-2 * term.abs())
 

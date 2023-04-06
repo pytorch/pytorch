@@ -1,9 +1,21 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 #if AT_CUDNN_ENABLED()
   #include <ATen/cudnn/Descriptors.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cudnn_ctc_loss.h>
+#include <ATen/ops/_cudnn_ctc_loss_native.h>
+#include <ATen/ops/_use_cudnn_ctc_loss.h>
+#include <ATen/ops/_use_cudnn_ctc_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 #if (!AT_CUDNN_ENABLED()) || (CUDNN_VERSION < 7600)
@@ -21,7 +33,27 @@ bool _use_cudnn_ctc_loss(
   return false;
 }
 
+bool _use_cudnn_ctc_loss_tensor(
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t BLANK) {
+  return false;
+}
+
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, bool deterministic, bool zero_infinity) {
+  AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
+}
+
+std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t BLANK,
+    bool deterministic,
+    bool zero_infinity) {
   AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
 }
 
@@ -34,6 +66,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor
 #include <ATen/cudnn/Utils.h>
 
 #include <ATen/TensorUtils.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -54,24 +87,38 @@ bool _use_cudnn_ctc_loss(
     // we don't know that input_lengths and target_lengths have the same size
     // (they should, but we didn't check yet)
     int64_t max_input_length = log_probs.size(0);
-    for (size_t b = 0; b < input_lengths.size(); b++) {
-      use_cudnn &= (input_lengths[b] == max_input_length);
+    for (const auto input_length : input_lengths) {
+      use_cudnn = use_cudnn && ((input_length == max_input_length) ? 1 : 0);
     }
-    for (size_t b = 0; b < target_lengths.size(); b++) {
+    for (const auto b : c10::irange(target_lengths.size())) {
       // target length < 256 is documented, but we see illegal memory accesses
       // when target lengths > input lengths for CuDNN
-      use_cudnn &=
-          (target_lengths[b] <= 256) & (target_lengths[b] <= input_lengths[b]);
+      use_cudnn =
+          use_cudnn && (target_lengths[b] < 256) && (target_lengths[b] <= input_lengths[b]);
     }
   }
   return use_cudnn;
 }
 
+bool _use_cudnn_ctc_loss_tensor(
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t BLANK) {
+  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  return at::_use_cudnn_ctc_loss(
+      log_probs, targets, il, tl, BLANK);
+}
+
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tensor& targets_t, IntArrayRef input_lengths_, IntArrayRef target_lengths_, int64_t BLANK, bool deterministic, bool zero_infinity) {
   (void)zero_infinity; // only used for backward
-  CheckedFrom c = "cudnn_ctc_loss";
-  TensorArg log_probs { log_probs_t, "log_probs", 1 };
-  TensorArg targets { targets_t, "targets", 2 };
+  const CheckedFrom c = "cudnn_ctc_loss";
+  const TensorArg log_probs { log_probs_t, "log_probs", 1 };
+  const TensorArg targets { targets_t, "targets", 2 };
   checkDim(c, log_probs, 3);
   checkScalarType(c, log_probs, kFloat);
   checkDim(c, targets, 1);
@@ -79,9 +126,9 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   checkContiguous(c, targets); // ?
   checkBackend(c, {*log_probs}, Backend::CUDA);
   checkBackend(c, {*targets}, Backend::CPU);
-  int64_t batch_size = log_probs->size(1);
-  TORCH_CHECK(input_lengths_.size() == batch_size, "input_lengths needs to have size to match batch_size");
-  TORCH_CHECK(target_lengths_.size() == batch_size, "target_lengths needs to have size to match batch_size");
+  const auto batch_size = log_probs->size(1);
+  TORCH_CHECK(static_cast<int64_t>(input_lengths_.size()) == batch_size, "input_lengths needs to have size to match batch_size");
+  TORCH_CHECK(static_cast<int64_t>(target_lengths_.size()) == batch_size, "target_lengths needs to have size to match batch_size");
 
   std::vector<int> input_lengths(input_lengths_.begin(), input_lengths_.end());
   std::vector<int> target_lengths(target_lengths_.begin(), target_lengths_.end());
@@ -91,9 +138,9 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   // assert other conditions for cudnnCTCLoss: all label lengths <= 256
   // all input lengths = logprob.size(0)
 
-  auto handle = getCudnnHandle();
+  const auto handle = getCudnnHandle();
 
-  cudnnCTCLossAlgo_t algo = (deterministic ? CUDNN_CTC_LOSS_ALGO_DETERMINISTIC : CUDNN_CTC_LOSS_ALGO_NON_DETERMINISTIC);
+  const cudnnCTCLossAlgo_t algo = (deterministic ? CUDNN_CTC_LOSS_ALGO_DETERMINISTIC : CUDNN_CTC_LOSS_ALGO_NON_DETERMINISTIC);
 
   CTCLossDescriptor ctc_loss_desc;
 
@@ -137,6 +184,21 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   return std::make_tuple(costs, grad);
 }
 
+std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t BLANK,
+    bool deterministic,
+    bool zero_infinity) {
+  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  return at::_cudnn_ctc_loss(
+      log_probs, targets, il, tl, BLANK, deterministic, zero_infinity);
+}
 
 }}  // namespace at::native
 

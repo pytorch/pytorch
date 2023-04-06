@@ -1,18 +1,29 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
 
+#include <ATen/core/Tensor.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/im2col.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/slow_conv_transpose2d_native.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/zeros.h>
+#endif
+
+#include <c10/core/TensorOptions.h>
+#include <c10/util/irange.h>
+
 namespace at {
-namespace native {
-
-template<typename scalar_t>
-void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
-
 namespace {
-
 static inline void slow_conv_transpose2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
@@ -131,19 +142,18 @@ static inline void slow_conv_transpose2d_shape_check(
     check_dim_size(grad_output, ndim, dimw, output_width);
   }
 }
+} // namespace
 
-void slow_conv_transpose2d_out_cpu_template(
-    Tensor& output,
-    const Tensor& input_,
-    const Tensor& weight_,
-    IntArrayRef kernel_size,
-    const Tensor& bias_,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef dilation,
-    Tensor& columns_,
-    Tensor& ones_) {
+namespace meta {
+TORCH_META_FUNC(slow_conv_transpose2d)
+(const Tensor& input,
+ const Tensor& weight,
+ IntArrayRef kernel_size,
+ OptionalTensorRef bias_opt,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ IntArrayRef output_padding,
+ IntArrayRef dilation) {
   TORCH_CHECK(
       kernel_size.size() == 2,
       "It is expected kernel_size equals to 2, but got size ",
@@ -169,9 +179,6 @@ void slow_conv_transpose2d_out_cpu_template(
       "It is expected stride equals to 2, but got size ",
       output_padding.size());
 
-  Tensor columns = columns_;
-  Tensor ones = ones_;
-
   int64_t kernel_height = kernel_size[0];
   int64_t kernel_width = kernel_size[1];
   int64_t dilation_height = dilation[0];
@@ -184,10 +191,10 @@ void slow_conv_transpose2d_out_cpu_template(
   int64_t output_padding_width = output_padding[1];
 
   slow_conv_transpose2d_shape_check(
-      input_,
+      input,
       Tensor(),
-      weight_,
-      bias_,
+      weight,
+      bias_opt.getTensorRef(),
       kernel_height,
       kernel_width,
       stride_height,
@@ -200,142 +207,180 @@ void slow_conv_transpose2d_out_cpu_template(
       dilation_width,
       false);
 
-  int n_input_plane = weight_.size(0);
-  int n_output_plane = weight_.size(1);
+  int n_output_plane = weight.size(1);
 
-  Tensor input = input_.contiguous();
-  Tensor weight = weight_.contiguous();
+  bool use_channels_last = native::thnn_conv_use_channels_last(input, weight);
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
 
-  TORCH_CHECK(columns.is_contiguous(), "columns needs to be contiguous");
+  Tensor input_ = input.contiguous(memory_format);
 
-  Tensor bias = Tensor();
-
-  if (bias_.defined()) {
-    bias = bias_.contiguous();
-    TORCH_CHECK(ones.is_contiguous(), "ones needs to be contiguous");
+  if (input_.dim() == 3) {
+    input_.resize_({1, input_.size(0), input_.size(1), input_.size(2)});
   }
 
-  bool is_batch = false;
-  if (input.dim() == 3) {
-    // Force batch
-    is_batch = true;
-    input.resize_({1, input.size(0), input.size(1), input.size(2)});
-  }
-
-  int64_t input_height = input.size(2);
-  int64_t input_width = input.size(3);
+  int64_t input_height = input_.size(2);
+  int64_t input_width = input_.size(3);
   int64_t output_height = (input_height - 1) * stride_height - 2 * pad_height +
       (dilation_height * (kernel_height - 1) + 1) + output_padding_height;
   int64_t output_width = (input_width - 1) * stride_width - 2 * pad_width +
       (dilation_width * (kernel_width - 1) + 1) + output_padding_width;
 
   // Batch size + input planes
-  int64_t batch_size = input.size(0);
+  int64_t batch_size = input_.size(0);
 
   // Resize output
-  output.resize_({batch_size, n_output_plane, output_height, output_width});
+  TensorOptions options(input.options());
+  set_output_raw_strided(
+      0,
+      {batch_size, n_output_plane, output_height, output_width},
+      {},
+      options.memory_format(memory_format));
+}
+} // namespace meta
 
-  // Resize temporary columns
-  columns.resize_({n_output_plane * kernel_width * kernel_height,
-                   input_height * input_width});
-  columns.zero_();
+namespace native {
 
-  // Define a buffer of ones, for bias accumulation
-  // Note: this buffer can be shared with other modules, it only ever gets
-  // increased, and always contains ones.
-  if (ones.dim() != 2 ||
-      ones.size(0) * ones.size(1) < output_height * output_width) {
-    // Resize plane and fill with ones...
-    ones.resize_({output_height, output_width});
-    ones.fill_(1);
+namespace {
+void slow_conv_transpose2d_out_cpu_template(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    IntArrayRef kernel_size,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef dilation) {
+  int64_t kernel_height = kernel_size[0];
+  int64_t kernel_width = kernel_size[1];
+  int64_t dilation_height = dilation[0];
+  int64_t dilation_width = dilation[1];
+  int64_t pad_height = padding[0];
+  int64_t pad_width = padding[1];
+  int64_t stride_height = stride[0];
+  int64_t stride_width = stride[1];
+  int64_t output_padding_height = output_padding[0];
+  int64_t output_padding_width = output_padding[1];
+
+  int n_input_plane = weight.size(0);
+  int n_output_plane = weight.size(1);
+
+  bool use_channels_last = thnn_conv_use_channels_last(input, weight);
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+
+  Tensor input_ = input.contiguous(memory_format);
+  Tensor weight_ = weight.contiguous(memory_format);
+  Tensor bias_ = bias.defined() ? bias.contiguous() : Tensor();
+
+  bool is_batch = false;
+  if (input_.dim() == 3) {
+    // Force batch
+    is_batch = true;
+    input_.resize_({1, input.size(0), input.size(1), input.size(2)});
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
+  int64_t input_height = input_.size(2);
+  int64_t input_width = input_.size(3);
+  int64_t output_height = (input_height - 1) * stride_height - 2 * pad_height +
+      (dilation_height * (kernel_height - 1) + 1) + output_padding_height;
+  int64_t output_width = (input_width - 1) * stride_width - 2 * pad_width +
+      (dilation_width * (kernel_width - 1) + 1) + output_padding_width;
+
+  // Batch size + input planes
+  int64_t batch_size = input_.size(0);
+
+  // Create temporary columns
+  Tensor columns = at::empty({0}, input.options());
+  if (use_channels_last) {
+    columns.resize_({batch_size, input_height * input_width, kernel_height * kernel_width * n_output_plane});
+  } else {
+    columns.resize_({batch_size, n_output_plane * kernel_height * kernel_width, input_height * input_width});
+  }
+  columns.zero_();
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Long, at::ScalarType::BFloat16,
       input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
-        // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
-          // Helpers
-          Tensor input_n;
-          Tensor output_n;
 
-          // Matrix mulitply per output:
-          input_n = input.select(0, elt);
-          output_n = output.select(0, elt);
+    at::parallel_for(0, batch_size, 0, [&](int64_t begin, int64_t end) {
+      // For each elt in batch, do:
+      for (const auto elt : c10::irange(begin, end)) {
+        // Matrix mulitply per output:
+        Tensor input_n = input_.select(0, elt);
+        Tensor output_n = output.select(0, elt);
+        Tensor columns_n = columns.select(0, elt);
 
-          // M,N,K are dims of matrix A and B
-          // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-          int64_t m = weight.size(1) * weight.size(2) * weight.size(3);
-          int64_t n = columns.size(1);
-          int64_t k = weight.size(0);
+        if (use_channels_last) {
+          int64_t m = kernel_height * kernel_width * n_output_plane;
+          int64_t n = input_height * input_width;
+          int64_t k = n_input_plane;
 
-          // Do GEMM (note: this is a bit confusing because gemm assumes
-          // column-major matrices)
+          // column-major matrices
           cpublas::gemm(
-              cpublas::NoTranspose,
-              cpublas::Transpose,
-              n,
+              TransposeType::NoTranspose,
+              TransposeType::NoTranspose,
               m,
+              n,
               k,
-              1,
-              input_n.data_ptr<scalar_t>(),
-              n,
-              weight.data_ptr<scalar_t>(),
+              static_cast<scalar_t>(1),
+              weight_.data_ptr<scalar_t>(),
               m,
-              0,
-              columns.data_ptr<scalar_t>(),
-              n);
+              input_n.data_ptr<scalar_t>(),
+              k,
+              static_cast<scalar_t>(0),
+              columns_n.data_ptr<scalar_t>(),
+              m);
+        } else {
+          int64_t m = input_height * input_width;
+          int64_t n = n_output_plane * kernel_height * kernel_width;
+          int64_t k = n_input_plane;
 
-          // Unpack columns back into input:
-          col2im<scalar_t>(
-              columns.data_ptr<scalar_t>(),
-              n_output_plane,
-              output_height,
-              output_width,
-              input_height,
-              input_width,
-              kernel_height,
-              kernel_width,
-              pad_height,
-              pad_width,
-              stride_height,
-              stride_width,
-              dilation_height,
-              dilation_width,
-              output_n.data_ptr<scalar_t>());
-
-          // Do Bias after:
-          // M,N,K are dims of matrix A and B
-          // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-          int64_t m_ = n_output_plane;
-          int64_t n_ = output_height * output_width;
-          int64_t k_ = 1;
-
-          // Do GEMM (note: this is a bit confusing because gemm assumes
-          // column-major matrices)
-          if (bias_.defined()) {
-            cpublas::gemm(
-                cpublas::Transpose,
-                cpublas::NoTranspose,
-                n_,
-                m_,
-                k_,
-                1,
-                ones.data_ptr<scalar_t>(),
-                k_,
-                bias.data_ptr<scalar_t>(),
-                k_,
-                1,
-                output_n.data_ptr<scalar_t>(),
-                n_);
-          }
+          // column-major matrices
+          cpublas::gemm(
+              TransposeType::NoTranspose,
+              TransposeType::Transpose,
+              m,
+              n,
+              k,
+              static_cast<scalar_t>(1),
+              input_n.data_ptr<scalar_t>(),
+              m,
+              weight_.data_ptr<scalar_t>(),
+              n,
+              static_cast<scalar_t>(0),
+              columns_n.data_ptr<scalar_t>(),
+              m);
         }
 
-        // Resize output
-        if (is_batch) {
-          output.resize_({n_output_plane, output_height, output_width});
-          input.resize_({n_input_plane, input_height, input_width});
-        }
-      });
+        // Unpack columns back into input:
+        col2im<scalar_t>(
+            columns_n.data_ptr<scalar_t>(),
+            n_output_plane,
+            output_height,
+            output_width,
+            input_height,
+            input_width,
+            kernel_height,
+            kernel_width,
+            pad_height,
+            pad_width,
+            stride_height,
+            stride_width,
+            dilation_height,
+            dilation_width,
+            output_n.data_ptr<scalar_t>(),
+            use_channels_last);
+      }
+    });
+  });
+
+  if (bias.defined()) {
+    output.add_(bias_.reshape({-1, 1, 1}));
+  }
+
+  // Resize output
+  if (is_batch) {
+    output.resize_({n_output_plane, output_height, output_width});
+  }
 }
 
 static void slow_conv_transpose2d_backward_out_cpu_template(
@@ -343,7 +388,6 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
     const Tensor& grad_output_,
     Tensor& grad_input,
     const Tensor& weight_,
-    const Tensor& grad_columns_,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -388,7 +432,8 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
   int64_t n_input_plane = weight_.size(0);
   int64_t n_output_plane = weight_.size(1);
 
-  Tensor grad_columns = grad_columns_;
+  bool use_channels_last = thnn_conv_use_channels_last(input_, weight_);
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
 
   slow_conv_transpose2d_shape_check(
       input_,
@@ -407,12 +452,9 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
       dilation_width,
       false);
 
-  Tensor input = input_.contiguous();
-  Tensor grad_output = grad_output_.contiguous();
-  Tensor weight = weight_.contiguous();
-
-  TORCH_CHECK(
-      grad_columns.is_contiguous(), "grad_columns needs to be contiguous");
+  Tensor input = input_.contiguous(memory_format);
+  Tensor grad_output = grad_output_.contiguous(memory_format);
+  Tensor weight = weight_.contiguous(memory_format);
 
   bool is_batch = false;
   if (input.dim() == 3) {
@@ -434,26 +476,36 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
   int64_t batch_size = input.size(0);
 
   // Resize output
-  grad_input.resize_({batch_size, n_input_plane, input_height, input_width});
+  grad_input.resize_({batch_size, n_input_plane, input_height, input_width}, memory_format);
   grad_input.zero_();
 
-  // Resize temporary columns
-  grad_columns.resize_({n_output_plane * kernel_width * kernel_height,
-                        input_height * input_width});
+  // Create temporary columns
+  bool need_columns = (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+      stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+      dilation_height != 1 || dilation_width != 1);
 
-  AT_DISPATCH_FLOATING_TYPES(
+  Tensor grad_columns = at::empty({0}, input.options());
+  if (need_columns) {
+    if (use_channels_last) {
+      grad_columns.resize_({input_height * input_width, kernel_height * kernel_width * n_output_plane});
+    } else {
+      grad_columns.resize_({n_output_plane * kernel_height * kernel_width, input_height * input_width});
+    }
+  }
+
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
       grad_output.scalar_type(), "slow_conv_transpose2d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n = Tensor();
         Tensor grad_output_n = Tensor();
 
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           // Matrix mulitply per sample:
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
-          if (kernel_height != 1 || kernel_width != 1) {
+          if (need_columns) {
             // Extract columns:
             im2col<scalar_t>(
                   grad_output_n.data_ptr<scalar_t>(),
@@ -470,39 +522,59 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
                   stride_width,
                   dilation_height,
                   dilation_width,
-                  grad_columns.data_ptr<scalar_t>());
+                  grad_columns.data_ptr<scalar_t>(),
+                  use_channels_last);
           }
 
-          // M,N,K are dims of matrix A and B
-          // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-          int64_t m = weight.size(0);
-          int64_t n = grad_columns.size(1);
-          int64_t k = weight.size(1) * weight.size(2) * weight.size(3);
+          auto gemm_in_ptr = need_columns ? grad_columns.data_ptr<scalar_t>()
+              : grad_output_n.data_ptr<scalar_t>();
 
-          // Do GEMM (note: this is a bit confusing because gemm assumes
-          // column-major matrices)
-          auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
-              grad_columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
-          cpublas::gemm(
-              cpublas::NoTranspose,
-              cpublas::NoTranspose,
-              n,
-              m,
-              k,
-              1,
-              gemm_in_ptr,
-              n,
-              weight.data_ptr<scalar_t>(),
-              k,
-              0,
-              grad_input_n.data_ptr<scalar_t>(),
-              n);
+          if (use_channels_last) {
+            int64_t m = n_input_plane;
+            int64_t n = input_height * input_width;
+            int64_t k = n_output_plane * kernel_height * kernel_width;
+
+            // column-major matrices
+            cpublas::gemm(
+                TransposeType::Transpose,
+                TransposeType::NoTranspose,
+                m,
+                n,
+                k,
+                static_cast<scalar_t>(1),
+                weight.data_ptr<scalar_t>(),
+                k,
+                gemm_in_ptr,
+                k,
+                static_cast<scalar_t>(0),
+                grad_input_n.data_ptr<scalar_t>(),
+                m);
+
+          } else {
+            int64_t m = input_height * input_width;
+            int64_t n = n_input_plane;
+            int64_t k = n_output_plane * kernel_height * kernel_width;
+
+            // column-major matrices
+            cpublas::gemm(
+                TransposeType::NoTranspose,
+                TransposeType::NoTranspose,
+                m,
+                n,
+                k,
+                static_cast<scalar_t>(1),
+                gemm_in_ptr,
+                m,
+                weight.data_ptr<scalar_t>(),
+                k,
+                static_cast<scalar_t>(0),
+                grad_input_n.data_ptr<scalar_t>(),
+                m);
+          }
         }
 
         // Resize output
         if (is_batch) {
-          grad_output.resize_({n_output_plane, output_height, output_width});
-          input.resize_({n_input_plane, input_height, input_width});
           grad_input.resize_({n_input_plane, input_height, input_width});
         }
       });
@@ -510,11 +582,10 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
 
 void slow_conv_transpose2d_acc_grad_parameters_cpu(
     const Tensor& input_,
+    const Tensor& weight_,
     const Tensor& grad_output_,
     Tensor& grad_weight,
     Tensor& grad_bias,
-    const Tensor& columns_,
-    const Tensor& ones_,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -557,8 +628,8 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
   int64_t output_padding_height = output_padding[0];
   int64_t output_padding_width = output_padding[1];
 
-  Tensor columns = columns_;
-  Tensor ones = ones_;
+  bool use_channels_last = thnn_conv_use_channels_last(input_, weight_);
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
 
   slow_conv_transpose2d_shape_check(
       input_,
@@ -577,32 +648,14 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
       dilation_width,
       true);
 
-  int64_t n_output_plane;
-  if (grad_weight.defined()) {
-    n_output_plane = grad_weight.size(1);
-  } else if (grad_bias.defined()) {
-    n_output_plane = grad_bias.size(0);
-  } else {
-    return;
-  }
+  int n_input_plane = weight_.size(0);
+  int n_output_plane = weight_.size(1);
 
-  Tensor input = input_.contiguous();
-  Tensor grad_output = grad_output_.contiguous();
+  Tensor input = input_.contiguous(memory_format);
+  Tensor grad_output = grad_output_.contiguous(memory_format);
+  TORCH_CHECK(grad_weight.is_contiguous(memory_format), "grad_weight needs to be contiguous");
 
-  if (grad_weight.defined()) {
-    TORCH_CHECK(
-        grad_weight.is_contiguous(), "grad_weight needs to be contiguous");
-  }
-  TORCH_CHECK(columns.is_contiguous(), "columns needs to be contiguous");
-  if (grad_bias.defined()) {
-    TORCH_CHECK(grad_bias.is_contiguous(), "grad_bias needs to be contiguous");
-    TORCH_CHECK(ones.is_contiguous(), "ones needs to be contiguous");
-  }
-
-  bool is_batch = false;
   if (input.dim() == 3) {
-    // Force batch
-    is_batch = true;
     input.resize_({1, input.size(0), input.size(1), input.size(2)});
     grad_output.resize_(
         {1, grad_output.size(0), grad_output.size(1), grad_output.size(2)});
@@ -618,19 +671,21 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
   // Batch size + input planes
   int64_t batch_size = input.size(0);
 
-  // Define a buffer of ones, for bias accumulation
-  if (ones.dim() != 2 ||
-      ones.size(0) * ones.size(1) < output_height * output_width) {
-    // Resize plane and fill with ones...
-    ones.resize_({output_height, output_width});
-    ones.fill_(1);
+  // Resize temporary columns
+  bool need_columns = (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+      stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+      dilation_height != 1 || dilation_width != 1);
+
+  Tensor columns = at::empty({0}, input.options());
+  if (need_columns) {
+    if (use_channels_last) {
+      columns.resize_({input_height * input_width, kernel_height * kernel_width * n_output_plane});
+    } else {
+      columns.resize_({n_output_plane * kernel_height * kernel_width, input_height * input_width});
+    }
   }
 
-  // Resize temporary columns
-  columns.resize_({n_output_plane * kernel_width * kernel_height,
-                   input_height * input_width});
-
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
       input.scalar_type(), "slow_conv_transpose2d_acc_grad_parameters_cpu", [&] {
         // Helpers
         Tensor input_n = Tensor();
@@ -639,7 +694,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
         scalar_t scale = static_cast<scalar_t>(scale_);
 
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           // Matrix mulitply per output:
           grad_output_n = grad_output.select(0, elt);
 
@@ -648,7 +703,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
             // Matrix mulitply per output:
             input_n = input.select(0, elt);
 
-            if (kernel_height != 1 || kernel_width != 1) {
+            if (need_columns) {
               // Extract columns:
               im2col<scalar_t>(
                   grad_output_n.data_ptr<scalar_t>(),
@@ -665,81 +720,72 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                   stride_width,
                   dilation_height,
                   dilation_width,
-                  columns.data_ptr<scalar_t>());
+                  columns.data_ptr<scalar_t>(),
+                  use_channels_last);
             }
 
-            // M,N,K are dims of matrix A and B
-            // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-            int64_t n = columns.size(0); // n_output_plane * kh * kw
-            int64_t m = input_n.size(0); // n_input_plane
-            int64_t k = columns.size(1); // input_height * input_width
+            auto gemm_in_ptr = need_columns ? columns.data_ptr<scalar_t>()
+                : grad_output_n.data_ptr<scalar_t>();
 
-            // Do GEMM (note: this is a bit confusing because gemm assumes
-            // column-major matrices)
-            auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
-                columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
-            cpublas::gemm(
-                cpublas::Transpose,
-                cpublas::NoTranspose,
-                n,
-                m,
-                k,
-                scale,
-                gemm_in_ptr,
-                k,
-                input_n.data_ptr<scalar_t>(),
-                k,
-                1,
-                grad_weight.data_ptr<scalar_t>(),
-                n);
+            if (use_channels_last) {
+              int64_t m = kernel_height * kernel_width * n_output_plane;
+              int64_t n = n_input_plane;
+              int64_t k = input_height * input_width;
+
+              // column-major matrices
+              cpublas::gemm(
+                  TransposeType::NoTranspose,
+                  TransposeType::Transpose,
+                  m,
+                  n,
+                  k,
+                  static_cast<scalar_t>(scale),
+                  gemm_in_ptr,
+                  m,
+                  input_n.data_ptr<scalar_t>(),
+                  n,
+                  static_cast<scalar_t>(1),
+                  grad_weight.data_ptr<scalar_t>(),
+                  m);
+            } else {
+              int64_t m = n_output_plane * kernel_height * kernel_width;
+              int64_t n = n_input_plane;
+              int64_t k = input_height * input_width;
+
+              // column-major matrices
+              cpublas::gemm(
+                  TransposeType::Transpose,
+                  TransposeType::NoTranspose,
+                  m,
+                  n,
+                  k,
+                  static_cast<scalar_t>(scale),
+                  gemm_in_ptr,
+                  k,
+                  input_n.data_ptr<scalar_t>(),
+                  k,
+                  static_cast<scalar_t>(1),
+                  grad_weight.data_ptr<scalar_t>(),
+                  m);
+            }
           }
-
-          // Do Bias:
-          if (grad_bias.defined()) {
-            // M,N,K are dims of matrix A and B
-            // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-            int64_t m_ = n_output_plane;
-            int64_t k_ = output_height * output_width;
-
-            // Do GEMV (note: this is a bit confusing because gemv assumes
-            // column-major matrices)
-            native::gemv<scalar_t>(
-                't',
-                k_,
-                m_,
-                scale,
-                grad_output_n.data_ptr<scalar_t>(),
-                k_,
-                ones.data_ptr<scalar_t>(),
-                1,
-                1,
-                grad_bias.data_ptr<scalar_t>(),
-                1);
-          }
-        }
-
-        // Resize
-        if (is_batch) {
-          grad_output.resize_({n_output_plane, output_height, output_width});
-          input.resize_({input.size(1), input_height, input_width});
         }
       });
 }
 
 } // namespace
 
-Tensor& slow_conv_transpose2d_out_cpu(
-    Tensor& output,
-    const Tensor& input,
-    const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef dilation) {
-  Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor ones = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+TORCH_IMPL_FUNC(slow_conv_transpose2d_structured_cpu)
+(const Tensor& input,
+ const Tensor& weight,
+ IntArrayRef kernel_size,
+ OptionalTensorRef bias_opt,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ IntArrayRef output_padding,
+ IntArrayRef dilation,
+ const Tensor& output){
+  const Tensor& bias = bias_opt.getTensorRef();
 
   slow_conv_transpose2d_out_cpu_template(
       output,
@@ -750,47 +796,10 @@ Tensor& slow_conv_transpose2d_out_cpu(
       stride,
       padding,
       output_padding,
-      dilation,
-      columns,
-      ones);
+      dilation);
+ }
 
-  return output;
-}
-
-Tensor slow_conv_transpose2d_cpu(
-    const Tensor& input,
-    const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef dilation) {
-  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor ones = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  slow_conv_transpose2d_out_cpu_template(
-      output,
-      input,
-      weight,
-      kernel_size,
-      bias,
-      stride,
-      padding,
-      output_padding,
-      dilation,
-      columns,
-      ones);
-
-  return output;
-}
-
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -798,15 +807,15 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation,
-    const Tensor& columns,
-    const Tensor& ones) {
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   if (grad_input.defined()) {
     slow_conv_transpose2d_backward_out_cpu_template(
         input,
         grad_output,
         grad_input,
         weight,
-        columns,
         kernel_size,
         stride,
         padding,
@@ -814,24 +823,19 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(
         dilation);
   }
 
-  if (grad_weight.defined()) {
-    grad_weight.resize_(weight.sizes());
-    grad_weight.zero_();
-  }
-
   if (grad_bias.defined()) {
-    grad_bias.resize_({weight.size(1)});
-    grad_bias.zero_();
+    at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
   }
 
-  if (grad_weight.defined() || grad_bias.defined()) {
+  if (grad_weight.defined()) {
+    grad_weight.resize_(weight.sizes(), weight.suggest_memory_format());
+    grad_weight.zero_();
     slow_conv_transpose2d_acc_grad_parameters_cpu(
         input,
+        weight,
         grad_output,
         grad_weight,
         grad_bias,
-        columns,
-        ones,
         kernel_size,
         stride,
         padding,
@@ -853,8 +857,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation,
-    const Tensor& columns,
-    const Tensor& ones,
     std::array<bool, 3> output_mask) {
   Tensor grad_input;
   Tensor grad_weight;
@@ -884,7 +886,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
         grad_output,
         grad_input,
         weight,
-        columns,
         kernel_size,
         stride,
         padding,
@@ -892,24 +893,19 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
         dilation);
   }
 
-  if (grad_weight.defined()) {
-    grad_weight.resize_(weight.sizes());
-    grad_weight.zero_();
-  }
-
   if (grad_bias.defined()) {
-    grad_bias.resize_({weight.size(1)});
-    grad_bias.zero_();
+    at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
   }
 
-  if (grad_weight.defined() || grad_bias.defined()) {
+  if (grad_weight.defined()) {
+    grad_weight.resize_(weight.sizes(), weight.suggest_memory_format());
+    grad_weight.zero_();
     slow_conv_transpose2d_acc_grad_parameters_cpu(
         input,
+        weight,
         grad_output,
         grad_weight,
         grad_bias,
-        columns,
-        ones,
         kernel_size,
         stride,
         padding,
@@ -920,6 +916,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
 
   return std::tuple<Tensor, Tensor, Tensor>(grad_input, grad_weight, grad_bias);
 }
+
+REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose2d_backward_stub, &slow_conv_transpose2d_backward_cpu);
 
 } // namespace native
 } // namespace at

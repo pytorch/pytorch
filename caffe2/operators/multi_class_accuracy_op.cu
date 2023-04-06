@@ -1,5 +1,6 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/multi_class_accuracy_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -18,9 +19,9 @@ __global__ void MultiClassAccuracyKernel(const int N, const int D, const float* 
     }
     int labelid = labeldata[i];
     if (maxid == labelid) {
-      atomicAdd(accuracies + labelid, static_cast<float>(1));
+      gpu_atomic_add(accuracies + labelid, static_cast<float>(1));
     }
-    atomicAdd(amounts + labelid, static_cast<int>(1));
+    gpu_atomic_add(amounts + labelid, static_cast<int>(1));
   }
 }
 __global__ void MultiClassAccuracyDivideKernel(
@@ -37,15 +38,15 @@ template <>
 bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
-  
-  
-  DCHECK_EQ(X.dim(), 2);
+
+
+  TORCH_DCHECK_EQ(X.dim(), 2);
   // amount, number of instances
   int N = X.dim32(0);
   // dimension, number of classes
   int D = X.dim32(1);
-  DCHECK_EQ(label.dim(), 1);
-  DCHECK_EQ(label.dim32(0), N);
+  TORCH_DCHECK_EQ(label.dim(), 1);
+  TORCH_DCHECK_EQ(label.dim32(0), N);
   auto* Y0 = Output(0, {D}, at::dtype<float>());
   auto* Y1 = Output(1, {D}, at::dtype<int>());
 
@@ -59,9 +60,13 @@ bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   MultiClassAccuracyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                               0, context_.cuda_stream()>>>(
       N, D, Xdata, labeldata, accuracies, amounts);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   MultiClassAccuracyDivideKernel<<<CAFFE_GET_BLOCKS(D), CAFFE_CUDA_NUM_THREADS,
                                   0, context_.cuda_stream()>>>(
     D, accuracies, amounts);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

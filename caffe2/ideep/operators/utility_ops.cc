@@ -1,4 +1,4 @@
-#include "caffe2/operators/utility_ops.h"
+  #include "caffe2/operators/utility_ops.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/ideep/ideep_utils.h"
 
@@ -58,12 +58,16 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
       const auto& X = OperatorBase::Input<itensor>(0);
       if (X.get_data_type() == itensor::data_type::f32) {
         std::vector<int64_t> dims;
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (int i = 0; i < X.get_dims().size(); ++i) {
           dims.push_back(X.get_dims()[i]);
         }
         auto* Y =
             OperatorBase::OutputTensor(0, dims, at::dtype<float>().device(CPU));
-        X.to_public(Y->template mutable_data<float>());
+        itensor temp_ten(
+            X.get_desc().to_default_format(),
+            Y->template mutable_data<float>());
+        X.reorder_to(temp_ten);
       } else {
         CAFFE_THROW("Unsupported ideep type: ",
                     static_cast<int>(X.get_data_type()));
@@ -113,11 +117,13 @@ REGISTER_IDEEP_OPERATOR(CopyIDEEPToCPU, CopyIDEEPToCPUOp);
 REGISTER_IDEEP_OPERATOR(Copy, IDEEPCopyOp);
 REGISTER_IDEEP_OPERATOR(WeightedSum, IDEEPWeightedSumOp);
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function,cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CopyCPUToIDEEP)
     .NumInputs(1)
     .NumOutputs(1)
     .Input(0, "cpu_blob", "The input TensorCPU to copy")
     .Output(0, "ideep_blob", "The output IDEEP tensort to copy to");
+// NOLINTNEXTLINE(clang-diagnostic-unused-function,cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CopyIDEEPToCPU)
     .NumInputs(1)
     .NumOutputs(1)

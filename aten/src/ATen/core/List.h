@@ -1,12 +1,14 @@
 #pragma once
 
+#include <ATen/core/ivalue_to.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <vector>
 
 namespace at {
@@ -16,16 +18,13 @@ namespace c10 {
 struct IValue;
 template<class T> class List;
 struct Type;
-using TypePtr = std::shared_ptr<Type>;
 
 namespace detail {
 
 struct ListImpl final : public c10::intrusive_ptr_target {
   using list_type = std::vector<IValue>;
 
-  explicit ListImpl(list_type list_, TypePtr elementType_)
-  : list(std::move(list_))
-  , elementType(std::move(elementType_)) {}
+  explicit TORCH_API ListImpl(list_type list_, TypePtr elementType_);
 
   list_type list;
 
@@ -53,10 +52,26 @@ bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
 template<class T, class Iterator>
 bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
 
+template<class T>
+struct ListElementConstReferenceTraits {
+  // In the general case, we use IValue::to().
+  using const_reference = typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
+};
+
+// There is no to() overload for c10::optional<std::string>.
+template<>
+struct ListElementConstReferenceTraits<c10::optional<std::string>> {
+  using const_reference = c10::optional<std::reference_wrapper<const std::string>>;
+};
+
 template<class T, class Iterator>
 class ListElementReference final {
 public:
-  operator T() const;
+  operator std::conditional_t<
+      std::is_reference<typename c10::detail::
+                            ivalue_to_const_ref_overload_return<T>::type>::value,
+      const T&,
+      T>() const;
 
   ListElementReference& operator=(T&& new_value) &&;
 
@@ -65,25 +80,18 @@ public:
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
 
-  // returns the underlying std::string by reference (only enabled if this is from a torch::List<std::string>).
-  template<class _T = T>
-  std::enable_if_t<std::is_same<std::string, T>::value && std::is_same<_T, T>::value, const std::string&> toStringRef() {
-    return iterator_->toStringRef();
-  }
-
-  template<class _T = T>
-  std::enable_if_t<std::is_same<c10::optional<std::string>, T>::value && std::is_same<_T, T>::value, c10::optional<std::reference_wrapper<const std::string>>> toOptionalStringRef() {
-    return iterator_->toOptionalStringRef();
+  const IValue& get() const& {
+    return *iterator_;
   }
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
+  ListElementReference(const ListElementReference&) = delete;
+  ListElementReference& operator=(const ListElementReference&) = delete;
+
 private:
   ListElementReference(Iterator iter)
   : iterator_(iter) {}
-
-  ListElementReference(const ListElementReference&) = delete;
-  ListElementReference& operator=(const ListElementReference&) = delete;
 
   // allow moving, but only our friends (i.e. the List class) can move us
   ListElementReference(ListElementReference&&) noexcept = default;
@@ -100,9 +108,16 @@ private:
 
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
-template<class T, class Iterator>
-class ListIterator final : public std::iterator<std::random_access_iterator_tag, T> {
-public:
+template <class T, class Iterator>
+class ListIterator final {
+ public:
+   // C++17 friendly std::iterator implementation
+  using iterator_category = std::random_access_iterator_tag;
+  using value_type = T;
+  using difference_type = std::ptrdiff_t;
+  using pointer = T*;
+  using reference = ListElementReference<T, Iterator>;
+
   explicit ListIterator() = default;
   ~ListIterator() = default;
 
@@ -151,7 +166,7 @@ public:
     return ListIterator{iterator_ - offset};
   }
 
-  friend typename std::iterator<std::random_access_iterator_tag, T>::difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
+  friend difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
     return lhs.iterator_ - rhs.iterator_;
   }
 
@@ -197,7 +212,8 @@ private:
 };
 
 template<class T> List<T> toTypedList(List<IValue> list);
-template<class T> List<IValue> toList(List<T> list);
+template<class T> List<IValue> toList(List<T>&& list);
+template<class T> List<IValue> toList(const List<T>& list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
 }
 
@@ -226,11 +242,13 @@ private:
   c10::intrusive_ptr<c10::detail::ListImpl> impl_;
 
   using internal_reference_type = impl::ListElementReference<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using internal_const_reference_type = typename impl::ListElementConstReferenceTraits<T>::const_reference;
 
 public:
   using value_type = T;
   using size_type = typename c10::detail::ListImpl::list_type::size_type;
   using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using const_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   using reverse_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::reverse_iterator>;
 
   /**
@@ -243,7 +261,7 @@ public:
    * Example:
    *   List<int> a({2, 3, 4});
    */
-  explicit List(std::initializer_list<T> initial_values);
+  List(std::initializer_list<T> initial_values);
   explicit List(ArrayRef<T> initial_values);
 
   /**
@@ -255,8 +273,6 @@ public:
 
   List(const List&) = default;
   List& operator=(const List&) = default;
-  List(List&&) noexcept;
-  List& operator=(List&&) noexcept;
 
   /**
    * Create a new List pointing to a deep copy of the same data.
@@ -289,7 +305,9 @@ public:
    *   list[2] = 5;
    *   int64_t v = list[1];
    */
-  internal_reference_type operator[](size_type pos) const;
+  internal_const_reference_type operator[](size_type pos) const;
+
+  internal_reference_type operator[](size_type pos);
 
   /**
    * Assigns a new value to the element at location pos.
@@ -446,9 +464,11 @@ public:
 
 private:
   explicit List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements);
+  explicit List(const c10::intrusive_ptr<c10::detail::ListImpl>& elements);
   friend struct IValue;
   template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
-  template<class T_> friend List<IValue> impl::toList(List<T_>);
+  template<class T_> friend List<IValue> impl::toList(List<T_>&&);
+  template<class T_> friend List<IValue> impl::toList(const List<T_>&);
   friend const IValue* impl::ptr_to_first_element(const List<IValue>& list);
 };
 
@@ -458,9 +478,7 @@ namespace impl {
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
 
-inline const IValue* ptr_to_first_element(const GenericList& list) {
-  return &list.impl_->list[0];
-}
+const IValue* ptr_to_first_element(const GenericList& list);
 
 }
 }
@@ -469,4 +487,4 @@ namespace torch {
   template<class T> using List = c10::List<T>;
 }
 
-#include <ATen/core/List_inl.h>
+#include <ATen/core/List_inl.h>  // IWYU pragma: keep

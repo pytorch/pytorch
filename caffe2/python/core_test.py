@@ -232,8 +232,44 @@ class TestCloneNet(test_util.TestCase):
             "external output not matched",
         )
 
+    def test_control_op_remap(self):
+        # Subnets under If/AsyncIf operators should get name remapping when cloned
+        n = core.Net("original")
+        then_net = core.Net("a")
+        then_net.FC(["inputA"], "fc_a")
+        else_net = core.Net("b")
+        else_net.FC(["inputB"], "fc_b")
+        n.If(
+            inputs=[],
+            outputs=[],
+            then_net=then_net.Proto(),
+            else_net=else_net.Proto(),
+        )
+        copied = n.Clone("copied", blob_remap={"inputA": "inputX"})
+        if_op = copied._net.op[0]
+        self.assertEqual(if_op.arg[0].n.op[0].input, ["inputX"])
+        self.assertEqual(if_op.arg[1].n.op[0].input, ["inputB"])
+
 
 class TestExternalInputs(test_util.TestCase):
+    def testAddExternalInputShouldRaiseIfDuplicate(self):
+        net = core.Net("test")
+        net.AddExternalInput(
+            schema.Struct(("x", schema.Scalar(np.float))),
+        )
+        with self.assertRaises(AssertionError):
+            net.AddExternalInput(
+                schema.Struct(("x", schema.Scalar(np.float))),
+            )
+
+    def testAddExternalInputShouldRaiseIfDuplicateInSameCall(self):
+        net = core.Net("test")
+        with self.assertRaises(AssertionError):
+            net.AddExternalInput(
+                schema.Struct(("x", schema.Scalar(np.float))),
+                schema.Struct(("x", schema.Scalar(np.float))),
+            )
+
     def testSetInputRecordWithBlobs(self):
         net = core.Net("test")
         record = schema.NewRecord(net, schema.Struct(
@@ -272,7 +308,7 @@ class TestCreateOperator(test_util.TestCase):
         self.assertTrue(op.HasField('device_option'))
         self.assertEqual(op.device_option.device_type, workspace.GpuDeviceType)
         self.assertEqual(op.device_option.device_id, 1)
-        self.assertTrue(len(op.arg), 3)
+        self.assertEqual(len(op.arg), 3)
 
         # can't guarantee ordering of kwargs, so generate a set of args
         # to test with
@@ -423,13 +459,13 @@ class TestExtractPredictorNet(test_util.TestCase):
             self.assertFalse("xx/data" in op.input)
 
         # Note: image input should not be included
-        self.assertEquals(ops[0].type, "Conv")
-        self.assertEquals(ops[1].type, "FC")
-        self.assertEquals(ops[2].type, "FC")
-        self.assertEquals(len(ops), 3)
+        self.assertEqual(ops[0].type, "Conv")
+        self.assertEqual(ops[1].type, "FC")
+        self.assertEqual(ops[2].type, "FC")
+        self.assertEqual(len(ops), 3)
 
         # test rename happened
-        self.assertEquals(ops[0].input[0], "image")
+        self.assertEqual(ops[0].input[0], "image")
 
         # Check export blobs
         self.assertTrue("image" not in export_blobs)
@@ -438,7 +474,7 @@ class TestExtractPredictorNet(test_util.TestCase):
 
         # Check external inputs/outputs
         self.assertTrue("image" in predict_net.Proto().external_input)
-        self.assertEquals(set(["pred"]), set(predict_net.Proto().external_output))
+        self.assertEqual(set(["pred"]), set(predict_net.Proto().external_output))
         self.assertEqual(
             set(predict_net.Proto().external_input) -
             set([str(p) for p in model.params]), set(["image"])
@@ -1200,6 +1236,28 @@ class TestRunAllOnGPU(test_util.TestCase):
         self.assertEqual(net_proto.device_option.device_type, workspace.GpuDeviceType)
         self.assertEqual(net_proto.device_option.device_id, 3)
         self.assertTrue(net_proto.op[0].arg[0].n.HasField('device_option'))
+
+
+class TestConstructionFromProto(test_util.TestCase):
+    def test_inplace_construction(self):
+        # just create some random net
+        n = core.Net('original')
+        a1 = n.AddExternalInput('a1')
+        a2 = n.AddExternalInput('a2')
+        b1, b2 = n.Concat([a1, a2], ['b1', 'b2'], axis=0)
+        c1 = n.Sum([b1, b1], ['c1'])
+        c2 = n.Sum([b2], ['c2'])
+        d = n.Sum([c1, c2], ['d'])
+
+        proto = n.Proto()
+        n_copied = core.Net(proto)
+        n_moved = core.Net(proto, inplace=True)
+        self.assertTrue(n_moved.Proto() is proto)
+        self.assertTrue(n_copied.Proto() is not proto)
+
+        proto.external_input.extend(['foo'])
+        self.assertEqual(len(n_moved.Proto().external_input), len(proto.external_input))
+        self.assertEqual(len(n_copied.Proto().external_input), len(proto.external_input) - 1)
 
 
 if __name__ == '__main__':

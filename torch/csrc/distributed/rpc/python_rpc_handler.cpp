@@ -32,7 +32,7 @@ constexpr auto kInternalModule = "torch.distributed.rpc.internal";
 struct PythonTypeResolver : public jit::Resolver {
   std::shared_ptr<jit::SugaredValue> resolveValue(
       const std::string& /* unused */,
-      torch::jit::Function& /* unused */,
+      torch::jit::GraphFunction& /* unused */,
       const jit::SourceRange& /* unused */) override {
     TORCH_INTERNAL_ASSERT(
         false, "RPC Type resolver does not need to resolve value");
@@ -179,8 +179,7 @@ bool PythonRpcHandler::isRemoteException(const py::object& obj) {
   auto type = obj.get_type();
   auto moduleName = type.attr("__module__").cast<std::string>();
   auto qualName = type.attr("__qualname__").cast<std::string>();
-  return moduleName.compare(kInternalModule) == 0 &&
-      qualName.compare("RemoteException") == 0;
+  return moduleName == kInternalModule && qualName == "RemoteException";
 }
 
 TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {

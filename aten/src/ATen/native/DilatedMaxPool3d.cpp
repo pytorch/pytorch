@@ -1,10 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/Pool.h>
+#include <c10/util/irange.h>
 #include <tuple>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max_pool3d_with_indices_backward_native.h>
+#include <ATen/ops/max_pool3d_with_indices_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at {
 namespace native {
@@ -37,9 +48,9 @@ static void max_pool3d_with_indices_single_out_frame(
           int dilationH)
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
-    for (auto k = start; k < end; k++)
-    {
+    for (const auto k : c10::irange(start, end)) {
       /* loop over output */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t i, j, ti;
       scalar_t *ip = input_p + k * itime * iwidth * iheight;
       for (ti = 0; ti < otime; ti++)
@@ -119,8 +130,7 @@ static void max_pool3d_with_indices_out_frame(
           int dilationT, int dilationW, int dilationH)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (auto p = start; p < end; p++)
-    {
+    for (const auto p : c10::irange(start, end)) {
       max_pool3d_with_indices_single_out_frame(
         input_data   + p * istride,
         output_data  + p * ostride,
@@ -154,7 +164,7 @@ void max_pool3d_with_indices_out_cpu_template(
   const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
   const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 3,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
   const int dH = stride.empty() ? kH :
@@ -194,7 +204,8 @@ void max_pool3d_with_indices_out_cpu_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    "max_pool3d_with_indices_out_cpu_template()");
 
   /* get contiguous input */
   Tensor input = input_.contiguous();
@@ -283,13 +294,13 @@ static void max_pool3d_with_indices_backward_single_out_frame(
           int dilationH)
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
-    for (auto k = start; k < end; k++)
-    {
+    for (const auto k : c10::irange(start, end)) {
       scalar_t *gradInput_p_k  = gradInput_p  + k * itime * iwidth * iheight;
       scalar_t *gradOutput_p_k = gradOutput_p + k * otime * owidth * oheight;
       int64_t *indz_p_k = indz_p + k * otime * owidth * oheight;
 
       /* calculate max points */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t ti, i, j;
       for (ti = 0; ti < otime; ti++)
       {
@@ -327,8 +338,7 @@ static void max_pool3d_with_indices_backward_out_frame(
           int dilationT, int dilationW, int dilationH)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (auto p = start; p < end; p++)
-    {
+    for (const auto p : c10::irange(start, end)) {
       max_pool3d_with_indices_backward_single_out_frame<scalar_t>(
         gradInput_data + p * istride,
         gradOutput_data + p * ostride,
@@ -362,7 +372,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
   const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
   const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 3,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
   const int dH = stride.empty() ? kH :
@@ -411,7 +421,8 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    "max_pool3d_with_indices_backward_out_cpu_template()");
 
   /* backprop */
   if (input.ndimension() == 4) /* non-batch mode*/
@@ -470,15 +481,14 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cpu(
-  Tensor& output,
-  Tensor& indices,
-  const Tensor& input,
+std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cpu(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode)
+  bool ceil_mode,
+  Tensor& output,
+  Tensor& indices)
 {
   max_pool3d_with_indices_out_cpu_template(
     output,
@@ -521,16 +531,15 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cpu(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& max_pool3d_with_indices_backward_out_cpu(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& max_pool3d_with_indices_backward_out_cpu(const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices)
+  const Tensor& indices,
+  Tensor& gradInput)
 {
   max_pool3d_with_indices_backward_out_cpu_template(
     gradInput,

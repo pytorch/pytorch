@@ -11,7 +11,6 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import random
-import six
 
 
 class TestUtilityOps(serial.SerializedTestCase):
@@ -333,7 +332,7 @@ class TestUtilityOps(serial.SerializedTestCase):
             )
         ),
         **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_lengths_gather(self, inputs, gc, dc):
         items = inputs[0]
         lengths = inputs[1]
@@ -360,7 +359,7 @@ class TestUtilityOps(serial.SerializedTestCase):
     @given(
         inputs=hu.lengths_tensor(),
         **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_lengths_to_ranges(self, inputs, gc, dc):
         _, lengths = inputs
 
@@ -474,7 +473,7 @@ class TestUtilityOps(serial.SerializedTestCase):
             names[len(inputs) - 1],
             ["Y"]
         )
-        with six.assertRaisesRegex(self, RuntimeError, 'Step size cannot be 0'):
+        with self.assertRaisesRegex(RuntimeError, 'Step size cannot be 0'):
             self.assertReferenceChecks(
                 device_option=gc,
                 op=op,

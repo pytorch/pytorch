@@ -1,9 +1,11 @@
+# flake8: noqa: F401
+r"""
+This file is in the process of migration to `torch/ao/quantization`, and
+is kept here for compatibility while the migration process is ongoing.
+If you are adding a new entry/functionality, please, add it to the
+`torch/ao/quantization/quant_type.py`, while adding an import statement
+here.
+"""
 
-import enum
-
-# Quantization type (dynamic quantization, static quantization).
-# Should match the c++ enum in quantization_type.h
-class QuantType(enum.IntEnum):
-    DYNAMIC = 0
-    STATIC = 1
-    QAT = 2
+from torch.ao.quantization.quant_type import QuantType
+from torch.ao.quantization.quant_type import _get_quant_type_to_str

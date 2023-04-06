@@ -67,6 +67,7 @@ struct TemplatePutOp : public Operator<CPUContext> {
       int_value = input * magnitude_expand_;
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     CAFFE_EVENT(stat_, stat_value, int_value);
 
     return true;
@@ -86,7 +87,7 @@ struct TemplatePutOp : public Operator<CPUContext> {
     Checks if given number of is NaN, while being permissive with different
     implementations of the standard libraries between operating systems.
 
-    Uses the preperties of NaN, defined by IEEE.
+    Uses the properties of NaN, defined by IEEE.
     https://www.gnu.org/software/libc/manual/html_node/Infinity-and-NaN.html
     */
     return input != input;

@@ -3,20 +3,24 @@
 This document explains the TorchScript serialization format, and the anatomy
 of a call to `torch::jit::save()` or `torch::jit::load()`.
 
-  - [Overview](#overview)
-    - [Design Notes](#design-notes)
-  - [`code/`: How code is serialized](#code-how-code-is-serialized)
-    - [Printing code objects as Python source](#printing-code-objects-as-python-source)
-    - [Placing the source code in the archive](#placing-the-source-code-in-the-archive)
-  - [How data is serialized](#how-data-is-serialized)
-    - [`data.pkl`: How module object state is serialized](#datapkl-how-module-object-state-is-serialized)
-    - [`data/`: How tensors are serialized](#tensors-how-tensors-are-serialized)
-  - [`constants.pkl`: Constants in code](#constantspkl-constants-in-code)
-  - [`torch:jit::load()`](#torchjitload)
-  - [`__getstate__` and `__setstate__`](#getstate-and-setstate)
-  - [Appendix: `CompilationUnit` and code object ownership](#appendix-compilationunit-and-code-object-ownership)
-    - [`CompilationUnit` ownership semantics](#compilationunit-ownership-semantics)
-    - [Code object naming](#code-object-naming)
+<!-- toc -->
+
+- [Overview](#overview)
+  - [Design Notes](#design-notes)
+- [`code/`: How code is serialized](#code-how-code-is-serialized)
+  - [Printing code objects as Python source](#printing-code-objects-as-python-source)
+  - [Placing the source code in the archive](#placing-the-source-code-in-the-archive)
+- [How data is serialized](#how-data-is-serialized)
+  - [`data.pkl`: How module object state is serialized](#datapkl-how-module-object-state-is-serialized)
+  - [`data/`: How tensors are serialized](#data-how-tensors-are-serialized)
+- [`constants.pkl`: Constants in code](#constantspkl-constants-in-code)
+- [`torch:jit::load()`](#torchjitload)
+- [`__getstate__` and `__setstate__`](#__getstate__-and-__setstate__)
+- [Appendix: `CompilationUnit` and code object ownership](#appendix-compilationunit-and-code-object-ownership)
+  - [`CompilationUnit` ownership semantics](#compilationunit-ownership-semantics)
+  - [Code object naming](#code-object-naming)
+
+<!-- tocstop -->
 
 ## Overview
 
@@ -112,7 +116,7 @@ serialized as well.
 `PythonPrint` works by walking a `Graph` (the IR representation of either a
 `ClassType`'s method or raw `Function`) and emitting Python code that
 corresponds to it. The rules for emitting Python code are mostly
-straightforward uninteresting. There are some extra pieces of information
+straightforward and uninteresting. There are some extra pieces of information
 that `PythonPrint` tracks, however:
 
 **Class dependencies**. While walking the graph, `PythonPrint` keeps track of
@@ -123,13 +127,13 @@ its methods or attributes.
 
 **Uses of tensor constants**. Most constants are inlined as literals, like
 strings or ints. But since tensors are potentially very large, when
-`PythonPrint` encouters a constant tensor it will emit a reference to a
+`PythonPrint` encounters a constant tensor it will emit a reference to a
 global `CONSTANTS` table (like `foo = CONSTANTS.c0`).
 
 When importing, the importer will know how to resolve this reference into an
 actual tensor by looking it up in the tensor table. So `CONSTANTS.c0` means
 "this is the `0th` tensor in the tensor tuple in `constants.pkl`." See
-[the constants section](#constantspkl-Constants-in-code) for more info.
+[the constants section](#constantspkl-constants-in-code) for more info.
 
 **Original source range records**. To aid debugging, `PythonPrint` remembers
 the "original" (user-written) location of the source code it's emitting. That
@@ -238,7 +242,7 @@ necessary for pickling a module object.
 ### `data.pkl`: How module object state is serialized
 
 All data is written into the `data.pkl` file with the exception of tensors
-(see [the tensor section](#tensors-How-tensors-are-serialized) below).
+(see [the tensor section](#data-how-tensors-are-serialized) below).
 "Data" means all parts of the module object state, like attributes,
 submodules, etc.
 
@@ -370,7 +374,7 @@ object around in C++, all its code will stay around and methods will be
 invokable.
 
 **`Module`**: A view over a `ClassType` and the `Object` that holds its state.
-Also responsible for turning unqualified names (e.g. `foward()`) into
+Also responsible for turning unqualified names (e.g. `forward()`) into
 qualified ones for lookup in the owning `CompilationUnit` (e.g.
 `__torch__.MyModule.forward`). Owns the `Object`, which transitively owns the
 `CompilationUnit`.

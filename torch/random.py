@@ -1,12 +1,16 @@
 import contextlib
+from typing import Generator
 import warnings
 
 from torch._C import default_generator
 import torch
 
 
-def set_rng_state(new_state) -> None:
+def set_rng_state(new_state: torch.Tensor) -> None:
     r"""Sets the random number generator state.
+
+    .. note: This function only works for CPU. For CUDA, please use
+             torch.manual_seed(seed), which works for both CPU and CUDA.
 
     Args:
         new_state (torch.ByteTensor): The desired state
@@ -35,6 +39,12 @@ def manual_seed(seed) -> torch._C.Generator:
     if not torch.cuda._is_in_bad_fork():
         torch.cuda.manual_seed_all(seed)
 
+    import torch.mps
+    if not torch.mps._is_in_bad_fork():
+        torch.mps.manual_seed(seed)
+
+    _seed_custom_device(seed)
+
     return default_generator.manual_seed(seed)
 
 
@@ -48,7 +58,36 @@ def seed() -> int:
     if not torch.cuda._is_in_bad_fork():
         torch.cuda.manual_seed_all(seed)
 
+    import torch.mps
+    if not torch.mps._is_in_bad_fork():
+        torch.mps.manual_seed(seed)
+
+    _seed_custom_device(seed)
+
     return seed
+
+
+def _seed_custom_device(seed) -> None:
+    r"""Sets the seed to generate random numbers for custom device.
+
+    Args:
+        seed (int): The desired seed.
+
+    See [Note: support the custom device with privateuse1]
+    """
+    seed = int(seed)
+    custom_backend_name = torch._C._get_privateuse1_backend_name()
+    if hasattr(torch, custom_backend_name):
+        custom_device_mod = getattr(torch, custom_backend_name)
+        _bad_fork_name = "_is_in_bad_fork"
+        _seed_all_name = "manual_seed_all"
+        if hasattr(custom_device_mod, _bad_fork_name) and hasattr(custom_device_mod, _seed_all_name):
+            if not getattr(custom_device_mod, _bad_fork_name)():
+                getattr(custom_device_mod, _seed_all_name)(seed)
+        else:
+            message = f"Set seed for `{custom_backend_name}` device does not take effect, please add API's "
+            message += f"`{_bad_fork_name}` and `{_seed_all_name}` to `{custom_backend_name}` device module."
+            warnings.warn(message, UserWarning, stacklevel=3)
 
 
 def initial_seed() -> int:
@@ -62,12 +101,12 @@ _fork_rng_warned_already = False
 
 
 @contextlib.contextmanager
-def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices"):
+def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices") -> Generator:
     """
     Forks the RNG, so that when you return, the RNG is reset
     to the state that it was previously in.
 
-    Arguments:
+    Args:
         devices (iterable of CUDA IDs): CUDA devices for which to fork
             the RNG.  CPU RNG state is always forked.  By default, :meth:`fork_rng` operates
             on all devices, but will emit a warning if your machine has a lot

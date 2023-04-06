@@ -1,9 +1,14 @@
+# Owner(s): ["module: unknown"]
+
 import threading
 import time
 import torch
 import unittest
 from torch.futures import Future
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase, TemporaryFileName, run_tests
+from typing import TypeVar
+
+T = TypeVar("T")
 
 
 def add_one(fut):
@@ -11,6 +16,63 @@ def add_one(fut):
 
 
 class TestFuture(TestCase):
+    def test_set_exception(self) -> None:
+        # This test is to ensure errors can propagate across futures.
+        error_msg = "Intentional Value Error"
+        value_error = ValueError(error_msg)
+
+        f = Future[T]()
+        # Set exception
+        f.set_exception(value_error)
+        # Exception should throw on wait
+        with self.assertRaisesRegex(ValueError, "Intentional"):
+            f.wait()
+
+        # Exception should also throw on value
+        f = Future()
+        f.set_exception(value_error)
+        with self.assertRaisesRegex(ValueError, "Intentional"):
+            f.value()
+
+        def cb(fut):
+            fut.value()
+
+        f = Future()
+        f.set_exception(value_error)
+
+        with self.assertRaisesRegex(RuntimeError, "Got the following error"):
+            cb_fut = f.then(cb)
+            cb_fut.wait()
+
+    def test_set_exception_multithreading(self) -> None:
+        # Ensure errors can propagate when one thread waits on future result
+        # and the other sets it with an error.
+        error_msg = "Intentional Value Error"
+        value_error = ValueError(error_msg)
+
+        def wait_future(f):
+            with self.assertRaisesRegex(ValueError, "Intentional"):
+                f.wait()
+
+        f = Future[T]()
+        t = threading.Thread(target=wait_future, args=(f, ))
+        t.start()
+        f.set_exception(value_error)
+        t.join()
+
+        def cb(fut):
+            fut.value()
+
+        def then_future(f):
+            fut = f.then(cb)
+            with self.assertRaisesRegex(RuntimeError, "Got the following error"):
+                fut.wait()
+
+        f = Future[T]()
+        t = threading.Thread(target=then_future, args=(f, ))
+        t.start()
+        f.set_exception(value_error)
+        t.join()
 
     def test_done(self) -> None:
         f = Future[torch.Tensor]()
@@ -264,6 +326,15 @@ class TestFuture(TestCase):
         fut3 = fut1.then(raise_in_fut)
         with self.assertRaisesRegex(RuntimeError, "Expected error"):
             torch.futures.wait_all([fut3, fut2])
+
+    def test_wait_none(self):
+        fut1 = Future[int]()
+        with self.assertRaisesRegex(RuntimeError, "Future can't be None"):
+            torch.jit.wait(None)
+        with self.assertRaisesRegex(RuntimeError, "Future can't be None"):
+            torch.futures.wait_all((None,))  # type: ignore[arg-type]
+        with self.assertRaisesRegex(RuntimeError, "Future can't be None"):
+            torch.futures.collect_all((fut1, None,))  # type: ignore[arg-type]
 
 if __name__ == '__main__':
     run_tests()

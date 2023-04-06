@@ -9,10 +9,6 @@ import json
 import numpy as np
 
 
-if not torch._six.PY3:
-    raise RuntimeError("DDP benchmark requires Python 3")
-
-
 def load(path):
     with open(path, 'r') as f:
         return json.load(f)
@@ -24,12 +20,12 @@ def main():
     args = parser.parse_args()
 
     if len(args.file) != 2:
-        raise "Must specify 2 files to diff"
+        raise RuntimeError("Must specify 2 files to diff")
 
     ja = load(args.file[0])
     jb = load(args.file[1])
 
-    keys = (set(ja.keys()) | set(jb.keys())) - set(["benchmark_results"])
+    keys = (set(ja.keys()) | set(jb.keys())) - {"benchmark_results"}
     print("{:20s} {:>20s}      {:>20s}".format("", "baseline", "test"))
     print("{:20s} {:>20s}      {:>20s}".format("", "-" * 20, "-" * 20))
     for key in sorted(keys):

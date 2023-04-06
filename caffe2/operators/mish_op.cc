@@ -12,39 +12,44 @@ namespace caffe2 {
 template <>
 template <typename T>
 bool MishFunctor<CPUContext>::
-operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
+operator()(const int N, const T* X, T* Y, CPUContext* context) const {
   ConstEigenVectorArrayMap<T> X_arr(X, N);
-  EigenVectorArrayMap<T>(Y, N) = X_arr * (T(1) + X_arr.exp()).log().tanh();
+  EigenVectorArrayMap<T> Y_arr(Y, N);
+  math::Exp<T, CPUContext>(N, X, Y, context);
+  math::Log1p<T, CPUContext>(N, Y, Y, context);
+  Y_arr = X_arr * Y_arr.tanh();
   return true;
 }
 
 template <>
 template <typename T>
 bool MishGradientOp<CPUContext>::DoRunWithType() {
-  auto& Xin = Input(X);
-  auto& Yin = Input(Y);
-  auto& DYin = Input(DY);
+  const auto& X = Input(INPUT);
+  const auto& Y = Input(OUTPUT);
+  const auto& dY = Input(OUTPUT_GRAD);
 
-  CAFFE_ENFORCE_EQ(Xin.numel(), Yin.numel());
-  CAFFE_ENFORCE_EQ(DYin.numel(), Yin.numel());
-  auto* DXout = Output(DX, Yin.sizes(), at::dtype<float>());
+  CAFFE_ENFORCE_EQ(X.numel(), Y.numel());
+  CAFFE_ENFORCE_EQ(dY.numel(), Y.numel());
+  auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
 
-  const float* Xdata = Xin.template data<float>();
-  const float* Ydata = Yin.template data<float>();
-  const float* dYdata = DYin.template data<float>();
-  float* dXdata = DXout->template mutable_data<float>();
+  const T* X_data = X.template data<T>();
+  const T* Y_data = Y.template data<T>();
+  const T* dY_data = dY.template data<T>();
+  T* dX_data = dX->template mutable_data<T>();
 
-  EigenVectorArrayMap<float> dXvec(dXdata, DXout->numel());
-  ConstEigenVectorArrayMap<float> Xvec(Xdata, Xin.numel());
-  ConstEigenVectorArrayMap<float> Yvec(Ydata, Yin.numel());
-  ConstEigenVectorArrayMap<float> dYvec(dYdata, DYin.numel());
+  const int64_t N = X.numel();
+  ConstEigenVectorArrayMap<T> X_arr(X_data, N);
+  ConstEigenVectorArrayMap<T> Y_arr(Y_data, N);
+  ConstEigenVectorArrayMap<T> dY_arr(dY_data, N);
+  EigenVectorArrayMap<T> dX_arr(dX_data, N);
 
-  // w = e^(3x) + 4*e^2x + e^x * (6 + 4x) + 4(1 + x)
-  // q = (e^x + 1)^2 + 1
-  // dX = dY * e^x * w / q^2
-  dXvec = dYvec *
-      (T(4) * (Xvec+T(1)) * (-T(3)*Xvec).exp() + T(4)*(-Xvec).exp() + T(1) + (T(4)*Xvec+T(6))*(-T(2)*Xvec).exp()) /
-      (T(1) + T(4)*(-Xvec).exp() + T(8)*(-T(2)*Xvec).exp() + T(8)*(-T(3)*Xvec).exp() + T(4)*(-T(4)*Xvec).exp());
+  math::Exp<T, CPUContext>(N, X_data, dX_data, &context_);
+  math::Log1p<T, CPUContext>(N, dX_data, dX_data, &context_);
+  math::Tanh<T, CPUContext>(N, dX_data, dX_data, &context_);
+  dX_arr = dY_arr *
+      (dX_arr +
+       X_arr * (T(1) - dX_arr.square()) * T(0.5) *
+           ((X_arr * T(0.5)).tanh() + T(1)));
 
   return true;
 }
@@ -52,7 +57,7 @@ bool MishGradientOp<CPUContext>::DoRunWithType() {
 REGISTER_CPU_OPERATOR(
     Mish,
     UnaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CPUContext,
         MishFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(MishGradient, MishGradientOp<CPUContext>);
@@ -70,11 +75,7 @@ tensor elementwise.
     .Input(0, "X", "1D input tensor")
     .Output(0, "Y", "1D output tensor");
 // Input: X, Y, dY, output: dX
-OPERATOR_SCHEMA(MishGradient)
-    .NumInputs(3)
-    .NumOutputs(1)
-    .AllowInplace({{2, 0}})
-    .SetDoc(R"DOC(
+OPERATOR_SCHEMA(MishGradient).NumInputs(3).NumOutputs(1).SetDoc(R"DOC(
 MishGradient takes X, Y and dY and uses this to update dX according to the
 chain rule and derivatives of the Mish function.
 )DOC");

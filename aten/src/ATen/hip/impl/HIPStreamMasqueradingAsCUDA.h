@@ -16,7 +16,7 @@ public:
   explicit HIPStreamMasqueradingAsCUDA(Stream stream)
     : HIPStreamMasqueradingAsCUDA(UNCHECKED, stream) {
     // We did the coercion unchecked; check that it was right.
-    TORCH_CHECK(stream.device().type() == DeviceType::CUDA /* !!! */);
+    TORCH_CHECK(stream.device().is_cuda() /* !!! */);
   }
 
   explicit HIPStreamMasqueradingAsCUDA(Unchecked, Stream stream)
@@ -50,6 +50,9 @@ public:
 
   DeviceIndex device_index() const { return stream_.device_index(); }
 
+  // Unsafely coerce HIP device into CUDA device
+  DeviceType device_type() const { return DeviceType::CUDA; }
+
   Device device() const {
     // Unsafely coerce HIP device into CUDA device
     return Device(DeviceType::CUDA, stream_.device_index());
@@ -66,14 +69,17 @@ public:
     return Stream(Stream::UNSAFE, device(), id());
   }
 
-  uint64_t pack() const noexcept {
+  c10::StreamData3 pack3() const noexcept {
     // Unsafely coerce HIP stream into "CUDA" stream before packing
-    return unwrap().pack();
+    return unwrap().pack3();
   }
 
-  static HIPStreamMasqueradingAsCUDA unpack(uint64_t bits) {
+  static HIPStreamMasqueradingAsCUDA unpack3(StreamId stream_id,
+                                             DeviceIndex device_index,
+                                             DeviceType device_type) {
     // NB: constructor manages CUDA->HIP translation for us
-    return HIPStreamMasqueradingAsCUDA(Stream::unpack(bits));
+    return HIPStreamMasqueradingAsCUDA(Stream::unpack3(
+        stream_id, device_index, device_type));
   }
 
   static std::tuple<int, int> priority_range() { return HIPStream::priority_range(); }
@@ -88,6 +94,11 @@ private:
 HIPStreamMasqueradingAsCUDA
 inline getStreamFromPoolMasqueradingAsCUDA(const bool isHighPriority = false, DeviceIndex device = -1) {
   return HIPStreamMasqueradingAsCUDA(getStreamFromPool(isHighPriority, device));
+}
+
+HIPStreamMasqueradingAsCUDA
+inline getStreamFromExternalMasqueradingAsCUDA(hipStream_t ext_stream, DeviceIndex device) {
+  return HIPStreamMasqueradingAsCUDA(getStreamFromExternal(ext_stream, device));
 }
 
 inline HIPStreamMasqueradingAsCUDA getDefaultHIPStreamMasqueradingAsCUDA(DeviceIndex device_index = -1) {

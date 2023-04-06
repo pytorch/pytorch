@@ -92,7 +92,7 @@ class TreeCursor {
 
 /**
  * Simple wrapper class allowing an easy traversal of the tensors representing
- * the hirerarchical structure.
+ * the hierarchical structure.
  */
 class TreeWalker {
  public:
@@ -146,7 +146,7 @@ class TreeWalker {
       return size;
     }
 
-    inline const TypeMeta& meta() const {
+    inline const TypeMeta meta() const {
       return walker_.input(fieldId_).dtype();
     }
 

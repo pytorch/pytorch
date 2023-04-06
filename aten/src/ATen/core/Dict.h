@@ -1,19 +1,19 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/TensorBody.h>
+#include <ATen/core/jit_type_base.h>
 
 namespace c10 {
 struct IValue;
 template<class Key, class Value> class Dict;
 struct Type;
-using TypePtr = std::shared_ptr<Type>;
 
 namespace impl {
 
@@ -21,6 +21,7 @@ using valid_dict_key_types = guts::typelist::typelist<
   int64_t,
   std::string,
   double,
+  c10::complex<double>,
   bool,
   at::Tensor
 >;
@@ -69,11 +70,11 @@ public:
   explicit DictEntryRef(Iterator iterator)
   : iterator_(std::move(iterator)) {}
 
-  Key key() const {
+  decltype(auto) key() const {
     return iterator_->first.template to<Key>();
   }
 
-  Value value() const {
+  decltype(auto) value() const {
     return iterator_->second.template to<Value>();
   }
 
@@ -100,8 +101,15 @@ private:
 // this wraps map_type::iterator to make sure user code can't rely
 // on it being the type of the underlying map.
 template<class Key, class Value, class Iterator>
-class DictIterator final : public std::iterator<std::forward_iterator_tag, DictEntryRef<Key, Value, Iterator>> {
+class DictIterator final {
 public:
+   // C++17 friendly std::iterator implementation
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = DictEntryRef<Key, Value, Iterator>;
+  using difference_type = std::ptrdiff_t;
+  using pointer = value_type*;
+  using reference = value_type&;
+
   explicit DictIterator() = default;
   ~DictIterator() = default;
 
@@ -135,7 +143,7 @@ public:
     return &entryRef_;
   }
 
-  friend typename std::iterator<std::random_access_iterator_tag, DictEntryRef<Key, Value, Iterator>>::difference_type operator-(const DictIterator& lhs, const DictIterator& rhs) {
+  friend difference_type operator-(const DictIterator& lhs, const DictIterator& rhs) {
     return lhs.entryRef_.iterator_ - rhs.entryRef_.iterator_;
   }
 
@@ -238,8 +246,6 @@ public:
 
   Dict(const Dict&) = default;
   Dict& operator=(const Dict&) = default;
-  Dict(Dict&&) noexcept;
-  Dict& operator=(Dict&&) noexcept;
 
   /**
    * Create a new Dict pointing to a deep copy of the same data.
@@ -388,4 +394,4 @@ namespace torch {
   template<class Key, class Value> using Dict = c10::Dict<Key, Value>;
 }
 
-#include <ATen/core/Dict_inl.h>
+#include <ATen/core/Dict_inl.h>  // IWYU pragma: keep

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -36,7 +37,7 @@ struct FunctionalGraphSlicer {
  private:
   bool isEmptyFunctionalGraph(Node* n) {
     auto g = n->g(attr::Subgraph);
-    return g->inputs().size() == 0 && g->outputs().size() == 0;
+    return g->inputs().empty() && g->outputs().empty();
   }
 
   void nonConstNodes(Block* block, size_t* num) {

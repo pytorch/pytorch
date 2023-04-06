@@ -1,34 +1,122 @@
+# IMPORTANT:
+# This file is ONLY used to subscribe for notifications for PRs
+# related to a specific file path. Approvals from people in this
+# file are not required for merges.
+
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
+# For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
-/docs/cpp @goldsborough @ebetica @yf225 @glaringlee
-/torch/csrc/api/ @ebetica @goldsborough @yf225 @glaringlee
-/test/cpp/api/ @ebetica @goldsborough @yf225 @glaringlee
-/torch/utils/cpp_extension.py @goldsborough @fmassa @soumith @ezyang
+/torch/utils/cpp_extension.py @fmassa @soumith @ezyang
 
 # Not there to strictly require the approval, but to be tagged as a reviewer
 # on the PRs to push them into a high priority inbox.
-/torch/csrc/api/data/ @apaszke
-/torch/csrc/autograd/ @apaszke @albanD
-/torch/csrc/jit/ @apaszke
-/torch/nn/ @apaszke
-/torch/autograd/ @apaszke @albanD
-/torch/jit/ @apaszke
-/torch/utils/data/ @apaszke
+/torch/csrc/autograd/ @albanD @soulitzer
+/torch/autograd/ @albanD @soulitzer
+/tools/autograd/ @albanD @soulitzer
+/torch/nn/ @albanD @jbschlosser @mikaylagawarecki
+/torch/optim/ @albanD @janeyx99
+/test/test_public_bindings.py @albanD
+/test/allowlist_for_publicAPI.json @albanD @anjali411
+/docs/source/conf.py @albanD
+/aten/src/ATen/native/tags.yaml @anjali411
+
+# Architecture Optimization (quantization, sparsity, etc.)
+/aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cuda @jerryzh168
+/aten/src/ATen/native/quantized/cudnn @jerryzh168
+/test/test_quantization.py @jerryzh168
+/test/ao/ @jerryzh168 @z-a-f @hdcharles
+/test/quantization/ @jerryzh168 @z-a-f
+/torch/quantization/ @jerryzh168
+ao/sparisty/ @z-a-f @hdcharles
+ao/quantization/ @jerryzh168
+nn/intrinsic/ @jerryzh168
+nn/quantized/ @jerryzh168
+nn/quantizable/ @jerryzh168 @z-a-f
+nn/qat/ @jerryzh168
 
 # Tensorpipe RPC Agent.
-/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
-/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw @beauby
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/lib/c10d/ @pietern @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
-/torch/csrc/distributed/ @pietern @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
-/torch/distributed/ @apaszke @pietern @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @kiukchung @d4l3k
+/torch/distributed/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @kiukchung @d4l3k
+/torch/distributed/_composable @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @yhcharles @fegin @kiukchung @d4l3k
+/torch/nn/parallel/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @kiukchung @d4l3k
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma
+/test/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin
+/torch/testing/_internal/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin
+
+# ONNX Export
+/torch/csrc/jit/passes/onnx.h @bowenbao @abock
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @abock
+/torch/csrc/jit/passes/onnx/ @bowenbao @abock
+/torch/onnx/ @bowenbao @abock
+/test/onnx/ @bowenbao @abock
+
+# Docker
+/.ci/docker/ @jeffdaily
+
+# Github Actions
+# This list is for people wanting to be notified every time there's a change
+# related to Github Actions
+/.github/ @pytorch/pytorch-dev-infra
+
+# Custom Test Infrastructure
+/test/run_test.py @pytorch/pytorch-dev-infra
+/torch/testing/_internal/common_device_type.py @mruberry
+/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
+
+# Parametrizations
+/torch/nn/utils/parametriz*.py @lezcano
+
+# torch.linalg
+# docs
+/torch/linalg/ @lezcano @IvanYashchuk
+# code
+/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
+# tests
+/test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
+
+# OpInfo-related files
+/torch/testing/_internal/common_methods_invocations.py @mruberry @ngimel
+/torch/testing/_internal/common_device_type.py @mruberry @ngimel
+test/test_ops.py @mruberry @ngimel
+test/test_ops_gradients.py @mruberry @ngimel @soulitzer
+test/test_ops_fwd_gradients.py @mruberry @ngimel @soulitzer
+test/test_unary_ufuncs.py @mruberry @ngimel
+test/test_binary_ufuncs.py @mruberry @ngimel
+test/test_reductions.py @mruberry @ngimel
+test/test_type_promotion.py @mruberry @ngimel
+
+# functorch-related things
+# This list is for people wanting to be notified every time there's a change
+# Useful for e.g. auditing xfails that other folks add to tests
+test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
+test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
+
+# torch MPS
+test/test_mps.py @kulinseth
+aten/src/ATen/mps/ @kulinseth
+aten/src/ATen/native/mps/ @kulinseth
+
+# Profiler
+torch/csrc/autograd/profiler* @robieta
+torch/autograd/profiler* @robieta
+torch/csrc/profiler/ @robieta
+torch/profiler/ @robieta
+
+# AOTDispatch tests
+test/functorch/test_aotdispatch.py @ezyang @Chillee
+
+# Dataloader
+torch/utils/data/ @NivekT @ejguan

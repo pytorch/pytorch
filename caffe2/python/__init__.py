@@ -1,8 +1,15 @@
-
-from caffe2.proto import caffe2_pb2
 import os
 import sys
-import platform
+import warnings
+
+
+try:
+    from caffe2.proto import caffe2_pb2
+except ImportError:
+    warnings.warn('Caffe2 support is not enabled in this PyTorch build. '
+                  'Please enable Caffe2 by building PyTorch from source with `BUILD_CAFFE2=1` flag.')
+    raise
+
 # TODO: refactor & remove the following alias
 caffe2_pb2.CPU = caffe2_pb2.PROTO_CPU
 caffe2_pb2.CUDA = caffe2_pb2.PROTO_CUDA
@@ -12,9 +19,8 @@ caffe2_pb2.OPENCL = caffe2_pb2.PROTO_OPENCL
 caffe2_pb2.IDEEP = caffe2_pb2.PROTO_IDEEP
 caffe2_pb2.HIP = caffe2_pb2.PROTO_HIP
 caffe2_pb2.COMPILE_TIME_MAX_DEVICE_TYPES = caffe2_pb2.PROTO_COMPILE_TIME_MAX_DEVICE_TYPES
-caffe2_pb2.ONLY_FOR_TEST = caffe2_pb2.PROTO_ONLY_FOR_TEST
 
-if platform.system() == 'Windows':
+if sys.platform == "win32":
     is_conda = os.path.exists(os.path.join(sys.prefix, 'conda-meta'))
     py_dll_path = os.path.join(os.path.dirname(sys.executable), 'Library', 'bin')
     th_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'torch')
@@ -50,18 +56,10 @@ if platform.system() == 'Windows':
 
     kernel32.LoadLibraryW.restype = ctypes.c_void_p
     if with_load_library_flags:
-        kernel32.AddDllDirectory.restype = ctypes.c_void_p
         kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
     for dll_path in dll_paths:
-        if sys.version_info >= (3, 8):
-            os.add_dll_directory(dll_path)
-        elif with_load_library_flags:
-            res = kernel32.AddDllDirectory(dll_path)
-            if res is None:
-                err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
-                raise err
+        os.add_dll_directory(dll_path)
 
     dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
     path_patched = False

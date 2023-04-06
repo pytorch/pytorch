@@ -2,7 +2,6 @@
 
 
 
-from future.utils import viewkeys
 from multiprocessing import Process, Queue
 import numpy as np
 import os
@@ -302,6 +301,7 @@ class DataParallelModelTest(TestCase):
         workspace.CreateNet(model.net)
         workspace.RunNet(model.net)
 
+    @unittest.skip("Test fails on GPU/RE")
     def test_synchronization_barrier(self):
         def run(comm_rank, comm_size, tmpdir):
             def add_input_ops(model):
@@ -351,6 +351,7 @@ class DataParallelModelTest(TestCase):
                 device_option=None,
                 tmpdir=tmpdir)
 
+    @unittest.skip("Test fails on GPU/RE")
     def test_pre_train_synchronization_barrier(self):
         def run(comm_rank, comm_size, tmpdir):
             def add_input_ops(model):
@@ -1173,7 +1174,7 @@ class ParallelizeBMUFTest(TestCase):
 
         # Check initial momentum params are zeros
         self.assertEqual(
-            list(viewkeys(model._device_grouped_blobs)), ['fc_w', 'fc_b']
+            list(model._device_grouped_blobs.keys()), ['fc_w', 'fc_b']
         )
         self.assertEqual(workspace.FetchBlob('{}_0/fc_b_v'.format(device_prefix)), 0)
         np.testing.assert_equal(

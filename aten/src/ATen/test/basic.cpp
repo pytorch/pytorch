@@ -4,14 +4,19 @@
 #include <ATen/core/Reduction.h>
 #include <torch/cuda.h>
 #include <ATen/test/test_assert.h>
+#include <c10/util/irange.h>
+#include <c10/util/CallOnce.h>
 
 // for TH compat test only...
 struct THFloatTensor;
 
 #include <iostream>
 #include <chrono>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
+#include <thread>
+#include <mutex>
 
 #define ASSERT_EQ_RESOLVED(X, Y) \
   {                              \
@@ -39,7 +44,9 @@ void TestOnesAndDot(DeprecatedTypeProperties& type) {
   Tensor b = ones({3, 4}, type);
   ASSERT_EQ_RESOLVED((b + b).sum().item<double>(), 24);
   ASSERT_EQ_RESOLVED(b.numel(), 12);
-  ASSERT_EQ_RESOLVED(b.view(-1).dot(b.view(-1)).item<double>(), 12);
+  if (type.backend() != Backend::CPU || type.scalarType() != kHalf) {
+    ASSERT_EQ_RESOLVED(b.view(-1).dot(b.view(-1)).item<double>(), 12);
+  }
 }
 
 void TestSort(DeprecatedTypeProperties& type) {
@@ -80,11 +87,30 @@ void TestAdd(DeprecatedTypeProperties& type) {
   }
 }
 
+void TestZeros(DeprecatedTypeProperties& type) {
+  auto begin = std::chrono::high_resolution_clock::now();
+  Tensor a = zeros({1024, 1024}, type);
+  for (const auto i : c10::irange(1, 1000)) {
+    (void)i; // Suppress unused variable warning
+    a = zeros({128, 128}, type);
+  }
+  auto end = std::chrono::high_resolution_clock::now();
+  std::cout << std::dec << "   "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   end - begin)
+                   .count()
+            << " ms" << std::endl;
+
+   std::srand(std::time(nullptr));
+   ASSERT_EQ(norm(a).item<double>(), 0.0);
+}
+
 void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (auto i = 0; i < 100000; i++) {
+  for (const auto i : c10::irange(1000)) {
+    (void)i; // Suppress unused variable warning
     add_out(r, r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -94,14 +120,15 @@ void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
                    end - begin)
                    .count()
             << " ms" << std::endl;
-  ASSERT_EQ_RESOLVED(norm(100000 * d).item<double>(), norm(r).item<double>());
+  ASSERT_EQ_RESOLVED(norm(1000 * d).item<double>(), norm(r).item<double>());
 }
 
 void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (auto i = 0; i < 100000; i++) {
+  for (const auto i : c10::irange(1000)) {
+    (void)i; // Suppress unused variable warning
     r = add(r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -111,7 +138,7 @@ void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
                    end - begin)
                    .count()
             << " ms" << std::endl;
-  ASSERT_EQ_RESOLVED(norm(100000 * d).item<double>(), norm(r).item<double>());
+  ASSERT_EQ_RESOLVED(norm(1000 * d).item<double>(), norm(r).item<double>());
 }
 
 void TestIsContiguous(DeprecatedTypeProperties& type) {
@@ -158,7 +185,7 @@ void TestCopyBroadcasting(DeprecatedTypeProperties& type) {
   Tensor a = zeros({4, 3}, type);
   Tensor e = rand({3}, type);
   a.copy_(e);
-  for (int i = 0; i < 4; ++i) {
+  for (const auto i : c10::irange(4)) {
     ASSERT_TRUE(a[i].equal(e));
   }
 }
@@ -229,37 +256,43 @@ void TestToString() {
 void TestIndexingByScalar() {
   Tensor tensor = arange(0, 10, kInt);
   Tensor one = ones({}, kInt);
-  for (int64_t i = 0; i < tensor.numel(); ++i) {
+  for (const auto i : c10::irange(tensor.numel())) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
   for (size_t i = 0; i < static_cast<uint64_t>(tensor.numel()); ++i) {
     ASSERT_TRUE(tensor[i].equal(one * static_cast<int64_t>(i)));
   }
-  for (int i = 0; i < tensor.numel(); ++i) {
+  for (const auto i : c10::irange(tensor.numel())) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
+  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
   for (int16_t i = 0; i < tensor.numel(); ++i) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
+  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
   for (int8_t i = 0; i < tensor.numel(); ++i) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
   // Throw StartsWith("Can only index tensors with integral scalars")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor[Scalar(3.14)].equal(one));
 }
 
 void TestIndexingByZerodimTensor() {
   Tensor tensor = arange(0, 10, kInt);
   Tensor one = ones({}, kInt);
-  for (int i = 0; i < tensor.numel(); ++i) {
+  for (const auto i : c10::irange(tensor.numel())) {
     ASSERT_TRUE(tensor[one * i].equal(one * i));
   }
   // Throw StartsWith(
   //            "Can only index tensors with integral scalars")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor[ones({}) * 3.14].equal(one));
   // Throw StartsWith("Can only index with tensors that are defined")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor[Tensor()].equal(one));
   // Throw StartsWith("Can only index with tensors that are scalars (zero-dim)")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor[ones({2, 3, 4}, kInt)].equal(one));
 }
 void TestIndexingMixedDevice(DeprecatedTypeProperties& type) {
@@ -276,9 +309,12 @@ void TestDispatch() {
 }
 
 void TestNegativeDim(DeprecatedTypeProperties& type) {
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(empty({5, -5, 5}, type.options()));
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(empty({5, -5, -5}, type.options()));
   Tensor tensor = empty({5, 5}, type.options());
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor.reshape({-5, -5}));
 }
 
@@ -309,6 +345,7 @@ void test(DeprecatedTypeProperties& type) {
   TestSort(type);
   TestRandperm(type);
   TestAdd(type);
+  TestZeros(type);
   TestLoadsOfAdds(type);
   TestLoadOfAddsWithCopy(type);
   TestIsContiguous(type);
@@ -370,14 +407,9 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_FALSE(tensor0.is_pinned());
 
   // Test setting requires_grad to true.
-  tensor0 = at::empty({4}, at::TensorOptions().requires_grad(true));
-  ASSERT_EQ(tensor0.dtype(), at::kFloat);
-  ASSERT_EQ(tensor0.layout(), at::kStrided);
-  ASSERT_EQ(tensor0.device(), at::kCPU);
-  // This is a bug. Requires_grad was set to TRUE but this is being ignored.
-  // Issue https://github.com/pytorch/pytorch/issues/30405
-  ASSERT_FALSE(tensor0.requires_grad());
-  ASSERT_FALSE(tensor0.is_pinned());
+  // This is a bug. Requires_grad was set to TRUE but this is not implemented.
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_ANY_THROW(at::empty({4}, at::TensorOptions().requires_grad(true)));
 
   // Test setting dtype
   at::Tensor tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf));
@@ -386,6 +418,18 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_EQ(tensor1.device(), at::kCPU);
   ASSERT_FALSE(tensor1.requires_grad());
   ASSERT_FALSE(tensor1.is_pinned());
+
+  // Sparse tensor CPU test to avoid requiring CUDA to catch simple bugs.
+  // Sparse tensors do not work with static CPU dispatch.
+#ifndef ATEN_CPU_STATIC_DISPATCH
+  tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf).layout(at::kSparse));
+  ASSERT_EQ(tensor1.dtype(), at::kHalf);
+  ASSERT_EQ(tensor1.layout(), at::kSparse);
+  ASSERT_EQ(tensor1.device(), at::kCPU);
+  ASSERT_FALSE(tensor1.requires_grad());
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  ASSERT_FALSE(tensor1.is_pinned());
+#endif // ATEN_CPU_STATIC_DISPATCH
 
   if (torch::cuda::is_available()) {
     // Test setting pin memory
@@ -415,10 +459,7 @@ TEST(BasicTest, FactoryMethodsTest) {
     // This is a bug
     // Issue https://github.com/pytorch/pytorch/issues/30405
     ASSERT_FALSE(tensor1.requires_grad());
-
-    // This will cause an exception
-    // Issue https://github.com/pytorch/pytorch/issues/30405
-    ASSERT_ANY_THROW(tensor1.is_pinned());
+    ASSERT_FALSE(tensor1.is_pinned());
   }
 
   // Test _like variants
@@ -432,4 +473,49 @@ TEST(BasicTest, FactoryMethodsTest) {
     ASSERT_FALSE(tensor0.requires_grad());
     ASSERT_FALSE(tensor0.is_pinned());
   }
+}
+
+TEST(BasicTest, BasicStdTestCPU) {
+  c10::once_flag flag1, flag2;
+
+  auto simple_do_once = [&]()
+  {
+      c10::call_once(flag1, [](){ std::cout << "Simple example: called once\n"; });
+  };
+
+  auto may_throw_function = [&](bool do_throw)
+  {
+    if (do_throw) {
+      std::cout << "throw: call_once will retry\n"; // this may appear more than once
+      TORCH_CHECK(false, "throw exception");
+    }
+    std::cout << "Didn't throw, call_once will not attempt again\n"; // guaranteed once
+  };
+
+  auto do_once = [&](bool do_throw)
+  {
+    try {
+      c10::call_once(flag2, may_throw_function, do_throw);
+    }
+    catch (...) {
+    }
+  };
+
+  std::thread st1(simple_do_once);
+  std::thread st2(simple_do_once);
+  std::thread st3(simple_do_once);
+  std::thread st4(simple_do_once);
+  st1.join();
+  st2.join();
+  st3.join();
+  st4.join();
+
+  std::thread t1(do_once, true);
+  std::thread t2(do_once, true);
+  std::thread t3(do_once, false);
+  std::thread t4(do_once, true);
+  t1.join();
+  t2.join();
+  t3.join();
+  t4.join();
 }

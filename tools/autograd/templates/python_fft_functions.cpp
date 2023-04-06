@@ -1,18 +1,28 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // ${generated_comment}
 
 #include "torch/csrc/Device.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_fft_functions.h"
+#include "torch/csrc/autograd/python_return_types.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
+#include "torch/csrc/utils/out_types.h"
+#include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+$ops_headers
+#endif
 
 using at::Tensor;
 using at::Device;
@@ -29,6 +39,7 @@ using at::TensorList;
 using at::Dimname;
 using at::DimnameList;
 
+using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {

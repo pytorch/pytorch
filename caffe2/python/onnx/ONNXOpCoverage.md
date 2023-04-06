@@ -19,7 +19,7 @@ This doc keeps tracking why operators are not covered by the testcases.
 |Atan|||&#x1F49A;OK|
 |AveragePool||OK|&#x1F49A;OK|
 |BatchNormalization||OK|&#x1F49A;OK|
-|Cast|Yes||&#x1F494;Need extendtion|
+|Cast|Yes||&#x1F494;Need extension|
 |Ceil|Yes||&#x1F49A;OK|
 |Clip|Yes|OK|&#x1F49A;OK|
 |Concat|Yes|OK|&#x1F49A;OK|

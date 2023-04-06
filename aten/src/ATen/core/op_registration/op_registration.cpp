@@ -1,14 +1,22 @@
 #include <c10/macros/Macros.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
 
 namespace c10 {
+namespace impl {
+void build_feature_required_feature_not_available(const char* feature) {
+    TORCH_CHECK(false, "Required feature '" + std::string(feature) + "' is not available");
+}
+}
 
-static_assert(std::is_nothrow_move_constructible<c10::optional<RegistrationHandleRAII>>::value, "");
-static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRAII>>::value, "");
+static_assert(std::is_nothrow_move_constructible<
+              c10::optional<RegistrationHandleRAII>>::value);
+static_assert(std::is_nothrow_move_assignable<
+              c10::optional<RegistrationHandleRAII>>::value);
 
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
   TORCH_CHECK(options.schemaOrName_.has_value(), "In operator registration: Tried to register an operator without specifying a schema or operator name.");
@@ -49,7 +57,7 @@ void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
 }
 
 c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const OperatorName& opName, const RegisterOperators::Options& options) {
-  TORCH_CHECK(options.kernels.size() > 0, "Cannot infer operator schema in registration of operator ", opName, " because there is no kernel specified.");
+  TORCH_CHECK(!options.kernels.empty(), "Cannot infer operator schema in registration of operator ", opName, " because there is no kernel specified.");
 
   c10::optional<FunctionSchema> inferred_schema = c10::nullopt;
   for (const auto& kernel : options.kernels) {
@@ -105,6 +113,7 @@ void RegisterOperators::registerOp_(Options&& options) {
 RegisterOperators::RegisterOperators() = default;
 RegisterOperators::~RegisterOperators() = default;
 RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
+// NOLINTNEXTLINE(bugprone-exception-escape)
 RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
 
 } // namespace c10

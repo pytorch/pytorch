@@ -1,7 +1,14 @@
 #pragma once
 
-namespace torch { namespace utils {
+#include <c10/core/MemoryFormat.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/utils/python_stub.h>
+
+namespace torch {
+namespace utils {
 
 void initializeMemoryFormats();
+TORCH_PYTHON_API PyObject* getTHPMemoryFormat(c10::MemoryFormat);
 
-}} // namespace torch::utils
+} // namespace utils
+} // namespace torch

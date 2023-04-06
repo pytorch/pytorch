@@ -1,14 +1,20 @@
+#ifdef BUILD_LITE_INTERPRETER
+
 #import "Benchmark.h"
 #include <string>
 #include <vector>
+#include <torch/script.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/observer.h>
 #include "ATen/ATen.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/jit/serialization/import.h"
-#include "torch/script.h"
 
-static std::string model = "model.pt";
+static std::string model = "model_lite.ptl";
 static std::string input_dims = "1,3,224,224";
 static std::string input_type = "float";
 static BOOL print_output = false;
@@ -18,9 +24,9 @@ static int iter = 10;
 @implementation Benchmark
 
 + (BOOL)setup:(NSDictionary*)config {
-  NSString* modelPath = [[NSBundle mainBundle] pathForResource:@"model" ofType:@"pt"];
+  NSString* modelPath = [[NSBundle mainBundle] pathForResource:@"model_lite" ofType:@"ptl"];
   if (![[NSFileManager defaultManager] fileExistsAtPath:modelPath]) {
-    NSLog(@"model.pt doesn't exist!");
+    NSLog(@"model_lite.ptl doesn't exist!");
     return NO;
   }
   model = std::string(modelPath.UTF8String);
@@ -65,12 +71,10 @@ static int iter = 10;
     }
   }
 
-  torch::autograd::AutoGradMode guard(false);
-  torch::jit::GraphOptimizerEnabledGuard opguard(false);
-  auto module = torch::jit::load(model);
+  c10::InferenceMode mode;
+  auto module = torch::jit::_load_for_mobile(model);
 
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
-  module.eval();
+//  module.eval();
   if (print_output) {
     std::cout << module.forward(inputs) << std::endl;
   }
@@ -101,3 +105,4 @@ static int iter = 10;
 }
 
 @end
+#endif

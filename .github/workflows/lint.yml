@@ -1,205 +1,261 @@
 name: Lint
 
 on:
+  pull_request:
   push:
     branches:
-    - master
-  pull_request:
+      - master
+      - main
+      - release/*
+      - landchecks/*
+  workflow_dispatch:
 
+# The names of steps that actually test the code should be suffixed with `(nonretryable)`.
+# When any other step fails, it's job will be retried once by retryBot.
 jobs:
+  docker-image:
+    name: docker-image
+    uses: ./.github/workflows/_calculate-docker-image.yml
+    with:
+      docker-image-name: pytorch-linux-focal-linter
+
+  lintrunner:
+    needs: docker-image
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      runner: linux.2xlarge
+      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        # The generic Linux job chooses to use base env, not the one setup by the image
+        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+        conda activate "${CONDA_ENV}"
+
+        CACHE_DIRECTORY="/tmp/.lintbin"
+        # Try to recover the cached binaries
+        if [[ -d "${CACHE_DIRECTORY}" ]]; then
+          # It's ok to fail this as lintrunner init would download these binaries
+          # again if they do not exist
+          cp -r "${CACHE_DIRECTORY}" . || true
+        fi
+
+        # This has already been cached in the docker image
+        lintrunner init 2> /dev/null
+
+        # Do build steps necessary for linters
+        python3 -m tools.linter.clang_tidy.generate_build_files
+        python3 -m tools.generate_torch_version --is_debug=false
+        python3 -m tools.pyi.gen_pyi \
+          --native-functions-path aten/src/ATen/native/native_functions.yaml \
+          --tags-path aten/src/ATen/native/tags.yaml \
+          --deprecated-functions-path "tools/autograd/deprecated.yaml"
+
+        RC=0
+        # Run lintrunner on all files
+        if ! lintrunner --force-color --all-files --tee-json=lint.json 2> /dev/null; then
+          echo ""
+          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
+          echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+          RC=1
+        fi
+
+        # Use jq to massage the JSON lint output into GitHub Actions workflow commands.
+        jq --raw-output \
+          '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
+          lint.json || true
+
+        exit $RC
+
   quick-checks:
-    runs-on: ubuntu-latest
+    needs: docker-image
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      runner: linux.2xlarge
+      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        # The generic Linux job chooses to use base env, not the one setup by the image
+        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+        conda activate "${CONDA_ENV}"
+
+        # Ensure no non-breaking spaces
+        # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
+        # does not support the '\u000a' syntax (which is relevant for local linters)
+        (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
+
+        # Ensure cross-OS compatible file names
+        (! git ls-files | grep -E '([<>:"|?*]|[ .]$)' || (echo "The above file names are not valid across all operating systems. Please ensure they don't contain the characters '<>:""|?*' and don't end with a white space or a '.' "; false))
+
+        # Ensure no versionless Python shebangs
+        (! git --no-pager grep -In '#!.*python$' -- . || (echo "The above lines have versionless Python shebangs; please specify either python2 or python3"; false))
+
+        # Ensure ciflow tags mentioned in config
+        python3 .github/scripts/collect_ciflow_labels.py --validate-tags
+
+        # C++ docs check
+        pushd docs/cpp/source
+        ./check-doxygen.sh
+        popd
+
+        # CUDA kernel launch check
+        set -eux
+        python3 torch/testing/_internal/check_kernel_launches.py |& tee cuda_kernel_launch_checks.txt
+
+  pr-sanity-checks:
+    name: pr-sanity-checks
+    runs-on: [self-hosted, linux.large]
+    # Only run this on pull requests. This check is simple enough to be done without a Docker image
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v1
-        with:
-          python-version: 3.x
-          architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v1
-      - name: Ensure consistent CircleCI YAML config
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+          fetch-depth: -1
+
+      - name: PR size check (nonretryable)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bash .github/scripts/pr-sanity-check.sh
+
+  workflow-checks:
+    needs: docker-image
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      runner: linux.2xlarge
+      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        # The generic Linux job chooses to use base env, not the one setup by the image
+        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+        conda activate "${CONDA_ENV}"
+
+        # Regenerate workflows
+        .github/scripts/generate_ci_workflows.py
+
+        RC=0
+        # Assert that regenerating the workflows didn't change them
+        if ! .github/scripts/report_git_status.sh .github/workflows; then
+          echo
+          echo 'As shown by the above diff, the committed .github/workflows'
+          echo 'are not up to date according to .github/templates.'
+          echo 'Please run this command, commit, and push again to your PR:'
+          echo
+          echo '    .github/scripts/generate_ci_workflows.py'
+          echo
+          echo 'If running that command does nothing, you may need to rebase'
+          echo 'onto a more recent commit from the PyTorch master branch.'
+          RC=1
+        fi
+
+        # Check that jobs will be cancelled
+        .github/scripts/ensure_actions_will_cancel.py
+
+        exit $RC
+
+  toc:
+    needs: docker-image
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      runner: linux.2xlarge
+      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        # The generic Linux job chooses to use base env, not the one setup by the image
+        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+        conda activate "${CONDA_ENV}"
+
+        # Regenerate ToCs and check that they didn't change
+        set -eu
+
+        export PATH=~/.npm-global/bin:"$PATH"
+        for FILE in $(git grep -Il '<!-- toc -->' -- '**.md'); do
+          markdown-toc --bullets='-' -i "$FILE"
+        done
+
+        if ! .github/scripts/report_git_status.sh .; then
+          echo
+          echo 'As shown by the above diff, the table of contents in one or'
+          echo 'more Markdown files is not up to date with the file contents.'
+          echo 'You can either apply that Git diff directly to correct the'
+          echo 'table of contents, or if you have npm installed, you can'
+          echo 'install the npm package markdown-toc and run the following'
+          # shellcheck disable=SC2016
+          echo 'command (replacing $FILE with the filename for which you want'
+          echo 'to regenerate the table of contents):'
+          echo
+          # shellcheck disable=SC2016
+          echo "    markdown-toc --bullets='-' -i \"\$FILE\""
+          false
+        fi
+
+  test-tools:
+    name: Test tools
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    needs: docker-image
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      runner: linux.2xlarge
+      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      fetch-depth: 0
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        # The generic Linux job chooses to use base env, not the one setup by the image
+        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+        conda activate "${CONDA_ENV}"
+
+        # Test tools
+        python3 -m unittest discover -vs tools/test -p 'test_*.py'
+        python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
+
+  test_collect_env:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    name: Test collect_env
+    runs-on: linux.20_04.4x
+    strategy:
+      matrix:
+        test_type: [with_torch, without_torch, older_python_version]
+    steps:
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) required, to allow us to use git log
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+          fetch-depth: 1
+      - name: Setup Python 3.5
+        if: matrix.test_type == 'older_python_version'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.5'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
+      - name: Setup Python 3.8
+        if: matrix.test_type != 'older_python_version'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
+      - name: Install torch
+        if: matrix.test_type == 'with_torch'
         run: |
           pip install -r requirements.txt
-          cd .circleci && ./ensure-consistency.py
-      - name: Shellcheck Jenkins scripts
+          # Doesn't really matter what torch version, we just need ANY torch installed
+          pip install 'torch==1.*'
+      - name: Run collect_env.py (nonretryable)
         run: |
-          sudo apt-get install -y shellcheck
-          .jenkins/run-shellcheck.sh
-      - name: Ensure no tabs
-        run: |
-          (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
-      - name: Ensure canonical include
-        run: |
-          (! git grep -I -l $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
-      - name: Ensure C++ source files are not executable
-        run: |
-          (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
-      - name: C++ docs check
-        run: |
-          sudo apt-get install -y doxygen && pip install -r requirements.txt
-          cd docs/cpp/source && ./check-doxygen.sh
+          # All we need to see is that it passes
+          python3 torch/utils/collect_env.py
 
-  flake8-py3:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Setup Python
-        uses: actions/setup-python@v1
-        with:
-          python-version: 3.x
-          architecture: x64
-      - name: Fetch PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
-      - name: Run flake8
-        run: |
-          set -eux
-          pip install flake8==3.8.2 flake8-mypy flake8-bugbear flake8-comprehensions flake8-executable flake8-pyi==20.5.0 mccabe pycodestyle==2.6.0 pyflakes==2.2.0
-          flake8 --version
-          flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
-          cat ${GITHUB_WORKSPACE}/flake8-output.txt
-      - name: Add annotations
-        uses: pytorch/add-annotations-github-action@master
-        with:
-          check_name: 'flake8-py3'
-          linter_output_path: 'flake8-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  clang-tidy:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Setup Python
-        uses: actions/setup-python@v1
-        with:
-          python-version: 3.x
-          architecture: x64
-      - name: Checkout PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
-      - name: Install dependencies
-        run: |
-          set -eux
-          # Install CUDA
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/cuda-ubuntu1804.pin
-          sudo mv cuda-ubuntu1804.pin /etc/apt/preferences.d/cuda-repository-pin-600
-          sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
-          sudo add-apt-repository "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/ /"
-          sudo apt-get update
-          sudo apt-get --no-install-recommends -y install cuda-toolkit-10-2
-          # Install dependencies
-          pip install pyyaml
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          sudo apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-11 main"
-          sudo apt-get update
-          sudo apt-get install -y clang-tidy-11
-          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-11 1000
-      - name: Run clang-tidy
-        run: |
-          set -eux
-          git remote add upstream https://github.com/pytorch/pytorch
-          git fetch upstream "$GITHUB_BASE_REF"
-          BASE_SHA=${{ github.event.pull_request.base.sha }}
-          HEAD_SHA=${{ github.event.pull_request.head.sha }}
-          MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
-
-          if [[ ! -d build ]]; then
-            git submodule update --init --recursive
-
-            export USE_NCCL=0
-            # We really only need compile_commands.json, so no need to build!
-            time python setup.py --cmake-only build
-
-            # Generate ATen files.
-            time python -m tools.codegen.gen \
-              -s aten/src/ATen \
-              -d build/aten/src/ATen
-
-            # Generate PyTorch files.
-            time python tools/setup_helpers/generate_code.py            \
-              --declarations-path build/aten/src/ATen/Declarations.yaml \
-              --nn-path aten/src
-          fi
-
-          # Run Clang-Tidy
-          # The negative filters below are to exclude files that include onnx_pb.h or
-          # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
-          # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
-          # in a follow up PR.
-          # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
-          python tools/clang_tidy.py                               \
-            --verbose                                              \
-            --paths torch/csrc/                                    \
-            --diff "$MERGE_BASE"                                   \
-            -g"-torch/csrc/jit/passes/onnx/helper.cpp"             \
-            -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp"\
-            -g"-torch/csrc/jit/serialization/onnx.cpp"             \
-            -g"-torch/csrc/jit/serialization/export.cpp"           \
-            -g"-torch/csrc/jit/serialization/import.cpp"           \
-            -g"-torch/csrc/jit/serialization/import_legacy.cpp"    \
-            -g"-torch/csrc/onnx/init.cpp"                          \
-            -g"-torch/csrc/cuda/nccl.*"                            \
-            -g"-torch/csrc/cuda/python_nccl.cpp"                   \
-            -g"-torch/csrc/autograd/FunctionsManual.cpp"           \
-            -g"-torch/csrc/generic/*.cpp"                          \
-            "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
-
-          cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
-      - name: Add annotations
-        uses: suo/add-annotations-github-action@master
-        with:
-          check_name: 'clang-tidy'
-          linter_output_path: 'clang-tidy-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  cmakelint:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Setup Python
-        uses: actions/setup-python@v1
-        with:
-          python-version: 3.x
-          architecture: x64
-      - name: Fetch PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
-      - name: Run cmakelint
-        run: |
-          set -eux
-          pip install cmakelint
-          cmakelint --version
-          git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
-          grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/)' | \
-          xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true

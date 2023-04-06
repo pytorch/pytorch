@@ -1,7 +1,18 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 #include <ATen/InferSize.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/core/Tensor.h>
+#include <c10/core/SymIntArrayRef.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_mkldnn_reshape_native.h>
+#include <ATen/ops/_mkldnn_transpose_native.h>
+#include <ATen/ops/clone_native.h>
+#include <ATen/ops/view_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -31,7 +42,7 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
@@ -51,7 +62,8 @@ Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
   const ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y{x};
   y.reshape(inferred_size);
-  return new_with_itensor_mkldnn(std::move(y), self.options());
+  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                 self.options().device_opt());
 }
 
 Tensor mkldnn_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
@@ -62,17 +74,22 @@ Tensor mkldnn_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optiona
   ideep::tensor& src = itensor_from_mkldnn(self);
   ideep::tensor dst;
   ideep::direct_copy::compute(src, dst);
-  return new_with_itensor_mkldnn(std::move(dst), self.options());
+  return new_with_itensor_mkldnn(std::move(dst), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                 self.options().device_opt());
 }
 
 Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
+  auto ndims = self.dim();
+  dim0 = maybe_wrap_dim(dim0, ndims);
+  dim1 = maybe_wrap_dim(dim1, ndims);
   const ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
   std::vector<int> axes(x.ndims());
   std::iota(axes.begin(), axes.end(), 0);
   std::swap(axes[dim0], axes[dim1]);
   y.transpose_from(x, axes);
-  return new_with_itensor_mkldnn(std::move(y), self.options());
+  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                 self.options().device_opt());
 }
 
 Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
@@ -82,4 +99,16 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED
+
+
+namespace at {
+namespace native {
+
+
+Tensor mkldnn_view_symint(const Tensor& self, c10::SymIntArrayRef size) {
+  return mkldnn_view(self, C10_AS_INTARRAYREF_SLOW(size));
+}
+
+} // namespace native
+} // namespace at

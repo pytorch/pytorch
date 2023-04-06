@@ -1,278 +1,490 @@
 #pragma once
 
-#include <ATen/native/vulkan/api/Common.h>
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Allocator.h>
-#include <ATen/native/vulkan/api/Cache.h>
-#include <c10/util/hash.h>
+#include <ATen/native/vulkan/api/Utils.h>
+
+#include <c10/core/ScalarType.h>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/typeid.h>
+
+#include <stack>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 
-struct Resource final {
-  class Pool;
+typedef uint8_t MemoryAccessFlags;
 
-  //
-  // Memory
-  //
+VkFormat vk_format(const at::ScalarType dtype);
 
-  struct Memory final {
-    /*
-      Barrier
-    */
+c10::ScalarType c10_scalartype(const VkFormat image_format);
 
-    struct Barrier final {
-      VkAccessFlags src;
-      VkAccessFlags dst;
-    };
+constexpr VmaAllocationCreateFlags DEFAULT_ALLOCATION_STRATEGY =
+    VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT;
 
-    VmaAllocator allocator;
-    VmaAllocation allocation;
+enum MemoryAccessType : MemoryAccessFlags {
+  NONE = 0u << 0u,
+  READ = 1u << 0u,
+  WRITE = 1u << 1u,
+};
 
-    class Scope;
-    template<typename Type>
-    using Data = Handle<Type, Scope>;
+struct MemoryBarrier final {
+  VkMemoryBarrier handle;
 
-    template<
-        typename Type,
-        typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
-    Data<Pointer> map() const &;
+  MemoryBarrier(
+      const VkAccessFlags src_access_flags,
+      const VkAccessFlags dst_access_flags);
+};
 
-    template<
-        typename Type,
-        typename Pointer = std::add_pointer_t<Type>>
-    Data<Pointer> map() &;
+class VulkanBuffer final {
+ public:
+  struct MemoryProperties final {
+    VmaAllocationCreateFlags create_flags;
 
-   private:
-    // Intentionally disabed to ensure memory access is always properly
-    // encapsualted in a scoped map-unmap region.  Allowing below overloads
-    // to be invoked on a temporary would open the door to the possibility
-    // of accessing the underlying memory out of the expected scope making
-    // for seemingly ineffective memory writes and hard to hunt down bugs.
+    VmaMemoryUsage memory_usage;
+    VkMemoryPropertyFlags required_mem_flags;
+    VkMemoryPropertyFlags preferred_mem_flags;
 
-    template<typename Type, typename Pointer>
-    Data<Pointer> map() const && = delete;
-
-    template<typename Type, typename Pointer>
-    Data<Pointer> map() && = delete;
+    VkBufferUsageFlags buffer_usage;
   };
 
-  //
-  // Buffer
-  //
-
-  struct Buffer final {
-    /*
-      Descriptor
-    */
-
-    struct Descriptor final {
-      VkDeviceSize size;
-
-      struct {
-        VkBufferUsageFlags buffer;
-        VmaMemoryUsage memory;
-      } usage;
-    };
-
-    /*
-      Object
-    */
-
-    struct Object final {
-      VkBuffer handle;
-      VkDeviceSize offset;
-      VkDeviceSize range;
-
-      operator bool() const;
-    };
-
-    /*
-      Barrier
-    */
-
-    struct Barrier final {
-      Object object;
-      Memory::Barrier memory;
-    };
-
-    Object object;
-    Memory memory;
-
-    operator bool() const;
+  struct BufferProperties final {
+    VkDeviceSize size;
+    VkDeviceSize mem_offset;
+    VkDeviceSize mem_range;
   };
 
-  //
-  // Image
-  //
+  explicit VulkanBuffer();
 
-  struct Image final {
-    //
-    // Sampler
-    //
+  explicit VulkanBuffer(
+      const VmaAllocator,
+      const VkDeviceSize,
+      const MemoryProperties&);
 
-    struct Sampler final {
-      /*
-        Descriptor
-      */
+  VulkanBuffer(const VulkanBuffer&) = delete;
+  VulkanBuffer& operator=(const VulkanBuffer&) = delete;
 
-      struct Descriptor final {
-        VkFilter filter;
-        VkSamplerMipmapMode mipmap_mode;
-        VkSamplerAddressMode address_mode;
-        VkBorderColor border;
-      };
+  VulkanBuffer(VulkanBuffer&&) noexcept;
+  VulkanBuffer& operator=(VulkanBuffer&&) noexcept;
 
-      /*
-        Factory
-      */
+  ~VulkanBuffer();
 
-      class Factory final {
-       public:
-        explicit Factory(const GPU& gpu);
-
-        typedef Sampler::Descriptor Descriptor;
-        typedef VK_DELETER(Sampler) Deleter;
-        typedef Handle<VkSampler, Deleter> Handle;
-
-        struct Hasher {
-          size_t operator()(const Descriptor& descriptor) const;
-        };
-
-        Handle operator()(const Descriptor& descriptor) const;
-
-       private:
-        VkDevice device_;
-      };
-
-      /*
-        Cache
-      */
-
-      typedef api::Cache<Factory> Cache;
-      Cache cache;
-
-      explicit Sampler(const GPU& gpu)
-        : cache(Factory(gpu)) {
-      }
-    };
-
-    /*
-      Descriptor
-    */
-
-    struct Descriptor final {
-      VkImageType type;
-      VkFormat format;
-      VkExtent3D extent;
-
-      struct {
-        VkImageUsageFlags image;
-        VmaMemoryUsage memory;
-      } usage;
-
-      struct {
-        VkImageViewType type;
-        VkFormat format;
-      } view;
-
-      Sampler::Descriptor sampler;
-    };
-
-    /*
-      Object
-    */
-
-    struct Object final {
-      VkImage handle;
-      VkImageLayout layout;
-      VkImageView view;
-      VkSampler sampler;
-
-      operator bool() const;
-    };
-
-    /*
-      Barrier
-    */
-
-    struct Barrier final {
-      Object object;
-      Memory::Barrier memory;
-
-      struct {
-        VkImageLayout src;
-        VkImageLayout dst;
-      } layout;
-    };
-
-    Object object;
-    Memory memory;
-
-    operator bool() const;
+  struct Package final {
+    VkBuffer handle;
+    VkDeviceSize buffer_offset;
+    VkDeviceSize buffer_range;
   };
 
-  //
-  // Fence
-  //
+  friend struct BufferMemoryBarrier;
 
-  struct Fence final {
-    Pool* pool;
-    size_t id;
+ private:
+  MemoryProperties memory_properties_;
+  BufferProperties buffer_properties_;
+  // The allocator object this was allocated from
+  VmaAllocator allocator_;
+  // Handles to the allocated memory
+  VmaAllocation allocation_;
+  VkBuffer handle_;
 
-    operator bool() const;
-    VkFence handle(bool add_to_waitlist = true) const;
-    void wait(uint64_t timeout_nanoseconds = UINT64_MAX);
+ public:
+  inline VmaAllocator vma_allocator() const {
+    return allocator_;
+  }
+
+  inline VmaAllocation allocation() const {
+    return allocation_;
+  }
+
+  inline VkBuffer handle() const {
+    return handle_;
+  }
+
+  inline VkDeviceSize mem_offset() const {
+    return buffer_properties_.mem_offset;
+  }
+
+  inline VkDeviceSize mem_range() const {
+    return buffer_properties_.mem_range;
+  }
+
+  inline VkDeviceSize mem_size() const {
+    return buffer_properties_.size;
+  }
+
+  operator bool() const {
+    return (allocation_ != VK_NULL_HANDLE);
+  }
+};
+
+class MemoryMap final {
+ public:
+  explicit MemoryMap(
+      const VulkanBuffer& buffer,
+      const MemoryAccessFlags access);
+
+  MemoryMap(const MemoryMap&) = delete;
+  MemoryMap& operator=(const MemoryMap&) = delete;
+
+  MemoryMap(MemoryMap&&) noexcept;
+  MemoryMap& operator=(MemoryMap&&) = delete;
+
+  ~MemoryMap();
+
+ private:
+  uint8_t access_;
+  VmaAllocator allocator_;
+  VmaAllocation allocation_;
+  void* data_;
+  VkDeviceSize data_len_;
+
+ public:
+  template <typename T>
+  T* data() {
+    return reinterpret_cast<T*>(data_);
+  }
+
+  inline size_t nbytes() {
+    return utils::safe_downcast<size_t>(data_len_);
+  }
+
+  void invalidate();
+};
+
+struct BufferMemoryBarrier final {
+  VkBufferMemoryBarrier handle;
+
+  BufferMemoryBarrier(
+      const VkAccessFlags src_access_flags,
+      const VkAccessFlags dst_access_flags,
+      const VulkanBuffer& buffer);
+};
+
+class ImageSampler final {
+ public:
+  struct Properties final {
+    VkFilter filter;
+    VkSamplerMipmapMode mipmap_mode;
+    VkSamplerAddressMode address_mode;
+    VkBorderColor border_color;
   };
 
-  //
-  // Pool
-  //
+  explicit ImageSampler(const VkDevice, const Properties&);
 
-  class Pool final {
-   public:
-    explicit Pool(const GPU& gpu);
-    Pool(const Pool&) = delete;
-    Pool& operator=(const Pool&) = delete;
-    Pool(Pool&&);
-    Pool& operator=(Pool&&);
-    ~Pool();
+  ImageSampler(const ImageSampler&) = delete;
+  ImageSampler& operator=(const ImageSampler&) = delete;
 
-    Buffer buffer(const Buffer::Descriptor& descriptor);
-    Image image(const Image::Descriptor& descriptor);
-    Fence fence();
-    void purge();
+  ImageSampler(ImageSampler&&) noexcept;
+  ImageSampler& operator=(ImageSampler&&) = delete;
 
-   private:
-    friend struct Fence;
+  ~ImageSampler();
 
-   private:
-    struct Configuration final {
-      static constexpr uint32_t kReserve = 256u;
+ private:
+  VkDevice device_;
+  VkSampler handle_;
+
+ public:
+  VkSampler handle() const {
+    return handle_;
+  }
+
+  struct Hasher {
+    size_t operator()(const Properties&) const;
+  };
+
+  // We need to define a custom swap function since this class
+  // does not allow for move assignment. The swap function will
+  // be used in the hash map.
+  friend void swap(ImageSampler& lhs, ImageSampler& rhs) noexcept;
+};
+
+class VulkanImage final {
+ public:
+  struct MemoryProperties final {
+    VmaAllocationCreateFlags create_flags;
+
+    VmaMemoryUsage memory_usage;
+    VkMemoryPropertyFlags required_mem_flags;
+    VkMemoryPropertyFlags preferred_mem_flags;
+
+    VkImageUsageFlags image_usage;
+  };
+
+  struct ImageProperties final {
+    VkImageType image_type;
+    VkFormat image_format;
+    VkExtent3D image_extents;
+  };
+
+  struct ViewProperties final {
+    VkImageViewType view_type;
+    VkFormat view_format;
+  };
+
+  typedef ImageSampler::Properties SamplerProperties;
+
+  struct Handles final {
+    VkImage image;
+    VkImageView image_view;
+    VkSampler sampler;
+  };
+
+  explicit VulkanImage();
+
+  explicit VulkanImage(
+      const VmaAllocator,
+      const VkDevice,
+      const MemoryProperties&,
+      const ImageProperties&,
+      const ViewProperties&,
+      const SamplerProperties&,
+      const VkImageLayout layout,
+      const VkSampler);
+
+  VulkanImage(const VulkanImage&) = delete;
+  VulkanImage& operator=(const VulkanImage&) = delete;
+
+  VulkanImage(VulkanImage&&) noexcept;
+  VulkanImage& operator=(VulkanImage&&) noexcept;
+
+  ~VulkanImage();
+
+  struct Package final {
+    VkImage handle;
+    VkImageLayout image_layout;
+    VkImageView image_view;
+    VkSampler image_sampler;
+  };
+
+  friend struct ImageMemoryBarrier;
+
+ private:
+  MemoryProperties memory_properties_;
+  ImageProperties image_properties_;
+  ViewProperties view_properties_;
+  SamplerProperties sampler_properties_;
+  // The allocator object this was allocated from
+  VmaAllocator allocator_;
+  // Handles to the allocated memory
+  VmaAllocation allocation_;
+  Handles handles_;
+  // Layout
+  VkImageLayout layout_;
+
+ public:
+  inline VmaAllocator vma_allocator() const {
+    return allocator_;
+  }
+
+  inline VmaAllocation allocation() const {
+    return allocation_;
+  }
+
+  inline VkFormat format() const {
+    return image_properties_.image_format;
+  }
+
+  inline VkExtent3D extents() const {
+    return image_properties_.image_extents;
+  }
+
+  inline VkImage handle() const {
+    return handles_.image;
+  }
+
+  inline VkImageView image_view() const {
+    return handles_.image_view;
+  }
+
+  inline VkSampler sampler() const {
+    return handles_.sampler;
+  }
+
+  Package package() const {
+    return {
+        handles_.image,
+        layout_,
+        handles_.image_view,
+        handles_.sampler,
     };
+  }
 
-    VkDevice device_;
-    Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
+  inline VkImageLayout layout() const {
+    return layout_;
+  }
 
-    struct {
-      std::vector<Handle<Buffer, void(*)(const Buffer&)>> pool;
-    } buffer_;
+  inline void set_layout(const VkImageLayout layout) {
+    layout_ = layout;
+  }
 
-    struct {
-      std::vector<Handle<Image, void(*)(const Image&)>> pool;
-      Image::Sampler sampler;
-    } image_;
+  inline operator bool() const {
+    return (allocation_ != VK_NULL_HANDLE);
+  }
+};
 
-    struct {
-      std::vector<Handle<VkFence, VK_DELETER(Fence)>> pool;
-      mutable std::vector<VkFence> waitlist;
-      size_t in_use;
-    } fence_;
-  } pool;
+struct ImageMemoryBarrier final {
+  VkImageMemoryBarrier handle;
 
-  explicit Resource(const GPU& gpu)
-    : pool(gpu) {
+  ImageMemoryBarrier(
+      const VkAccessFlags src_access_flags,
+      const VkAccessFlags dst_access_flags,
+      const VkImageLayout src_layout_flags,
+      const VkImageLayout dst_layout_flags,
+      const VulkanImage& image);
+};
+
+class SamplerCache final {
+ public:
+  explicit SamplerCache(const VkDevice device);
+
+  SamplerCache(const SamplerCache&) = delete;
+  SamplerCache& operator=(const SamplerCache&) = delete;
+
+  SamplerCache(SamplerCache&&) noexcept;
+  SamplerCache& operator=(SamplerCache&&) = delete;
+
+  ~SamplerCache();
+
+  typedef ImageSampler::Properties Key;
+  typedef ImageSampler Value;
+  typedef ImageSampler::Hasher Hasher;
+
+ private:
+  // Multiple threads could potentially be adding entries into the cache, so use
+  // a mutex to manage access
+  std::mutex cache_mutex_;
+
+  VkDevice device_;
+  ska::flat_hash_map<Key, Value, Hasher> cache_;
+
+ public:
+  VkSampler retrieve(const Key&);
+  void purge();
+};
+
+class MemoryAllocator final {
+ public:
+  explicit MemoryAllocator(
+      const VkInstance instance,
+      const VkPhysicalDevice physical_device,
+      const VkDevice device);
+
+  MemoryAllocator(const MemoryAllocator&) = delete;
+  MemoryAllocator& operator=(const MemoryAllocator&) = delete;
+
+  MemoryAllocator(MemoryAllocator&&) noexcept;
+  MemoryAllocator& operator=(MemoryAllocator&&) = delete;
+
+  ~MemoryAllocator();
+
+ private:
+  VkInstance instance_;
+  VkPhysicalDevice physical_device_;
+  VkDevice device_;
+  VmaAllocator allocator_;
+
+ public:
+  VulkanImage create_image(
+      const VkExtent3D&,
+      const VkFormat,
+      const VkImageType,
+      const VkImageViewType,
+      const VulkanImage::SamplerProperties&,
+      const VkSampler,
+      const bool allow_transfer = false);
+
+  VulkanBuffer create_storage_buffer(
+      const VkDeviceSize,
+      const bool gpu_only = true);
+
+  VulkanBuffer create_staging_buffer(const VkDeviceSize);
+
+  /*
+   * Create a uniform buffer with a specified size
+   */
+  VulkanBuffer create_uniform_buffer(const VkDeviceSize);
+
+  /*
+   * Create a uniform buffer containing the data in an arbitrary struct
+   */
+  template <typename Block>
+  VulkanBuffer create_params_buffer(const Block& block);
+};
+
+class VulkanFence final {
+ public:
+  // TODO: This is required for the lazy allocation pattern in api/Tensor.
+  //       It will be disabled pending future refactors.
+  explicit VulkanFence();
+
+  explicit VulkanFence(const VkDevice);
+
+  VulkanFence(const VulkanFence&) = delete;
+  VulkanFence& operator=(const VulkanFence&) = delete;
+
+  VulkanFence(VulkanFence&&) noexcept;
+  VulkanFence& operator=(VulkanFence&&) noexcept;
+
+  ~VulkanFence();
+
+ private:
+  VkDevice device_;
+  VkFence handle_;
+  bool waiting_;
+
+ public:
+  // Used to get the handle for a queue submission.
+  VkFence get_submit_handle() {
+    if (handle_ != VK_NULL_HANDLE) {
+      // Indicate we are now waiting for this fence to be signaled
+      waiting_ = true;
+    }
+    return handle_;
+  }
+
+  VkFence handle() {
+    return handle_;
+  }
+
+  // Trigger a synchronous wait for the fence to be signaled
+  void wait();
+
+  bool waiting() const {
+    return waiting_;
+  }
+
+  operator bool() const {
+    return (VK_NULL_HANDLE != handle_);
+  }
+};
+
+// A pool to track created Fences and reuse ones that are available.
+// Only intended to be modified by one thread at a time.
+struct FencePool final {
+  VkDevice device_;
+
+  std::stack<VulkanFence> pool_;
+
+  explicit FencePool(const VkDevice device) : device_(device), pool_{} {}
+
+  // Returns an rvalue reference to a fence, so that it can be moved
+  inline VulkanFence get_fence() {
+    if (pool_.empty()) {
+      VulkanFence new_fence = VulkanFence(device_);
+      return new_fence;
+    }
+
+    VulkanFence top_fence = std::move(pool_.top());
+    pool_.pop();
+
+    return top_fence;
+  }
+
+  // Marks the fence as available
+  inline void return_fence(VulkanFence& fence) {
+    pool_.push(std::move(fence));
   }
 };
 
@@ -280,98 +492,24 @@ struct Resource final {
 // Impl
 //
 
-class Resource::Memory::Scope final {
- public:
-  enum class Access {
-    Read,
-    Write,
-  };
+template <typename Block>
+inline VulkanBuffer MemoryAllocator::create_params_buffer(const Block& block) {
+  VulkanBuffer uniform_buffer = create_uniform_buffer(sizeof(Block));
 
-  Scope(VmaAllocator allocator, VmaAllocation allocation, Access access);
-  void operator()(const void* data) const;
+  // Fill the uniform buffer with data in block
+  {
+    MemoryMap mapping(uniform_buffer, MemoryAccessType::WRITE);
+    Block* data_ptr = mapping.template data<Block>();
 
- private:
-  VmaAllocator allocator_;
-  VmaAllocation allocation_;
-  Access access_;
-};
-
-template<typename, typename Pointer>
-inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
-  void* map(const Memory& memory);
-
-  return Data<Pointer>{
-    reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator, allocation, Scope::Access::Read),
-  };
-}
-
-template<typename, typename Pointer>
-inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
-  void* map(const Memory& memory);
-
-  return Data<Pointer>{
-    reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator, allocation, Scope::Access::Write),
-  };
-}
-
-inline Resource::Buffer::Object::operator bool() const {
-  return VK_NULL_HANDLE != handle;
-}
-
-inline Resource::Buffer::operator bool() const {
-  return object;
-}
-
-inline bool operator==(
-    const Resource::Image::Sampler::Descriptor& _1,
-    const Resource::Image::Sampler::Descriptor& _2) {
-    return (_1.filter == _2.filter) &&
-           (_1.mipmap_mode == _2.mipmap_mode) &&
-           (_1.address_mode == _2.address_mode) &&
-           (_1.border == _2.border);
-}
-
-inline size_t Resource::Image::Sampler::Factory::Hasher::operator()(
-    const Descriptor& descriptor) const {
-  return c10::get_hash(
-      descriptor.filter,
-      descriptor.mipmap_mode,
-      descriptor.address_mode,
-      descriptor.border);
-}
-
-inline Resource::Image::Object::operator bool() const {
-  return VK_NULL_HANDLE != handle;
-}
-
-inline Resource::Image::operator bool() const {
-  return object;
-}
-
-inline Resource::Fence::operator bool() const {
-  return pool;
-}
-
-inline VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
-  if (!pool) {
-    return VK_NULL_HANDLE;
+    *data_ptr = block;
   }
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      id < pool->fence_.pool.size(),
-      "Invalid Vulkan fence!");
-
-  const VkFence fence = pool->fence_.pool[id].get();
-  if (add_to_waitlist) {
-    pool->fence_.waitlist.push_back(fence);
-  }
-
-  return fence;
+  return uniform_buffer;
 }
 
 } // namespace api
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

@@ -15,6 +15,7 @@ struct MiniEnvironment {
   MiniEnvironment(Block* b, std::shared_ptr<MiniEnvironment> next = nullptr)
       : next(std::move(next)) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<MiniEnvironment<T>> next;
 
   T findInThisFrame(const std::string& name) {
@@ -40,6 +41,7 @@ struct MiniEnvironment {
 
   std::vector<std::string> definedVariables() {
     std::vector<std::string> result;
+    result.reserve(table.size());
     for (auto& kv : table) {
       result.push_back(kv.first);
     }

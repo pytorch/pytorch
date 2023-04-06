@@ -6,8 +6,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static const std::unordered_map<int, int> binary_prec = {
     {TK_IF, 1},
@@ -65,17 +64,18 @@ bool SharedParserData::isBinary(int kind, int* prec) {
 }
 
 C10_EXPORT int stringToKind(const std::string& str) {
-  static std::once_flag init_flag;
-  static std::unordered_map<std::string, int> str_to_kind;
-  std::call_once(init_flag, []() {
+  static std::unordered_map<std::string, int> str_to_kind = []() {
+    std::unordered_map<std::string, int> ret_str_to_kind;
     for (char tok : std::string(valid_single_char_tokens))
-      str_to_kind[std::string(1, tok)] = tok;
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+      ret_str_to_kind[std::string(1, tok)] = tok;
 #define DEFINE_CASE(tok, _, str) \
   if (std::string(str) != "")    \
-    str_to_kind[str] = tok;
+    ret_str_to_kind[str] = tok;
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
-  });
+    return ret_str_to_kind;
+  }();
   try {
     return str_to_kind.at(str);
   } catch (std::out_of_range& err) {
@@ -102,5 +102,4 @@ C10_EXPORT SharedParserData& sharedParserData() {
   return data;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

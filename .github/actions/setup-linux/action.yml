@@ -1,0 +1,58 @@
+name: Setup Linux
+
+description: Set up Docker workspace on EC2
+
+runs:
+  using: composite
+  steps:
+    - name: Display EC2 information
+      shell: bash
+      run: |
+        set -euo pipefail
+        function get_ec2_metadata() {
+          # Pulled from instance metadata endpoint for EC2
+          # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+          category=$1
+          # If it is GCP runner (runner name contains gcp), do not run this
+          runner_name_str=${{ runner.name }}
+          if [[ $runner_name_str != *"gcp"* ]]; then
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          else
+            echo "Runner is from Google Cloud Platform, No info on ec2 metadata"
+          fi
+        }
+        echo "ami-id: $(get_ec2_metadata ami-id)"
+        echo "instance-id: $(get_ec2_metadata instance-id)"
+        echo "instance-type: $(get_ec2_metadata instance-type)"
+        echo "system info $(uname -a)"
+
+    - name: Start docker if docker deamon is not running
+      shell: bash
+      run: |
+        if systemctl is-active --quiet docker; then
+            echo "Docker daemon is running...";
+        else
+            echo "Starting docker deamon..." && sudo systemctl start docker;
+        fi
+
+    - name: Log in to ECR
+      uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+      env:
+        AWS_RETRY_MODE: standard
+        AWS_MAX_ATTEMPTS: "5"
+        AWS_DEFAULT_REGION: us-east-1
+      with:
+        shell: bash
+        timeout_minutes: 5
+        max_attempts: 3
+        retry_wait_seconds: 30
+        command: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+
+    - name: Preserve github env variables for use in docker
+      shell: bash
+      run: |
+        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"

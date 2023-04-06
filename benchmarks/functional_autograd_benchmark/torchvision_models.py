@@ -8,7 +8,7 @@ from torch.jit.annotations import Dict
 from collections import OrderedDict
 
 try:
-    from scipy.optimize import linear_sum_assignment  # type: ignore
+    from scipy.optimize import linear_sum_assignment
     scipy_available = True
 except Exception:
     scipy_available = False
@@ -29,7 +29,7 @@ class BasicBlock(nn.Module):
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
                  base_width=64, dilation=1, norm_layer=None):
-        super(BasicBlock, self).__init__()
+        super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         if groups != 1 or base_width != 64:
@@ -74,7 +74,7 @@ class Bottleneck(nn.Module):
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
                  base_width=64, dilation=1, norm_layer=None):
-        super(Bottleneck, self).__init__()
+        super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         width = int(planes * (base_width / 64.)) * groups
@@ -116,7 +116,7 @@ class ResNet(nn.Module):
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
                  norm_layer=None):
-        super(ResNet, self).__init__()
+        super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
@@ -247,7 +247,7 @@ class IntermediateLayerGetter(nn.ModuleDict):
     Additionally, it is only able to query submodules that are directly
     assigned to the model. So if `model` is passed, `model.feature1` can
     be returned, but not `model.feature1.layer2`.
-    Arguments:
+    Args:
         model (nn.Module): model on which we will extract the features
         return_layers (Dict[name, new_name]): a dict containing the names
             of the modules for which the activations will be returned as
@@ -281,7 +281,7 @@ class IntermediateLayerGetter(nn.ModuleDict):
             if not return_layers:
                 break
 
-        super(IntermediateLayerGetter, self).__init__(layers)
+        super().__init__(layers)
         self.return_layers = orig_return_layers
 
     def forward(self, x):
@@ -297,7 +297,7 @@ class _SimpleSegmentationModel(nn.Module):
     __constants__ = ['aux_classifier']
 
     def __init__(self, backbone, classifier, aux_classifier=None):
-        super(_SimpleSegmentationModel, self).__init__()
+        super().__init__()
         self.backbone = backbone
         self.classifier = classifier
         self.aux_classifier = aux_classifier
@@ -324,7 +324,7 @@ class _SimpleSegmentationModel(nn.Module):
 class FCN(_SimpleSegmentationModel):
     """
     Implements a Fully-Convolutional Network for semantic segmentation.
-    Arguments:
+    Args:
         backbone (nn.Module): the network used to compute the features for the model.
             The backbone should return an OrderedDict[Tensor], with the key being
             "out" for the last feature map used, and "aux" if an auxiliary classifier
@@ -346,7 +346,7 @@ class FCNHead(nn.Sequential):
             nn.Conv2d(inter_channels, channels, 1)
         ]
 
-        super(FCNHead, self).__init__(*layers)
+        super().__init__(*layers)
 
 def _segm_resnet(name, backbone_name, num_classes, aux, pretrained_backbone=True):
     # backbone = resnet.__dict__[backbone_name](
@@ -509,7 +509,7 @@ def box_area(boxes):
     """
     Computes the area of a set of bounding boxes, which are specified by its
     (x1, y1, x2, y2) coordinates.
-    Arguments:
+    Args:
         boxes (Tensor[N, 4]): boxes for which the area will be computed. They
             are expected to be in (x1, y1, x2, y2) format
     Returns:
@@ -702,7 +702,7 @@ class SetCriterion(nn.Module):
         # Retrieve the matching between the outputs of the last layer and the targets
         indices = self.matcher(outputs_without_aux, targets)
 
-        # Compute the average number of target boxes accross all nodes, for normalization purposes
+        # Compute the average number of target boxes across all nodes, for normalization purposes
         num_boxes = sum(len(t["labels"]) for t in targets)
         num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
         if is_dist_avail_and_initialized():

@@ -43,6 +43,7 @@ bool GatherDNNLowPOp<T>::RunOnDevice() {
       output->t.ResizeLike(*Fp32Op_()->Get()->Output(0));
       T* out_data = output->t.template mutable_data<T>();
 
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       TensorQuantizationParams out_qparams;
       if (HasStaticQuantization(this)) {
         out_qparams = GetStaticQuantizationParamsOf(this, 0);

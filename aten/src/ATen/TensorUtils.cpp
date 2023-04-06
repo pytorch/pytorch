@@ -1,7 +1,8 @@
+#include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/TensorUtils.h>
-
-#include <ATen/ATen.h>
+#include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #include <ostream>
 #include <sstream>
@@ -17,6 +18,25 @@ std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
     out << "argument #" << t.pos << " '" << t.name << "'";
   }
   return out;
+}
+
+void checkDim(
+    CheckedFrom c,
+    const Tensor& tensor,
+    const char* name,
+    int pos, // 1-indexed
+    int64_t dim) {
+  TORCH_CHECK(
+      tensor.dim() == dim,
+      "Expected ",
+      dim,
+      "-dimensional tensor, but got ",
+      tensor.dim(),
+      "-dimensional tensor for ",
+      TensorGeometryArg(TensorArg({tensor, name, pos})),
+      " (while checking arguments for ",
+      c,
+      ")");
 }
 
 void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim) {
@@ -55,9 +75,25 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
     " for ", t, " (while checking arguments for ", c, ")");
 }
 
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, c10::SymIntArrayRef sizes) {
+  checkDim(c, t, sizes.size());
+  TORCH_CHECK(
+    t->sym_sizes().equals(sizes),
+    "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
+    " for ", t, " (while checking arguments for ", c, ")");
+}
+
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t size) {
   TORCH_CHECK(
     t->size(dim) == size,
+    "Expected tensor to have size ", size, " at dimension ", dim,
+    ", but got size ", t->size(dim), " for ", t,
+    " (while checking arguments for ", c, ")");
+}
+
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, c10::SymInt size) {
+  TORCH_CHECK(
+    t->sym_size(dim) == size,
     "Expected tensor to have size ", size, " at dimension ", dim,
     ", but got size ", t->size(dim), " for ", t,
     " (while checking arguments for ", c, ")");
@@ -109,15 +145,15 @@ void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors) {
 }
 
 void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
-  if (! (t1->is_cuda()) || ! (t2->is_cuda())) {
+  if (t1->is_cpu() || t2->is_cpu()) {
     std::ostringstream oss;
-    if (! t1->is_cuda()) {
+    if (t1->is_cpu()) {
       oss << "Tensor for " << t1 << " is on CPU, ";
     }
-    if (! t2->is_cuda()) {
+    if (t2->is_cpu()) {
       oss << "Tensor for " << t2 << " is on CPU, ";
     }
-    oss << "but expected " << ((!(t1->is_cuda() || t2->is_cuda())) ? "them" : "it")
+    oss << "but expected " << ((!t1->is_cpu() && !t2->is_cpu()) ? "them" : "it")
         << " to be on GPU (while checking arguments for " << c << ")";
     AT_ERROR(oss.str());
   }
@@ -244,26 +280,6 @@ void * maybe_data_ptr(const TensorArg& tensor) {
   return tensor->defined() ? (void *)tensor->data_ptr() : nullptr;
 }
 
-// See TensorUtils.h on why this is useful now that we cache is_contiguous.
-bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
-  int64_t dim = sizes.size();
-  int64_t expected_stride = 1;
-  bool contig_if_nonempty = true;
-  for (int64_t i = dim - 1; i >= 0; i--) {
-    if (sizes[i] == 0) {
-      return true;
-    }
-    if (contig_if_nonempty) {
-      if (sizes[i] != 1 && strides[i] != expected_stride) {
-        contig_if_nonempty = false;
-      }
-      expected_stride *= sizes[i];
-    }
-  }
-  return contig_if_nonempty;
-}
-
-// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
 void check_dim_size(
     const Tensor& tensor,
     int64_t dim,
@@ -298,22 +314,6 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
   return strides;
 }
 
-size_t computeStorageNbytes(
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    size_t itemsize_bytes) {
-  // size of the underlying storage is 1 bigger than the offset
-  // of the last element according to stride
-  size_t size = 1;
-  for(size_t i = 0; i < sizes.size(); i++) {
-    if(sizes[i] == 0) {
-      return 0;
-    }
-    size += strides[i]*(sizes[i]-1);
-  }
-  return size * itemsize_bytes;
-}
-
 // On a high level,
 // 1. separate `oldshape` into chunks of dimensions, where the dimensions are
 //    ``contiguous'' in each chunk, i.e., oldstride[i] = oldshape[i+1] *
@@ -322,12 +322,19 @@ size_t computeStorageNbytes(
 //    `oldshape` was separated into, where each chunk of newshape has matching
 //    ``numel'', i.e., number of subspaces, as the corresponding chunk of
 //    `oldshape`.
-c10::optional<std::vector<int64_t>> computeStride(
-    IntArrayRef oldshape,
-    IntArrayRef oldstride,
-    IntArrayRef newshape) {
+//
+// templatized for DimVector and IntArrayRef use cases,
+// see overloads of computeStride() below.
+//
+template <typename ResultVec, typename NewShapeVec, typename Numel>
+inline c10::optional<ResultVec> computeStride_impl(
+    const NewShapeVec& oldshape,
+    const NewShapeVec& oldstride,
+    const NewShapeVec& newshape,
+    ResultVec toResult(const NewShapeVec&)
+) {
   if (oldshape.empty()) {
-    return std::vector<int64_t>(newshape.size(), 1);
+    return ResultVec(newshape.size(), 1);
   }
 
   // NOTE: stride is arbitrary in the numel() == 0 case;
@@ -335,20 +342,19 @@ c10::optional<std::vector<int64_t>> computeStride(
   // we use the stride as if it were computed via resize.
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
-  int64_t numel = std::accumulate(oldshape.begin(), oldshape.end(), 1,
-                                  std::multiplies<int64_t>());
+  const Numel numel = c10::multiply_integers(oldshape);
   if (numel == 0 && oldshape.equals(newshape)) {
-    return oldstride.vec();
+    return toResult(oldstride);
   }
 
-  std::vector<int64_t> newstride(newshape.size());
+  ResultVec newstride(newshape.size());
   if (numel == 0) {
     for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
       if (view_d == (int64_t)(newshape.size() - 1)) {
         newstride[view_d] = 1;
       } else {
         newstride[view_d] =
-          std::max<int64_t>(newshape[view_d+1], 1) * newstride[view_d+1];
+          std::max<Numel>(newshape[view_d+1], Numel(1)) * newstride[view_d+1];
       }
     }
     return newstride;
@@ -356,10 +362,10 @@ c10::optional<std::vector<int64_t>> computeStride(
 
   int64_t view_d = (int64_t)newshape.size() - 1;
   // stride for each subspace in the chunk
-  int64_t chunk_base_stride = oldstride.back();
+  Numel chunk_base_stride = oldstride.back();
   // numel in current chunk
-  int64_t tensor_numel = 1;
-  int64_t view_numel = 1;
+  Numel tensor_numel = 1;
+  Numel view_numel = 1;
   for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
     tensor_numel *= oldshape[tensor_d];
     // if end of tensor size chunk, check view
@@ -386,6 +392,30 @@ c10::optional<std::vector<int64_t>> computeStride(
     return c10::nullopt;
   }
   return newstride;
+}
+
+c10::optional<std::vector<int64_t>> computeStride(
+    IntArrayRef oldshape,
+    IntArrayRef oldstride,
+    IntArrayRef newshape) {
+  auto toResult = [](const IntArrayRef& a) { return a.vec(); };
+  return computeStride_impl<std::vector<int64_t>, IntArrayRef, int64_t>(oldshape, oldstride, newshape, toResult);
+}
+
+c10::optional<SymDimVector> computeStride(
+    c10::SymIntArrayRef oldshape,
+    c10::SymIntArrayRef oldstride,
+    c10::SymIntArrayRef newshape) {
+  auto toResult = [](const SymIntArrayRef& a) { return SymDimVector(a); };
+  return computeStride_impl<SymDimVector, c10::SymIntArrayRef, c10::SymInt>(oldshape, oldstride, newshape, toResult);
+}
+
+c10::optional<DimVector> computeStride(
+    IntArrayRef oldshape,
+    IntArrayRef oldstride,
+    const DimVector& newshape) {
+  auto toResult = [](const IntArrayRef& a) { return DimVector(a); };
+  return computeStride_impl<DimVector, IntArrayRef, int64_t>(oldshape, oldstride, newshape, toResult);
 }
 
 }  // namespace detail

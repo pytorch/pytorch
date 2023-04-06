@@ -1,18 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Distance.h>
 
-#include <numeric>
-#include <iterator>
 #include <algorithm>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vml.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/cpu/vec/functional.h>
+#include <c10/util/irange.h>
 
-namespace at { namespace native { namespace {
+namespace at::native {
+namespace {
 
 template<typename scalar_t>
 struct Dist {
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
 
   // Depending on the value of the pnorm, there are specific implementations
   // that are much faster than std::pow(std::abs(a - b), p), but have the same
@@ -39,10 +42,10 @@ struct Dist {
   // there's a struct with only a backward pass for this case.
 
   // TODO This is an inefficient way to compite sign, and can be much faster
-  // using native SSE instructions that should be added to Vec256.
+  // using native SSE instructions that should be added to Vectorized.
   static inline Vec sign(Vec val) {
-    return vec256::minimum(vec256::maximum(Vec(0), val.ceil()), Vec(1)) +
-      vec256::minimum(vec256::maximum(Vec(-1), val.floor()), Vec(0));
+    return vec::minimum(vec::maximum(Vec(0), val.ceil()), Vec(1)) +
+      vec::minimum(vec::maximum(Vec(-1), val.floor()), Vec(0));
   }
 
   static inline Vec abs(Vec val) {
@@ -62,7 +65,7 @@ struct Dist {
   }
 
   static inline Vec min(Vec val, scalar_t other) {
-    return vec256::minimum(val, Vec(other));
+    return vec::minimum(val, Vec(other));
   }
 
   static inline scalar_t min(scalar_t val, scalar_t other) {
@@ -70,7 +73,7 @@ struct Dist {
   }
 
   static inline Vec max(Vec val, Vec other) {
-    return vec256::maximum(val, other);
+    return vec::maximum(val, other);
   }
 
   static inline scalar_t max(scalar_t val, scalar_t other) {
@@ -90,7 +93,7 @@ struct Dist {
   struct zdist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return min(ceil(abs(diff)), 1); }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
-    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
   };
 
   // One norm
@@ -98,8 +101,8 @@ struct Dist {
   struct odist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
-    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff); }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t /*dist*/, const Vec& /*p*/) { return Vec(grad) * sign(diff); }
   };
 
   // Special general pnorm derivative if p is less than two
@@ -138,7 +141,7 @@ struct Dist {
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
     // TODO This backward pass uses a very complext expression to compute (diff
     // == dist) that could be much faster if using SSE instructions.
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
   };
 
   template <typename F>
@@ -159,6 +162,7 @@ struct Dist {
       const Vec pvec(p);
       double n2 = n - .5;
       // The -1 accounts for floating point truncation issues
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
@@ -168,7 +172,7 @@ struct Dist {
       const scalar_t * const res_end = res_start + end;
 
       while (res != res_end) {
-        *res = F::finish(vec256::map2_reduce_all<scalar_t>(
+        *res = F::finish(vec::map2_reduce_all<scalar_t>(
           [&pvec](Vec a, Vec b) { return F::map((a - b).abs(), pvec); },
           F::red, self_i, self_j, m), p);
 
@@ -226,7 +230,7 @@ struct Dist {
         const scalar_t * self_j = t2_start + size2 * l + j;
 
         scalar_t agg = 0;
-        for (int x = 0; x < m; x++) {
+        for (const auto x : c10::irange(m)) {
           scalar_t a = *(self_i + x);
           scalar_t b = *(self_j + x);
           agg = F::red(agg, F::map(std::abs(a-b), p));
@@ -391,7 +395,7 @@ struct Dist {
     const scalar_t * t1_end = t1 + l1_size;
     const scalar_t * t2_end = t2 + l2_size;
 
-    for (int64_t l = 0; l < d; l++) {
+    for (const auto l C10_UNUSED : c10::irange(d)) {
       for (; t1 != t1_end; t1 += m, res += m) {
         const Vec vec_t1 = Vec::loadu(t1, count);
         Vec res_vec = Vec::loadu(res, count);
@@ -444,4 +448,4 @@ REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
 REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
 
-}}  // namespace at::native
+}  // namespace at::native

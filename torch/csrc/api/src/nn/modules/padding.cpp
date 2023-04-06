@@ -8,7 +8,8 @@ namespace torch {
 namespace nn {
 
 template <size_t D, typename Derived>
-ReflectionPadImpl<D, Derived>::ReflectionPadImpl(const ReflectionPadOptions<D>& options_)
+ReflectionPadImpl<D, Derived>::ReflectionPadImpl(
+    const ReflectionPadOptions<D>& options_)
     : options(options_) {}
 
 template <size_t D, typename Derived>
@@ -27,11 +28,13 @@ void ReflectionPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 
 template class ReflectionPadImpl<1, ReflectionPad1dImpl>;
 template class ReflectionPadImpl<2, ReflectionPad2dImpl>;
+template class ReflectionPadImpl<3, ReflectionPad3dImpl>;
 
 // ============================================================================
 
 template <size_t D, typename Derived>
-ReplicationPadImpl<D, Derived>::ReplicationPadImpl(const ReplicationPadOptions<D>& options_)
+ReplicationPadImpl<D, Derived>::ReplicationPadImpl(
+    const ReplicationPadOptions<D>& options_)
     : options(options_) {}
 
 template <size_t D, typename Derived>
@@ -54,24 +57,33 @@ template class ReplicationPadImpl<3, ReplicationPad3dImpl>;
 
 // ============================================================================
 
-ZeroPad2dImpl::ZeroPad2dImpl(const ZeroPad2dOptions& options_)
+template <size_t D, typename Derived>
+ZeroPadImpl<D, Derived>::ZeroPadImpl(const ZeroPadOptions<D>& options_)
     : options(options_) {}
 
-void ZeroPad2dImpl::reset() {}
+template <size_t D, typename Derived>
+void ZeroPadImpl<D, Derived>::reset() {}
 
-void ZeroPad2dImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::ZeroPad2d"
+template <size_t D, typename Derived>
+Tensor ZeroPadImpl<D, Derived>::forward(const Tensor& input) {
+  return F::detail::pad(input, options.padding(), torch::kConstant, 0);
+}
+
+template <size_t D, typename Derived>
+void ZeroPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::ZeroPad" << D << "d"
          << "(padding=" << options.padding() << ")";
 }
 
-Tensor ZeroPad2dImpl::forward(const Tensor& input) {
-  return F::detail::pad(input, options.padding(), torch::kConstant, 0);
-}
+template class ZeroPadImpl<1, ZeroPad1dImpl>;
+template class ZeroPadImpl<2, ZeroPad2dImpl>;
+template class ZeroPadImpl<3, ZeroPad3dImpl>;
 
 // ============================================================================
 
 template <size_t D, typename Derived>
-ConstantPadImpl<D, Derived>::ConstantPadImpl(const ConstantPadOptions<D>& options_)
+ConstantPadImpl<D, Derived>::ConstantPadImpl(
+    const ConstantPadOptions<D>& options_)
     : options(options_) {}
 
 template <size_t D, typename Derived>
@@ -79,14 +91,15 @@ void ConstantPadImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 Tensor ConstantPadImpl<D, Derived>::forward(const Tensor& input) {
-  return F::detail::pad(input, options.padding(), torch::kConstant, options.value());
+  return F::detail::pad(
+      input, options.padding(), torch::kConstant, options.value());
 }
 
 template <size_t D, typename Derived>
 void ConstantPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ConstantPad" << D << "d"
-         << "(padding=" << options.padding()
-         << ", value=" << options.value() << ")";
+         << "(padding=" << options.padding() << ", value=" << options.value()
+         << ")";
 }
 
 template class ConstantPadImpl<1, ConstantPad1dImpl>;

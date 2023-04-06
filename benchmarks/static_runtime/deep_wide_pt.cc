@@ -17,7 +17,7 @@ class DeepAndWide(Module):
   def forward(self: __torch__.DeepAndWide,
     ad_emb_packed: Tensor,
     user_emb: Tensor,
-    wide: Tensor) -> Tensor:
+    wide: Tensor) -> Tuple[Tensor]:
     _0 = self._fc_b
     _1 = self._fc_w
     _2 = self._sigma
@@ -29,13 +29,31 @@ class DeepAndWide(Module):
     dp = torch.flatten(dp_unflatten, 1, -1)
     input = torch.cat([dp, wide_preproc], 1)
     fc1 = torch.addmm(_0, input, torch.t(_1), beta=1, alpha=1)
-    return torch.sigmoid(fc1)
+    return (torch.sigmoid(fc1),)
 )JIT";
 
 const std::string trivial_model_1 = R"JIT(
   def forward(self, a, b, c):
       s = torch.tensor([[3, 3], [3, 3]])
       return a + b * c + s
+)JIT";
+
+const std::string leaky_relu_model_const = R"JIT(
+  def forward(self, input):
+      x = torch.leaky_relu(input, 0.1)
+      x = torch.leaky_relu(x, 0.1)
+      x = torch.leaky_relu(x, 0.1)
+      x = torch.leaky_relu(x, 0.1)
+      return torch.leaky_relu(x, 0.1)
+)JIT";
+
+const std::string leaky_relu_model = R"JIT(
+  def forward(self, input, neg_slope):
+      x = torch.leaky_relu(input, neg_slope)
+      x = torch.leaky_relu(x, neg_slope)
+      x = torch.leaky_relu(x, neg_slope)
+      x = torch.leaky_relu(x, neg_slope)
+      return torch.leaky_relu(x, neg_slope)
 )JIT";
 
 void import_libs(
@@ -46,9 +64,8 @@ void import_libs(
   torch::jit::SourceImporter si(
       cu,
       &tensor_table,
-      [&](const std::string& /* unused */) -> std::shared_ptr<torch::jit::Source> {
-        return src;
-      },
+      [&](const std::string& /* unused */)
+          -> std::shared_ptr<torch::jit::Source> { return src; },
       /*version=*/2);
   si.loadType(c10::QualifiedName(class_name));
 }
@@ -79,5 +96,48 @@ torch::jit::Module getDeepAndWideSciptModel(int num_features) {
 torch::jit::Module getTrivialScriptModel() {
   torch::jit::Module module("m");
   module.define(trivial_model_1);
+  return module;
+}
+
+torch::jit::Module getLeakyReLUScriptModel() {
+  torch::jit::Module module("leaky_relu");
+  module.define(leaky_relu_model);
+  return module;
+}
+
+torch::jit::Module getLeakyReLUConstScriptModel() {
+  torch::jit::Module module("leaky_relu_const");
+  module.define(leaky_relu_model_const);
+  return module;
+}
+
+const std::string long_model = R"JIT(
+  def forward(self, a, b, c):
+      d = torch.relu(a * b)
+      e = torch.relu(a * c)
+      f = torch.relu(e * d)
+      g = torch.relu(f * f)
+      h = torch.relu(g * c)
+      return h
+)JIT";
+
+torch::jit::Module getLongScriptModel() {
+  torch::jit::Module module("m");
+  module.define(long_model);
+  return module;
+}
+
+const std::string signed_log1p_model = R"JIT(
+  def forward(self, a):
+      b = torch.abs(a)
+      c = torch.log1p(b)
+      d = torch.sign(a)
+      e = d * c
+      return e
+)JIT";
+
+torch::jit::Module getSignedLog1pModel() {
+  torch::jit::Module module("signed_log1p");
+  module.define(signed_log1p_model);
   return module;
 }

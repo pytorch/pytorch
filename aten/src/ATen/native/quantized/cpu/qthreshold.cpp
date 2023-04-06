@@ -1,8 +1,15 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <torch/library.h>
-#include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/threshold_native.h>
+#endif
 
 #include <algorithm>
 
@@ -14,8 +21,8 @@ DEFINE_DISPATCH(qthreshold_stub);
 // the underlying implementation for quantized threshold kernel
 Tensor quantized_threshold_impl(
     const Tensor& qx,
-    Scalar threshold,
-    Scalar value) {
+    const Scalar& threshold,
+    const Scalar& value) {
   Tensor qy = at::_empty_affine_quantized(
     qx.sizes(), qx.options(), qx.q_scale(), qx.q_zero_point());
   qthreshold_stub(qx.device().type(), qx, threshold, value, qy);
@@ -25,8 +32,8 @@ Tensor quantized_threshold_impl(
 // at::native functions for the native_functions.yaml
 Tensor threshold_quantized_cpu(
     const Tensor& qx,
-    Scalar threshold,
-    Scalar value) {
+    const Scalar& threshold,
+    const Scalar& value) {
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "threshold", [&]() {
     qy = quantized_threshold_impl(qx, threshold, value);

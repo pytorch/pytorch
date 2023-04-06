@@ -1,15 +1,14 @@
-from .quantize import *
-from .observer import *
-from .qconfig import *
-from .fake_quantize import *
+from .quantize import *  # noqa: F403
+from .observer import *  # noqa: F403
+from .qconfig import *  # noqa: F403
+from .fake_quantize import *  # noqa: F403
 from .fuse_modules import fuse_modules
-from .stubs import *
-from .quant_type import *
-from .quantize_jit import *
-from .quantize_fx import *
-from .quantization_mappings import *
-from .fuser_method_mappings import *
-from .custom_module_class_mappings import *
+from .stubs import *  # noqa: F403
+from .quant_type import *  # noqa: F403
+from .quantize_jit import *  # noqa: F403
+# from .quantize_fx import *
+from .quantization_mappings import *  # noqa: F403
+from .fuser_method_mappings import *  # noqa: F403
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -19,43 +18,43 @@ def default_eval_fn(model, calib_data):
     for data, target in calib_data:
         model(data)
 
-_all__ = [
+__all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub',
     # Top level API for eager mode quantization
     'quantize', 'quantize_dynamic', 'quantize_qat',
     'prepare', 'convert', 'prepare_qat',
     # Top level API for graph mode quantization on TorchScript
-    'quantize_jit', 'quantize_dynamic_jit',
+    'quantize_jit', 'quantize_dynamic_jit', '_prepare_ondevice_dynamic_jit',
+    '_convert_ondevice_dynamic_jit', '_quantize_ondevice_dynamic_jit',
     # Top level API for graph mode quantization on GraphModule(torch.fx)
-    'fuse_fx', 'quantize_fx',  # TODO: add quantize_dynamic_fx
-    'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',
+    # 'fuse_fx', 'quantize_fx',  # TODO: add quantize_dynamic_fx
+    # 'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',
     'QuantType',  # quantization type
     # custom module APIs
-    'register_static_quant_module_mapping',
-    'get_static_quant_module_mappings', 'get_static_quant_module_class',
-    'register_dynamic_quant_module_mapping',
-    'get_dynamic_quant_module_mappings',
-    'register_qat_module_mapping',
-    'get_qat_module_mappings',
-    'get_qconfig_propagation_list',
-    'get_compare_output_module_list',
-    'register_quantized_operator_mapping', 'get_quantized_operator',
-    'register_fuser_method', 'get_fuser_method',
-    'register_observed_custom_module_mapping',
-    'get_observed_custom_module_class',
-    'register_quantized_custom_mdoule_mapping',
-    'get_quantized_custom_module_class',
-    'is_custom_module_class',
-    'is_observed_custom_module',
+    'get_default_static_quant_module_mappings', 'get_static_quant_module_class',
+    'get_default_dynamic_quant_module_mappings',
+    'get_default_qat_module_mappings',
+    'get_default_qconfig_propagation_list',
+    'get_default_compare_output_module_list',
+    'get_quantized_operator',
+    'get_fuser_method',
     # Sub functions for `prepare` and `swap_module`
-    'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
-    'default_eval_fn', 'get_observer_dict',
-    'register_activation_post_process_hook',
+    'propagate_qconfig_', 'add_quant_dequant', 'swap_module',
+    'default_eval_fn',
     # Observers
-    'ObserverBase', 'WeightObserver', 'observer', 'default_observer',
-    'default_weight_observer',
+    'ObserverBase', 'WeightObserver', 'HistogramObserver',
+    'observer', 'default_observer',
+    'default_weight_observer', 'default_placeholder_observer',
+    'default_per_channel_weight_observer',
+    # FakeQuantize (for qat)
+    'default_fake_quant', 'default_weight_fake_quant',
+    'default_fixed_qparams_range_neg1to1_fake_quant',
+    'default_fixed_qparams_range_0to1_fake_quant',
+    'default_per_channel_weight_fake_quant',
+    'default_histogram_fake_quant',
     # QConfig
     'QConfig', 'default_qconfig', 'default_dynamic_qconfig', 'float16_dynamic_qconfig',
+    'float_qparams_weight_only_qconfig',
     # QAT utilities
     'default_qat_qconfig', 'prepare_qat', 'quantize_qat',
     # module transformations

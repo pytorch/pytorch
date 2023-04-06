@@ -8,7 +8,7 @@ namespace data {
 /// An `Example` from a dataset.
 ///
 /// A dataset consists of data and an associated target (label).
-template <typename Data = Tensor, typename Target = Tensor>
+template <typename Data = at::Tensor, typename Target = at::Tensor>
 struct Example {
   using DataType = Data;
   using TargetType = Target;
@@ -23,9 +23,9 @@ struct Example {
 
 namespace example {
 using NoTarget = void;
-} //  namespace example
+} // namespace example
 
-/// A specialization for `Example` that does not have have a target.
+/// A specialization for `Example` that does not have a target.
 ///
 /// This class exists so that code can be written for a templated `Example`
 /// type, and work both for labeled and unlabeled datasets.
@@ -50,6 +50,6 @@ struct Example<Data, example::NoTarget> {
   Data data;
 };
 
-using TensorExample = Example<Tensor, example::NoTarget>;
+using TensorExample = Example<at::Tensor, example::NoTarget>;
 } // namespace data
 } // namespace torch

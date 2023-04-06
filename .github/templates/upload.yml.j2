@@ -1,0 +1,72 @@
+{% import 'common.yml.j2' as common %}
+
+{%- macro binary_env(config, is_windows=False) -%}
+    env:!{{ binary_env_as_input(config, is_windows, True) }}
+{%- endmacro %}
+
+{%- macro binary_env_as_input(config, is_windows=False, include_skip_tests=False) -%}
+{%- if is_windows %}
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      BUILDER_ROOT: ${{ github.workspace }}/builder
+{%- else %}
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+{%- endif %}
+      PACKAGE_TYPE: !{{ config["package_type"] }}
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: !{{ config["desired_cuda"] }}
+{%- if config["gpu_arch_version"] %}
+      GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
+{%- endif %}
+      GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
+{%- if include_skip_tests %}
+      SKIP_ALL_TESTS: 1
+{%- endif %}
+{%- if not is_windows %}
+      DOCKER_IMAGE: !{{ config["container_image"] }}
+{%- endif %}
+{%- if config["package_type"] == "manywheel" %}
+  {%- if config["devtoolset"] %}
+      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
+  {%- endif %}
+{%- endif %}
+{%- if config["package_type"] == "libtorch" %}
+  {%- if config["libtorch_config"] %}
+      LIBTORCH_CONFIG: !{{ config["libtorch_config"] }}
+  {%- endif %}
+      LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
+  {%- if config["devtoolset"] %}
+      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
+  {%- endif %}
+  {%- if is_windows %}
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.8"
+  {%- endif %}
+{%- else %}
+      DESIRED_PYTHON: "!{{ config["python_version"] }}"
+{%- endif %}
+{%- endmacro %}
+
+
+{%- macro upload_binaries(config, is_windows=False, has_test=True, use_s3=True) -%}
+!{{ config["build_name"] }}-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+{%- if has_test %}
+    needs: !{{ config["build_name"] }}-test
+{%- else %}
+    needs: !{{ config["build_name"] }}-build
+{%- endif %}
+    with:!{{ binary_env_as_input(config, is_windows) }}
+      build_name: !{{ config["build_name"] }}
+      {%- if not use_s3 %}
+      use_s3: False
+      {%- endif %}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+{%- endmacro %}

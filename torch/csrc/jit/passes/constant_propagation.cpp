@@ -1,7 +1,9 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
+
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -13,10 +15,15 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
-c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
+c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
+    const Node* n,
+    bool ignore_custom_classes,
+    AliasDb* db) {
   Stack stack;
   for (auto input : n->inputs()) {
     if (auto ival = toIValue(input)) {
@@ -25,6 +32,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
       return c10::nullopt;
     }
   }
+
   switch (n->kind()) {
     case prim::ListUnpack: {
       if (stack.back().toList().size() != n->outputs().size()) {
@@ -35,48 +43,87 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
     case prim::TupleConstruct: {
       auto tt = n->output()->type()->expect<TupleType>();
       if (tt->name()) {
-        namedTupleConstruct(stack, tt, n->inputs().size());
+        namedTupleConstruct(stack, std::move(tt), n->inputs().size());
       } else {
         tupleConstruct(stack, n->inputs().size());
       }
     } break;
     case prim::ListConstruct: {
       listConstruct(
-          stack, n->output()->type()->expect<ListType>(), n->inputs().size());
+          stack,
+          n->output()->type()->expectRef<ListType>(),
+          n->inputs().size());
     } break;
     case prim::DictConstruct: {
       dictConstruct(
-          stack, n->output()->type()->expect<DictType>(), n->inputs().size());
+          stack,
+          n->output()->type()->expectRef<DictType>(),
+          n->inputs().size());
     } break;
     case prim::CreateObject: {
-      createObject(stack, n->output()->type()->expect<ClassType>());
+      createObject(
+          stack,
+          n->output()->type()->expect<ClassType>(),
+          /*use_weak_ref*/ true);
+    } break;
+    case prim::GetAttr: {
+      auto attr = pop(stack).toObject()->getAttr(n->s(attr::name));
+      push(stack, attr);
     } break;
     case prim::isinstance: {
       isinstance(stack, n->tys(attr::types));
     } break;
     default: {
-      const auto& the_operator = n->getOperator();
-      if (the_operator.schema().is_vararg()) {
+      const auto maybe_schema = n->maybeSchema();
+      if (maybe_schema && maybe_schema->is_vararg()) {
         // vararg schemas require the number of inputs at the top of the stack
         // but this is broken in other places in constant prop, so disable it
         // for now
         return c10::nullopt;
       }
 
-      auto op = n->getOperation();
       try {
-        op(&stack);
+        auto op = n->getOperation();
+        op(stack);
       } catch (...) {
         return c10::nullopt;
       }
     } break;
   }
 
-  for (const IValue& v : stack) {
+  for (IValue& v : stack) {
     if (v.isTensor()) {
-      at::Tensor t = v.toTensor();
+      const at::Tensor& t = v.toTensor();
       if (t.defined() && t.requires_grad()) {
         // requires grad tensors cannot be constants
+        return c10::nullopt;
+      }
+    }
+    // Weak form of const propagation
+    if (ignore_custom_classes) {
+      if (v.isCustomClass()) {
+        return c10::nullopt;
+      }
+    }
+    // see [Constant Object Weak CompilationUnit Reference]
+    if (v.isCustomClass()) {
+      if (v.toObject()->is_weak_compilation_ref()) {
+        continue;
+      }
+      if (!db) {
+        continue;
+      }
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      Node* n_non_const = const_cast<Node*>(n);
+      if (db->mayContainAlias(
+              n_non_const->inputs(), {n_non_const->outputs()})) {
+        continue;
+      }
+      auto obj = v.toObject();
+      obj->unsafe_make_weak_compilation_ref();
+    }
+    if (v.isObject()) {
+      if (!v.toObject()->is_weak_compilation_ref()) {
         return c10::nullopt;
       }
     }
@@ -89,14 +136,16 @@ namespace {
 std::unordered_set<Symbol> skip_list = {
     prim::If,
     prim::Loop,
-    prim::Function,
+    prim::Closure,
     prim::Constant,
     prim::AutogradZero,
     prim::Uninitialized,
     prim::Guard,
     prim::profile,
-    prim::profile_optional,
+    prim::profile_ivalue,
     prim::unchecked_unwrap_optional, // TODO remove
+    prim::awaitable,
+    aten::dequantize,
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
 };
@@ -104,33 +153,36 @@ std::unordered_set<Symbol> skip_list = {
 struct ConstantPropagator {
   // Runs constant propagation with an aliasing db and checks if inputs or
   // outputs might be mutated in the graph
-  static ConstantPropagator WithAliasDb(std::shared_ptr<Graph> graph) {
-    return ConstantPropagator(graph, true);
+  static ConstantPropagator WithAliasDb(
+      std::shared_ptr<Graph> graph,
+      bool ignore_custom_classes) {
+    return ConstantPropagator(std::move(graph), true, ignore_custom_classes);
   }
 
   // Runs constant propagation only on ops that clearly do not have aliased
   // inputs or outputs without computing aliasing information
   static ConstantPropagator NoAliasDb(std::shared_ptr<Graph> graph) {
-    return ConstantPropagator(graph, false);
+    return ConstantPropagator(std::move(graph), false, false);
   }
 
-  void run() {
+  bool run() {
     ConstantPropagation(graph_->block());
+    return made_change_;
   }
 
  private:
-  ConstantPropagator(std::shared_ptr<Graph> graph, bool aliasing_types)
-      : graph_(std::move(graph)) {
-    if (aliasing_types) {
-      aliasDb_ = torch::make_unique<AliasDb>(graph_);
-    } else {
-      aliasDb_ = nullptr;
-    }
-  }
+  ConstantPropagator(
+      std::shared_ptr<Graph> graph,
+      bool aliasing_types,
+      bool ignore_custom_classes)
+      : graph_(std::move(graph)),
+        aliasing_types_(aliasing_types),
+        ignore_custom_classes_(ignore_custom_classes) {}
 
   void propagateNode(Node* n) {
     std::vector<IValue> outputs;
-    if (auto outputs_opt = runNodeIfInputsAreConstant(n)) {
+    if (auto outputs_opt =
+            runNodeIfInputsAreConstant(n, ignore_custom_classes_)) {
       outputs = std::move(outputs_opt.value());
     } else {
       // The op failed to run, so we cannot continue constant-prop for it.
@@ -138,9 +190,10 @@ struct ConstantPropagator {
     }
     auto graph = n->owningGraph();
     WithInsertPoint guard(n);
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       auto new_output = tryInsertConstant(*graph, outputs[i]);
       if (new_output) {
+        made_change_ = true;
         GRAPH_UPDATE(
             "Folding %",
             n->outputs()[i]->debugName(),
@@ -162,6 +215,7 @@ struct ConstantPropagator {
       n->outputs().at(i)->replaceAllUsesWith(
           n->inputs().at(i + loop_input_offset));
     }
+    made_change_ = true;
     n->destroy();
   }
 
@@ -213,6 +267,7 @@ struct ConstantPropagator {
     size_t block_index = *input_bool ? 0 : 1;
     ConstantPropagation(n->blocks().at(block_index));
     inlineIfBody(n->blocks().at(block_index));
+    made_change_ = true;
   }
 
   void replaceAndRemoveIfOutput(Node* n, size_t i, Value* replacement) {
@@ -223,7 +278,7 @@ struct ConstantPropagator {
   }
 
   // remove extra outputs from the node
-  bool removeExtraIfOutputs(Node* n) {
+  void removeExtraIfOutputs(Node* n) {
     TORCH_CHECK(n->kind() == prim::If, "Only supported for If nodes");
     auto true_block = n->blocks()[0];
     auto false_block = n->blocks()[1];
@@ -251,12 +306,12 @@ struct ConstantPropagator {
 
       i++; // increment bc we didn't remove current index
     }
-    // an output was removed
-    return initial_outputs != true_block->outputs().size();
+    made_change_ |= initial_outputs != true_block->outputs().size();
   }
 
   // remove extra outputs from the node
   void removeExtraLoopOutputs(Node* node) {
+    auto initial_outputs = node->outputs().size();
     auto loop_body = node->blocks().at(0);
     auto loop_input_offset = 2; // offset of loop carried deps in input list
     auto loop_body_offset =
@@ -277,22 +332,8 @@ struct ConstantPropagator {
         loop_body->eraseOutput(loop_body_offset + i);
       }
     }
+    made_change_ |= initial_outputs != node->outputs().size();
   }
-
-  // An Op has runnable inputs if:
-  // - All inputs are constants.
-  // - It is an op that forwards tuples, and all inputs are constants
-  // or tuples that we know the ivalue for. We can't use known tuple ivalues
-  // for non-forwarding ops because that Tuple could contain an ivalue that is
-  // not allowed as a constant, for instance, a Tensor with a gradient.
-  bool runnableInputs(Node* n) {
-    if (std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-          return v->node()->kind() == prim::Constant;
-        })) {
-      return true;
-    }
-    return false;
-  };
 
   bool noMutableValues(at::ArrayRef<Value*> values) {
     return std::none_of(values.begin(), values.end(), [](Value* v) {
@@ -300,17 +341,25 @@ struct ConstantPropagator {
     });
   }
 
+  AliasDb* getOrCreateAliasDb() {
+    if (!aliasDb_) {
+      aliasDb_ = std::make_unique<AliasDb>(graph_);
+    }
+    return aliasDb_.get();
+  }
+
   bool supportedNode(Node* n) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     bool no_mutation;
-    if (aliasDb_) {
-      no_mutation = !aliasDb_->hasWriters(n);
+    if (aliasing_types_) {
+      no_mutation = !getOrCreateAliasDb()->hasWriters(n);
     } else {
       no_mutation =
           noMutableValues(n->inputs()) && noMutableValues(n->outputs());
     }
     return no_mutation && !n->kind().is_onnx() &&
         skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
-        !n->hasSideEffects() && n->blocks().size() == 0;
+        !n->hasSideEffects() && n->blocks().empty();
   }
 
   void ConstantPropagation(at::ArrayRef<Block*> blocks) {
@@ -320,10 +369,13 @@ struct ConstantPropagator {
   }
 
   void ConstantPropagation(Node* n) {
-    bool runnable_inputs = runnableInputs(n);
+    bool constant_inputs =
+        std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
+          return v->node()->kind() == prim::Constant;
+        });
     if (n->kind() == prim::If) {
       // inline node if we can, otherwise check for simplified outputs
-      if (runnable_inputs) {
+      if (constant_inputs) {
         inlineIf(n);
       } else {
         ConstantPropagation(n->blocks());
@@ -336,7 +388,7 @@ struct ConstantPropagator {
         ConstantPropagation(n->blocks());
         removeExtraLoopOutputs(n);
       }
-    } else if (runnable_inputs && supportedNode(n)) {
+    } else if (constant_inputs && supportedNode(n)) {
       propagateNode(n);
     } else {
       ConstantPropagation(n->blocks());
@@ -352,22 +404,35 @@ struct ConstantPropagator {
   }
 
   std::shared_ptr<Graph> graph_;
-  std::unique_ptr<AliasDb> aliasDb_;
+  // lazily initialized if using aliasing_types, otherwise not initialized
+  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
+  bool aliasing_types_;
+  bool made_change_ = false;
+  bool ignore_custom_classes_;
 };
 } // anonymous namespace
 
-void ConstantPropagation(std::shared_ptr<Graph>& graph) {
-  ConstantPropagator cp = ConstantPropagator::WithAliasDb(graph);
-  cp.run();
-  EliminateDeadCode(graph);
+bool ConstantPropagation(
+    std::shared_ptr<Graph>& graph,
+    bool ignore_custom_classes) {
+  ConstantPropagator cp =
+      ConstantPropagator::WithAliasDb(graph, ignore_custom_classes);
+  bool made_change = cp.run();
+  if (made_change) {
+    EliminateDeadCode(graph);
+  }
   GRAPH_DUMP("After ConstantPropagation: ", graph);
+  return made_change;
 }
 
-void ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
+bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
   ConstantPropagator cp = ConstantPropagator::NoAliasDb(graph);
-  cp.run();
-  EliminateDeadCode(graph);
-  GRAPH_DUMP("After ConstantPropagation: ", graph);
+  bool made_change = cp.run();
+  if (made_change) {
+    EliminateDeadCode(graph);
+  }
+  GRAPH_DUMP("After ConstantPropagationImmutableTypes: ", graph);
+  return made_change;
 }
 
 } // namespace jit

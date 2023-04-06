@@ -1,72 +1,94 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
+
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
+#include <ATen/TensorOperators.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/rsqrt.h>
+#include <ATen/ops/zeros_like.h>
+#endif
+
 #include <stack>
+#include <utility>
 
 namespace torch {
 namespace jit {
 
+std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
+    const ConvBNParameters& p) {
+  at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
+  const int64_t ndim = p.conv_w.dim();
+  at::DimVector sizes(ndim, 1);
+  sizes.at(0) = -1;
+
+  auto conv_w_dtype = p.conv_w.dtype();
+  auto conv_b_dtype = p.conv_b.dtype();
+
+  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape(sizes);
+  at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
+  return std::make_tuple(new_w.to(conv_w_dtype), new_b.to(conv_b_dtype));
+}
+
 namespace {
 using graph_rewrite_helper::PatternInfo;
-
-struct ConvBNParameters {
-  at::Tensor conv_w;
-  at::Tensor conv_b;
-  at::Tensor bn_rm;
-  at::Tensor bn_rv;
-  double bn_eps = 0.0;
-  at::Tensor bn_w;
-  at::Tensor bn_b;
-};
 
 static bool hastensor(Module& m, const char* name) {
   return m.hasattr(name) && m.attr(name).isTensor();
 }
 
 void replaceConvBiasWithGetAttr(Module& module) {
-  auto graph = module.get_method("forward").graph();
-  // Only looks fors _convolution pattern.
-  // Thus assumes that tracing will have always gotten rid of aten::conv2d or
-  // aten::conv3d. If it did not, BN folding will fail.
-  const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
-      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
-          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
-          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
-        %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
-            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled, %allow_tf32)
-        return (%conv_out) )");
-  const PatternInfo& pattern_convolution_deprecated =
-      PatternInfo::parse_from_str(R"(
-      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
-          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
-          %deterministic:bool, %cudnn_enabled:bool):
-        %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
-            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
-        return (%conv_out) )");
-  auto replace_pattern = [&](const PatternInfo& pattern_convolution) {
-    const Graph& pattern_convolution_graph = *pattern_convolution.pattern_graph;
-    const auto& convolution_vmap = pattern_convolution.vmap;
+  for (const auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    // Only looks for _convolution pattern.
+    // Thus assumes that tracing will have always gotten rid of aten::conv2d or
+    // aten::conv3d. If it did not, BN folding will fail.
+    const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
+        graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+            %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+            %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
+          %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
+              %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled, %allow_tf32)
+          return (%conv_out) )");
+    const PatternInfo& pattern_convolution_deprecated =
+        PatternInfo::parse_from_str(R"(
+        graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+            %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+            %deterministic:bool, %cudnn_enabled:bool):
+          %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
+              %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
+          return (%conv_out) )");
+    auto replace_pattern = [&](const PatternInfo& pattern_convolution) {
+      const Graph& pattern_convolution_graph =
+          *pattern_convolution.pattern_graph;
+      const auto& convolution_vmap = pattern_convolution.vmap;
 
-    const auto& matches = findPatternMatches(pattern_convolution_graph, *graph);
-    for (const auto& match : matches) {
-      // We come here only if the bias was not present in the module.
-      // In that case, the corresponding graph will not have getAttr("bias")
-      // Insert that in the graph.
-      // And change _convolution to take the new value.
-      auto conv_node =
-          match.values_map.at(convolution_vmap.at("conv_out"))->node();
-      WithInsertPoint ins(conv_node);
-      Value* bias_attr_val = graph->insertGetAttr(graph->inputs()[0], "bias")
-                                 ->setType(TensorType::get());
-      constexpr size_t conv_bias_index = 2;
-      conv_node->replaceInput(conv_bias_index, bias_attr_val);
-    }
-  };
-  replace_pattern(pattern_convolution);
-  replace_pattern(pattern_convolution_deprecated);
+      const auto& matches =
+          findPatternMatches(pattern_convolution_graph, *graph);
+      for (const auto& match : matches) {
+        // We come here only if the bias was not present in the module.
+        // In that case, the corresponding graph will not have getAttr("bias")
+        // Insert that in the graph.
+        // And change _convolution to take the new value.
+        auto conv_node =
+            match.values_map.at(convolution_vmap.at("conv_out"))->node();
+        WithInsertPoint ins(conv_node);
+        Value* bias_attr_val = graph->insertGetAttr(graph->inputs()[0], "bias")
+                                   ->setType(TensorType::get());
+        constexpr size_t conv_bias_index = 2;
+        conv_node->replaceInput(conv_bias_index, bias_attr_val);
+      }
+    };
+    replace_pattern(pattern_convolution);
+    replace_pattern(pattern_convolution_deprecated);
+  }
 }
 
 void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
@@ -82,9 +104,9 @@ void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
   if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {
       auto optional_tensor_type = OptionalType::create(TensorType::get());
-      t->addAttribute("bias", optional_tensor_type, true);
+      t->addAttribute("bias", std::move(optional_tensor_type), true);
       auto optional_tensor = c10::optional<at::Tensor>();
-      module.setattr("bias", optional_tensor);
+      module.setattr("bias", std::move(optional_tensor));
       replaceConvBiasWithGetAttr(module);
     }
   }
@@ -115,16 +137,6 @@ class FoldConvBatchNormHelper {
       Module& bn,
       ConvBNParameters& r);
 
-  /**
-   * Given the current weight and bias tensors of a Conv module and parameters
-   * of the BatchNorm module we're folding with, compute the updated values
-   * for the weight and bias.
-   *
-   * The function is basically copied from torch/nn/utils/fusion.py
-   */
-  std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
-      const ConvBNParameters& p);
-
   std::unordered_map<ModulePtr, std::tuple<at::Tensor, at::Tensor>>
       conv_module_and_params_;
 
@@ -148,17 +160,6 @@ class FoldConvBatchNormHelper {
   std::vector<Value*> values_to_rewrite_;
   std::unordered_set<Node*> nodes_to_delete_;
 };
-
-std::tuple<at::Tensor, at::Tensor> FoldConvBatchNormHelper::
-    computeUpdatedConvWeightAndBias(const ConvBNParameters& p) {
-  at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
-  const int64_t ndim = p.conv_w.dim();
-  at::DimVector sizes(ndim, 1);
-  sizes.at(0) = -1;
-  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape(sizes);
-  at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
-  return std::make_tuple(new_w, new_b);
-}
 
 bool extractOptionalBNParams(const script::Module& bn, ConvBNParameters& r) {
   auto bn_forward = bn.get_method("forward");
@@ -310,8 +311,7 @@ void FoldConvBatchNormHelper::analyze(
                 "Conv and BN modules didn't have all required parameters or attributes...");
             continue;
           }
-          conv_bn_paths_[g].push_back(
-              std::make_tuple(conv_module_path, bn_module_path));
+          conv_bn_paths_[g].emplace_back(conv_module_path, bn_module_path);
           // We are using a separate vector for saving Values we want to rewrite
           // to make sure that the order in which we perform these
           // transformations is deterministic. Iterating through keys of

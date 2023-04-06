@@ -1,15 +1,17 @@
 #include <torch/csrc/cuda/python_nccl.h>
 
+#include <ATen/core/functional.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
-#include <ATen/core/functional.h>
+#include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 #include <unordered_map>
@@ -51,7 +53,9 @@ static void destroy_nccl_comm(PyObject* capsule) {
   END_HANDLE_TH_ERRORS_RET()
 }
 
-static std::vector<c10::optional<at::cuda::CUDAStream>> unpack_streams(PyObject* obj, size_t size) {
+static std::vector<c10::optional<at::cuda::CUDAStream>> unpack_streams(
+    PyObject* obj,
+    size_t size) {
   if (obj == Py_None) {
     return std::vector<c10::optional<at::cuda::CUDAStream>>(size, c10::nullopt);
   }
@@ -79,7 +83,7 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
       throw python_error();
     auto size = PySequence_Fast_GET_SIZE(seq.get());
     comms = std::vector<ncclComm_t>(size);
-    for (int64_t i = 0; i < size; i++) {
+    for (const auto i : c10::irange(size)) {
       comms[i] = unpack_nccl_comm(PySequence_Fast_GET_ITEM(seq.get(), i));
     }
   }
@@ -124,14 +128,7 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   int root, op;
 
   if (!PyArg_ParseTuple(
-          args,
-          "OOiiOO",
-          &_inputs,
-          &_output,
-          &root,
-          &op,
-          &_streams,
-          &_comms)) {
+          args, "OOiiOO", &_inputs, &_output, &root, &op, &_streams, &_comms)) {
     THPUtils_invalidArguments(
         args,
         nullptr,
@@ -144,7 +141,8 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
   auto output = extract_tensor(_output);
-  std::vector<c10::optional<at::cuda::CUDAStream>> streams = unpack_streams(_streams, inputs.size());
+  std::vector<c10::optional<at::cuda::CUDAStream>> streams =
+      unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
   {
@@ -282,30 +280,30 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static inline
-at::Tensor extract_tensor(PyObject* obj) {
+static inline at::Tensor extract_tensor(PyObject* obj) {
   if (!THPVariable_Check(obj)) {
     throw torch::TypeError("expected Tensor (got %s)", Py_TYPE(obj)->tp_name);
   }
-  return ((THPVariable*)obj)->cdata;
+  return THPVariable_Unpack(obj);
 }
 
-static inline
-std::vector<at::Tensor> extract_tensors(PyObject* obj) {
+static inline std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   auto seq = THPObjectPtr(PySequence_Fast(obj, "expected a sequence"));
   if (!seq)
     throw python_error();
 
+  const Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
   std::vector<at::Tensor> list;
-  Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
+  if (length >= 0) {
+    list.reserve(length);
+  }
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject* item = PySequence_Fast_GET_ITEM(seq.get(), i);
     if (!THPVariable_Check(item)) {
       throw torch::TypeError(
           "expected Tensor at %d (got %s)", (int)i, Py_TYPE(item)->tp_name);
     }
-    auto var = (THPVariable*)item;
-    list.emplace_back(var->cdata);
+    list.emplace_back(THPVariable_Unpack(item));
   }
   return list;
 }

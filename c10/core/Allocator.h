@@ -38,6 +38,9 @@ class C10_API DataPtr {
   void* get() const {
     return ptr_.get();
   }
+  void* mutable_get() {
+    return ptr_.get();
+  }
   void* get_context() const {
     return ptr_.get_context();
   }
@@ -94,7 +97,9 @@ class C10_API DataPtr {
    * be; be sure to read the source code of the Allocator
    * in question to confirm this.
    */
-  C10_NODISCARD bool compare_exchange_deleter(DeleterFnPtr expected_deleter, DeleterFnPtr new_deleter) {
+  C10_NODISCARD bool compare_exchange_deleter(
+      DeleterFnPtr expected_deleter,
+      DeleterFnPtr new_deleter) {
     return ptr_.compare_exchange_deleter(expected_deleter, new_deleter);
   }
   Device device() const {
@@ -215,24 +220,58 @@ struct AllocatorRegisterer {
   }
 };
 
-#define REGISTER_ALLOCATOR(t, f)                    \
-  namespace {                                       \
-  static AllocatorRegisterer<t> g_allocator_d(f); \
+#define REGISTER_ALLOCATOR(t, f)                       \
+  namespace {                                          \
+  static c10::AllocatorRegisterer<t> g_allocator_d(f); \
   }
 
 // An interface for reporting thread local memory usage
 // per device
 struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
   MemoryReportingInfoBase();
-  virtual ~MemoryReportingInfoBase() {}
+  ~MemoryReportingInfoBase() override = default;
 
-  // Negative alloc_size corresponds to freeing of the memory
-  virtual void reportMemoryUsage(void* ptr, int64_t alloc_size, Device device) = 0;
+  /**
+   * alloc_size corresponds to the size of the ptr.
+   *
+   * total_allocated corresponds to total allocated memory.
+   *
+   * total_reserved corresponds to total size of memory pool, both used and
+   * unused, if applicable.
+   */
+  virtual void reportMemoryUsage(
+      void* ptr,
+      int64_t alloc_size,
+      size_t total_allocated,
+      size_t total_reserved,
+      Device device) = 0;
+
+  virtual void reportOutOfMemory(
+      int64_t alloc_size,
+      size_t total_allocated,
+      size_t total_reserved,
+      Device device);
 
   virtual bool memoryProfilingEnabled() const = 0;
 };
 
 C10_API bool memoryProfilingEnabled();
-C10_API void reportMemoryUsageToProfiler(void* ptr, int64_t alloc_size, Device device);
+C10_API void reportMemoryUsageToProfiler(
+    void* ptr,
+    int64_t alloc_size,
+    size_t total_allocated,
+    size_t total_reserved,
+    Device device);
+
+C10_API void reportOutOfMemoryToProfiler(
+    int64_t alloc_size,
+    size_t total_allocated,
+    size_t total_reserved,
+    Device device);
+
+// used to hold traceback information in allocators
+struct GatheredContext {
+  virtual ~GatheredContext() = default;
+};
 
 } // namespace c10

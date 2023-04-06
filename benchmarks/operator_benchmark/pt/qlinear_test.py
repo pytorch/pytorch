@@ -2,10 +2,10 @@
 import operator_benchmark as op_bench
 
 import torch
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 
-from . import configs
+from pt import configs
 
 """
 Microbenchmarks for Quantized Linear operators.
@@ -26,21 +26,25 @@ class _QLinearBenchmarkBase(op_bench.TorchBenchmarkBase):
         self.qlinear.scale = scale
         self.qlinear.zero_point = zero_point
 
-    def forward(self):
+    def forward(self, input):
         # Assume that the `self.input` is set in the child
-        return self.qlinear(self.input)
+        return self.qlinear(input)
 
 class QLinearBenchmark(_QLinearBenchmarkBase):
     def init(self, N, IN, OUT, device):
-        super(QLinearBenchmark, self).init(N, IN, OUT, nnq.Linear(IN, OUT))
-        self.input = self.qX
+        super().init(N, IN, OUT, nnq.Linear(IN, OUT))
+        self.inputs = {
+            "input": self.qX
+        }
         self.set_module_name("QLinear")
 
 
 class QDynamicLinearBenchmark(_QLinearBenchmarkBase):
     def init(self, N, IN, OUT, device):
-        super(QDynamicLinearBenchmark, self).init(N, IN, OUT, nnqd.Linear(IN, OUT))
-        self.input = self.X
+        super().init(N, IN, OUT, nnqd.Linear(IN, OUT))
+        self.inputs = {
+            "input": self.X
+        }
         self.set_module_name("QDynamicLinear")
 
 

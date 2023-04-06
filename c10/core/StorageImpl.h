@@ -2,84 +2,115 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/SymInt.h>
+#include <c10/core/impl/PyObjectSlot.h>
 
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
 
-struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
+// A storage represents the underlying backing data buffer for a
+// tensor.  This concept was inherited from the original Torch7
+// codebase; we'd kind of like to get rid of the concept
+// (see https://github.com/pytorch/pytorch/issues/14797) but
+// it's hard work and no one has gotten around to doing it.
+//
+// NB: storage is supposed to uniquely own a data pointer; e.g.,
+// two non-null data pointers alias if and only if they are from
+// the same storage.  Technically you can violate this invariant
+// (e.g., you can create a non-owning StorageImpl with at::from_blob)
+// but a lot of things won't work correctly, including:
+//
+// - An ordinary deleter on such a storage is wrong, because normal deleters
+//   assume unique ownership, but if you have two storages at the same data,
+//   that implies there is some sort of shared ownership. So your deleter would
+//   have to actually be internally doing some sort of refcount thing
+// - Deepcopy in Python side relies on storage equality and not data pointer
+//   equality; so if there are two separate storages pointing to the same data,
+//   the data will actually get duplicated in that case (one data ptr before,
+//   two data ptrs after)
+// - Version counts won't work correctly, because we do all VC tracking at the
+//   level of storages (unless you explicitly disconnect the VC with detach);
+//   mutation because data pointers are the same are totally untracked
+struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   struct use_byte_size_t {};
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
-      size_t size_bytes,
+      use_byte_size_t /*use_byte_size*/,
+      SymInt size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable)
       : data_ptr_(std::move(data_ptr)),
-        size_bytes_(size_bytes),
+        size_bytes_(std::move(size_bytes)),
+        size_bytes_is_symbolic_(size_bytes_.is_symbolic()),
         resizable_(resizable),
         received_cuda_(false),
         allocator_(allocator) {
     if (resizable) {
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT(
           allocator_, "For resizable storage, allocator must be provided");
     }
   }
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
-      size_t size_bytes,
+      use_byte_size_t /*use_byte_size*/,
+      SymInt size_bytes,
       at::Allocator* allocator,
       bool resizable)
       : StorageImpl(
             use_byte_size_t(),
             size_bytes,
-            allocator->allocate(size_bytes),
+            size_bytes.is_symbolic()
+                ? allocator->allocate(0)
+                : allocator->allocate(size_bytes.as_int_unchecked()),
             allocator,
             resizable) {}
 
-  StorageImpl& operator=(StorageImpl&& other) = default;
+  StorageImpl& operator=(StorageImpl&& other) = delete;
   StorageImpl& operator=(const StorageImpl&) = delete;
   StorageImpl() = delete;
-  StorageImpl(StorageImpl&& other) = default;
+  StorageImpl(StorageImpl&& other) = delete;
   StorageImpl(const StorageImpl&) = delete;
-  ~StorageImpl() = default;
+  ~StorageImpl() override = default;
 
   void reset() {
     data_ptr_.clear();
     size_bytes_ = 0;
+    size_bytes_is_symbolic_ = false;
   }
 
-  template <typename T>
-  inline T* data() const {
-    return unsafe_data<T>();
-  }
-
-  template <typename T>
-  inline T* unsafe_data() const {
-    return static_cast<T*>(this->data_ptr_.get());
-  }
-
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     data_ptr_.clear();
   }
 
   size_t nbytes() const {
+    TORCH_CHECK(!size_bytes_is_symbolic_);
+    return size_bytes_.as_int_unchecked();
+  }
+
+  SymInt sym_nbytes() const {
     return size_bytes_;
   }
 
   // TODO: remove later
   void set_nbytes(size_t size_bytes) {
     size_bytes_ = size_bytes;
+    size_bytes_is_symbolic_ = false;
+  }
+
+  void set_nbytes(c10::SymInt size_bytes) {
+    size_bytes_ = std::move(size_bytes);
   }
 
   bool resizable() const {
     return resizable_;
   };
 
-  at::DataPtr& data_ptr() {
+  at::DataPtr& mutable_data_ptr() {
     return data_ptr_;
   };
 
@@ -89,17 +120,21 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
 
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
-    std::swap(data_ptr_, data_ptr);
-    return std::move(data_ptr);
+    at::DataPtr old_data_ptr(std::move(data_ptr_));
+    data_ptr_ = std::move(data_ptr);
+    return old_data_ptr;
   };
 
-  // TODO: Return const ptr eventually if possible
-  void* data() {
+  void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
+    data_ptr_ = std::move(data_ptr);
+  }
+
+  const void* data() const {
     return data_ptr_.get();
   }
 
-  void* data() const {
-    return data_ptr_.get();
+  void* mutable_data() {
+    return data_ptr_.mutable_get();
   }
 
   at::DeviceType device_type() const {
@@ -153,6 +188,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
       size_t size_bytes) {
     data_ptr_ = std::move(data_ptr);
     size_bytes_ = size_bytes;
+    size_bytes_is_symbolic_ = false;
     allocator_ = nullptr;
     resizable_ = false;
   }
@@ -169,11 +205,13 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
 
  private:
   DataPtr data_ptr_;
-  size_t size_bytes_;
+  SymInt size_bytes_;
+  bool size_bytes_is_symbolic_;
   bool resizable_;
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
   Allocator* allocator_;
+  impl::PyObjectSlot pyobj_slot_;
 };
 } // namespace c10

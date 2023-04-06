@@ -1,20 +1,22 @@
+#include <c10/util/Exception.h>
+#include <c10/util/ThreadLocal.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
+
+#include <utility>
 
 namespace c10 {
 
-namespace {
-thread_local std::shared_ptr<ThreadLocalDebugInfo> debug_info = nullptr;
-}
+C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
+#define debug_info (tls_debug_info.get())
 
 /* static */
-std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::get(
-    DebugInfoKind kind) {
-  auto cur = debug_info;
+DebugInfoBase* ThreadLocalDebugInfo::get(DebugInfoKind kind) {
+  ThreadLocalDebugInfo* cur = debug_info.get();
   while (cur) {
     if (cur->kind_ == kind) {
-      return cur->info_;
+      return cur->info_.get();
     }
-    cur = cur->parent_info_;
+    cur = cur->parent_info_.get();
   }
   return nullptr;
 }
@@ -26,8 +28,8 @@ std::shared_ptr<ThreadLocalDebugInfo> ThreadLocalDebugInfo::current() {
 
 /* static */
 void ThreadLocalDebugInfo::_forceCurrentDebugInfo(
-    const std::shared_ptr<ThreadLocalDebugInfo>& info) {
-  debug_info = info;
+    std::shared_ptr<ThreadLocalDebugInfo> info) {
+  debug_info = std::move(info);
 }
 
 /* static */
@@ -38,14 +40,15 @@ void ThreadLocalDebugInfo::_push(
   debug_info = std::make_shared<ThreadLocalDebugInfo>();
   debug_info->parent_info_ = prev_info;
   debug_info->kind_ = kind;
-  debug_info->info_ = info;
+  debug_info->info_ = std::move(info);
 }
 
 /* static */
 std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_pop(DebugInfoKind kind) {
   TORCH_CHECK(
       debug_info && debug_info->kind_ == kind,
-      "Expected debug info of type ", (size_t)kind);
+      "Expected debug info of type ",
+      (size_t)kind);
   auto res = debug_info;
   debug_info = debug_info->parent_info_;
   return res->info_;
@@ -60,14 +63,14 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_peek(DebugInfoKind kind) {
   return debug_info->info_;
 }
 
-
 DebugInfoGuard::DebugInfoGuard(
-    DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info) {
+    DebugInfoKind kind,
+    std::shared_ptr<DebugInfoBase> info) {
   if (!info) {
     return;
   }
   prev_info_ = debug_info;
-  ThreadLocalDebugInfo::_push(kind, info);
+  ThreadLocalDebugInfo::_push(kind, std::move(info));
   active_ = true;
 }
 
@@ -80,13 +83,12 @@ DebugInfoGuard::~DebugInfoGuard() {
 // Used only for setting a debug info after crossing the thread boundary;
 // in this case we assume that thread pool's thread does not have an
 // active debug info
-DebugInfoGuard::DebugInfoGuard(
-    std::shared_ptr<ThreadLocalDebugInfo> info) {
+DebugInfoGuard::DebugInfoGuard(std::shared_ptr<ThreadLocalDebugInfo> info) {
   if (!info) {
     return;
   }
-  prev_info_ = debug_info;
-  debug_info = info;
+  prev_info_ = std::move(debug_info);
+  debug_info = std::move(info);
   active_ = true;
 }
 

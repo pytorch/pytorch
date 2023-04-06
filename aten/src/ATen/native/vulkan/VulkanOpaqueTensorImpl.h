@@ -11,7 +11,7 @@ template <typename OpaqueHandle>
 struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
   VulkanOpaqueTensorImpl(
       at::DispatchKeySet key_set,
-      const caffe2::TypeMeta& data_type,
+      const caffe2::TypeMeta data_type,
       c10::Device device,
       OpaqueHandle opaque_handle,
       c10::IntArrayRef sizes,
@@ -21,25 +21,29 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             data_type,
             device,
             opaque_handle,
-            sizes),
+            sizes,
+            false),
         strides_(strides.vec()) {}
 
-  IntArrayRef strides() const override {
+  IntArrayRef strides_custom() const override {
     return strides_;
   }
 
-  bool is_contiguous(
-      c10::MemoryFormat memory_format =
-          c10::MemoryFormat::Contiguous) const override {
+  SymIntArrayRef sym_strides_custom() const override {
+    return c10::fromIntArrayRefKnownNonNegative(strides_);
+  }
+
+  bool is_contiguous_custom(c10::MemoryFormat memory_format) const override {
     return true;
   }
 
-  int64_t stride(int64_t d) const override {
-    d = at::maybe_wrap_dim(d, this->dim(), false);
-    return strides_[d];
+ private:
+  const char* tensorimpl_type_name() const override {
+    return "VulkanOpaqueTensorImpl";
   }
 
- private:
+  // TODO: storing strides separately is unnecessary, the base TensorImpl
+  // has space for them
   SmallVector<int64_t, 5> strides_;
 };
 

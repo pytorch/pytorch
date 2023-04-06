@@ -1,37 +1,43 @@
 #import "ViewController.h"
-#import <torch/script.h>
+
+
+#ifdef BUILD_LITE_INTERPRETER
 #import "Benchmark.h"
+#endif
 
 @interface ViewController ()
-@property(weak, nonatomic) IBOutlet UITextView* textView;
-
+@property(nonatomic, strong) UITextView* textView;
 @end
 
-@implementation ViewController {
-}
+@implementation ViewController
 
 - (void)viewDidLoad {
   [super viewDidLoad];
 
-  NSError* err;
-  NSData* configData = [NSData
-      dataWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"config" ofType:@"json"]];
+#ifdef BUILD_LITE_INTERPRETER
+  self.textView = [[UITextView alloc] initWithFrame:self.view.bounds];
+  self.textView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  [self.view addSubview:self.textView];
+
+  NSData* configData = [NSData dataWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"config" ofType:@"json"]];
   if (!configData) {
     NSLog(@"Config.json not found!");
     return;
   }
-  NSDictionary* config = [NSJSONSerialization JSONObjectWithData:configData
-                                                         options:NSJSONReadingAllowFragments
-                                                           error:&err];
 
+  NSError* err;
+  NSDictionary* config = [NSJSONSerialization JSONObjectWithData:configData options:NSJSONReadingAllowFragments error:&err];
   if (err) {
     NSLog(@"Parse config.json failed!");
     return;
   }
+
   [Benchmark setup:config];
   [self runBenchmark];
+#endif
 }
 
+#ifdef BUILD_LITE_INTERPRETER
 - (void)runBenchmark {
   self.textView.text = @"Start benchmarking...\n";
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -41,12 +47,6 @@
     });
   });
 }
-
-- (IBAction)reRun:(id)sender {
-  self.textView.text = @"";
-  dispatch_async(dispatch_get_main_queue(), ^{
-    [self runBenchmark];
-  });
-}
+#endif
 
 @end

@@ -13,7 +13,6 @@ bool LpNormOp<float, CPUContext>::RunOnDevice() {
   auto* norm = Output(0, {1}, at::dtype<float>());
   const float* X_data = X.data<float>();
   const float size = average_ ? (float)X.numel() : 1.0f;
-  CAFFE_ENFORCE_GT(size, 0);
   if (p_ == 1) {
     *(norm->template mutable_data<float>()) =
         (ConstEigenVectorMap<float>(X_data, X.numel()).array()).abs().sum() /
@@ -153,7 +152,7 @@ supports l1 and l2 norm) determined by the argument p.
     .Arg("p", "Order of the norm in p-norm")
     .Arg(
         "average",
-        "whehther we calculate norm or averaged_norm."
+        "whether we calculate norm or averaged_norm."
         "The Lp_averaged_norm(x) is defined as"
         "Lp_averaged_normgradient(x) = LpNormGradient(x) / size(x)");
 

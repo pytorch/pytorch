@@ -17,12 +17,9 @@ from caffe2.python.modeling.net_modifier import NetModifier
 from caffe2.python.optimizer import get_param_device, Optimizer
 from caffe2.python.regularizer import Regularizer, RegularizationBy
 from caffe2.python.layers import layers
-from caffe2.proto import caffe2_pb2
-from future.utils import viewitems, viewvalues
 
 import logging
 import numpy as np
-import six
 import copy
 logger = logging.getLogger(__name__)
 
@@ -50,7 +47,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             This attribute access will be consistent with MTML model.
         '''
 
-        super(LayerModelHelper, self).__init__(name=name)
+        super().__init__(name=name)
         self._layer_names = set()
         self._layers = []
         self._param_to_shape = {}
@@ -125,7 +122,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
     def add_ad_hoc_plot_blob(self, blob, dtype=None):
         assert isinstance(
-            blob, (six.string_types, core.BlobReference)
+            blob, (str, core.BlobReference)
         ), "expect type str or BlobReference, but got {}".format(type(blob))
         dtype = dtype or (np.float, (1, ))
         self.add_metric_field(str(blob), schema.Scalar(dtype, blob))
@@ -173,7 +170,7 @@ class LayerModelHelper(model_helper.ModelHelper):
     def add_global_constant(
         self, name, array=None, dtype=None, initializer=None
     ):
-        assert isinstance(name, six.string_types), (
+        assert isinstance(name, str), (
             'name should be a string as we are using it as map key')
         # This is global namescope for constants. They will be created in all
         # init_nets and there should be very few of them.
@@ -224,7 +221,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         self.add_global_constant('ZERO_RANGE', [0, 0], dtype='int32')
 
     def _add_global_constants(self, init_net):
-        for initializer_op in viewvalues(self.global_constant_initializers):
+        for initializer_op in self.global_constant_initializers.values():
             init_net._net.op.extend([initializer_op])
 
     def create_init_net(self, name):
@@ -310,7 +307,7 @@ class LayerModelHelper(model_helper.ModelHelper):
                      ps_param=None, regularizer=None):
         if isinstance(param_name, core.BlobReference):
             param_name = str(param_name)
-        elif isinstance(param_name, six.string_types):
+        elif isinstance(param_name, str):
             # Parameter name will be equal to current Namescope that got
             # resolved with the respect of parameter sharing of the scopes.
             param_name = parameter_sharing_context.get_parameter_name(
@@ -634,7 +631,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         blob_to_device=None,
     ):
         logger.info("apply regularizer on loss")
-        for param, regularizer in viewitems(self.param_to_reg):
+        for param, regularizer in self.param_to_reg.items():
             if regularizer is None:
                 continue
             logger.info("add regularizer {0} for param {1} to loss".format(regularizer, param))
@@ -659,7 +656,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}
-        for param, regularizer in viewitems(self.param_to_reg):
+        for param, regularizer in self.param_to_reg.items():
             if regularizer is None:
                 continue
             assert isinstance(regularizer, Regularizer)
@@ -715,7 +712,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}
-        for param, optimizer in viewitems(self.param_to_optim):
+        for param, optimizer in self.param_to_optim.items():
             assert optimizer is not None, \
                 "default optimizer must have been set in add_layer"
             # note that not all params has gradient and thus we sent None if
@@ -750,6 +747,6 @@ class LayerModelHelper(model_helper.ModelHelper):
         # TODO(xlwang): provide more rich feature information in breakdown_map;
         # and change the assertion accordingly
         assert isinstance(breakdown_map, dict)
-        assert all(isinstance(k, six.string_types) for k in breakdown_map)
+        assert all(isinstance(k, str) for k in breakdown_map)
         assert sorted(breakdown_map.values()) == list(range(len(breakdown_map)))
         self._breakdown_map = breakdown_map

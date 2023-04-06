@@ -6,6 +6,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
 
+__all__ = ['ExpRelaxedCategorical', 'RelaxedOneHotCategorical']
 
 class ExpRelaxedCategorical(Distribution):
     r"""
@@ -21,7 +22,7 @@ class ExpRelaxedCategorical(Distribution):
     Args:
         temperature (Tensor): relaxation temperature
         probs (Tensor): event probabilities
-        logits (Tensor): the log probability of each event.
+        logits (Tensor): unnormalized log probability for each event
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables
     (Maddison et al, 2017)
@@ -30,8 +31,8 @@ class ExpRelaxedCategorical(Distribution):
     (Jang et al, 2017)
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
-    support = constraints.real
+                       'logits': constraints.real_vector}
+    support = constraints.real_vector  # The true support is actually a submanifold of this.
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
@@ -39,7 +40,7 @@ class ExpRelaxedCategorical(Distribution):
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(ExpRelaxedCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(ExpRelaxedCategorical, _instance)
@@ -93,30 +94,29 @@ class RelaxedOneHotCategorical(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = RelaxedOneHotCategorical(torch.tensor([2.2]),
-                                         torch.tensor([0.1, 0.2, 0.3, 0.4]))
+        ...                              torch.tensor([0.1, 0.2, 0.3, 0.4]))
         >>> m.sample()
         tensor([ 0.1294,  0.2324,  0.3859,  0.2523])
 
     Args:
         temperature (Tensor): relaxation temperature
         probs (Tensor): event probabilities
-        logits (Tensor): the log probability of each event.
+        logits (Tensor): unnormalized log probability for each event
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
+                       'logits': constraints.real_vector}
     support = constraints.simplex
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
-        base_dist = ExpRelaxedCategorical(temperature, probs, logits)
-        super(RelaxedOneHotCategorical, self).__init__(base_dist,
-                                                       ExpTransform(),
-                                                       validate_args=validate_args)
+        base_dist = ExpRelaxedCategorical(temperature, probs, logits, validate_args=validate_args)
+        super().__init__(base_dist, ExpTransform(), validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(RelaxedOneHotCategorical, _instance)
-        return super(RelaxedOneHotCategorical, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     @property
     def temperature(self):

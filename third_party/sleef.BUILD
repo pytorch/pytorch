@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-load("@//third_party:sleef.bzl", "sleef_cc_library")
+load("@pytorch//third_party:sleef.bzl", "sleef_cc_library")
 
 SLEEF_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
@@ -10,17 +10,11 @@ SLEEF_COPTS = [
     "-DDNNL_CPU_RUNTIME=TBB",
     "-DONNX_ML=1",
     "-DONNX_NAMESPACE=onnx",
-    "-DTH_BLAS_MKL",
     "-D_FILE_OFFSET_BITS=64",
     "-ffp-contract=off",
     "-fno-math-errno",
     "-fno-trapping-math",
     "-DCAFFE2_USE_GLOO",
-    "-DCUDA_HAS_FP16=1",
-    "-DHAVE_GCC_GET_CPUID",
-    "-DUSE_AVX",
-    "-DUSE_AVX2",
-    "-DTH_HAVE_THREAD",
     "-std=gnu99",
 ]
 
@@ -178,12 +172,12 @@ genrule(
 genrule(
     name = "sleef_h",
     srcs = [
-        "src/libm/sleeflibm_header.h.org",
+        "src/libm/sleeflibm_header.h.org.in",
         "src/libm/sleeflibm_footer.h.org",
     ],
     outs = ["build/include/sleef.h"],
     cmd = "{ " + "; ".join([
-        "cat $(location src/libm/sleeflibm_header.h.org)",
+        "cat $(location src/libm/sleeflibm_header.h.org.in)",
         "$(location :mkrename) cinz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__",
         "$(location :mkrename) cinz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__ sse2",
         "$(location :mkrename) cinz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__ sse4",

@@ -1,11 +1,13 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/FunctionOfAMatrixUtils.h>
 
+#include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCAtomics.cuh>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -37,8 +39,7 @@ void _lauch_kernel(int total_n_elems, const func_t& f) {
   auto stream = at::cuda::getCurrentCUDAStream();
   _elemwise_kernel<n_threads, n_elems_per_thread, func_t>
     <<<grid, block, 0, stream>>>(total_n_elems, f);
-
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename scalar_t>
@@ -86,7 +87,7 @@ void _compute_linear_combination_internal_kernel(
     }
   };
 
-  _lauch_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+  _lauch_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
 }
 
 void _compute_linear_combination_cuda_kernel(
@@ -110,4 +111,4 @@ void _compute_linear_combination_cuda_kernel(
 
 REGISTER_DISPATCH(_compute_linear_combination_stub, &_compute_linear_combination_cuda_kernel);
 
-}} // namespace at::native
+} // namespace at::native

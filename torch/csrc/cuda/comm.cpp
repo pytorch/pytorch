@@ -12,6 +12,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <cstddef>
@@ -26,15 +27,18 @@ using namespace torch::autograd;
 // of a single type only. Adding this logic directly in the loop makes it a bit
 // ugly, so here's a helper for it.
 struct unique_type_checker {
-  void show(const at::DeprecatedTypeProperties& t) {
-    if (!unique)
+  void show(size_t type_id) {
+    if (!unique) {
       return;
-    if (!type)
-      type = &t;
-    unique = (type == &t);
+    }
+    if (!type_id_) {
+      type_id_ = type_id;
+    }
+
+    unique = type_id_.value() == type_id;
   }
 
-  const at::DeprecatedTypeProperties* type = nullptr;
+  c10::optional<size_t> type_id_;
   bool unique = true;
 };
 
@@ -50,9 +54,9 @@ static inline std::vector<Tensor>& _broadcast_out_impl(
 #ifdef USE_NCCL
   std::vector<Tensor> nccl_list;
   nccl_list.reserve(out_tensors.size() + 1);
-  nccl_list.push_back(tensor);
+  nccl_list.emplace_back(tensor);
   for (auto& out_tensor : out_tensors) {
-    nccl_list.push_back(out_tensor);
+    nccl_list.emplace_back(out_tensor);
   }
   if (nccl::is_available(nccl_list)) {
     nccl::broadcast(nccl_list);
@@ -70,7 +74,7 @@ static inline std::vector<Tensor>& _broadcast_out_impl(
 std::vector<Tensor>& broadcast_out(
     const Tensor& tensor,
     std::vector<Tensor>& out_tensors) {
-  for (size_t i = 0; i < out_tensors.size(); i++) {
+  for (const auto i : c10::irange(out_tensors.size())) {
     TORCH_CHECK(
         out_tensors[i].is_cuda(),
         "Expected all output tensors to be CUDA tensors, but output tensor at index ",
@@ -91,27 +95,30 @@ std::vector<Tensor>& broadcast_out(
 }
 
 std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<Tensor> diff_device_dst_tensors;
   diff_device_dst_tensors.reserve(devices.size());
   for (auto device : devices) {
     TORCH_CHECK(
         device >= 0, "Expected non-negative device index, but got ", device);
     if (device != tensor.get_device()) {
-      diff_device_dst_tensors.push_back(at::empty(
+      diff_device_dst_tensors.emplace_back(at::empty(
           tensor.sizes(),
           tensor.options().device(
               at::Device(DeviceType::CUDA, device)))); // preserve memory format
     }
   }
   _broadcast_out_impl(tensor, diff_device_dst_tensors);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<Tensor> dst_tensors;
   dst_tensors.reserve(devices.size());
   auto it = diff_device_dst_tensors.begin();
   for (auto device : devices) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (device != tensor.get_device()) {
-      dst_tensors.push_back(*it++);
+      dst_tensors.emplace_back(*it++);
     } else {
-      dst_tensors.push_back(tensor);
+      dst_tensors.emplace_back(tensor);
     }
   }
   TORCH_INTERNAL_ASSERT(it == diff_device_dst_tensors.end());
@@ -165,6 +172,7 @@ tensor_list2d broadcast_coalesced(
   buffer_size = std::min(torch::cuda::nccl::get_max_count(), buffer_size);
 #endif
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   tensor_list2d outputs(devices.size());
   outputs[0] = tensors.vec();
   for (auto& o : outputs)
@@ -172,12 +180,12 @@ tensor_list2d broadcast_coalesced(
 
   unique_type_checker type_checker;
   at::cuda::CUDAGuard device_guard(devices[0]);
-  for (auto& chunk : utils::take_tensors(tensors, buffer_size)) {
-    auto& type = chunk.type();
-    type_checker.show(type);
+  for (auto& chunk : torch::utils::take_tensors(tensors, buffer_size)) {
+    auto type_id = chunk.type_id();
+    type_checker.show(type_id);
     std::vector<at::Tensor> results;
-    if (chunk.type().is_sparse()) {
-      auto flat_tuple = utils::flatten_sparse_tensors(chunk.tensors);
+    if (chunk.options().is_sparse()) {
+      auto flat_tuple = torch::utils::flatten_sparse_tensors(chunk.tensors);
       auto broadcast_indices = broadcast(flat_tuple.first, devices);
       auto broadcast_values = broadcast(flat_tuple.second, devices);
       results.reserve(devices.size());
@@ -186,24 +194,22 @@ tensor_list2d broadcast_coalesced(
         auto& device_outputs = outputs[i];
         auto& inds = broadcast_indices[i];
         auto& vals = broadcast_values[i];
-        for (auto& t :
-             utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
+        for (const auto& var : torch::utils::unflatten_sparse_tensors(
+                 inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          Variable var = t;
-          device_outputs.push_back(make_variable(var.tensor_data(), false));
+          device_outputs.emplace_back(make_variable(var.tensor_data(), false));
         }
       }
     } else {
-      auto results =
-          broadcast(utils::flatten_dense_tensors(chunk.tensors), devices);
+      auto results = broadcast(
+          torch::utils::flatten_dense_tensors(chunk.tensors), devices);
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
         device_guard.set_index(devices[i]);
         auto& device_outputs = outputs[i];
-        for (auto& t :
-             utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
+        for (auto& var :
+             torch::utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          Variable var = t;
-          device_outputs.push_back(make_variable(var.tensor_data(), false));
+          device_outputs.emplace_back(make_variable(var.tensor_data(), false));
         }
       }
     }
@@ -212,7 +218,7 @@ tensor_list2d broadcast_coalesced(
   // If we only saw a single tensor type, then we can skip expensive reordering
   if (!type_checker.unique) {
     for (auto& o : outputs)
-      utils::reorder_tensors_like(o, tensors);
+      torch::utils::reorder_tensors_like(o, tensors);
   }
   return outputs;
 }
@@ -233,9 +239,10 @@ std::vector<at::Tensor>& scatter_out(
       "Expected at least one output tensor to scatter to");
   dim = at::maybe_wrap_dim(dim, tensor);
   int64_t total_size = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(out_tensors.size());
-  for (size_t i = 0; i < out_tensors.size(); i++) {
+  for (const auto i : c10::irange(out_tensors.size())) {
     TORCH_CHECK(
         out_tensors[i].is_cuda(),
         "Expected all output tensors to be CUDA tensors, but output tensor at index ",
@@ -244,10 +251,10 @@ std::vector<at::Tensor>& scatter_out(
         out_tensors[i].device(),
         "'");
     auto out_sizes = out_tensors[i].sizes().vec();
-    bool same_ndim = out_sizes.size() == tensor.dim();
+    bool same_ndim = out_sizes.size() == static_cast<size_t>(tensor.dim());
     if (same_ndim) {
       total_size += out_sizes[dim];
-      chunk_sizes.push_back(out_sizes[dim]);
+      chunk_sizes.emplace_back(out_sizes[dim]);
       out_sizes[dim] = tensor.size(dim);
     }
     TORCH_CHECK(
@@ -277,8 +284,8 @@ std::vector<at::Tensor>& scatter_out(
   auto chunks =
       tensor.split_with_sizes(/*split_sizes=*/chunk_sizes, /*dim=*/dim);
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
-  for (size_t i = 0; i < chunks.size(); i++) {
-    if (streams && (*streams)[i]) {
+  for (const auto i : c10::irange(chunks.size())) {
+    if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
       const auto device_index =
           static_cast<int16_t>(out_tensors[i].get_device());
       TORCH_CHECK(
@@ -321,14 +328,15 @@ std::vector<at::Tensor> scatter(
         chunk_sizes->size());
   }
   dim = at::maybe_wrap_dim(dim, tensor);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> chunks = chunk_sizes
       ? tensor.split_with_sizes(/*split_sizes=*/*chunk_sizes, /*dim=*/dim)
       : tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
-  for (size_t i = 0; i < chunks.size(); ++i) {
+  for (const auto i : c10::irange(chunks.size())) {
     const auto device_index = static_cast<int16_t>(devices[i]);
     if (device_index != tensor.get_device()) {
-      if (streams && (*streams)[i]) {
+      if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
         TORCH_CHECK(
             (*streams)[i]->device_index() == device_index,
             "Expected the device associated with the stream at index ",
@@ -366,14 +374,15 @@ static inline at::Tensor& _gather_out_impl(
     at::TensorList tensors,
     at::Tensor& out_tensor,
     int64_t dim) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(tensors.size());
   for (auto& tensor : tensors) {
-    chunk_sizes.push_back(tensor.size(dim));
+    chunk_sizes.emplace_back(tensor.size(dim));
   }
   auto chunks =
       out_tensor.split_with_sizes(/*split_sizes=*/chunk_sizes, /*dim=*/dim);
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     chunks[i].copy_(tensors[i], /*non_blocking=*/out_tensor.is_cuda());
   }
   return out_tensor;
@@ -388,8 +397,9 @@ at::Tensor& gather_out(
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   dim = at::maybe_wrap_dim(dim, first);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
     TORCH_CHECK(
         tensor.is_cuda(),
@@ -410,7 +420,7 @@ at::Tensor& gather_out(
         expected_size.size(),
         ")");
     expected_size[dim] = tensor.size(dim);
-    for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
+    for (const auto dimension : c10::irange(expected_size.size())) {
       TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Input tensor at index ",
@@ -442,9 +452,10 @@ at::Tensor gather(
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   dim = at::maybe_wrap_dim(dim, first);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
   auto memory_format = first.suggest_memory_format();
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
     TORCH_CHECK(
         tensor.is_cuda(),
@@ -464,7 +475,7 @@ at::Tensor gather(
         expected_size.size(),
         ")");
     expected_size[dim] = tensor.size(dim);
-    for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
+    for (const auto dimension : c10::irange(expected_size.size())) {
       TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Input tensor at index ",

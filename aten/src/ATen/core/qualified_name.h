@@ -3,13 +3,14 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <string>
 
 namespace c10 {
 
 // Represents a name of the form "foo.bar.baz"
 struct QualifiedName {
-  QualifiedName() {}
+  QualifiedName() = default;
 
   // `name` can be a dotted string, like "foo.bar.baz", or just a bare name.
   /* implicit */ QualifiedName(const std::string& name) {
@@ -20,29 +21,29 @@ struct QualifiedName {
 
     while (pos != std::string::npos) {
       auto atom = name.substr(startSearchFrom, pos - startSearchFrom);
-      AT_ASSERTM(
-          atom.size() > 0, "Invalid name for qualified name: '", name, "'");
+      TORCH_INTERNAL_ASSERT(
+          !atom.empty(), "Invalid name for qualified name: '", name, "'");
       atoms_.push_back(std::move(atom));
       startSearchFrom = pos + 1;
       pos = name.find(delimiter_, startSearchFrom);
     }
 
     auto finalAtom = name.substr(startSearchFrom, pos - startSearchFrom);
-    AT_ASSERTM(
-        finalAtom.size() > 0, "Invalid name for qualified name: '", name, "'");
-    atoms_.push_back(std::move(finalAtom));
+    TORCH_INTERNAL_ASSERT(
+        !finalAtom.empty(), "Invalid name for qualified name: '", name, "'");
+    atoms_.emplace_back(std::move(finalAtom));
 
     cacheAccessors();
   }
 
-  explicit QualifiedName(std::vector<std::string> atoms) {
-    for (const auto& atom : atoms) {
+  explicit QualifiedName(std::vector<std::string> atoms) : atoms_(std::move(atoms)) {
+    for (const auto& atom : atoms_) {
       TORCH_CHECK(!atom.empty(), "Atom cannot be empty");
       TORCH_CHECK(
           atom.find(delimiter_) == std::string::npos,
           "Delimiter not allowed in atom");
     }
-    atoms_ = atoms;
+
     cacheAccessors();
   }
   // Unnecessary copy. Ideally we'd use something like std::string_view.
@@ -69,7 +70,7 @@ struct QualifiedName {
       // Can't be a prefix if it's bigger
       return false;
     }
-    for (size_t i = 0; i < thisAtoms.size(); i++) {
+    for (const auto i : c10::irange(thisAtoms.size())) {
       if (thisAtoms[i] != otherAtoms[i]) {
         return false;
       }
@@ -116,7 +117,7 @@ struct QualifiedName {
       reserve += e.size() + 1;
     }
     out.reserve(reserve);
-    for (size_t i = 0; i < v.size(); ++i) {
+    for (const auto i : c10::irange(v.size())) {
       if (i != 0) {
         out.push_back(delimiter);
       }
@@ -133,7 +134,7 @@ struct QualifiedName {
       prefix_ = join(delimiter_, prefixView);
     }
 
-    if (atoms_.size() >= 1) {
+    if (!atoms_.empty()) {
       name_ = atoms_.back();
     }
   }

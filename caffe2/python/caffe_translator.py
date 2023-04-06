@@ -1,6 +1,5 @@
 ## @package caffe_translator
 # Module caffe2.python.caffe_translator
-#!/usr/bin/env python2
 
 import argparse
 import copy
@@ -193,7 +192,7 @@ def _GetInputDims(caffe_net):
     return input_dims
 
 
-class TranslatorRegistry(object):
+class TranslatorRegistry:
     registry_ = {}
 
     @classmethod
@@ -211,9 +210,9 @@ class TranslatorRegistry(object):
         try:
             caffe_ops, params = cls.registry_[layer.type](
                 layer, pretrained_blobs, is_test, **kwargs)
-        except KeyError:
+        except KeyError as e:
             raise KeyError('No translator registered for layer: %s yet.' %
-                           str(layer))
+                           str(layer)) from e
         if caffe_ops is None:
             caffe_ops = []
         if type(caffe_ops) is not list:

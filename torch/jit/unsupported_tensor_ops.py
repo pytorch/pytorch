@@ -14,12 +14,12 @@ def _gen_unsupported_methods_properties():
         return x.{op}()
     ''')
 
-    deprecated_apis = set(["volatile", "resize", "reinforce", "new", "name", "map2_", "has_names", "grad_fn", "resize_as"])
+    deprecated_apis = {"volatile", "resize", "reinforce", "new", "name", "map2_", "has_names", "grad_fn", "resize_as"}
     tensor_attrs = tensor_attrs - deprecated_apis
 
     properties = []
     methods = []
-    sorted_tensor_attrs = sorted(list(tensor_attrs), key=lambda x: x.lower())
+    sorted_tensor_attrs = sorted(tensor_attrs, key=lambda x: x.lower())
     for attr in sorted_tensor_attrs:
         funcs_str = funcs_template.format(op=attr)
         scope: Dict[str, Any] = {}
@@ -35,8 +35,8 @@ def _gen_unsupported_methods_properties():
             else:
                 properties.append(attr)
 
-    mapped_methods = map(lambda x: "\t*  :meth:`~torch.Tensor." + x + r"`", methods)
-    mapped_properties = map(lambda x: "\t*  :attr:`~torch.Tensor." + x + r"`", properties)
+    mapped_methods = ("\t*  :meth:`~torch.Tensor." + x + r"`" for x in methods)
+    mapped_properties = ("\t*  :attr:`~torch.Tensor." + x + r"`" for x in properties)
     return "\n".join(mapped_methods), "\n".join(mapped_properties)
 
 

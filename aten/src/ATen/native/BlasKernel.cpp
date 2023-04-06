@@ -1,9 +1,14 @@
-#include <limits>
-#include <algorithm>
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
-#include <TH/THGeneral.h>
-
+#include <ATen/OpMathType.h>
+#include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
+#include <c10/util/complex.h>
+#include <c10/util/irange.h>
+#include <algorithm>
+#include <climits>
+#include <iostream>
+#include <limits>
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
@@ -11,13 +16,13 @@ extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
 extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
 
-#ifdef BLAS_F2C
+#if AT_BLAS_F2C()
 # define ffloat double
 #else
 # define ffloat float
 #endif
 
-#ifdef BLAS_USE_CBLAS_DOT
+#if AT_BLAS_USE_CBLAS_DOT()
   extern "C" float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
   extern "C" void cblas_cdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
   extern "C" void cblas_zdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
@@ -51,7 +56,7 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
   extern "C" void zdotu_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
   extern "C" void cdotc_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
   extern "C" void zdotc_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
-#endif // BLAS_USE_CBLAS_DOT
+#endif // AT_BLAS_USE_CBLAS_DOT
 #endif // AT_BUILD_WITH_BLAS
 
 namespace at { namespace native {
@@ -152,7 +157,7 @@ inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
     blas_impl::scal_fast_path<scalar_t>(&i_n, &a, x, &i_incx);
     return;
   }
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     if (a == scalar_t(0)) {
       x[i * incx] = 0;
     } else {
@@ -176,12 +181,12 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
     return;
   }
 
+  using opmath_t = at::opmath_type<scalar_t>;
   if ((trans == 'T') || (trans == 't')) {
-    for (int64_t i = 0; i < n; i++)
-    {
-      scalar_t sum = 0;
+    for (const auto i : c10::irange(n)) {
+      opmath_t sum = 0;
       scalar_t *row_ = a + lda * i;
-      for (int64_t j = 0; j < m; j++) {
+      for (const auto j : c10::irange(m)) {
         sum += x[j * incx] * row_[j];
       }
       if (beta == scalar_t(0)) {
@@ -193,15 +198,37 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
   } else {
     if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
 
-    for (int64_t j = 0; j < n; j++) {
+    bool is_low_precision = !std::is_same<opmath_t, scalar_t>::value;
+    std::vector<opmath_t> sum;
+    if (is_low_precision) {
+      sum.resize(m);
+    }
+    for (const auto j : c10::irange(n)) {
       scalar_t *column_ = a + lda * j;
-      scalar_t z = alpha * x[j * incx];
-      for (int64_t i = 0; i < m; i++) {
+      opmath_t z = alpha * static_cast<opmath_t>(x[j * incx]);
+      for (const auto i : c10::irange(m)) {
         //output values are ignored if beta is 0, and set to 0, nans and infs are not propagated
         if (j==0 && beta==scalar_t(0)) {
-         y[i * incy] = scalar_t(0);
+          if (!is_low_precision) {
+            y[i * incy] = 0;
+          }
         }
-        y[i * incy] += z * column_[i];
+        if (is_low_precision) {
+          sum[i] += z * column_[i];
+        } else {
+          y[i * incy] += z * column_[i];
+        }
+      }
+    }
+    if (is_low_precision) {
+      if (beta == scalar_t(0)) {
+        for (const auto i : c10::irange(m)) {
+          y[i * incy] = sum[i];
+        }
+      } else {
+        for (const auto i : c10::irange(m)) {
+          y[i * incy] += sum[i];
+        }
       }
     }
   }
@@ -217,6 +244,7 @@ AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
 namespace blas_impl {
 #if AT_BUILD_WITH_BLAS()
 float dot_fast_path(int n, float* x, int incx, float* y, int incy) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return sdot_(&n, x, &incx, y, &incy);
 }
 
@@ -257,12 +285,14 @@ scalar_t dot_naive(
     scalar_t* y,
     int64_t incy,
     Functor op) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t i;
-  scalar_t sum = 0;
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t sum = 0;
   for (i = 0; i < n; i++) {
-    sum += op(x[i * incx], y[i * incy]);
+    sum += op(static_cast<opmath_t>(x[i * incx]), static_cast<opmath_t>(y[i * incy]));
   }
-  return sum;
+  return static_cast<scalar_t>(sum);
 }
 
 } // namespace blas_impl

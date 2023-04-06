@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 import io
@@ -33,7 +35,7 @@ class TestTypeSharing(JitTestCase):
     def test_basic(self):
         class M(torch.nn.Module):
             def __init__(self, a, b, c):
-                super(M, self).__init__()
+                super().__init__()
                 self.a = a
                 self.b = b
                 self.c = c
@@ -53,7 +55,7 @@ class TestTypeSharing(JitTestCase):
         """
         class M(torch.nn.Module):
             def __init__(self, a, b, c):
-                super(M, self).__init__()
+                super().__init__()
                 self.a = a
                 self.b = b
                 self.c = c
@@ -75,7 +77,7 @@ class TestTypeSharing(JitTestCase):
             __constants__ = ["const"]
 
             def __init__(self, attr, const):
-                super(M, self).__init__()
+                super().__init__()
                 self.attr = attr
                 self.const = const
 
@@ -111,7 +113,7 @@ class TestTypeSharing(JitTestCase):
         """
         class M(torch.nn.Module):
             def __init__(self, in1, out1, in2, out2):
-                super(M, self).__init__()
+                super().__init__()
                 self.submod1 = torch.nn.Linear(in1, out1)
                 self.submod2 = torch.nn.Linear(in2, out2)
 
@@ -137,7 +139,7 @@ class TestTypeSharing(JitTestCase):
         """
         class M(torch.nn.Module):
             def __init__(self, foo):
-                super(M, self).__init__()
+                super().__init__()
                 self.foo = foo
 
             def forward(self, x):
@@ -158,7 +160,7 @@ class TestTypeSharing(JitTestCase):
             __constants__ = ["const"]
 
             def __init__(self, in1, out1, in2, out2):
-                super(A, self).__init__()
+                super().__init__()
                 self.submod1 = torch.nn.Linear(in1, out1)
                 self.submod2 = torch.nn.Linear(in2, out2)
                 self.const = 5
@@ -172,7 +174,7 @@ class TestTypeSharing(JitTestCase):
             __constants__ = ["const"]
 
             def __init__(self, in1, out1, in2, out2):
-                super(B, self).__init__()
+                super().__init__()
                 self.submod1 = torch.nn.Linear(in1, out1)
                 self.submod2 = torch.nn.Linear(in2, out2)
                 self.const = 5
@@ -192,7 +194,7 @@ class TestTypeSharing(JitTestCase):
         """
         class M(torch.nn.Module):
             def __init__(self, in1, out1, in2, out2):
-                super(M, self).__init__()
+                super().__init__()
                 self.submod1 = torch.nn.Linear(in1, out1)
                 self.submod2 = torch.nn.Linear(in2, out2)
                 self.foo = torch.ones(in1, in1)
@@ -214,7 +216,7 @@ class TestTypeSharing(JitTestCase):
         """
         class M(torch.nn.Module):
             def __init__(self, in1, out1, in2, out2):
-                super(M, self).__init__()
+                super().__init__()
                 self.submod1 = torch.nn.Linear(in1, out1)
                 self.submod2 = torch.nn.Linear(in2, out2)
                 self.foo = torch.ones(in1, in1)
@@ -242,21 +244,20 @@ class TestTypeSharing(JitTestCase):
         """
         Attributes whose type cannot be inferred should fail cleanly with nice hints
         """
-        class NotScriptable(object):
-            pass
-
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 # assign a type we know can't be converted to TorchScript
-                self.foo = NotScriptable()
+                self.foo = object
 
             def forward(self):
                 # try to use it in forward
                 return self.foo
 
         m = M()
-        with self.assertRaisesRegex(RuntimeError, "failed to convert Python type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "failed to convert Python type",
+                                                 "self.foo"):
             torch.jit.script(m)
 
     def test_script_function_attribute_different(self):
@@ -273,7 +274,7 @@ class TestTypeSharing(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self, fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.fn = fn
 
             def forward(self, x):
@@ -287,7 +288,7 @@ class TestTypeSharing(JitTestCase):
     def test_builtin_function_same(self):
         class Caller(torch.nn.Module):
             def __init__(self, fn):
-                super(Caller, self).__init__()
+                super().__init__()
                 self.fn = fn
 
             def forward(self, input):
@@ -301,7 +302,7 @@ class TestTypeSharing(JitTestCase):
     def test_builtin_function_different(self):
         class Caller(torch.nn.Module):
             def __init__(self, fn):
-                super(Caller, self).__init__()
+                super().__init__()
                 self.fn = fn
 
             def forward(self, input):
@@ -322,7 +323,7 @@ class TestTypeSharing(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self, fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.fn = fn
 
             def forward(self, x):
@@ -345,7 +346,7 @@ class TestTypeSharing(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self, fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.fn = fn
 
             def forward(self, x):
@@ -365,7 +366,7 @@ class TestTypeSharing(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self, fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.fn = fn
 
             def forward(self, x):
@@ -383,9 +384,6 @@ class TestTypeSharing(JitTestCase):
         trace runs, tracing must always generate a unique type.
         """
         class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
             def forward(self, x, y):
                 if x.sum() > y.sum():
                     return x
@@ -399,7 +397,7 @@ class TestTypeSharing(JitTestCase):
     def test_ignored_fns(self):
         class M(torch.nn.Module):
             def __init__(self, foo):
-                super(M, self).__init__()
+                super().__init__()
                 self.foo = foo
 
             @torch.jit.ignore
@@ -417,9 +415,6 @@ class TestTypeSharing(JitTestCase):
     @suppress_warnings
     def test_script_module_containing_traced_module(self):
         class Traced(torch.nn.Module):
-            def __init__(self):
-                super(Traced, self).__init__()
-
             def forward(self, x):
                 if x.sum() > 0:
                     return x
@@ -428,7 +423,7 @@ class TestTypeSharing(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self, input):
-                super(M, self).__init__()
+                super().__init__()
                 self.traced = torch.jit.trace(Traced(), input)
 
             def forward(self, x):
@@ -441,7 +436,7 @@ class TestTypeSharing(JitTestCase):
     def test_loaded_modules_work(self):
         class AB(torch.nn.Module):
             def __init__(self):
-                super(AB, self).__init__()
+                super().__init__()
                 self.a = 1
                 self.b = 1
 
@@ -450,7 +445,7 @@ class TestTypeSharing(JitTestCase):
 
         class A(torch.nn.Module):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
                 self.a = 1
 
             def forward(self):
@@ -458,7 +453,7 @@ class TestTypeSharing(JitTestCase):
 
         class Wrapper(torch.nn.Module):
             def __init__(self, sub):
-                super(Wrapper, self).__init__()
+                super().__init__()
                 self.sub = sub
 
             def forward(self):
@@ -482,15 +477,12 @@ class TestTypeSharing(JitTestCase):
         that have different keys but the same value types.
         """
         class A(torch.nn.Module):
-            def __init__(self):
-                super(A, self).__init__()
-
             def forward(self, x):
                 return x
 
         class Foo(torch.nn.Module):
             def __init__(self, s):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.dict = torch.nn.ModuleDict(s)
 
             def forward(self, x):
@@ -535,9 +527,6 @@ class TestTypeSharing(JitTestCase):
                 return x
 
         class B(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x
 

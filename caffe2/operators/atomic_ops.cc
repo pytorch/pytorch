@@ -3,7 +3,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -20,6 +20,7 @@ class CreateMutexOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<std::mutex>>(0) =
+        // NOLINTNEXTLINE(modernize-make-unique)
         std::unique_ptr<std::mutex>(new std::mutex);
     return true;
   }
@@ -57,6 +58,7 @@ class CreateAtomicBoolOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<std::atomic<bool>>>(0) =
+        // NOLINTNEXTLINE(modernize-make-unique)
         std::unique_ptr<std::atomic<bool>>(new std::atomic<bool>(false));
     return true;
   }
@@ -95,7 +97,7 @@ REGISTER_CPU_OPERATOR(CreateMutex, CreateMutexOp);
 REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp<int32_t>);
 REGISTER_CPU_OPERATOR(AtomicFetchAdd64, AtomicFetchAddOp<int64_t>);
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     CreateMutex,
     IDEEPFallbackOp<CreateMutexOp, SkipIndices<0>>);

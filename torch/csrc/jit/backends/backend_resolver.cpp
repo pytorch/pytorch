@@ -15,7 +15,7 @@ struct ClassNamespaceValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& name) override {
     auto fullName = c10::QualifiedName(basename_, name);
 
@@ -41,12 +41,14 @@ struct ClassNamespaceValue : public SugaredValue {
 struct LoweredModuleResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     if (name == "torch") {
       return std::make_shared<BuiltinModule>("aten");
     } else if (name == "__torch__") {
       return std::make_shared<ClassNamespaceValue>(c10::QualifiedName(name));
+    } else if (name == "Exception") {
+      return std::make_shared<ExceptionValue>(name);
     }
 
     return nullptr;

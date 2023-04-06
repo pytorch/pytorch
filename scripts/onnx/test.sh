@@ -5,7 +5,8 @@ set -ex
 UNKNOWN=()
 
 # defaults
-PARALLEL=0
+PARALLEL=1
+export TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK=ERRORS
 
 while [[ $# -gt 0 ]]
 do
@@ -23,11 +24,8 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-pip install pytest scipy hypothesis
-
-if [[ $PARALLEL == 1 ]]; then
-    pip install pytest-xdist
-fi
+# allows coverage to run w/o failing due to a missing plug-in
+pip install -e tools/coverage_plugins_package
 
 # realpath might not be available on MacOS
 script_path=$(python -c "import os; import sys; print(os.path.realpath(sys.argv[1]))" "${BASH_SOURCE[0]}")
@@ -38,38 +36,53 @@ test_paths=(
 
 args=()
 args+=("-v")
-if [[ $PARALLEL == 1 ]]; then
-  args+=("-n")
-  args+=("3")
-fi
+args+=("--cov")
+args+=("--cov-report")
+args+=("xml:test/coverage.xml")
+args+=("--cov-append")
 
-# These exclusions are for tests that take a long time / a lot of GPU
-# memory to run; they should be passing (and you will test them if you
-# run them locally
-pytest "${args[@]}" \
-  --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
-  --ignore "$top_dir/test/onnx/test_custom_ops.py" \
-  --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
-  --ignore "$top_dir/test/onnx/test_utility_funs.py" \
-  "${test_paths[@]}"
+args_parallel=()
+if [[ $PARALLEL == 1 ]]; then
+  args_parallel+=("-n")
+  args_parallel+=("auto")
+fi
 
 # onnxruntime only support py3
 # "Python.h" not found in py2, needed by TorchScript custom op compilation.
-if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ]]; then
+if [[ "${SHARD_NUMBER}" == "1" ]]; then
+  # These exclusions are for tests that take a long time / a lot of GPU
+  # memory to run; they should be passing (and you will test them if you
+  # run them locally
+  pytest "${args[@]}" "${args_parallel[@]}" \
+    --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
+    --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
+    --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime_cuda.py" \
+    --ignore "$top_dir/test/onnx/test_custom_ops.py" \
+    --ignore "$top_dir/test/onnx/test_utility_funs.py" \
+    --ignore "$top_dir/test/onnx/test_models.py" \
+    --ignore "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
+    "${test_paths[@]}"
+
+  # Heavy memory usage tests that cannot run in parallel.
   pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset7" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset8" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime" \
     "$top_dir/test/onnx/test_custom_ops.py" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py" \
-    "$top_dir/test/onnx/test_utility_funs.py"
+    "$top_dir/test/onnx/test_utility_funs.py" \
+    "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "not TestModelsONNXRuntime"
 fi
-if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
-  # Update the loop for new opsets
-  for i in $(seq 10 12); do
-    pytest "${args[@]}" \
-      "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
-  done
+
+if [[ "${SHARD_NUMBER}" == "2" ]]; then
+  # Heavy memory usage tests that cannot run in parallel.
+  # TODO(#79802): Parameterize test_models.py
   pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset12_onnx_shape_inference"
+    "$top_dir/test/onnx/test_models.py" \
+    "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
+    "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "TestModelsONNXRuntime"
+
+  pytest "${args[@]}" "${args_parallel[@]}" \
+    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py"
+fi
+
+# Our CI expects both coverage.xml and .coverage to be within test/
+if [ -d .coverage ]; then
+  mv .coverage test/.coverage
 fi

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
+
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 
 namespace torch {
@@ -15,11 +16,11 @@ namespace jit {
 // subgraph, replace the context unpacking value with the new graph input.
 // fork(foo) ->
 // def foo(a, b):
-void inlineForkedClosure(Node* fork_closure) {
+void inlineForkedClosure(Node* fork_closure, NodeKind genKind) {
   Node* function_context_node = fork_closure->input()->node();
 
   if (function_context_node->inputs().size() != 2 ||
-      function_context_node->inputs().at(0)->node()->kind() != prim::Function ||
+      function_context_node->inputs().at(0)->node()->kind() != prim::Closure ||
       function_context_node->inputs().at(1)->node()->kind() !=
           prim::TupleConstruct) {
     throw ErrorReport(fork_closure->sourceRange()) << "Cannot fork this value";
@@ -29,7 +30,7 @@ void inlineForkedClosure(Node* fork_closure) {
   Node* context = function_context_node->inputs().at(1)->node();
   auto fork_graph = function->g(attr::Subgraph)->copy();
   auto g = fork_closure->owningGraph();
-  Node* fork_node = g->create(prim::fork, 1)
+  Node* fork_node = g->create(genKind, 1)
                         ->insertAfter(fork_closure)
                         ->setSourceRange(fork_closure->sourceRange());
 
@@ -63,7 +64,10 @@ void inlineForkedClosures(Block* block) {
     it++;
     switch (n->kind()) {
       case prim::forkClosure: {
-        inlineForkedClosure(n);
+        inlineForkedClosure(n, prim::fork);
+      } break;
+      case prim::awaitableClosure: {
+        inlineForkedClosure(n, prim::awaitable);
       } break;
       default: {
         for (Block* b : n->blocks()) {

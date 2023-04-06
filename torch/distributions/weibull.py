@@ -6,6 +6,7 @@ from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.utils import broadcast_all
 from torch.distributions.gumbel import euler_constant
 
+__all__ = ['Weibull']
 
 class Weibull(TransformedDistribution):
     r"""
@@ -13,6 +14,7 @@ class Weibull(TransformedDistribution):
 
     Example:
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Weibull(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Weibull distribution with scale=1, concentration=1
         tensor([ 0.4784])
@@ -27,12 +29,10 @@ class Weibull(TransformedDistribution):
     def __init__(self, scale, concentration, validate_args=None):
         self.scale, self.concentration = broadcast_all(scale, concentration)
         self.concentration_reciprocal = self.concentration.reciprocal()
-        base_dist = Exponential(torch.ones_like(self.scale))
+        base_dist = Exponential(torch.ones_like(self.scale), validate_args=validate_args)
         transforms = [PowerTransform(exponent=self.concentration_reciprocal),
                       AffineTransform(loc=0, scale=self.scale)]
-        super(Weibull, self).__init__(base_dist,
-                                      transforms,
-                                      validate_args=validate_args)
+        super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Weibull, _instance)
@@ -51,6 +51,10 @@ class Weibull(TransformedDistribution):
     @property
     def mean(self):
         return self.scale * torch.exp(torch.lgamma(1 + self.concentration_reciprocal))
+
+    @property
+    def mode(self):
+        return self.scale * ((self.concentration - 1) / self.concentration) ** self.concentration.reciprocal()
 
     @property
     def variance(self):

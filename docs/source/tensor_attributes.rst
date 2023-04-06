@@ -12,7 +12,7 @@ Each ``torch.Tensor`` has a :class:`torch.dtype`, :class:`torch.device`, and :cl
 torch.dtype
 -----------
 
-.. class:: torch.dtype
+.. class:: dtype
 
 A :class:`torch.dtype` is an object that represents the data type of a
 :class:`torch.Tensor`. PyTorch has twelve different data types:
@@ -113,7 +113,7 @@ When the output tensor of an arithmetic operation is specified, we allow casting
 Casting Examples::
 
     # allowed:
-    >>> float_tensor *= double_tensor
+    >>> float_tensor *= float_tensor
     >>> float_tensor *= int_tensor
     >>> float_tensor *= uint_tensor
     >>> float_tensor *= bool_tensor
@@ -134,12 +134,12 @@ Casting Examples::
 torch.device
 ------------
 
-.. class:: torch.device
+.. class:: device
 
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
 
-The :class:`torch.device` contains a device type (``'cpu'`` or ``'cuda'``) and optional device
+The :class:`torch.device` contains a device type (``'cpu'``, ``'cuda'`` or ``'mps'``) and optional device
 ordinal for the device type. If the device ordinal is not present, this object will always represent
 the current device for the device type, even after :func:`torch.cuda.set_device()` is called; e.g.,
 a :class:`torch.Tensor` constructed with device ``'cuda'`` is equivalent to ``'cuda:X'`` where X is
@@ -158,6 +158,9 @@ Via a string:
     >>> torch.device('cpu')
     device(type='cpu')
 
+    >>> torch.device('mps')
+    device(type='mps')
+
     >>> torch.device('cuda')  # current cuda device
     device(type='cuda')
 
@@ -168,8 +171,32 @@ Via a string and device ordinal:
     >>> torch.device('cuda', 0)
     device(type='cuda', index=0)
 
+    >>> torch.device('mps', 0)
+    device(type='mps', index=0)
+
     >>> torch.device('cpu', 0)
     device(type='cpu', index=0)
+
+The device object can also be used as a context manager to change the default
+device tensors are allocated on:
+
+::
+
+    >>> with torch.device('cuda:1'):
+    ...     r = torch.randn(2, 3)
+    >>> r.device
+    device(type='cuda', index=1)
+
+This context manager has no effect if a factory function is passed an explicit,
+non-None device argument.  To globally change the default device, see also
+:func:`torch.set_default_device`.
+
+.. warning::
+
+    This function imposes a slight performance cost on every Python
+    call to the torch API (not just factory functions).  If this
+    is causing problems for you, please comment on
+    https://github.com/pytorch/pytorch/issues/92701
 
 .. note::
    The :class:`torch.device` argument in functions can generally be substituted with a string.
@@ -204,7 +231,7 @@ Via a string and device ordinal:
 torch.layout
 ------------
 
-.. class:: torch.layout
+.. class:: layout
 
 .. warning::
   The ``torch.layout`` class is in beta and subject to change.
@@ -224,7 +251,7 @@ to perform many tensor operations efficiently.
 
 Example::
 
-    >>> x = torch.Tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
+    >>> x = torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
     >>> x.stride()
     (5, 1)
 
@@ -236,7 +263,7 @@ For more information on ``torch.sparse_coo`` tensors, see :ref:`sparse-docs`.
 torch.memory_format
 -------------------
 
-.. class:: torch.memory_format
+.. class:: memory_format
 
 A :class:`torch.memory_format` is an object representing the memory format on which a :class:`torch.Tensor` is
 or will be allocated.
@@ -244,11 +271,15 @@ or will be allocated.
 Possible values are:
 
 - ``torch.contiguous_format``:
-  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in decreasing order.
+  Tensor is or will be allocated in dense non-overlapping memory. Strides represented by values in decreasing order.
 
 - ``torch.channels_last``:
-  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in
+  Tensor is or will be allocated in dense non-overlapping memory. Strides represented by values in
   ``strides[0] > strides[2] > strides[3] > strides[1] == 1`` aka NHWC order.
+
+- ``torch.channels_last_3d``:
+  Tensor is or will be allocated in dense non-overlapping memory. Strides represented by values in
+  ``strides[0] > strides[2] > strides[3] > strides[4] > strides[1] == 1`` aka NDHWC order.
 
 - ``torch.preserve_format``:
   Used in functions like `clone` to preserve the memory format of the input tensor. If input tensor is

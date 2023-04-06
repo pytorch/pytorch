@@ -43,13 +43,16 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
   c10::optional<Tensor> orig_bias_;
   c10::optional<Scalar> output_min_;
   c10::optional<Scalar> output_max_;
+  bool orig_weight_and_bias_freed_;
 
  public:
   SerializationTypeLinearPrePack unpack() {
+    TORCH_CHECK(!orig_weight_and_bias_freed_, "Original weight and bias have been freed");
     return std::make_tuple(orig_weight_, orig_bias_, output_min_, output_max_);
   }
 
   virtual Tensor run(const Tensor& input) = 0;
+  virtual void free_orig_weight_and_bias() = 0;
 };
 
 class XNNPackLinearOpContext final : public LinearOpContext {
@@ -60,23 +63,25 @@ class XNNPackLinearOpContext final : public LinearOpContext {
   XNNPackLinearOpContext(
       Tensor&& weight,
       c10::optional<Tensor>&& bias,
-      c10::optional<Scalar> min,
-      c10::optional<Scalar> max,
+      const c10::optional<Scalar>& min,
+      const c10::optional<Scalar>& max,
       ContextLinear&& op_context)
       : op_context_(std::move(op_context)) {
     orig_weight_ = std::move(weight);
     orig_bias_ = std::move(bias);
     output_min_ = min;
     output_max_ = max;
+    orig_weight_and_bias_freed_ = false;
   }
 
-  Tensor run(const Tensor& input);
+  Tensor run(const Tensor& input) override;
+  void free_orig_weight_and_bias() override;
 
   static c10::intrusive_ptr<LinearOpContext> create_context(
       Tensor&& weight,
       c10::optional<Tensor>&& bias,
-      const c10::optional<Scalar> output_min,
-      const c10::optional<Scalar> output_max);
+      const c10::optional<Scalar>& output_min,
+      const c10::optional<Scalar>& output_max);
 };
 
 class Conv2dOpContext : public torch::jit::CustomClassHolder {
@@ -89,9 +94,11 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   int64_t groups_;
   c10::optional<Scalar> output_min_;
   c10::optional<Scalar> output_max_;
+  bool orig_weight_and_bias_freed_;
 
  public:
   SerializationTypeConv2dPrePack unpack() {
+    TORCH_CHECK(!orig_weight_and_bias_freed_, "Original weight and bias have been freed");
     return std::make_tuple(
         orig_weight_,
         orig_bias_,
@@ -104,6 +111,7 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   }
 
   virtual Tensor run(const Tensor& input) = 0;
+  virtual void free_orig_weight_and_bias() = 0;
 };
 
 class TransposeConv2dOpContext : public torch::jit::CustomClassHolder {
@@ -117,9 +125,11 @@ class TransposeConv2dOpContext : public torch::jit::CustomClassHolder {
   int64_t groups_;
   c10::optional<Scalar> output_min_;
   c10::optional<Scalar> output_max_;
+  bool orig_weight_and_bias_freed_;
 
  public:
   SerializationTypeTransposeConv2dPrePack unpack() {
+    TORCH_CHECK(!orig_weight_and_bias_freed_, "Original weight and bias have been freed");
     return std::make_tuple(
         orig_weight_,
         orig_bias_,
@@ -133,11 +143,19 @@ class TransposeConv2dOpContext : public torch::jit::CustomClassHolder {
   }
 
   virtual Tensor run(const Tensor& input) = 0;
+  virtual void free_orig_weight_and_bias() = 0;
 };
 
 class XNNPackConv2dOpContext final : public Conv2dOpContext {
  private:
   ContextConv2D op_context_;
+  // xnnpack convs use indirection buffer.
+  // These buffers need setup at runtime and/or when input
+  // dims change. If we are running the same model on multiple
+  // threads, this can lead to contention where indirection buffer
+  // is being accessed and updated at the same time from two different
+  // threads.
+  std::mutex xnnp_mutex_;
 
  public:
   XNNPackConv2dOpContext(
@@ -147,8 +165,8 @@ class XNNPackConv2dOpContext final : public Conv2dOpContext {
       std::vector<int64_t>&& stride,
       std::vector<int64_t>&& dilation,
       uint64_t groups,
-      c10::optional<Scalar> min,
-      c10::optional<Scalar> max,
+      const c10::optional<Scalar>& min,
+      const c10::optional<Scalar>& max,
       ContextConv2D&& op_context)
       : op_context_(std::move(op_context)) {
     orig_weight_ = std::move(weight);
@@ -159,9 +177,11 @@ class XNNPackConv2dOpContext final : public Conv2dOpContext {
     groups_ = groups;
     output_min_ = min;
     output_max_ = max;
+    orig_weight_and_bias_freed_ = false;
   }
 
   Tensor run(const Tensor& input) override;
+  void free_orig_weight_and_bias() override;
 
   static c10::intrusive_ptr<Conv2dOpContext> create_context(
       Tensor&& weight,
@@ -170,13 +190,20 @@ class XNNPackConv2dOpContext final : public Conv2dOpContext {
       std::vector<int64_t>&& stride,
       std::vector<int64_t>&& dilation,
       int64_t groups,
-      const c10::optional<Scalar> output_min,
-      const c10::optional<Scalar> output_max);
+      const c10::optional<Scalar>& output_min,
+      const c10::optional<Scalar>& output_max);
 };
 
 class XNNPackTransposeConv2dOpContext final : public TransposeConv2dOpContext {
  private:
   ContextConv2D op_context_;
+  // xnnpack convs use indirection buffer.
+  // These buffers need setup at runtime and/or when input
+  // dims change. If we are running the same model on multiple
+  // threads, this can lead to contention where indirection buffer
+  // is being accessed and updated at the same time from two different
+  // threads.
+  std::mutex xnnp_mutex_;
 
  public:
   XNNPackTransposeConv2dOpContext(
@@ -187,8 +214,8 @@ class XNNPackTransposeConv2dOpContext final : public TransposeConv2dOpContext {
       std::vector<int64_t>&& stride,
       std::vector<int64_t>&& dilation,
       uint64_t groups,
-      c10::optional<Scalar> min,
-      c10::optional<Scalar> max,
+      const c10::optional<Scalar>& min,
+      const c10::optional<Scalar>& max,
       ContextConv2D&& op_context)
       : op_context_(std::move(op_context)) {
     orig_weight_ = std::move(weight);
@@ -200,9 +227,11 @@ class XNNPackTransposeConv2dOpContext final : public TransposeConv2dOpContext {
     groups_ = groups;
     output_min_ = min;
     output_max_ = max;
+    orig_weight_and_bias_freed_ = false;
   }
 
   Tensor run(const Tensor& input) override;
+  void free_orig_weight_and_bias() override;
 
   static c10::intrusive_ptr<TransposeConv2dOpContext> create_context(
       Tensor&& weight,
@@ -212,8 +241,8 @@ class XNNPackTransposeConv2dOpContext final : public TransposeConv2dOpContext {
       std::vector<int64_t>&& stride,
       std::vector<int64_t>&& dilation,
       int64_t groups,
-      const c10::optional<Scalar> output_min,
-      const c10::optional<Scalar> output_max);
+      const c10::optional<Scalar>& output_min,
+      const c10::optional<Scalar>& output_max);
 };
 
 } // namespace xnnpack

@@ -1,7 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
+#include <ATen/CollapseDims.h>
 
 namespace at {
 namespace cuda {
@@ -51,7 +50,7 @@ TensorInfo<T, IndexType>::TensorInfo(T* p,
                                      IndexType st[MAX_TENSORINFO_DIMS]) {
   data = p;
   dims = dim;
-  AT_ASSERT(dims < MAX_TENSORINFO_DIMS);
+  TORCH_CHECK(dims < MAX_TENSORINFO_DIMS, "CUDA Tensors cannot have more than 25 dimensions");
 
   for (int i = 0; i < dim; ++i) {
     sizes[i] = sz[i];

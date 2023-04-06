@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 import sys
 import pickle
+import struct
 import pprint
 import zipfile
 import fnmatch
-from typing import IO, BinaryIO, Union
+from typing import Any, IO, BinaryIO, Union
 
+__all__ = ["FakeObject", "FakeClass", "DumpUnpickler", "main"]
 
-class FakeObject(object):
+class FakeObject:
     def __init__(self, module, name, args):
         self.module = module
         self.name = name
@@ -41,11 +43,11 @@ class FakeObject(object):
         raise Exception("Need to implement")
 
 
-class FakeClass(object):
+class FakeClass:
     def __init__(self, module, name):
         self.module = module
         self.name = name
-        self.__new__ = self.fake_new  # type: ignore
+        self.__new__ = self.fake_new  # type: ignore[assignment]
 
     def __repr__(self):
         return f"{self.module}.{self.name}"
@@ -57,17 +59,48 @@ class FakeClass(object):
         return FakeObject(self.module, self.name, args[1:])
 
 
-class DumpUnpickler(pickle._Unpickler):  # type: ignore
+class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
+    def __init__(
+            self,
+            file,
+            *,
+            catch_invalid_utf8=False,
+            **kwargs):
+        super().__init__(file, **kwargs)
+        self.catch_invalid_utf8 = catch_invalid_utf8
+
     def find_class(self, module, name):
         return FakeClass(module, name)
 
     def persistent_load(self, pid):
         return FakeObject("pers", "obj", (pid,))
 
+    dispatch = dict(pickle._Unpickler.dispatch)  # type: ignore[attr-defined]
+
+    # Custom objects in TorchScript are able to return invalid UTF-8 strings
+    # from their pickle (__getstate__) functions.  Install a custom loader
+    # for strings that catches the decode exception and replaces it with
+    # a sentinel object.
+    def load_binunicode(self):
+        strlen, = struct.unpack("<I", self.read(4))  # type: ignore[attr-defined]
+        if strlen > sys.maxsize:
+            raise Exception("String too long.")
+        str_bytes = self.read(strlen)  # type: ignore[attr-defined]
+        obj: Any
+        try:
+            obj = str(str_bytes, "utf-8", "surrogatepass")
+        except UnicodeDecodeError as exn:
+            if not self.catch_invalid_utf8:
+                raise
+            obj = FakeObject("builtin", "UnicodeDecodeError", (str(exn),))
+        self.append(obj)  # type: ignore[attr-defined]
+    dispatch[pickle.BINUNICODE[0]] = load_binunicode  # type: ignore[assignment]
+
     @classmethod
     def dump(cls, in_stream, out_stream):
         value = cls(in_stream).load()
         pprint.pprint(value, stream=out_stream)
+        return value
 
 
 def main(argv, output_stream=None):
@@ -112,6 +145,6 @@ if __name__ == "__main__":
     # I've tested on the following versions:
     #   3.7.4
     if True:
-        pprint.PrettyPrinter._dispatch[FakeObject.__repr__] = FakeObject.pp_format  # type: ignore
+        pprint.PrettyPrinter._dispatch[FakeObject.__repr__] = FakeObject.pp_format  # type: ignore[attr-defined]
 
     sys.exit(main(sys.argv))

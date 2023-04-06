@@ -1,6 +1,8 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorNames.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <c10/util/irange.h>
+
 #include <bitset>
 #include <sstream>
 
@@ -125,7 +127,15 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
       ". Please rename the out tensor's dims with `Tensor.rename`.");
 }
 
-Tensor& propagate_names_if_nonempty(Tensor& result,
+const Tensor& propagate_names_if_present_and_nonempty(const Tensor& result,
+    c10::optional<DimnameList> maybe_names,
+    bool validate_names) {
+  auto maybe_name_list = maybe_names.value_or(at::ArrayRef<Dimname>{});
+  propagate_names_if_nonempty(result.unsafeGetTensorImpl(), maybe_name_list, validate_names);
+  return result;
+}
+
+const Tensor& propagate_names_if_nonempty(const Tensor& result,
     DimnameList maybe_names,
     bool validate_names) {
   propagate_names_if_nonempty(result.unsafeGetTensorImpl(), maybe_names, validate_names);
@@ -141,7 +151,7 @@ TensorImpl* propagate_names_if_nonempty(TensorImpl* result,
   return propagate_names(result, maybe_names, validate_names);
 }
 
-Tensor& propagate_names(Tensor& result, DimnameList names, bool validate_names) {
+const Tensor& propagate_names(const Tensor& result, DimnameList names, bool validate_names) {
   propagate_names(result.unsafeGetTensorImpl(), names, validate_names);
   return result;
 }
@@ -162,14 +172,15 @@ TensorImpl* propagate_names(TensorImpl* result, DimnameList names, bool validate
   return result;
 }
 
-void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
+void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
   if (!result.has_names() && !src.has_names()) {
     return;
   }
-  auto src_names = src.names();
-  auto result_dim = result.dim();
-  auto src_dim = src_names.size();
-  TORCH_INTERNAL_ASSERT(src_dim - excluded_idxs.size() == result_dim);
+  const auto src_names = src.names();
+  const auto result_dim = static_cast<int64_t>(result.dim());
+  const auto src_dim = static_cast<int64_t>(src_names.size());
+  const auto excluded_dim = static_cast<int64_t>(excluded_idxs.size());
+  TORCH_INTERNAL_ASSERT(src_dim - excluded_dim == result_dim);
 
   // fast path
   if (excluded_idxs.size() == 1) {
@@ -182,7 +193,7 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
   std::vector<Dimname> outnames;
   outnames.reserve(result_dim);
   auto included_idxs = compute_included_idxs(excluded_idxs, src_dim);
-  for (size_t dim = 0; dim < src_dim; ++dim) {
+  for (const auto dim : c10::irange(src_dim)) {
     if (included_idxs[dim]) {
       outnames.push_back(src_names[dim]);
     }
@@ -190,19 +201,19 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
   propagate_names(result, outnames);
 }
 
-void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef reduced_dims, bool keepdim) {
+void propagate_names_for_reduction(const Tensor& result, const Tensor& src, IntArrayRef reduced_dims, bool keepdim) {
   if (keepdim) {
     propagate_names(result, src);
     return;
   }
   // This actually means "full reduction"
-  if (reduced_dims.size() == 0) {
+  if (reduced_dims.empty()) {
     return;
   }
   propagate_names_except(result, src, reduced_dims);
 }
 
-void propagate_names(Tensor& result, const Tensor& src) {
+void propagate_names(const Tensor& result, const Tensor& src) {
   propagate_names(result.unsafeGetTensorImpl(), src.unsafeGetTensorImpl());
 }
 
@@ -222,8 +233,22 @@ std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor) {
   }
   std::vector<Dimname> outnames;
   auto tensor_names = tensor.names();
-  for (int64_t d = 0; d < tensor.dim(); d++) {
-    if (tensor.sizes()[d] != 1) {
+  for (const auto d : c10::irange(tensor.dim())) {
+    if (tensor.sym_sizes()[d] != 1) {
+      outnames.push_back(tensor_names[d]);
+    }
+  }
+  return outnames;
+}
+
+std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor, std::bitset<dim_bitset_size> dims) {
+  if (!tensor.has_names()) {
+    return {};
+  }
+  std::vector<Dimname> outnames;
+  auto tensor_names = tensor.names();
+  for (const auto d : c10::irange(tensor.dim())) {
+    if (!dims.test(d) || tensor.sym_sizes()[d] != 1) {
       outnames.push_back(tensor_names[d]);
     }
   }
@@ -239,7 +264,7 @@ std::vector<Dimname> compute_diagonal_outnames(
   }
   std::vector<Dimname> outnames;
   auto tensor_names = tensor.names();
-  for (int64_t d = 0; d < tensor.dim(); d++) {
+  for (const auto d : c10::irange(tensor.dim())) {
     if (d == dim1 || d == dim2) {
       continue;
     }
@@ -249,36 +274,10 @@ std::vector<Dimname> compute_diagonal_outnames(
   return outnames;
 }
 
-// tensor_dotted_dim and other_dotted_dim are the dimensions of the two
-// tensors that we contract together. Usually other_dotted_dim is 0
-// and tensor_dotted_dim is the last dim of tensor, but there are some special
-// cases like einsum and tensordot where one can contract arbitrary dims.
-static std::vector<Dimname> compute_dot_product_outnames(
-    DimnameList tensor_names,
-    int64_t tensor_dotted_dim,
-    DimnameList other_names,
-    int64_t other_dotted_dim) {
-  int64_t num_outnames = tensor_names.size() + other_names.size() - 2;
-  if (num_outnames == 0) {
-    return {};
-  }
-  std::vector<Dimname> outnames(num_outnames, Dimname::wildcard());
-  int64_t index = 0;
-  for (int64_t j = 0; j < tensor_names.size(); ++j) {
-    if (j == tensor_dotted_dim) continue;
-    outnames[index++] = tensor_names[j];
-  }
-  for (int64_t j = 0; j < other_names.size(); ++j) {
-    if (j == other_dotted_dim) continue;
-    outnames[index++] = other_names[j];
-  }
-  return outnames;
-}
-
 static void check_feature_names_are_distinct(
     DimnameList self_names,
     DimnameList other_names,
-    DimnameList outnames) {
+    const DimnameList& outnames) {
   if (self_names.size() < 2 || other_names.size() < 2) {
     // There are less than 2 feature dims in outnames so there is nothing to check
     return;
@@ -294,33 +293,6 @@ static void check_feature_names_are_distinct(
     ". Please rename the input tensors with `Tensor.rename` to prevent this.");
 }
 
-static DimnameList batch_dims(DimnameList names) {
-  if (names.size() <= 2) {
-    return {};
-  }
-  return DimnameList(names.begin(), names.end() - 2);
-}
-
-static DimnameList feature_dims(DimnameList names) {
-  if (names.size() <= 2) {
-    return names;
-  }
-  return DimnameList(names.end() - 2, 2);
-}
-
-static bool are_distinct(DimnameList batch_dims, DimnameList feature_dims) {
-  for (const auto& target : feature_dims) {
-    if (target.isWildcard()) {
-      continue;
-    }
-    if (std::any_of(batch_dims.begin(), batch_dims.end(),
-          [&](const Dimname& dim) { return target == dim; })) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static int64_t num_batch_dims(DimnameList names) {
   if (names.size() <= 2) {
     return 0;
@@ -331,7 +303,7 @@ static int64_t num_batch_dims(DimnameList names) {
 static std::vector<Dimname> compute_matmul_outnames(
     DimnameList self_names,
     DimnameList other_names) {
-  TORCH_CHECK(self_names.size() >= 1 && other_names.size() >= 1,
+  TORCH_CHECK(!self_names.empty() && !other_names.empty(),
       "both arguments to matmul need to be at least 1D, but they are ",
       self_names.size(), "D and ", other_names.size(), "D");
 
@@ -363,39 +335,35 @@ static std::vector<Dimname> compute_matmul_outnames(
   if (other_names.size() >= 2) {
     working_names.append(TensorName(other_names, -1));
   }
-  const auto result = working_names.toDimnameVec();
+  auto result = working_names.toDimnameVec();
 
   check_feature_names_are_distinct(self_names, other_names, result);
   return result;
 }
 
-void propagate_names_for_addmv(
-    Tensor& result,
+std::vector<Dimname> propagate_names_for_addmv(
     const Tensor& mat,
     const Tensor& vec,
     const Tensor& bias) {
-  if (!result.has_names() && !mat.has_names() &&
+  if (!mat.has_names() &&
       !vec.has_names() && !bias.has_names()) {
-    return;
+    return std::vector<Dimname>{};
   }
   auto mv_outnames = compute_matmul_outnames(mat.names(), vec.names());
-  auto add_outnames = unify_from_right(mv_outnames, bias.names());
-  propagate_names(result, add_outnames);
+  return unify_from_right(mv_outnames, bias.names());
 }
 
-void propagate_names_for_addmm(
-    Tensor& result,
+std::vector<Dimname> propagate_names_for_addmm(
     const Tensor& m1,
     const Tensor& m2,
     const Tensor& bias) {
   if (!m1.has_names() && !m2.has_names() &&
-      !bias.has_names() && !result.has_names()) {
-    return;
+      !bias.has_names()) {
+    return std::vector<Dimname>{};
   }
 
   auto mm_outnames = compute_matmul_outnames(m1.names(), m2.names());
-  auto add_outnames = unify_from_right(mm_outnames, bias.names());
-  propagate_names(result, add_outnames);
+  return unify_from_right(mm_outnames, bias.names());
 }
 
 void check_names_for_dot(
@@ -411,7 +379,7 @@ void check_names_for_dot(
 // rules for binary ops that expect the named dims to line up positionally
 // from the right. i.e.,
 // Tensor[H, W].expand(3, 3, 3, 3) -> Tensor[None, None, H, W]
-void propagate_names_for_expand(Tensor& result, const Tensor& self) {
+void propagate_names_for_expand(const Tensor& result, const Tensor& self) {
   if (!self.has_names()) {
     return;
   }
@@ -455,14 +423,14 @@ std::vector<Dimname> broadcast_to_outnames(
   return unify_from_right(reference_names, tensor_names);
 }
 
-std::vector<Dimname> compute_cat_outnames(TensorList tensors) {
+std::vector<Dimname> compute_cat_outnames(const MaterializedITensorListRef& tensors) {
   if (!at::has_names(tensors)) {
     return {};
   }
   std::vector<Dimname> result;
-  for (const auto& tensor : tensors) {
+  for (const Tensor& tensor : tensors) {
     const auto tensor_names = tensor.names();
-    TORCH_CHECK(tensor_names.size() > 0, "zero-dimensional tensor cannot be concatenated");
+    TORCH_CHECK(!tensor_names.empty(), "zero-dimensional tensor cannot be concatenated");
     TORCH_CHECK(result.empty() || tensor_names.size() == result.size(),
         "Tensors must have same number of dimensions: got ", result.size(),
         " and ", tensor_names.size());
@@ -507,7 +475,7 @@ std::vector<Dimname> compute_cdist_outnames(
 }
 
 std::vector<Dimname> compute_bmm_outnames(
-    Tensor& result,
+    const Tensor& result,
     const Tensor& self,
     const Tensor& other) {
   if (!result.has_names() && !self.has_names() && !other.has_names()) {
@@ -517,17 +485,16 @@ std::vector<Dimname> compute_bmm_outnames(
 }
 
 std::vector<Dimname> compute_baddbmm_outnames(
-    TensorImpl* result,
-    TensorImpl* batch1,
-    TensorImpl* batch2,
-    TensorImpl* bias) {
-  if (!impl::has_names(result) && !impl::has_names(batch1) &&
-      !impl::has_names(batch2) && !impl::has_names(bias)) {
+    const Tensor& result,
+    const Tensor& self,
+    const Tensor& other,
+    const Tensor& bias) {
+  if (!result.has_names() && !self.has_names()
+    && !other.has_names() && !bias.has_names()) {
     return {};
   }
-  auto bmm_names = compute_matmul_outnames(
-      impl::get_names(batch1), impl::get_names(batch2));
-  auto baddbmm_names = unify_from_right(impl::get_names(bias), bmm_names);
+  auto bmm_names = compute_matmul_outnames(self.names(), other.names());
+  auto baddbmm_names = unify_from_right(bias.names(), bmm_names);
   return baddbmm_names;
 }
 

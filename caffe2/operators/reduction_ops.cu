@@ -2,7 +2,7 @@
 #include "caffe2/operators/reduction_ops.h"
 #include "caffe2/utils/conversions.h"
 
-#include <cub/cub.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 
@@ -83,7 +83,7 @@ template <>
 bool SumElementsGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& dY = Input(1);
-  DCHECK_EQ(dY.numel(), 1);
+  TORCH_DCHECK_EQ(dY.numel(), 1);
 
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
   SumElementsGradientKernel<float>
@@ -95,6 +95,8 @@ bool SumElementsGradientOp<float, CUDAContext>::RunOnDevice() {
           X.numel(),
           dY.data<float>(),
           dX->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -125,6 +127,7 @@ bool MaxReductionGradientOp<T, Context, ROWWISE>::RunOnDevice() {
         0,
         context_.cuda_stream()>>>(
         batch_size, M, N, Xdata, Ydata, dYdata, dXdata);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     colwise_max_gradient_kernel<<<
         CAFFE_GET_BLOCKS(batch_size * input_size),
@@ -132,6 +135,7 @@ bool MaxReductionGradientOp<T, Context, ROWWISE>::RunOnDevice() {
         0,
         context_.cuda_stream()>>>(
         batch_size, M, N, Xdata, Ydata, dYdata, dXdata);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

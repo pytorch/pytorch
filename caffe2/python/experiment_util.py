@@ -10,10 +10,8 @@ import time
 import logging
 import socket
 import abc
-import six
 
 from collections import OrderedDict
-from future.utils import viewkeys, viewvalues
 
 '''
 Utilities for logging experiment run stats, such as accuracy
@@ -25,8 +23,8 @@ an external log destination.
 '''
 
 
-class ExternalLogger(object):
-    six.add_metaclass(abc.ABCMeta)
+class ExternalLogger:
+    __metaclass__ = abc.ABCMeta
 
     @abc.abstractmethod
     def set_runtime_args(self, runtime_args):
@@ -97,19 +95,19 @@ class ModelTrainerLog():
         else:
             logdict['inputs_per_sec'] = 0.0
 
-        for k in sorted(viewkeys(additional_values)):
+        for k in sorted(additional_values.keys()):
             logdict[k] = additional_values[k]
 
         # Write the headers if they are not written yet
         if self.headers is None:
-            self.headers = list(viewkeys(logdict))
+            self.headers = list(logdict.keys())
             self.logstr(",".join(self.headers))
 
-        self.logstr(",".join(str(v) for v in viewvalues(logdict)))
+        self.logstr(",".join(str(v) for v in logdict.values()))
 
         for logger in self.external_loggers:
             try:
                 logger.log(logdict)
             except Exception as e:
-                logging.warn(
+                logging.warning(
                     "Failed to call ExternalLogger: {}".format(e), e)

@@ -56,6 +56,7 @@ def async_execution(fn):
         >>>     )
         >>>
         >>> # On worker0
+        >>> # xdoctest: +SKIP
         >>> ret = rpc.rpc_sync(
         >>>     "worker1",
         >>>     async_add_chained,
@@ -160,5 +161,6 @@ def async_execution(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         return fn(*args, **kwargs)
-    wrapper._wrapped_async_rpc_function = fn
+    # Can't declare and use attributes of function objects (mypy#2087)
+    wrapper._wrapped_async_rpc_function = fn  # type: ignore[attr-defined]
     return wrapper

@@ -7,13 +7,10 @@ namespace at {
 
 namespace {
   DeviceType sparseTensorSetToDeviceType(DispatchKeySet key_set) {
-    if (key_set.has(DispatchKey::SparseCPU)) {
-      return kCPU;
-    } else if (key_set.has(DispatchKey::SparseCUDA)) {
-      return kCUDA;
-    } else {
-      AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", key_set);
-    }
+    auto k = c10::highestPriorityBackendTypeId(key_set);
+    TORCH_CHECK(c10::toFunctionalityKey(k) == DispatchKey::Sparse,
+      "cannot create sparse tensor with non sparse dispatch key ", k);
+    return c10::dispatchKeyToDeviceType(k);
   }
 }
 
@@ -30,12 +27,12 @@ namespace {
 //
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
-SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type)
+SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta data_type)
   :   SparseTensorImpl(key_set, data_type
       , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
       , at::empty({0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(key_set)).dtype(data_type))) {}
 
-SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
+SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta data_type, at::Tensor indices, at::Tensor values)
     : TensorImpl(key_set, data_type, values.device())
     , sparse_dim_(1)
     , dense_dim_(0)
@@ -46,17 +43,20 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
   AT_ASSERT(values_.sizes() == IntArrayRef({0}));
   AT_ASSERT(values_.device() == indices_.device());
   AT_ASSERT(values_.device() == device());
+
+  is_non_overlapping_and_dense_ = false;
+  set_storage_access_should_throw();
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
 }
 
-IntArrayRef SparseTensorImpl::strides() const {
-  AT_ERROR("sparse tensors do not have strides");
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
+void SparseTensorImpl::release_resources() {
+  TensorImpl::release_resources();
+  values_.reset();
+  indices_.reset();
 }
-bool SparseTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
-  AT_ERROR("sparse tensors do not have is_contiguous");
-}
-int64_t SparseTensorImpl::stride(int64_t d) const {
-  AT_ERROR("sparse tensors do not have strides");
-}
+
 void SparseTensorImpl::set_size(int64_t dim, int64_t new_size) {
   AT_ERROR("sparse tensors do not have set_size");
 }
@@ -66,19 +66,17 @@ void SparseTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("sparse tensors do not have set_storage_offset");
 }
-
-int64_t SparseTensorImpl::dim() const {
-  return sparse_dim_ + dense_dim_;
-}
+#ifdef DEBUG
 bool SparseTensorImpl::has_storage() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "SparseTensorImpl assumes that storage_ is never set");
   return false;
 }
-const Storage& SparseTensorImpl::storage() const {
-  AT_ERROR("sparse tensors do not have storage");
+#endif
+
+const char* SparseTensorImpl::tensorimpl_type_name() const {
+  return "SparseTensorImpl";
 }
-int64_t SparseTensorImpl::storage_offset() const {
-  AT_ERROR("sparse tensors do not have storage");
-}
+
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
   TORCH_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe ", err_msg_tensor_metadata_change_not_allowed);
 
@@ -91,16 +89,16 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   TORCH_CHECK(indices.options().backend() == values.options().backend(), "backend of indices (", indices.options().backend(), ") must match backend of values (", values.options().backend(), ")");
   TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
 
-  TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes());
-  TORCH_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ", indices.size(1), ", nnz from values: ", values.size(0));
-  TORCH_CHECK(indices.size(0) == sparse_dim_, "indices has incorrect first dimension, expected ", sparse_dim_, ", got ", indices.size(0));
+  TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sym_sizes());
+  TORCH_CHECK(indices.sym_size(1) == values.sym_size(0), "indices and values must have same nnz, but got nnz from indices: ", indices.sym_size(1), ", nnz from values: ", values.sym_size(0));
+  TORCH_CHECK(indices.sym_size(0) == sparse_dim_, "indices has incorrect first dimension, expected ", sparse_dim_, ", got ", indices.sym_size(0));
   TORCH_CHECK(values.dim() == dense_dim_ + 1, "values has incorrect number of dimensions, expected ", dense_dim_ + 1, ", got ", values.dim());
 
-  auto dense_size_original = sizes().slice(sparse_dim_);
-  std::vector<int64_t> expected_values_size_vec = {values.size(0)};
+  auto dense_size_original = sym_sizes().slice(sparse_dim_);
+  std::vector<c10::SymInt> expected_values_size_vec = {values.sym_size(0)};
   expected_values_size_vec.insert(expected_values_size_vec.end(), dense_size_original.begin(), dense_size_original.end());
-  IntArrayRef expected_values_size(expected_values_size_vec);
-  auto new_values_size = values.sizes();
+  SymIntArrayRef expected_values_size(expected_values_size_vec);
+  auto new_values_size = values.sym_sizes();
   TORCH_CHECK(
     std::equal(expected_values_size.begin(), expected_values_size.end(), new_values_size.begin()),
     "values has incorrect size, expected ", expected_values_size, ", got ", new_values_size
@@ -111,7 +109,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_ASSERT(device() == values_.device());
   AT_ASSERT(values_.device() == indices_.device());
 
-  coalesced_ = false;
+  coalesced_ = sym_nnz() < 2;
 }
 
 

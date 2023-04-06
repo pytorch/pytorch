@@ -1,17 +1,10 @@
 #pragma once
 
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#ifndef _USE_MATH_DEFINES
-#define _USE_MATH_DEFINES
-#endif
-#include <math.h>
-#endif
-
 #include <ATen/core/Array.h>
 #include <ATen/core/TransformationHelper.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/MathConstants.h>
 #include <c10/util/Optional.h>
 #include <c10/macros/Macros.h>
 
@@ -44,10 +37,7 @@ namespace {
 template <typename T>
 struct uniform_int_from_to_distribution {
 
-  C10_HOST_DEVICE inline uniform_int_from_to_distribution(uint64_t range, int64_t base) {
-    range_ = range;
-    base_ = base;
-  }
+  C10_HOST_DEVICE inline uniform_int_from_to_distribution(uint64_t range, int64_t base) : range_(range), base_(base) {}
 
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
@@ -165,7 +155,7 @@ template <typename RNG, typename ret_type,                                      
             !has_member_next_##TYPE##_normal_sample<RNG>::value ||                                  \
             !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                 \
           ), int> = 0>                                                                              \
-C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, ret_type* ret) {  \
+C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* /*generator*/, ret_type* /*ret*/) {  \
   return false;                                                                                     \
 }                                                                                                   \
                                                                                                     \
@@ -181,7 +171,7 @@ template <typename RNG, typename ret_type,                                      
           typename std::enable_if_t<(                                                               \
             !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                 \
           ), int> = 0>                                                                              \
-C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* generator, ret_type cache) { \
+C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* /*generator*/, ret_type /*cache*/) { \
 }
 
 DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(double);
@@ -219,8 +209,8 @@ struct normal_distribution {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     const dist_acctype<T> u1 = uniform(generator);
     const dist_acctype<T> u2 = uniform(generator);
-    const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
-    const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
+    const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log1p(-u2));
+    const dist_acctype<T> theta = static_cast<T>(2.0) * c10::pi<T> * u1;
     if (std::is_same<T, double>::value) {
       maybe_set_next_double_normal_sample(generator, r * ::sin(theta));
     } else {
@@ -288,9 +278,7 @@ struct geometric_distribution {
 template <typename T>
 struct exponential_distribution {
 
-  C10_HOST_DEVICE inline exponential_distribution(T lambda_in) {
-    lambda = lambda_in;
-  }
+  C10_HOST_DEVICE inline exponential_distribution(T lambda_in) : lambda(lambda_in) {}
 
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
@@ -308,10 +296,7 @@ struct exponential_distribution {
 template <typename T>
 struct cauchy_distribution {
 
-  C10_HOST_DEVICE inline cauchy_distribution(T median_in, T sigma_in) {
-    median = median_in;
-    sigma = sigma_in;
-  }
+  C10_HOST_DEVICE inline cauchy_distribution(T median_in, T sigma_in) : median(median_in), sigma(sigma_in) {}
 
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {

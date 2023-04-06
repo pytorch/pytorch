@@ -1,6 +1,7 @@
 #ifndef CAFFE2_OPERATORS_FILLER_OP_H_
 #define CAFFE2_OPERATORS_FILLER_OP_H_
 
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -443,7 +444,7 @@ class GaussianFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(std::forward<Args>(args)...),
         mean_(this->template GetSingleArgument<float>("mean", 0)),
         std_(this->template GetSingleArgument<float>("std", 1)) {
-    DCHECK_GT(std_, 0) << "Standard deviation should be nonnegative.";
+    TORCH_DCHECK_GT(std_, 0) << "Standard deviation should be nonnegative.";
   }
 
   bool Fill(Tensor* output) override {
@@ -536,7 +537,7 @@ class LengthsRangeFillOp : public Operator<Context> {
     auto* output_data = output->template mutable_data<int32_t>();
 
     int32_t offset = 0;
-    for (int i = 0; i < input.numel(); ++i) {
+    for (const auto i : c10::irange(input.numel())) {
       auto len = input_data[i];
       auto start = output_data + offset;
       std::iota(

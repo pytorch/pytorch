@@ -1,9 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorOperators.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/affine_grid_generator_backward_native.h>
+#include <ATen/ops/affine_grid_generator_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/linspace.h>
+#include <ATen/ops/tensor.h>
+#endif
 
 namespace at { namespace native {
 
-at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps, 
+at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps,
                                  bool align_corners) {
   if (num_steps <= 1) {
     return at::tensor(0, grid.options());

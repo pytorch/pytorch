@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
@@ -28,35 +27,56 @@ struct TORCH_API SGDOptions : public OptimizerCloneableOptions<SGDOptions> {
   TORCH_ARG(double, dampening) = 0;
   TORCH_ARG(double, weight_decay) = 0;
   TORCH_ARG(bool, nesterov) = false;
-public:
+
+ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
-  TORCH_API friend bool operator==(const SGDOptions& lhs, const SGDOptions& rhs);
-  ~SGDOptions() = default;
+  TORCH_API friend bool operator==(
+      const SGDOptions& lhs,
+      const SGDOptions& rhs);
+  ~SGDOptions() override = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
 };
 
-struct TORCH_API SGDParamState : public OptimizerCloneableParamState<SGDParamState> {
+struct TORCH_API SGDParamState
+    : public OptimizerCloneableParamState<SGDParamState> {
   TORCH_ARG(torch::Tensor, momentum_buffer);
 
-public:
+ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
-  TORCH_API friend bool operator==(const SGDParamState& lhs, const SGDParamState& rhs);
-  ~SGDParamState() = default;
+  TORCH_API friend bool operator==(
+      const SGDParamState& lhs,
+      const SGDParamState& rhs);
+  ~SGDParamState() override = default;
 };
 
 class TORCH_API SGD : public Optimizer {
  public:
-  explicit SGD(std::vector<OptimizerParamGroup> param_groups,
-      SGDOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<SGDOptions>(defaults)) {
+  explicit SGD(
+      std::vector<OptimizerParamGroup> param_groups,
+      SGDOptions defaults)
+      : Optimizer(
+            std::move(param_groups),
+            std::make_unique<SGDOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
-    TORCH_CHECK(defaults.momentum() >= 0, "Invalid momentum value: ", defaults.momentum());
-    TORCH_CHECK(defaults.weight_decay() >= 0, "Invalid weight_decay value: ", defaults.weight_decay());
-    TORCH_CHECK(!defaults.nesterov() || (defaults.momentum() > 0 && defaults.dampening() == 0), "Nesterov momentum requires a momentum and zero dampening");
+    TORCH_CHECK(
+        defaults.momentum() >= 0,
+        "Invalid momentum value: ",
+        defaults.momentum());
+    TORCH_CHECK(
+        defaults.weight_decay() >= 0,
+        "Invalid weight_decay value: ",
+        defaults.weight_decay());
+    TORCH_CHECK(
+        !defaults.nesterov() ||
+            (defaults.momentum() > 0 && defaults.dampening() == 0),
+        "Nesterov momentum requires a momentum and zero dampening");
   }
 
-  explicit SGD(std::vector<Tensor> params,
-      SGDOptions defaults) : SGD({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit SGD(std::vector<Tensor> params, SGDOptions defaults)
+      : SGD({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
 

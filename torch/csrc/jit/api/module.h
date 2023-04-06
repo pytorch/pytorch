@@ -5,11 +5,10 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
-#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/utils/memory.h>
@@ -18,6 +17,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 #include <memory>
@@ -25,6 +25,8 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 // This file contains classes which assist in desugaring Python style
@@ -87,13 +89,13 @@ using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 struct TORCH_API Module : public Object {
   explicit Module(c10::QualifiedName class_name);
   Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
-  Module() {}
+  Module() = default;
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
   Module(ModulePtr module_value) : Object(std::move(module_value)) {}
-  ~Module() {}
+  ~Module() = default;
 
   void set_optimized(bool o) {
     TORCH_WARN(
@@ -108,8 +110,8 @@ struct TORCH_API Module : public Object {
     return true;
   }
 
-  IValue forward(std::vector<IValue> inputs) {
-    return get_method("forward")(std::move(inputs));
+  IValue forward(std::vector<IValue> inputs, const Kwargs& kwargs = Kwargs()) {
+    return get_method("forward")(std::move(inputs), kwargs);
   }
 
   // In script modules, buffers are Tensors attribute that are _not_ registered
@@ -133,7 +135,7 @@ struct TORCH_API Module : public Object {
 
   void register_attribute(
       const std::string& name,
-      const TypePtr t,
+      const TypePtr& t,
       IValue v,
       bool is_param = false,
       bool is_buffer = false) {
@@ -172,8 +174,7 @@ struct TORCH_API Module : public Object {
   std::string dump_to_str(
       bool print_method_bodies,
       bool print_attr_values,
-      bool print_param_values,
-      int level) const;
+      bool print_param_values) const;
 
   /// Enables "training" mode.
   void train(bool on = true);
@@ -222,12 +223,14 @@ struct TORCH_API Module : public Object {
   void _save_for_mobile(
       std::ostream& out,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      bool save_mobile_debug_info = false) const;
+      bool save_mobile_debug_info = false,
+      bool use_flatbuffer = false) const;
 
   void _save_for_mobile(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      bool save_mobile_debug_info = false) const;
+      bool save_mobile_debug_info = false,
+      bool use_flatbuffer = false) const;
 
   Module copy() const;
 
@@ -239,7 +242,19 @@ struct TORCH_API Module : public Object {
   // will be preserved as well
   Module clone(bool inplace = false) const;
 
+  // Clones both the underlying `ClassType` and the module instance(data), this
+  // function creates a new `ClassType` and returns a new instance that has the
+  // same data as the current instance but with the new type, shared ClassType
+  // will be preserved as well. Also allows the caller to specify a set of
+  // method and attribute names to not clone.
+  Module clone(
+      bool inplace,
+      const std::unordered_set<std::string>& ignored_method,
+      const std::unordered_set<std::string>& ignored_attributes) const;
+
   void clone_method(const Module& orig, const std::string& name);
+
+  IValue operator()(std::vector<IValue> inputs);
 
   template <typename... Types>
   IValue create_class(const c10::QualifiedName& name, Types&&... args) const {
@@ -252,11 +267,39 @@ struct TORCH_API Module : public Object {
     return _ivalue() == y._ivalue();
   }
 
+  void set_delete_memory(std::shared_ptr<char> delete_mem) {
+    mem_to_delete_ = delete_mem;
+  }
+
+  // A set of functions to maintain input shapes through torch.jit.save and
+  // torch.jit.load. It only works on tensors and lists/dicts of tensors
+  // because tracing is only supported by these types.
+  void store_traced_inputs(std::string func_name, std::vector<IValue> inputs) {
+    if (inputs.size() == 0) {
+      return;
+    }
+    auto c10_inputs = c10::impl::GenericList(AnyType::get());
+    for (const IValue& value : inputs) {
+      // Not checking whether this is traceable type as that is already checked
+      // higher up in the stack and changing that would require a larger
+      // restructuring.
+      c10_inputs.push_back(value);
+    }
+    traced_inputs_.insert_or_assign(func_name, c10_inputs);
+  }
+
+  c10::Dict<std::string, c10::impl::GenericList> retrieve_traced_inputs()
+      const {
+    return traced_inputs_;
+  }
+
  private:
   Module clone_impl(
       std::unordered_map<TypePtr, TypePtr>& type_remap,
       bool inplace,
-      IValue::HashAliasedIValueMap memo) const;
+      IValue::HashAliasedIValueMap memo,
+      const std::unordered_set<std::string>& ignored_methods,
+      const std::unordered_set<std::string>& ignored_attributes) const;
 
   void clone_method(
       const Module& orig,
@@ -264,14 +307,72 @@ struct TORCH_API Module : public Object {
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
   c10::QualifiedName getNameForMethod(std::string basename) const {
-    return QualifiedName(*type()->name(), basename);
+    return QualifiedName(*type()->name(), std::move(basename));
   }
 
   void to_impl(
       const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
+
+  // Extra handle for the module to delete when itself is deleted
+  std::shared_ptr<char> mem_to_delete_;
+
+  // Map of function names to the traced inputs that they have been traced with
+  c10::Dict<std::string, c10::impl::GenericList> traced_inputs_;
 };
+
+// C++ equivalent api of `torch.jit.freeze`. See documentation there for
+// details.
+TORCH_API Module freeze(
+    const Module& module,
+    c10::optional<std::vector<std::string>> preserved_attrs = c10::nullopt,
+    bool optimize_numerics = true);
+
+// C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation
+// there for details.
+TORCH_API Module optimize_for_inference(
+    Module& module,
+    const std::vector<std::string>& other_methods = {});
+
+enum class FusionBehavior { STATIC, DYNAMIC };
+
+using FusionStrategy = std::vector<std::pair<FusionBehavior, size_t>>;
+// clang-format off
+/*
+Sets the type and number of specializations that can occur during fusion.
+
+Usage: provide a list of pairs (type, depth) where type is one of STATIC or DYNAMIC
+and depth is an integer.
+
+Behavior - static vs dynamic:
+    In STATIC fusion, fused ops are compiled to have fixed input shapes. The shape is determined
+    based on some initial profiling runs.
+    In DYNAMIC fusion, fused ops are compiled to have variable input shapes, so that multiple
+    shapes are possible.
+
+In both cases, we also recompile on new striding behavior, device, or dtype.
+
+Behavior - fallback functions & depth:
+    When an input doesn't match the format required by the specialized compiled op, it will run
+    a fallback function. Fallback functions are recursively be compiled and specialized based
+    on the observed tensor shapes. Since compilation can be slow, the "depth" parameter is provided to
+    limit the number of specializations that can be compiled, before giving up on recompiling and
+    falling back to a completely un-fused, un-specialized implementation.
+
+The list of (type, depth) pairs controls the type of specializations and the number of
+specializations. For example: [(STATIC, 2), (DYNAMIC, 2)] indicates that the first
+two specializations will use static fusions, the following two specializations will use
+dynamic fusion, and any inputs that satisfy none of the 4 options will run an
+unfused implementation.
+
+NB: in the future, if more as more fusion backends are added there may be more granular
+apis for specific fusers.
+*/
+// clang-format on
+TORCH_API FusionStrategy getFusionStrategy();
+// returns previous strategy
+TORCH_API FusionStrategy setFusionStrategy(FusionStrategy& fusion_strategy);
 
 namespace detail {
 
@@ -432,7 +533,9 @@ struct slot_list_impl {
   size_t size() const {
     if (!size_) {
       size_ = size_t(0);
+      // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
       for (const value_type& s : *(this)) {
+        (void)s; // Suppress unused variable warning
         ++*size_;
       }
     }
@@ -440,7 +543,7 @@ struct slot_list_impl {
   }
 
   slot_list_impl(Module module, bool recurse, bool return_module)
-      : module_(std::move(module)),
+      : module_(module),
         recurse_(recurse),
         return_module_(return_module),
         size_(c10::nullopt) {
@@ -506,8 +609,8 @@ struct TORCH_API BufferPolicy {
     return std::move(v).toTensor();
   }
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
-    return typ->getAttribute(i)->isSubtypeOf(TensorType::get()) &&
-        !typ->is_parameter(i);
+    return typ->getAttribute(i)->isSubtypeOf(*TensorType::get()) &&
+        typ->is_buffer(i);
   }
   static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };
@@ -539,7 +642,7 @@ struct NamedPolicy {
       name = (cursors.back().i_ == -1) ? "" : nameFragment(cursors.back());
     } else {
       std::ostringstream ss;
-      for (size_t i = 0; i < cursors.size(); ++i) {
+      for (const auto i : c10::irange(cursors.size())) {
         if (i > 0) {
           ss << ".";
         }
@@ -547,7 +650,7 @@ struct NamedPolicy {
       }
       name = ss.str();
     }
-    return value_type{std::move(name), Policy::create(cursors, v)};
+    return value_type{std::move(name), Policy::create(cursors, std::move(v))};
   }
   static bool valid(const ClassTypePtr& t, size_t i, const IValue& v) {
     return Policy::valid(t, i, v);

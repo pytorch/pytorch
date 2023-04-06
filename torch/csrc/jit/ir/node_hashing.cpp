@@ -4,18 +4,31 @@
 #include <unordered_map>
 
 #include <ATen/core/functional.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
 bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
+  // type_equal doesnt distinguish between mkldnn/pytorch cpu tensors,
+  // and we dont want to coalesce mkldnn tensors bc they do layout
+  // transformations based on usage
+  if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
+    return false;
+  }
+  if (lhs.is_nested() || rhs.is_nested()) {
+    return false;
+  }
+  // If device is not equal, lhs.equal(rhs) would throw an error.
+  if (lhs.device() != rhs.device()) {
+    return false;
+  }
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
@@ -24,7 +37,7 @@ bool typeListEqual(
     const std::vector<TypePtr>& rhs) {
   if (lhs.size() != rhs.size())
     return false;
-  for (size_t i = 0; i < lhs.size(); ++i) {
+  for (const auto i : c10::irange(lhs.size())) {
     if (*lhs[i] != *rhs[i]) {
       return false;
     }
@@ -55,7 +68,7 @@ bool attributesEqual(at::ArrayRef<IValue> a1, at::ArrayRef<IValue> a2) {
   if (a1.size() != a2.size()) {
     return false;
   }
-  for (size_t i = 0; i < a1.size(); ++i) {
+  for (const auto i : c10::irange(a1.size())) {
     if (!ivaluesEqual(a1[i], a2[i])) {
       return false;
     }
@@ -96,8 +109,8 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
     return attributesEqual(a1.toListRef(), a2.toListRef());
   }
   if (a1.isTuple()) {
-    at::ArrayRef<IValue> a1_elem = a1.toTuple()->elements();
-    at::ArrayRef<IValue> a2_elem = a2.toTuple()->elements();
+    at::ArrayRef<IValue> a1_elem = a1.toTupleRef().elements();
+    at::ArrayRef<IValue> a2_elem = a2.toTupleRef().elements();
     return attributesEqual(a1_elem, a2_elem);
   }
   if (a1.isGenericDict()) {
@@ -125,6 +138,9 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
   }
   if (a1.isEnum()) {
     return a1.toEnumHolder() == a2.toEnumHolder();
+  }
+  if (a1.isObject()) {
+    return &a1.toObjectRef() == &a2.toObjectRef();
   }
   TORCH_INTERNAL_ASSERT(false);
 }
@@ -161,7 +177,9 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 
     switch (lhs->kindOf(name)) {
       COMPARE_ATTRIBUTEVALUE(f)
+      COMPARE_ATTRIBUTEVALUE(c)
       COMPARE_ATTRIBUTEVALUE(fs)
+      COMPARE_ATTRIBUTEVALUE(cs)
       COMPARE_ATTRIBUTEVALUE(i)
       COMPARE_ATTRIBUTEVALUE(is)
       COMPARE_ATTRIBUTEVALUE(s)
@@ -192,19 +210,25 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 
 } // anonymous namespace
 
+// Makes a hash that hashes the input Value, the output type
+// as well as the node attributes
 size_t HashNode::operator()(const Node* k) const {
   AT_ASSERT(k != nullptr);
   size_t constant_hash = 0;
   if (k->kind() == prim::Constant) {
     TypePtr type = k->output()->type();
-    if (type->isSubtypeOf(NumberType::get()) &&
+    if (type->isSubtypeOf(*NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::i) {
       constant_hash = std::hash<int64_t>{}(k->i(attr::value));
     } else if (
-        type->isSubtypeOf(NumberType::get()) &&
+        type->isSubtypeOf(*NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::f) {
       constant_hash = std::hash<double>{}(k->f(attr::value));
-    } else if (type->isSubtypeOf(BoolType::get())) {
+    } else if (
+        type->isSubtypeOf(*NumberType::get()) &&
+        k->kindOf(attr::value) == AttributeKind::c) {
+      constant_hash = c10::hash<c10::complex<double>>{}(k->c(attr::value));
+    } else if (type->isSubtypeOf(*BoolType::get())) {
       constant_hash = std::hash<bool>{}(k->i(attr::value));
     }
   }
@@ -213,8 +237,10 @@ size_t HashNode::operator()(const Node* k) const {
       fmap(k->outputs(), [](const Value* v) { return v->type()->kind(); }),
       fmap(k->inputs(), [](const Value* v) { return v->unique(); }),
       constant_hash);
-};
+}
 
+// Checks that two nodes have the same inputs, output types
+// and node attributes.
 bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   if (lhs == nullptr && rhs == nullptr)
     return true;
@@ -229,8 +255,10 @@ bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   auto rhs_outputs = rhs->outputs();
   if (lhs_outputs.size() != rhs_outputs.size())
     return false;
-  for (size_t i = 0; i < lhs_outputs.size(); ++i) {
-    if (*lhs_outputs[i]->type() != *rhs_outputs[i]->type())
+  for (const auto i : c10::irange(lhs_outputs.size())) {
+    const auto& lt = lhs_outputs[i]->type();
+    const auto& rt = rhs_outputs[i]->type();
+    if (!(lt == rt || *lt == *rt))
       return false;
   }
 
@@ -245,8 +273,17 @@ bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   if (!attributesEqualCSE(lhs, rhs))
     return false;
 
-  return true;
-};
+  // Check if the blocks contained in a op are the same
+  if (lhs->blocks().size() != rhs->blocks().size()) {
+    return false;
+  }
+  for (size_t i = 0; i < lhs->blocks().size(); ++i) {
+    if (lhs->blocks()[i] != rhs->blocks()[i]) {
+      return false;
+    }
+  }
 
-} // namespace jit
-} // namespace torch
+  return true;
+}
+
+} // namespace torch::jit

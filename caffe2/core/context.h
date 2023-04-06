@@ -16,8 +16,10 @@
 #include <c10/util/ArrayRef.h>
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#include <c10/core/GeneratorImpl.h>
+#include <c10/util/irange.h>
 #include <ATen/core/DistributionsHelper.h>
-#include <ATen/CPUGeneratorImpl.h>
+#include <ATen/core/MT19937RNGEngine.h>
 #else
 #include "caffe2/core/distributions_stubs.h"
 #endif
@@ -30,7 +32,7 @@ namespace caffe2 {
  * A function to generate a random number seed that is unique in a best-effort
  * basis, using an ever-incrementing seed and the current time.
  */
-CAFFE2_API uint32_t RandomNumberSeed();
+TORCH_API uint32_t RandomNumberSeed();
 
 /**
  * The CPU Context, representing the bare minimum of what a Context class in
@@ -44,10 +46,41 @@ CAFFE2_API uint32_t RandomNumberSeed();
  * computation it has.
  *
  */
-class CAFFE2_API CPUContext final : public BaseContext {
+class TORCH_API CPUContext final : public BaseContext {
  public:
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-  typedef at::CPUGeneratorImpl rand_gen_type;
+  class rand_gen_type {
+   public:
+    explicit rand_gen_type(uint64_t seed_in = default_rng_seed_val)
+        : engine_{seed_in} {}
+
+    uint32_t random() {
+      return engine_();
+    }
+    uint64_t random64() {
+      uint32_t random1 = engine_();
+      uint32_t random2 = engine_();
+      return (static_cast<uint64_t>(random1) << 32) | random2;
+    }
+
+    c10::optional<float> next_float_normal_sample() {
+      return next_float_normal_sample_;
+    }
+    c10::optional<double> next_double_normal_sample() {
+      return next_double_normal_sample_;
+    }
+    void set_next_float_normal_sample(c10::optional<float> randn) {
+      next_float_normal_sample_ = randn;
+    }
+    void set_next_double_normal_sample(c10::optional<double> randn) {
+      next_double_normal_sample_ = randn;
+    }
+
+   private:
+    at::mt19937 engine_;
+    c10::optional<float> next_float_normal_sample_;
+    c10::optional<double> next_double_normal_sample_;
+  };
 #else
   typedef std::mt19937 rand_gen_type;
 #endif
@@ -63,7 +96,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
 
   ~CPUContext() noexcept override {}
 
-  inline void SwitchToDevice(int /*stream_id*/) override {}
+  inline void SwitchToDevice(int64_t /*stream_id*/) override {}
 
   using BaseContext::SwitchToDevice;
 
@@ -123,7 +156,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
           static_cast<const void*>(src),
           static_cast<void*>(dst));
     } else {
-      for (size_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         dst[i] = src[i];
       }
     }
@@ -131,7 +164,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
 
   template <class SrcContext, class DstContext>
   inline void
-  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+  CopyItems(const TypeMeta meta, size_t n, const void* src, void* dst) {
     if (meta.copy()) {
       meta.copy()(src, dst, n);
     } else {

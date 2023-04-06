@@ -76,13 +76,13 @@ __all__ = [
 ]
 
 
-class ConstraintRegistry(object):
+class ConstraintRegistry:
     """
     Registry to link constraints to transforms.
     """
     def __init__(self):
         self._registry = {}
-        super(ConstraintRegistry, self).__init__()
+        super().__init__()
 
     def register(self, constraint, factory=None):
         """
@@ -98,7 +98,7 @@ class ConstraintRegistry(object):
             constraint (subclass of :class:`~torch.distributions.constraints.Constraint`):
                 A subclass of :class:`~torch.distributions.constraints.Constraint`, or
                 a singleton object of the desired class.
-            factory (callable): A callable that inputs a constraint object and returns
+            factory (Callable): A callable that inputs a constraint object and returns
                 a  :class:`~torch.distributions.transforms.Transform` object.
         """
         # Support use as decorator.
@@ -153,15 +153,29 @@ transform_to = ConstraintRegistry()
 ################################################################################
 
 @biject_to.register(constraints.real)
-@biject_to.register(constraints.real_vector)
 @transform_to.register(constraints.real)
-@transform_to.register(constraints.real_vector)
 def _transform_to_real(constraint):
     return transforms.identity_transform
 
 
+@biject_to.register(constraints.independent)
+def _biject_to_independent(constraint):
+    base_transform = biject_to(constraint.base_constraint)
+    return transforms.IndependentTransform(
+        base_transform, constraint.reinterpreted_batch_ndims)
+
+
+@transform_to.register(constraints.independent)
+def _transform_to_independent(constraint):
+    base_transform = transform_to(constraint.base_constraint)
+    return transforms.IndependentTransform(
+        base_transform, constraint.reinterpreted_batch_ndims)
+
+
 @biject_to.register(constraints.positive)
+@biject_to.register(constraints.nonnegative)
 @transform_to.register(constraints.positive)
+@transform_to.register(constraints.nonnegative)
 def _transform_to_positive(constraint):
     return transforms.ExpTransform()
 
@@ -213,6 +227,18 @@ def _transform_to_simplex(constraint):
 @transform_to.register(constraints.lower_cholesky)
 def _transform_to_lower_cholesky(constraint):
     return transforms.LowerCholeskyTransform()
+
+
+@transform_to.register(constraints.positive_definite)
+@transform_to.register(constraints.positive_semidefinite)
+def _transform_to_positive_definite(constraint):
+    return transforms.PositiveDefiniteTransform()
+
+
+@biject_to.register(constraints.corr_cholesky)
+@transform_to.register(constraints.corr_cholesky)
+def _transform_to_corr_cholesky(constraint):
+    return transforms.CorrCholeskyTransform()
 
 
 @biject_to.register(constraints.cat)

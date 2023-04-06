@@ -1,11 +1,20 @@
-#include <ATen/ATen.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-#include <ATen/div_rtn.h>
 
 #include <ATen/native/im2col.h>
 #include <ATen/native/im2col_shape_check.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/col2im_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/im2col_native.h>
+#endif
 
 // Note [im2col/col2im output padding]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -127,7 +136,7 @@ static void col2im_out_cpu_template(
   if (input.dim() == 2) {
     // Force batch
     batched_input = false;
-    input.resize_({1, input.size(0), input.size(1)});
+    input = input.view({1, input.size(0), input.size(1)});
   }
 
   int64_t batch_size = input.size(0);
@@ -135,9 +144,8 @@ static void col2im_out_cpu_template(
   int64_t n_output_plane = n_input_plane / (kernel_width * kernel_height);
 
   output.resize_({batch_size, n_output_plane, output_height, output_width});
-  output.zero_();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf,
       input.scalar_type(), "col2im_out_cpu", [&] {
         Tensor input_n = Tensor();
         Tensor output_n = Tensor();
@@ -151,7 +159,7 @@ static void col2im_out_cpu_template(
                 stride_width +
             1;
 
-        for (int64_t elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           input_n = input.select(0, elt);
           output_n = output.select(0, elt);
 
@@ -179,28 +187,15 @@ static void col2im_out_cpu_template(
       });
 }
 
-void col2im_backward_out_cpu_template(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  // im2col_out_cpu checks size of kernel_size, dilation, padding and stride
-  im2col_out_cpu(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
-}
-
 } // namespace
 
-Tensor& col2im_out_cpu(
-    Tensor& output,
-    const Tensor& input,
+Tensor& col2im_out_cpu(const Tensor& input,
     IntArrayRef output_size,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
-    IntArrayRef stride) {
+    IntArrayRef stride,
+    Tensor& output) {
   col2im_out_cpu_template(
       output, input, output_size, kernel_size, dilation, padding, stride);
   return output;
@@ -218,31 +213,6 @@ Tensor col2im_cpu(
   col2im_out_cpu_template(
       output, input, output_size, kernel_size, dilation, padding, stride);
   return output;
-}
-
-Tensor& col2im_backward_out_cpu(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  col2im_backward_out_cpu_template(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
-  return grad_input;
-}
-
-Tensor col2im_backward_cpu(
-    const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  col2im_backward_out_cpu_template(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
-  return grad_input;
 }
 
 } // namespace native

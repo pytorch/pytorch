@@ -163,6 +163,9 @@ EventStatus EventQueryCUDA(const Event* event) {
       std::unique_lock<std::mutex> lock(wrapper->mutex_recorded_);
       wrapper->err_msg_ = err_msg;
       wrapper->status_ = EventStatus::EVENT_FAILED;
+    } else {
+      // ignore and clear the error if not ready
+      (void)cudaGetLastError();
     }
   }
   return static_cast<EventStatus>(wrapper->status_.load());

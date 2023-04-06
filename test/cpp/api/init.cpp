@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/init_baseline.h>
@@ -8,17 +9,17 @@
 #include <functional>
 #include <vector>
 
-
 void check_exact_values(
     const std::vector<torch::Tensor>& parameters,
     const std::vector<std::vector<torch::Tensor>>& expected_parameters) {
   ASSERT_EQ(parameters.size(), expected_parameters.size());
 
-  for (size_t i = 0; i < parameters.size(); i++) {
+  for (const auto i : c10::irange(parameters.size())) {
     auto layerParameters = parameters[i];
     auto expectedLayerParameters = expected_parameters[i];
 
-    if (layerParameters.size(0) != expectedLayerParameters.size()) {
+    if (static_cast<size_t>(layerParameters.size(0)) !=
+        expectedLayerParameters.size()) {
       std::cout << "layer #" << i
                 << " layerParameters size: " << layerParameters.size(0)
                 << " != "
@@ -27,8 +28,9 @@ void check_exact_values(
       ASSERT_TRUE(false);
     }
 
-    for (size_t p = 0; p < layerParameters.size(0); p++) {
-      // Always compare using double dtype, regardless of the original dtype of the tensors
+    for (const auto p : c10::irange(layerParameters.size(0))) {
+      // Always compare using double dtype, regardless of the original dtype of
+      // the tensors
       auto tensor = layerParameters[p].to(torch::kFloat64);
       auto expectedTensor = expectedLayerParameters[p].to(torch::kFloat64);
 
@@ -109,20 +111,17 @@ TEST(InitTest, CanInitializeTensorThatRequiresGrad) {
 }
 
 TEST(InitTest, CalculateGainWithTanh) {
-  double gain =
-      torch::nn::init::calculate_gain(torch::kTanh);
+  double gain = torch::nn::init::calculate_gain(torch::kTanh);
   ASSERT_DOUBLE_EQ(gain, 5.0 / 3.0);
 }
 
 TEST(InitTest, CalculateGainWithRelu) {
-  double gain =
-      torch::nn::init::calculate_gain(torch::kReLU);
+  double gain = torch::nn::init::calculate_gain(torch::kReLU);
   ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0));
 }
 
 TEST(InitTest, CalculateGainWithLeakyRelu) {
-  double gain =
-      torch::nn::init::calculate_gain(torch::kLeakyReLU);
+  double gain = torch::nn::init::calculate_gain(torch::kLeakyReLU);
   ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0 / (1 + pow(0.01, 2))));
 }
 

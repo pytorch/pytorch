@@ -62,7 +62,10 @@ In foo.cc, do:
 
 #pragma once
 
+#if defined(CAFFE2_PERF_WITH_AVX512) || defined(CAFFE2_PERF_WITH_AVX2) \
+     || defined(CAFFE2_PERF_WITH_AVX)
 #include <cpuinfo.h>
+#endif
 
 // DO macros: these should be used in your entry function, similar to foo()
 // above, that routes implementations based on CPU capability.
@@ -105,12 +108,12 @@ In foo.cc, do:
 #endif // CAFFE2_PERF_WITH_AVX2
 
 #ifdef CAFFE2_PERF_WITH_AVX
-#define AVX_DO(funcname, ...)                  \
-  {                                            \
+#define AVX_DO(funcname, ...)                                               \
+  {                                                                         \
     static const bool isDo = cpuinfo_initialize() && cpuinfo_has_x86_avx(); \
-    if (isDo) {                                \
-      return funcname##__avx(__VA_ARGS__);     \
-    }                                          \
+    if (isDo) {                                                             \
+      return funcname##__avx(__VA_ARGS__);                                  \
+    }                                                                       \
   }
 #define AVX_F16C_DO(funcname, ...)                                            \
   {                                                                           \

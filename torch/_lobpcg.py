@@ -3,30 +3,27 @@
 # Author: Pearu Peterson
 # Created: February 2020
 
-from typing import Dict, Tuple, Optional
+from typing import Dict, Optional, Tuple
 
 import torch
 from torch import Tensor
 from . import _linalg_utils as _utils
-from .overrides import has_torch_function, handle_torch_function
+from .overrides import handle_torch_function, has_torch_function
 
 
-__all__ = ['lobpcg']
+__all__ = ["lobpcg"]
+
 
 def _symeig_backward_complete_eigenspace(D_grad, U_grad, A, D, U):
     # compute F, such that F_ij = (d_j - d_i)^{-1} for i != j, F_ii = 0
     F = D.unsqueeze(-2) - D.unsqueeze(-1)
-    F.diagonal(dim1=-2, dim2=-1).fill_(float('inf'))
+    F.diagonal(dim1=-2, dim2=-1).fill_(float("inf"))
     F.pow_(-1)
 
     # A.grad = U (D.grad + (U^T U.grad * F)) U^T
-    Ut = U.transpose(-1, -2).contiguous()
+    Ut = U.mT.contiguous()
     res = torch.matmul(
-        U,
-        torch.matmul(
-            torch.diag_embed(D_grad) + torch.matmul(Ut, U_grad) * F,
-            Ut
-        )
+        U, torch.matmul(torch.diag_embed(D_grad) + torch.matmul(Ut, U_grad) * F, Ut)
     )
 
     return res
@@ -66,7 +63,9 @@ def _polynomial_coefficients_given_roots(roots):
         # Needs more memory, O(... * k^2), but with only O(... * k^2) complexity.
         poly_coeffs_new = poly_coeffs.clone() if roots.requires_grad else poly_coeffs
         out = poly_coeffs_new.narrow(-1, poly_order - i, i + 1)
-        out -= roots.narrow(-1, i - 1, 1) * poly_coeffs.narrow(-1, poly_order - i + 1, i + 1)
+        out -= roots.narrow(-1, i - 1, 1) * poly_coeffs.narrow(
+            -1, poly_order - i + 1, i + 1
+        )
         poly_coeffs = poly_coeffs_new
 
     return poly_coeffs.narrow(-1, 1, poly_order + 1)
@@ -76,7 +75,7 @@ def _polynomial_value(poly, x, zero_power, transition):
     """
     A generic method for computing poly(x) using the Horner's rule.
 
-    Arguments:
+    Args:
       poly (Tensor): the (possibly batched) 1D Tensor representing
                      polynomial coefficients such that
                      poly[..., i] = (a_{i_0}, ..., a{i_n} (==1)), and
@@ -84,7 +83,7 @@ def _polynomial_value(poly, x, zero_power, transition):
 
       x (Tensor): the value (possible batched) to evalate the polynomial `poly` at.
 
-      zero_power (Tensor): the represenation of `x^0`. It is application-specific.
+      zero_power (Tensor): the representation of `x^0`. It is application-specific.
 
       transition (Callable): the function that accepts some intermediate result `int_val`,
                              the `x` and a specific polynomial coefficient
@@ -102,6 +101,7 @@ def _polynomial_value(poly, x, zero_power, transition):
         res = transition(res, x, poly[..., k])
     return res
 
+
 def _matrix_polynomial_value(poly, x, zero_power=None):
     """
     Evaluates `poly(x)` for the (batched) matrix input `x`.
@@ -115,10 +115,12 @@ def _matrix_polynomial_value(poly, x, zero_power=None):
         return res
 
     if zero_power is None:
-        zero_power = torch.eye(x.size(-1), x.size(-1), dtype=x.dtype, device=x.device) \
-            .view(*([1] * len(list(x.shape[:-2]))), x.size(-1), x.size(-1))
+        zero_power = torch.eye(
+            x.size(-1), x.size(-1), dtype=x.dtype, device=x.device
+        ).view(*([1] * len(list(x.shape[:-2]))), x.size(-1), x.size(-1))
 
     return _polynomial_value(poly, x, zero_power, transition)
+
 
 def _vector_polynomial_value(poly, x, zero_power=None):
     """
@@ -136,10 +138,11 @@ def _vector_polynomial_value(poly, x, zero_power=None):
 
     return _polynomial_value(poly, x, zero_power, transition)
 
+
 def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     # compute a projection operator onto an orthogonal subspace spanned by the
     # columns of U defined as (I - UU^T)
-    Ut = U.transpose(-2, -1).contiguous()
+    Ut = U.mT.contiguous()
     proj_U_ortho = -U.matmul(Ut)
     proj_U_ortho.diagonal(dim1=-2, dim2=-1).add_(1)
 
@@ -156,10 +159,10 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
             (*A.shape[:-1], A.size(-1) - D.size(-1)),
             dtype=A.dtype,
             device=A.device,
-            generator=gen
+            generator=gen,
         )
     )
-    U_ortho_t = U_ortho.transpose(-2, -1).contiguous()
+    U_ortho_t = U_ortho.mT.contiguous()
 
     # compute the coefficients of the characteristic polynomial of the tensor D.
     # Note that D is diagonal, so the diagonal elements are exactly the roots
@@ -212,11 +215,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
 
     # compute the action of `chr_poly_D_at_A` restricted to U_ortho_t
     chr_poly_D_at_A_to_U_ortho = torch.matmul(
-        U_ortho_t,
-        torch.matmul(
-            chr_poly_D_at_A,
-            U_ortho
-        )
+        U_ortho_t, torch.matmul(chr_poly_D_at_A, U_ortho)
     )
     # we need to invert 'chr_poly_D_at_A_to_U_ortho`, for that we compute its
     # Cholesky decomposition and then use `torch.cholesky_solve` for better stability.
@@ -228,57 +227,52 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     #
     # check if `chr_poly_D_at_A_to_U_ortho` is positive-definite or negative-definite
     chr_poly_D_at_A_to_U_ortho_sign = -1 if (largest and (k % 2 == 1)) else +1
-    chr_poly_D_at_A_to_U_ortho_L = torch.cholesky(
+    chr_poly_D_at_A_to_U_ortho_L = torch.linalg.cholesky(
         chr_poly_D_at_A_to_U_ortho_sign * chr_poly_D_at_A_to_U_ortho
     )
 
     # compute the gradient part in span(U)
-    res = _symeig_backward_complete_eigenspace(
-        D_grad, U_grad, A, D, U
-    )
+    res = _symeig_backward_complete_eigenspace(D_grad, U_grad, A, D, U)
 
     # incorporate the Sylvester equation solution into the full gradient
     # it resides in span(U_ortho)
     res -= U_ortho.matmul(
-        chr_poly_D_at_A_to_U_ortho_sign * torch.cholesky_solve(
-            U_ortho_t.matmul(series_acc),
-            chr_poly_D_at_A_to_U_ortho_L
+        chr_poly_D_at_A_to_U_ortho_sign
+        * torch.cholesky_solve(
+            U_ortho_t.matmul(series_acc), chr_poly_D_at_A_to_U_ortho_L
         )
     ).matmul(Ut)
 
     return res
 
+
 def _symeig_backward(D_grad, U_grad, A, D, U, largest):
     # if `U` is square, then the columns of `U` is a complete eigenspace
     if U.size(-1) == U.size(-2):
-        return _symeig_backward_complete_eigenspace(
-            D_grad, U_grad, A, D, U
-        )
+        return _symeig_backward_complete_eigenspace(D_grad, U_grad, A, D, U)
     else:
-        return _symeig_backward_partial_eigenspace(
-            D_grad, U_grad, A, D, U, largest
-        )
+        return _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest)
+
 
 class LOBPCGAutogradFunction(torch.autograd.Function):
-
     @staticmethod
-    def forward(ctx,
-                A: Tensor,
-                k: Optional[int] = None,
-                B: Optional[Tensor] = None,
-                X: Optional[Tensor] = None,
-                n: Optional[int] = None,
-                iK: Optional[Tensor] = None,
-                niter: Optional[int] = None,
-                tol: Optional[float] = None,
-                largest: Optional[bool] = None,
-                method: Optional[str] = None,
-                tracker: Optional[None] = None,
-                ortho_iparams: Optional[Dict[str, int]] = None,
-                ortho_fparams: Optional[Dict[str, float]] = None,
-                ortho_bparams: Optional[Dict[str, bool]] = None
-                ) -> Tuple[Tensor, Tensor]:
-
+    def forward(  # type: ignore[override]
+        ctx,
+        A: Tensor,
+        k: Optional[int] = None,
+        B: Optional[Tensor] = None,
+        X: Optional[Tensor] = None,
+        n: Optional[int] = None,
+        iK: Optional[Tensor] = None,
+        niter: Optional[int] = None,
+        tol: Optional[float] = None,
+        largest: Optional[bool] = None,
+        method: Optional[str] = None,
+        tracker: None = None,
+        ortho_iparams: Optional[Dict[str, int]] = None,
+        ortho_fparams: Optional[Dict[str, float]] = None,
+        ortho_bparams: Optional[Dict[str, bool]] = None,
+    ) -> Tuple[Tensor, Tensor]:
         # makes sure that input is contiguous for efficiency.
         # Note: autograd does not support dense gradients for sparse input yet.
         A = A.contiguous() if (not A.is_sparse) else A
@@ -286,12 +280,24 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
             B = B.contiguous() if (not B.is_sparse) else B
 
         D, U = _lobpcg(
-            A, k, B, X,
-            n, iK, niter, tol, largest, method, tracker,
-            ortho_iparams, ortho_fparams, ortho_bparams
+            A,
+            k,
+            B,
+            X,
+            n,
+            iK,
+            niter,
+            tol,
+            largest,
+            method,
+            tracker,
+            ortho_iparams,
+            ortho_fparams,
+            ortho_bparams,
         )
 
-        ctx.save_for_backward(A, B, D, U, largest)
+        ctx.save_for_backward(A, B, D, U)
+        ctx.largest = largest
 
         return D, U
 
@@ -300,23 +306,27 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         A_grad = B_grad = None
         grads = [None] * 14
 
-        A, B, D, U, largest = ctx.saved_tensors
+        A, B, D, U = ctx.saved_tensors
+        largest = ctx.largest
 
         # lobpcg.backward has some limitations. Checks for unsupported input
         if A.is_sparse or (B is not None and B.is_sparse and ctx.needs_input_grad[2]):
             raise ValueError(
-                'lobpcg.backward does not support sparse input yet.'
-                'Note that lobpcg.forward does though.'
+                "lobpcg.backward does not support sparse input yet."
+                "Note that lobpcg.forward does though."
             )
-        if A.dtype in (torch.complex64, torch.complex128) or \
-           B is not None and B.dtype in (torch.complex64, torch.complex128):
+        if (
+            A.dtype in (torch.complex64, torch.complex128)
+            or B is not None
+            and B.dtype in (torch.complex64, torch.complex128)
+        ):
             raise ValueError(
-                'lobpcg.backward does not support complex input yet.'
-                'Note that lobpcg.forward does though.'
+                "lobpcg.backward does not support complex input yet."
+                "Note that lobpcg.forward does though."
             )
         if B is not None:
             raise ValueError(
-                'lobpcg.backward does not support backward with B != I yet.'
+                "lobpcg.backward does not support backward with B != I yet."
             )
 
         if largest is None:
@@ -324,9 +334,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
 
         # symeig backward
         if B is None:
-            A_grad = _symeig_backward(
-                D_grad, U_grad, A, D, U, largest
-            )
+            A_grad = _symeig_backward(D_grad, U_grad, A, D, U, largest)
 
         # A has index 0
         grads[0] = A_grad
@@ -335,24 +343,24 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         return tuple(grads)
 
 
-def lobpcg(A: Tensor,
-           k: Optional[int] = None,
-           B: Optional[Tensor] = None,
-           X: Optional[Tensor] = None,
-           n: Optional[int] = None,
-           iK: Optional[Tensor] = None,
-           niter: Optional[int] = None,
-           tol: Optional[float] = None,
-           largest: Optional[bool] = None,
-           method: Optional[str] = None,
-           tracker: Optional[None] = None,
-           ortho_iparams: Optional[Dict[str, int]] = None,
-           ortho_fparams: Optional[Dict[str, float]] = None,
-           ortho_bparams: Optional[Dict[str, bool]] = None
-           ) -> Tuple[Tensor, Tensor]:
-
+def lobpcg(
+    A: Tensor,
+    k: Optional[int] = None,
+    B: Optional[Tensor] = None,
+    X: Optional[Tensor] = None,
+    n: Optional[int] = None,
+    iK: Optional[Tensor] = None,
+    niter: Optional[int] = None,
+    tol: Optional[float] = None,
+    largest: Optional[bool] = None,
+    method: Optional[str] = None,
+    tracker: None = None,
+    ortho_iparams: Optional[Dict[str, int]] = None,
+    ortho_fparams: Optional[Dict[str, float]] = None,
+    ortho_bparams: Optional[Dict[str, bool]] = None,
+) -> Tuple[Tensor, Tensor]:
     """Find the k largest (or smallest) eigenvalues and the corresponding
-    eigenvectors of a symmetric positive defined generalized
+    eigenvectors of a symmetric positive definite generalized
     eigenvalue problem using matrix-free LOBPCG methods.
 
     This function is a front-end to the following LOBPCG algorithms
@@ -384,12 +392,12 @@ def lobpcg(A: Tensor,
       we do the following symmetrization map: `A -> (A + A.t()) / 2`.
       The map is performed only when the `A` requires gradients.
 
-    Arguments:
+    Args:
 
       A (Tensor): the input tensor of size :math:`(*, m, m)`
 
       B (Tensor, optional): the input tensor of size :math:`(*, m,
-                  m)`. When not specified, `B` is interpereted as
+                  m)`. When not specified, `B` is interpreted as
                   identity matrix.
 
       X (tensor, optional): the input tensor of size :math:`(*, m, n)`
@@ -497,14 +505,27 @@ def lobpcg(A: Tensor,
 
     if not torch.jit.is_scripting():
         tensor_ops = (A, B, X, iK)
-        if (not set(map(type, tensor_ops)).issubset((torch.Tensor, type(None))) and has_torch_function(tensor_ops)):
+        if not set(map(type, tensor_ops)).issubset(
+            (torch.Tensor, type(None))
+        ) and has_torch_function(tensor_ops):
             return handle_torch_function(
-                lobpcg, tensor_ops, A, k=k,
-                B=B, X=X, n=n, iK=iK, niter=niter, tol=tol,
-                largest=largest, method=method, tracker=tracker,
+                lobpcg,
+                tensor_ops,
+                A,
+                k=k,
+                B=B,
+                X=X,
+                n=n,
+                iK=iK,
+                niter=niter,
+                tol=tol,
+                largest=largest,
+                method=method,
+                tracker=tracker,
                 ortho_iparams=ortho_iparams,
                 ortho_fparams=ortho_fparams,
-                ortho_bparams=ortho_bparams)
+                ortho_bparams=ortho_bparams,
+            )
 
     if not torch._jit_internal.is_scripting():
         if A.requires_grad or (B is not None and B.requires_grad):
@@ -514,43 +535,67 @@ def lobpcg(A: Tensor,
             # The symmetrization is important for first-order optimization methods,
             # so that (A - alpha * A_grad) is still a symmetric matrix.
             # Same holds for `B`.
-            A_sym = (A + A.transpose(-2, -1)) / 2
-            B_sym = (B + B.transpose(-2, -1)) / 2 if (B is not None) else None
+            A_sym = (A + A.mT) / 2
+            B_sym = (B + B.mT) / 2 if (B is not None) else None
 
             return LOBPCGAutogradFunction.apply(
-                A_sym, k, B_sym, X, n, iK, niter, tol, largest,
-                method, tracker, ortho_iparams, ortho_fparams, ortho_bparams
+                A_sym,
+                k,
+                B_sym,
+                X,
+                n,
+                iK,
+                niter,
+                tol,
+                largest,
+                method,
+                tracker,
+                ortho_iparams,
+                ortho_fparams,
+                ortho_bparams,
             )
     else:
         if A.requires_grad or (B is not None and B.requires_grad):
             raise RuntimeError(
-                'Script and require grads is not supported atm.'
-                'If you just want to do the forward, use .detach()'
-                'on A and B before calling into lobpcg'
+                "Script and require grads is not supported atm."
+                "If you just want to do the forward, use .detach()"
+                "on A and B before calling into lobpcg"
             )
 
     return _lobpcg(
-        A, k, B, X,
-        n, iK, niter, tol, largest, method, tracker,
-        ortho_iparams, ortho_fparams, ortho_bparams
+        A,
+        k,
+        B,
+        X,
+        n,
+        iK,
+        niter,
+        tol,
+        largest,
+        method,
+        tracker,
+        ortho_iparams,
+        ortho_fparams,
+        ortho_bparams,
     )
 
-def _lobpcg(A: Tensor,
-            k: Optional[int] = None,
-            B: Optional[Tensor] = None,
-            X: Optional[Tensor] = None,
-            n: Optional[int] = None,
-            iK: Optional[Tensor] = None,
-            niter: Optional[int] = None,
-            tol: Optional[float] = None,
-            largest: Optional[bool] = None,
-            method: Optional[str] = None,
-            tracker: Optional[None] = None,
-            ortho_iparams: Optional[Dict[str, int]] = None,
-            ortho_fparams: Optional[Dict[str, float]] = None,
-            ortho_bparams: Optional[Dict[str, bool]] = None
-            ) -> Tuple[Tensor, Tensor]:
 
+def _lobpcg(
+    A: Tensor,
+    k: Optional[int] = None,
+    B: Optional[Tensor] = None,
+    X: Optional[Tensor] = None,
+    n: Optional[int] = None,
+    iK: Optional[Tensor] = None,
+    niter: Optional[int] = None,
+    tol: Optional[float] = None,
+    largest: Optional[bool] = None,
+    method: Optional[str] = None,
+    tracker: None = None,
+    ortho_iparams: Optional[Dict[str, int]] = None,
+    ortho_fparams: Optional[Dict[str, float]] = None,
+    ortho_bparams: Optional[Dict[str, bool]] = None,
+) -> Tuple[Tensor, Tensor]:
     # A must be square:
     assert A.shape[-2] == A.shape[-1], A.shape
     if B is not None:
@@ -560,53 +605,50 @@ def _lobpcg(A: Tensor,
     dtype = _utils.get_floating_dtype(A)
     device = A.device
     if tol is None:
-        feps = {torch.float32: 1.2e-07,
-                torch.float64: 2.23e-16}[dtype]
-        tol = feps ** 0.5
+        feps = {torch.float32: 1.2e-07, torch.float64: 2.23e-16}[dtype]
+        tol = feps**0.5
 
     m = A.shape[-1]
     k = (1 if X is None else X.shape[-1]) if k is None else k
     n = (k if n is None else n) if X is None else X.shape[-1]
 
-    if (m < 3 * n):
+    if m < 3 * n:
         raise ValueError(
-            'LPBPCG algorithm is not applicable when the number of A rows (={})'
-            ' is smaller than 3 x the number of requested eigenpairs (={})'
-            .format(m, n))
+            "LPBPCG algorithm is not applicable when the number of A rows (={})"
+            " is smaller than 3 x the number of requested eigenpairs (={})".format(m, n)
+        )
 
-    method = 'ortho' if method is None else method
+    method = "ortho" if method is None else method
 
     iparams = {
-        'm': m,
-        'n': n,
-        'k': k,
-        'niter': 1000 if niter is None else niter,
+        "m": m,
+        "n": n,
+        "k": k,
+        "niter": 1000 if niter is None else niter,
     }
 
     fparams = {
-        'tol': tol,
+        "tol": tol,
     }
 
-    bparams = {
-        'largest': True if largest is None else largest
-    }
+    bparams = {"largest": True if largest is None else largest}
 
-    if method == 'ortho':
+    if method == "ortho":
         if ortho_iparams is not None:
             iparams.update(ortho_iparams)
         if ortho_fparams is not None:
             fparams.update(ortho_fparams)
         if ortho_bparams is not None:
             bparams.update(ortho_bparams)
-        iparams['ortho_i_max'] = iparams.get('ortho_i_max', 3)
-        iparams['ortho_j_max'] = iparams.get('ortho_j_max', 3)
-        fparams['ortho_tol'] = fparams.get('ortho_tol', tol)
-        fparams['ortho_tol_drop'] = fparams.get('ortho_tol_drop', tol)
-        fparams['ortho_tol_replace'] = fparams.get('ortho_tol_replace', tol)
-        bparams['ortho_use_drop'] = bparams.get('ortho_use_drop', False)
+        iparams["ortho_i_max"] = iparams.get("ortho_i_max", 3)
+        iparams["ortho_j_max"] = iparams.get("ortho_j_max", 3)
+        fparams["ortho_tol"] = fparams.get("ortho_tol", tol)
+        fparams["ortho_tol_drop"] = fparams.get("ortho_tol_drop", tol)
+        fparams["ortho_tol_replace"] = fparams.get("ortho_tol_replace", tol)
+        bparams["ortho_use_drop"] = bparams.get("ortho_use_drop", False)
 
     if not torch.jit.is_scripting():
-        LOBPCG.call_tracker = LOBPCG_call_tracker
+        LOBPCG.call_tracker = LOBPCG_call_tracker  # type: ignore[assignment]
 
     if len(A.shape) > 2:
         N = int(torch.prod(torch.tensor(A.shape[:-2])))
@@ -619,16 +661,18 @@ def _lobpcg(A: Tensor,
         for i in range(N):
             A_ = bA[i]
             B_ = bB[i] if bB is not None else None
-            X_ = torch.randn((m, n), dtype=dtype, device=device) if bX is None else bX[i]
+            X_ = (
+                torch.randn((m, n), dtype=dtype, device=device) if bX is None else bX[i]
+            )
             assert len(X_.shape) == 2 and X_.shape == (m, n), (X_.shape, (m, n))
-            iparams['batch_index'] = i
+            iparams["batch_index"] = i
             worker = LOBPCG(A_, B_, X_, iK, iparams, fparams, bparams, method, tracker)
             worker.run()
             bE[i] = worker.E[:k]
             bXret[i] = worker.X[:, :k]
 
         if not torch.jit.is_scripting():
-            LOBPCG.call_tracker = LOBPCG_call_tracker_orig
+            LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[assignment]
 
         return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
 
@@ -640,28 +684,26 @@ def _lobpcg(A: Tensor,
     worker.run()
 
     if not torch.jit.is_scripting():
-        LOBPCG.call_tracker = LOBPCG_call_tracker_orig
+        LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[assignment]
 
     return worker.E[:k], worker.X[:, :k]
 
 
-class LOBPCG(object):
-    """Worker class of LOBPCG methods.
-    """
+class LOBPCG:
+    """Worker class of LOBPCG methods."""
 
-    def __init__(self,
-                 A,        # type: Optional[Tensor]
-                 B,        # type: Optional[Tensor]
-                 X,        # type: Tensor
-                 iK,       # type: Optional[Tensor]
-                 iparams,  # type: Dict[str, int]
-                 fparams,  # type: Dict[str, float]
-                 bparams,  # type: Dict[str, bool]
-                 method,   # type: str
-                 tracker   # type: Optional[None]
-                 ):
-        # type: (...) -> None
-
+    def __init__(
+        self,
+        A: Optional[Tensor],
+        B: Optional[Tensor],
+        X: Tensor,
+        iK: Optional[Tensor],
+        iparams: Dict[str, int],
+        fparams: Dict[str, float],
+        bparams: Dict[str, bool],
+        method: str,
+        tracker: None,
+    ) -> None:
         # constant parameters
         self.A = A
         self.B = B
@@ -671,64 +713,62 @@ class LOBPCG(object):
         self.bparams = bparams
         self.method = method
         self.tracker = tracker
-        m = iparams['m']
-        n = iparams['n']
+        m = iparams["m"]
+        n = iparams["n"]
 
         # variable parameters
         self.X = X
-        self.E = torch.zeros((n, ), dtype=X.dtype, device=X.device)
+        self.E = torch.zeros((n,), dtype=X.dtype, device=X.device)
         self.R = torch.zeros((m, n), dtype=X.dtype, device=X.device)
         self.S = torch.zeros((m, 3 * n), dtype=X.dtype, device=X.device)
-        self.tvars = {}               # type: Dict[str, Tensor]
-        self.ivars = {'istep': 0}     # type: Dict[str, int]
-        self.fvars = {'_': 0.0}       # type: Dict[str, float]
-        self.bvars = {'_': False}     # type: Dict[str, bool]
+        self.tvars: Dict[str, Tensor] = {}
+        self.ivars: Dict[str, int] = {"istep": 0}
+        self.fvars: Dict[str, float] = {"_": 0.0}
+        self.bvars: Dict[str, bool] = {"_": False}
 
     def __str__(self):
-        lines = ['LOPBCG:']
-        lines += ['  iparams={}'.format(self.iparams)]
-        lines += ['  fparams={}'.format(self.fparams)]
-        lines += ['  bparams={}'.format(self.bparams)]
-        lines += ['  ivars={}'.format(self.ivars)]
-        lines += ['  fvars={}'.format(self.fvars)]
-        lines += ['  bvars={}'.format(self.bvars)]
-        lines += ['  tvars={}'.format(self.tvars)]
-        lines += ['  A={}'.format(self.A)]
-        lines += ['  B={}'.format(self.B)]
-        lines += ['  iK={}'.format(self.iK)]
-        lines += ['  X={}'.format(self.X)]
-        lines += ['  E={}'.format(self.E)]
-        r = ''
+        lines = ["LOPBCG:"]
+        lines += ["  iparams={}".format(self.iparams)]
+        lines += ["  fparams={}".format(self.fparams)]
+        lines += ["  bparams={}".format(self.bparams)]
+        lines += ["  ivars={}".format(self.ivars)]
+        lines += ["  fvars={}".format(self.fvars)]
+        lines += ["  bvars={}".format(self.bvars)]
+        lines += ["  tvars={}".format(self.tvars)]
+        lines += ["  A={}".format(self.A)]
+        lines += ["  B={}".format(self.B)]
+        lines += ["  iK={}".format(self.iK)]
+        lines += ["  X={}".format(self.X)]
+        lines += ["  E={}".format(self.E)]
+        r = ""
         for line in lines:
-            r += line + '\n'
+            r += line + "\n"
         return r
 
     def update(self):
-        """Set and update iteration variables.
-        """
-        if self.ivars['istep'] == 0:
+        """Set and update iteration variables."""
+        if self.ivars["istep"] == 0:
             X_norm = float(torch.norm(self.X))
-            iX_norm = X_norm ** -1
+            iX_norm = X_norm**-1
             A_norm = float(torch.norm(_utils.matmul(self.A, self.X))) * iX_norm
             B_norm = float(torch.norm(_utils.matmul(self.B, self.X))) * iX_norm
-            self.fvars['X_norm'] = X_norm
-            self.fvars['A_norm'] = A_norm
-            self.fvars['B_norm'] = B_norm
-            self.ivars['iterations_left'] = self.iparams['niter']
-            self.ivars['converged_count'] = 0
-            self.ivars['converged_end'] = 0
+            self.fvars["X_norm"] = X_norm
+            self.fvars["A_norm"] = A_norm
+            self.fvars["B_norm"] = B_norm
+            self.ivars["iterations_left"] = self.iparams["niter"]
+            self.ivars["converged_count"] = 0
+            self.ivars["converged_end"] = 0
 
-        if self.method == 'ortho':
+        if self.method == "ortho":
             self._update_ortho()
         else:
             self._update_basic()
 
-        self.ivars['iterations_left'] = self.ivars['iterations_left'] - 1
-        self.ivars['istep'] = self.ivars['istep'] + 1
+        self.ivars["iterations_left"] = self.ivars["iterations_left"] - 1
+        self.ivars["istep"] = self.ivars["istep"] + 1
 
     def update_residual(self):
-        """Update residual R from A, B, X, E.
-        """
+        """Update residual R from A, B, X, E."""
         mm = _utils.matmul
         self.R = mm(self.A, self.X) - mm(self.B, self.X) * self.E
 
@@ -739,12 +779,15 @@ class LOBPCG(object):
         Users may redefine this method for custom convergence criteria.
         """
         # (...) -> int
-        prev_count = self.ivars['converged_count']
-        tol = self.fparams['tol']
-        A_norm = self.fvars['A_norm']
-        B_norm = self.fvars['B_norm']
+        prev_count = self.ivars["converged_count"]
+        tol = self.fparams["tol"]
+        A_norm = self.fvars["A_norm"]
+        B_norm = self.fvars["B_norm"]
         E, X, R = self.E, self.X, self.R
-        rerr = torch.norm(R, 2, (0, )) * (torch.norm(X, 2, (0, )) * (A_norm + E[:X.shape[-1]] * B_norm)) ** -1
+        rerr = (
+            torch.norm(R, 2, (0,))
+            * (torch.norm(X, 2, (0,)) * (A_norm + E[: X.shape[-1]] * B_norm)) ** -1
+        )
         converged = rerr < tol
         count = 0
         for b in converged:
@@ -753,10 +796,12 @@ class LOBPCG(object):
                 # strict ordering of eigenpairs
                 break
             count += 1
-        assert count >= prev_count, 'the number of converged eigenpairs ' \
-            '(was {}, got {}) cannot decrease'.format(prev_count, count)
-        self.ivars['converged_count'] = count
-        self.tvars['rerr'] = rerr
+        assert count >= prev_count, (
+            "the number of converged eigenpairs "
+            "(was {}, got {}) cannot decrease".format(prev_count, count)
+        )
+        self.ivars["converged_count"] = count
+        self.tvars["rerr"] = rerr
         return count
 
     def stop_iteration(self):
@@ -765,9 +810,11 @@ class LOBPCG(object):
         Note that tracker (if defined) can force-stop iterations by
         setting ``worker.bvars['force_stop'] = True``.
         """
-        return (self.bvars.get('force_stop', False)
-                or self.ivars['iterations_left'] == 0
-                or self.ivars['converged_count'] >= self.iparams['k'])
+        return (
+            self.bvars.get("force_stop", False)
+            or self.ivars["iterations_left"] == 0
+            or self.ivars["converged_count"] >= self.iparams["k"]
+        )
 
     def run(self):
         """Run LOBPCG iterations.
@@ -782,7 +829,6 @@ class LOBPCG(object):
             self.call_tracker()
 
         while not self.stop_iteration():
-
             self.update()
 
             if not torch.jit.is_scripting() and self.tracker is not None:
@@ -806,12 +852,12 @@ class LOBPCG(object):
         Update or initialize iteration variables when `method == "basic"`.
         """
         mm = torch.matmul
-        ns = self.ivars['converged_end']
-        nc = self.ivars['converged_count']
-        n = self.iparams['n']
-        largest = self.bparams['largest']
+        ns = self.ivars["converged_end"]
+        nc = self.ivars["converged_count"]
+        n = self.iparams["n"]
+        largest = self.bparams["largest"]
 
-        if self.ivars['istep'] == 0:
+        if self.ivars["istep"] == 0:
             Ri = self._get_rayleigh_ritz_transform(self.X)
             M = _utils.qform(_utils.qform(self.A, self.X), Ri)
             E, Z = _utils.symeig(M, largest)
@@ -823,38 +869,38 @@ class LOBPCG(object):
             self.S[..., :n] = self.X
 
             W = _utils.matmul(self.iK, self.R)
-            self.ivars['converged_end'] = ns = n + np + W.shape[-1]
-            self.S[:, n + np:ns] = W
+            self.ivars["converged_end"] = ns = n + np + W.shape[-1]
+            self.S[:, n + np : ns] = W
         else:
             S_ = self.S[:, nc:ns]
             Ri = self._get_rayleigh_ritz_transform(S_)
             M = _utils.qform(_utils.qform(self.A, S_), Ri)
             E_, Z = _utils.symeig(M, largest)
-            self.X[:, nc:] = mm(S_, mm(Ri, Z[:, :n - nc]))
-            self.E[nc:] = E_[:n - nc]
-            P = mm(S_, mm(Ri, Z[:, n:2 * n - nc]))
+            self.X[:, nc:] = mm(S_, mm(Ri, Z[:, : n - nc]))
+            self.E[nc:] = E_[: n - nc]
+            P = mm(S_, mm(Ri, Z[:, n : 2 * n - nc]))
             np = P.shape[-1]
 
             self.update_residual()
             nc = self.update_converged_count()
             self.S[..., :n] = self.X
-            self.S[:, n:n + np] = P
+            self.S[:, n : n + np] = P
             W = _utils.matmul(self.iK, self.R[:, nc:])
 
-            self.ivars['converged_end'] = ns = n + np + W.shape[-1]
-            self.S[:, n + np:ns] = W
+            self.ivars["converged_end"] = ns = n + np + W.shape[-1]
+            self.S[:, n + np : ns] = W
 
     def _update_ortho(self):
         """
         Update or initialize iteration variables when `method == "ortho"`.
         """
         mm = torch.matmul
-        ns = self.ivars['converged_end']
-        nc = self.ivars['converged_count']
-        n = self.iparams['n']
-        largest = self.bparams['largest']
+        ns = self.ivars["converged_end"]
+        nc = self.ivars["converged_count"]
+        n = self.iparams["n"]
+        largest = self.bparams["largest"]
 
-        if self.ivars['istep'] == 0:
+        if self.ivars["istep"] == 0:
             Ri = self._get_rayleigh_ritz_transform(self.X)
             M = _utils.qform(_utils.qform(self.A, self.X), Ri)
             E, Z = _utils.symeig(M, largest)
@@ -864,8 +910,8 @@ class LOBPCG(object):
             nc = self.update_converged_count()
             self.S[:, :n] = self.X
             W = self._get_ortho(self.R, self.X)
-            ns = self.ivars['converged_end'] = n + np + W.shape[-1]
-            self.S[:, n + np:ns] = W
+            ns = self.ivars["converged_end"] = n + np + W.shape[-1]
+            self.S[:, n + np : ns] = W
 
         else:
             S_ = self.S[:, nc:ns]
@@ -873,9 +919,15 @@ class LOBPCG(object):
             E_, Z = _utils.symeig(_utils.qform(self.A, S_), largest)
 
             # Update E, X, P
-            self.X[:, nc:] = mm(S_, Z[:, :n - nc])
-            self.E[nc:] = E_[:n - nc]
-            P = mm(S_, mm(Z[:, n - nc:], _utils.basis(_utils.transpose(Z[:n - nc, n - nc:]))))
+            self.X[:, nc:] = mm(S_, Z[:, : n - nc])
+            self.E[nc:] = E_[: n - nc]
+            P = mm(
+                S_,
+                mm(
+                    Z[:, n - nc :],
+                    _utils.basis(_utils.transpose(Z[: n - nc, n - nc :])),
+                ),
+            )
             np = P.shape[-1]
 
             # check convergence
@@ -884,10 +936,10 @@ class LOBPCG(object):
 
             # update S
             self.S[:, :n] = self.X
-            self.S[:, n:n + np] = P
-            W = self._get_ortho(self.R[:, nc:], self.S[:, :n + np])
-            ns = self.ivars['converged_end'] = n + np + W.shape[-1]
-            self.S[:, n + np:ns] = W
+            self.S[:, n : n + np] = P
+            W = self._get_ortho(self.R[:, nc:], self.S[:, : n + np])
+            ns = self.ivars["converged_end"] = n + np + W.shape[-1]
+            self.S[:, n + np : ns] = W
 
     def _get_rayleigh_ritz_transform(self, S):
         """Return a transformation matrix that is used in Rayleigh-Ritz
@@ -925,7 +977,7 @@ class LOBPCG(object):
           matrix product `D M` with element-wise product `M *
           d`. Also, creating the diagonal matrix `D` is avoided.
 
-        Arguments:
+        Args:
         S (Tensor): the matrix basis for the search subspace, size is
                     :math:`(m, n)`.
 
@@ -939,17 +991,15 @@ class LOBPCG(object):
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
-        R = torch.cholesky((SBS * d_row) * d_col, upper=True)
-        # TODO: could use LAPACK ?trtri as R is upper-triangular
-        Rinv = torch.inverse(R)
-        return Rinv * d_col
+        # TODO use torch.linalg.cholesky_solve once it is implemented
+        R = torch.linalg.cholesky((SBS * d_row) * d_col, upper=True)
+        return torch.linalg.solve_triangular(
+            R, d_row.diag_embed(), upper=True, left=False
+        )
 
-    def _get_svqb(self,
-                  U,     # Tensor
-                  drop,  # bool
-                  tau    # float
-                  ):
-        # type: (Tensor, bool, float) -> Tensor
+    def _get_svqb(
+        self, U: Tensor, drop: bool, tau: float  # Tensor  # bool  # float
+    ) -> Tensor:
         """Return B-orthonormal U.
 
         .. note:: When `drop` is `False` then `svqb` is based on the
@@ -957,7 +1007,7 @@ class LOBPCG(object):
                   modification of the corresponding algorithm
                   introduced in [StathopolousWu2002].
 
-        Arguments:
+        Args:
 
           U (Tensor) : initial approximation, size is (m, n)
           drop (bool) : when True, drop columns that
@@ -995,9 +1045,9 @@ class LOBPCG(object):
             assert len(nz[0]) == len(d)
 
         # The original algorithm 4 from [DuerschPhD2015].
-        d_col = (d ** -0.5).reshape(d.shape[0], 1)
+        d_col = (d**-0.5).reshape(d.shape[0], 1)
         DUBUD = (UBU * d_col) * _utils.transpose(d_col)
-        E, Z = _utils.symeig(DUBUD, eigenvectors=True)
+        E, Z = _utils.symeig(DUBUD)
         t = tau * abs(E).max()
         if drop:
             keep = torch.where(E > t)
@@ -1008,7 +1058,7 @@ class LOBPCG(object):
         else:
             E[(torch.where(E < t))[0]] = t
 
-        return torch.matmul(U * _utils.transpose(d_col), Z * E ** -0.5)
+        return torch.matmul(U * _utils.transpose(d_col), Z * E**-0.5)
 
     def _get_ortho(self, U, V):
         """Return B-orthonormal U with columns are B-orthogonal to V.
@@ -1023,7 +1073,7 @@ class LOBPCG(object):
         .. note:: If all U columns are B-collinear to V then the
                   returned tensor U will be empty.
 
-        Arguments:
+        Args:
 
           U (Tensor) : initial approximation, size is (m, n)
           V (Tensor) : B-orthogonal external basis, size is (m, k)
@@ -1037,28 +1087,28 @@ class LOBPCG(object):
         """
         mm = torch.matmul
         mm_B = _utils.matmul
-        m = self.iparams['m']
-        tau_ortho = self.fparams['ortho_tol']
-        tau_drop = self.fparams['ortho_tol_drop']
-        tau_replace = self.fparams['ortho_tol_replace']
-        i_max = self.iparams['ortho_i_max']
-        j_max = self.iparams['ortho_j_max']
+        m = self.iparams["m"]
+        tau_ortho = self.fparams["ortho_tol"]
+        tau_drop = self.fparams["ortho_tol_drop"]
+        tau_replace = self.fparams["ortho_tol_replace"]
+        i_max = self.iparams["ortho_i_max"]
+        j_max = self.iparams["ortho_j_max"]
         # when use_drop==True, enable dropping U columns that have
         # small contribution to the `span([U, V])`.
-        use_drop = self.bparams['ortho_use_drop']
+        use_drop = self.bparams["ortho_use_drop"]
 
         # clean up variables from the previous call
         for vkey in list(self.fvars.keys()):
-            if vkey.startswith('ortho_') and vkey.endswith('_rerr'):
+            if vkey.startswith("ortho_") and vkey.endswith("_rerr"):
                 self.fvars.pop(vkey)
-        self.ivars.pop('ortho_i', 0)
-        self.ivars.pop('ortho_j', 0)
+        self.ivars.pop("ortho_i", 0)
+        self.ivars.pop("ortho_j", 0)
 
         BV_norm = torch.norm(mm_B(self.B, V))
         BU = mm_B(self.B, U)
         VBU = mm(_utils.transpose(V), BU)
         i = j = 0
-        stats = ''
+        stats = ""
         for i in range(i_max):
             U = U - mm(V, VBU)
             drop = False
@@ -1072,20 +1122,18 @@ class LOBPCG(object):
                     U = self._get_svqb(U, False, tau_replace)
                 if torch.numel(U) == 0:
                     # all initial U columns are B-collinear to V
-                    self.ivars['ortho_i'] = i
-                    self.ivars['ortho_j'] = j
+                    self.ivars["ortho_i"] = i
+                    self.ivars["ortho_j"] = j
                     return U
                 BU = mm_B(self.B, U)
                 UBU = mm(_utils.transpose(U), BU)
                 U_norm = torch.norm(U)
                 BU_norm = torch.norm(BU)
-                R = UBU - torch.eye(UBU.shape[-1],
-                                    device=UBU.device,
-                                    dtype=UBU.dtype)
+                R = UBU - torch.eye(UBU.shape[-1], device=UBU.device, dtype=UBU.dtype)
                 R_norm = torch.norm(R)
                 # https://github.com/pytorch/pytorch/issues/33810 workaround:
                 rerr = float(R_norm) * float(BU_norm * U_norm) ** -1
-                vkey = 'ortho_UBUmI_rerr[{}, {}]'.format(i, j)
+                vkey = "ortho_UBUmI_rerr[{}, {}]".format(i, j)
                 self.fvars[vkey] = rerr
                 if rerr < tau_ortho:
                     break
@@ -1093,7 +1141,7 @@ class LOBPCG(object):
             VBU_norm = torch.norm(VBU)
             U_norm = torch.norm(U)
             rerr = float(VBU_norm) * float(BV_norm * U_norm) ** -1
-            vkey = 'ortho_VBU_rerr[{}]'.format(i)
+            vkey = "ortho_VBU_rerr[{}]".format(i)
             self.fvars[vkey] = rerr
             if rerr < tau_ortho:
                 break
@@ -1103,16 +1151,20 @@ class LOBPCG(object):
                 B = self.B
                 assert B is not None
                 raise ValueError(
-                    'Overdetermined shape of U:'
-                    ' #B-cols(={}) >= #U-cols(={}) + #V-cols(={}) must hold'
-                    .format(B.shape[-1], U.shape[-1], V.shape[-1]))
-        self.ivars['ortho_i'] = i
-        self.ivars['ortho_j'] = j
+                    "Overdetermined shape of U:"
+                    " #B-cols(={}) >= #U-cols(={}) + #V-cols(={}) must hold".format(
+                        B.shape[-1], U.shape[-1], V.shape[-1]
+                    )
+                )
+        self.ivars["ortho_i"] = i
+        self.ivars["ortho_j"] = j
         return U
 
 
 # Calling tracker is separated from LOBPCG definitions because
 # TorchScript does not support user-defined callback arguments:
 LOBPCG_call_tracker_orig = LOBPCG.call_tracker
+
+
 def LOBPCG_call_tracker(self):
     self.tracker(self)

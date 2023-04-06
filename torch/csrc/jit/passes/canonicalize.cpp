@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
+
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 
 namespace torch {
@@ -32,7 +34,7 @@ std::shared_ptr<Graph> Canonicalize(
     r->appendNode(r_node);
     auto outputs = node->outputs();
     auto r_outputs = r_node->outputs();
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for (const auto i : c10::irange(outputs.size())) {
       rn_env[outputs.at(i)] = r_outputs.at(i);
     }
     if (node->hasAttribute(attr::Subgraph)) {
@@ -141,7 +143,7 @@ bool isBeforeOrAfter(const Use& a, const Use& b, bool checking_before) {
 }
 
 c10::optional<const Use> firstOrLastUse(Value* v, bool find_first) {
-  if (v->uses().size() == 0) {
+  if (v->uses().empty()) {
     return c10::nullopt;
   }
   Use extreme_use = v->uses()[0];

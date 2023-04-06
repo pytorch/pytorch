@@ -1,0 +1,103 @@
+name: TorchBench CI (pytorch-linux-py3.8-cu116)
+on:
+  pull_request:
+
+env:
+  PYTHON_VERSION: "3.8"
+  # must be consistent with https://github.com/pytorch/benchmark/blob/main/requirements.txt#L19
+  NUMPY_VERSION: "1.21.2"
+  SETUP_SCRIPT: "/data/nvme/bin/setup_instance.sh"
+  PR_NUM: ${{ github.event.number }}
+  PR_BODY: ${{ github.event.pull_request.body }}
+  PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+
+jobs:
+  run-torchbench:
+    # We don't accept running on non-pytorch repos because of security concerns
+    # Only run the job when the body contains magic word "RUN_TORCHBENCH:"
+    if: ${{ github.repository_owner == 'pytorch' && contains(github.event.pull_request.body, 'RUN_TORCHBENCH:') }}
+    runs-on: [self-hosted, bm-runner]
+    # Set to 12 hours
+    timeout-minutes: 720
+    steps:
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          path: pytorch
+      - name: Update self-hosted PyTorch
+        run: |
+          pushd "${HOME}"/pytorch
+          git remote prune origin
+          git fetch
+          popd
+      - name: Create conda environment and install deps
+        run: |
+          conda create -y -n pr-ci python="${PYTHON_VERSION}"
+          # shellcheck source=/dev/null
+          . "${SETUP_SCRIPT}"
+          conda activate pr-ci
+          conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
+                           setuptools cmake=3.22.* typing-extensions boto3 \
+                           pillow pytest tabulate gitpython git-lfs tqdm psutil
+          pip install --pre torch torchvision torchtext -f https://download.pytorch.org/whl/nightly/cu116/torch_nightly.html
+      - name: Setup TorchBench branch
+        run: |
+          # shellcheck source=/dev/null
+          . "${SETUP_SCRIPT}"
+          conda activate pr-ci
+          PR_BODY_FILE=/tmp/pr-body.txt
+          echo "$PR_BODY" > ${PR_BODY_FILE}
+          python pytorch/.github/scripts/run_torchbench.py --pr-body "${PR_BODY_FILE}" set-torchbench-branch
+      - name: Checkout TorchBench
+        uses: malfet/checkout@silent-checkout
+        with:
+          repository: pytorch/benchmark
+          path: benchmark
+          lfs: false
+          ref: ${{ env.TORCHBENCH_BRANCH }}
+      - name: GPU Info
+        run: |
+          nvidia-smi
+      - name: Run TorchBench
+        run: |
+          set -x
+          pushd "${HOME}"/pytorch
+          PR_MERGE_BASE=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")
+          popd
+          PR_BODY_FILE=/tmp/pr-body.txt
+          echo "$PR_BODY" > ${PR_BODY_FILE}
+          # shellcheck source=/dev/null
+          . "${SETUP_SCRIPT}"
+          conda activate pr-ci
+          python3 pytorch/.github/scripts/run_torchbench.py \
+                  --pr-body "$PR_BODY_FILE" \
+                  run \
+                  --pytorch-path "${HOME}"/pytorch \
+                  --torchbench-path "${PWD}"/benchmark \
+                  --pr-num "$PR_NUM" \
+                  --pr-base-sha "$PR_MERGE_BASE" \
+                  --pr-head-sha "$PR_HEAD_SHA"
+      - name: Upload result to S3
+        run: |
+          # shellcheck source=/dev/null
+          . "${SETUP_SCRIPT}"
+          conda activate pr-ci
+          python3 pytorch/.github/scripts/run_torchbench.py \
+                  upload-s3 \
+                  --result-dir "${HOME}/.torchbench/bisection/pr${{ github.event.number }}"
+      - name: Remove conda environment and cleanup
+        run: |
+          conda env remove --name pr-ci
+          rm /tmp/pr-body.txt
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: TorchBench result
+          path: ~/.torchbench/bisection/pr${{ github.event.number }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true

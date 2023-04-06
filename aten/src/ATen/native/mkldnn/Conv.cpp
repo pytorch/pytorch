@@ -1,13 +1,27 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
+#include <torch/library.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/native/ConvUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_add_relu_native.h>
+#include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/convolution.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/mkldnn_convolution_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
 namespace at { namespace native {
 
 Tensor mkldnn_convolution(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
   TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
@@ -30,188 +44,1099 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
   TORCH_CHECK(false, "mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
 }
 
+REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
+
+Tensor mkldnn_convolution_transpose(
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
+  TORCH_CHECK(false, "mkldnn_convolution_transpose: ATen not compiled with MKLDNN support");
+}
+
+Tensor mkldnn_convolution_transpose_backward_input(
+    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool bias_defined) {
+  TORCH_CHECK(false, "mkldnn_convolution_transpose_backward_input: ATen not compiled with MKLDNN support");
+}
+
+std::tuple<Tensor, Tensor> mkldnn_convolution_transpose_backward_weights(
+    IntArrayRef weight_size, const Tensor& grad_output, const Tensor& input,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool bias_defined) {
+  TORCH_CHECK(false, "mkldnn_convolution_transpose_backward_weights: ATen not compiled with MKLDNN support");
+}
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
+    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, std::array<bool,3> output_mask) {
+  TORCH_CHECK(false, "mkldnn_convolution_transpose_backward: ATen not compiled with MKLDNN support");
+}
+
+REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_stub);
+REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub);
+
 }}
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/ConvUtils.h>
-
-namespace {
-// Helper function for getting an ideep tensor out of an aten Tensor.
-// Note in case the aten Tensor is a dense tensor, the returned ideep
-// tensor is just a view of the storage of the aten dense tensor, so
-// caller needs to make sure the aten dense tensor's lifetime is
-// longer than the ideep tensor.
-inline ideep::tensor get_mkldnn_tensor(const at::Tensor& tensor) {
-  if (tensor.is_mkldnn()) {
-    return at::native::itensor_from_mkldnn(tensor);
-  } else {
-    return at::native::itensor_view_from_dense(tensor);
-  }
-}
-}
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
-ideep::tensor _mkldnn_convolution(
-    const ideep::tensor& x,
-    const ideep::tensor& w,
-    const c10::optional<ideep::tensor>& b,
+// follow check rules from native/Convolution.cpp without transpose supported
+static void check_shape_forward(const Tensor& input,
+                                const Tensor& weight,
+                                const Tensor& bias,
+                                const IntArrayRef& padding,
+                                const IntArrayRef& stride,
+                                const IntArrayRef& dilation,
+                                const int64_t groups) {
+#define MKLDNN_CONV_ARG_CHECK(IT, OP) std::any_of(IT.begin(), IT.end(), [](auto x) { return x OP 0; })
+  auto is_padding_neg = MKLDNN_CONV_ARG_CHECK(padding, <);
+  auto is_stride_nonpos = MKLDNN_CONV_ARG_CHECK(stride, <=);
+  auto is_dilation_nonpos = MKLDNN_CONV_ARG_CHECK(dilation, <=);
+#undef MKLDNN_CONV_ARG_CHECK
+  TORCH_CHECK(!is_padding_neg, "negative padding is not supported");
+  TORCH_CHECK(!is_stride_nonpos, "non-positive stride is not supported");
+  TORCH_CHECK(!is_dilation_nonpos, "non-positive dilation is not supported");
+  TORCH_CHECK(groups > 0, "non-positive groups is not supported");
+
+  int64_t k = input.ndimension();
+  const IntArrayRef& weight_sizes = weight.sizes();
+  int64_t weight_dim = weight_sizes.size();
+
+  TORCH_CHECK(weight_dim == k,
+              "Expected ", weight_dim, "-dimensional input for ", weight_dim,
+              "-dimensional weight ", weight_sizes, ", but got ", k, "-dimensional input of size ",
+              input.sizes(), " instead");
+  TORCH_CHECK(weight_sizes[0] >= groups,
+              "Given groups=", groups, ", expected weight to be at least ", groups,
+              " at dimension 0, but got weight of size ", weight_sizes, " instead");
+  TORCH_CHECK(weight_sizes[0] % groups == 0,
+              "Given groups=", groups, ", expected weight to be divisible by ",
+              groups, " at dimension 0, but got weight of size [", weight_sizes,
+              "] instead");
+  TORCH_CHECK(input.size(1) == (weight_sizes[1] * groups),
+              "Given groups=", groups, ", weight of size ", weight_sizes,
+              ", expected input", input.sizes(), " to have ",
+              (weight_sizes[1] * groups), " channels, but got ", input.size(1),
+              " channels instead");
+  TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[0]),
+              "Given weight of size ", weight_sizes,
+              ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
+              ", but got bias of size ", bias.sizes(), " instead");
+
+  std::vector<int64_t> input_shape;
+  std::vector<int64_t> kernel_shape;
+  bool kernel_size_correct = true;
+
+  for (const auto i : c10::irange(2, k)) {
+    input_shape.push_back(input.size(i) + 2 * padding[i-2]);
+    // log new kernel size considering dilation
+    kernel_shape.push_back(dilation[i-2] * (weight_sizes[i]-1) + 1);
+    if (input_shape.back() < kernel_shape.back()) {
+      kernel_size_correct = false;
+    }
+  }
+
+  TORCH_CHECK(input_shape.size() == kernel_shape.size(), "Inconsistent shape between Input and Kernel");
+
+  if (!kernel_size_correct) {
+    // If kernel size is incorrect
+    std::ostringstream input_ss;
+    std::ostringstream kernel_ss;
+    std::string separator = "";
+
+    for (int i = 0, len = input_shape.size(); i < len; ++i) {
+      input_ss << separator << input_shape[i];
+      kernel_ss << separator << kernel_shape[i];
+      separator = " x ";
+    }
+
+    TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
+                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
+  }
+}
+
+#define MKLDNNTensor(itensor, options)                                  \
+  new_with_itensor_mkldnn(                                              \
+      std::move(itensor),                                               \
+      optTypeMetaToScalarType(options.dtype_opt()),                     \
+      options.device_opt())
+
+// Note [MKLDNN Convolution Memory Formats]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// MKLDNN has 3 types of memory formats in convolution:
+//
+// In case memory format passed from PyTorch (aka. user layout)
+// differs from the internal layout which MKLDNN used, a `reorder` is needed;
+// otherwise when user layout is identical to internal layout,
+// MKLDNN uses a memory `view` upon an existing CPU tensor.
+//
+// 1. NCHW (CPU tensor, contiguous)
+//  input reorder:  NCHW(user) -> Blocked(internal)
+//  weight reorder: OIHW(user) -> Blocked(internal)
+//  output reorder: Blocked(internal) -> NCHW(user)
+//
+// 2. NHWC: (CPU tensor, channels last)
+//  input view:     NHWC(user) -> NHWC(internal)
+//  weight reorder: OHWI(user) -> Blocked(internal)
+//  output view:    NHWC(internal) -> NHWC(user)
+//
+// 3. Blocked (MKLDNN tensor):
+//  By explicitly converting a tensor to mkldnn, e.g. `x.to_mkldnn()`,
+//  blocked format will propagate between layers. Input, output will be in blocked format.
+//
+//  For inference case, weight can be prepacked into blocked format by
+//  (so as to save weight reoder overhead):
+//      model = torch.utils.mkldnn.to_mkldnn(model)
+//
+//  For training case, grad_output can be CPU tensor or MKLDNN tensor,
+//  but weight/bias and grad_weight/grad_bias are always CPU tensor.
+//
+
+static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bool is_channels_last) {
+   auto memory_format =  at::MemoryFormat::Contiguous;
+   if (is_channels_last) {
+      memory_format = dims == 4 ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::ChannelsLast3d;
+   }
+   return memory_format;
+}
+
+void _mkldnn_convolution_out (
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const Tensor& bias,
+    std::vector<int64_t>& output_sizes,
+    ideep::tensor& y,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    IntArrayRef padding,
+    int64_t groups,
+    bool is_channels_last,
+    const ideep::attr_t& op_attr) {
+  auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
+  auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
+  auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
+  const ideep::tensor x = itensor_from_tensor(input);
+  const ideep::tensor w = itensor_from_tensor(weight);
+  if (bias.defined()) {
+    const ideep::tensor b = itensor_from_tensor(bias);
+    ideep::convolution_forward::compute_v3(
+        x,
+        w,
+        b,
+        {output_sizes.cbegin(), output_sizes.cend()},
+        y,
+        {stride.begin(), stride.end()},
+        {dilation.begin(), dilation.end()},
+        {padding.begin(), padding.end()},
+        {padding.begin(), padding.end()},
+        groups,
+        is_channels_last,
+        op_attr);
+  } else {
+    ideep::convolution_forward::compute_v3(
+        x,
+        w,
+        {output_sizes.cbegin(), output_sizes.cend()},
+        y,
+        {stride.begin(), stride.end()},
+        {dilation.begin(), dilation.end()},
+        {padding.begin(), padding.end()},
+        {padding.begin(), padding.end()},
+        groups,
+        is_channels_last,
+        op_attr);
+  }
+}
+
+Tensor _mkldnn_convolution(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
-
-  auto kernel_size = w.get_dims();
-
-  std::vector<int64_t> input_size = x.get_dims();
-  std::vector<int64_t> output_sizes =
-      conv_output_size(input_size, kernel_size, padding, stride, dilation);
-
-  ideep::tensor y;
-  if (b.has_value()) {
-    ideep::convolution_forward::compute(
-        x,
-        w,
-        b.value(),
-        {output_sizes.cbegin(), output_sizes.cend()},
-        y,
-        {stride.begin(), stride.end()},
-        {dilation.begin(), dilation.end()},
-        {padding.begin(), padding.end()},
-        {padding.begin(), padding.end()},
-        groups);
-  } else {
-    ideep::convolution_forward::compute(
-        x,
-        w,
-        {output_sizes.cbegin(), output_sizes.cend()},
-        y,
-        {stride.begin(), stride.end()},
-        {dilation.begin(), dilation.end()},
-        {padding.begin(), padding.end()},
-        {padding.begin(), padding.end()},
-        groups);
+    int64_t groups,
+    bool use_channels_last,
+    c10::string_view attr = "none",
+    torch::List<c10::optional<at::Scalar>> scalars =
+        torch::List<c10::optional<at::Scalar>>(),
+    c10::optional<c10::string_view> algorithm = c10::nullopt) {
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (attr != "none") {
+    auto it = fusion_unary_attr_map().find(attr);
+    TORCH_CHECK(
+        it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
+    op_attr = it->second(scalars, algorithm);
   }
-  return y;
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  if (input_t.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
+  check_shape_forward(input_t, weight_t, bias, padding, stride, dilation, groups);
+
+  auto memory_format =
+      mkldnn_convolution_memory_format(input_t.ndimension(), use_channels_last);
+
+  auto output_sizes = conv_output_size(input_t.sizes(), weight_t.sizes(), padding, stride, dilation);
+  auto output = at::empty({0}, input_t.options());
+  ideep::tensor y;
+  if (use_channels_last) {
+    output.resize_(output_sizes, memory_format);
+    y = itensor_from_tensor(output);
+  }
+  _mkldnn_convolution_out(
+      input_t,
+      weight_t,
+      bias,
+      output_sizes,
+      y,
+      stride,
+      dilation,
+      padding,
+      groups,
+      use_channels_last,
+      op_attr);
+
+  if (input_t.is_mkldnn()) {
+    return MKLDNNTensor(y, input_t.options());
+  } else if (!use_channels_last) {
+    return mkldnn_to_dense(MKLDNNTensor(y, input_t.options()));
+  } else {
+    return output;
+  }
 }
 
 Tensor mkldnn_convolution(
-    const Tensor& input,
-    const Tensor& weight,
-    const Tensor& bias,
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  const ideep::tensor mkldnn_input = get_mkldnn_tensor(input);
-  const ideep::tensor mkldnn_weight = get_mkldnn_tensor(weight);
-  c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
-  if (bias.defined()) {
-    mkldnn_bias = get_mkldnn_tensor(bias);
-  }
-
-  ideep::tensor mkldnn_output = _mkldnn_convolution(
-      mkldnn_input,
-      mkldnn_weight,
-      mkldnn_bias,
+  bool use_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
+  return _mkldnn_convolution(
+      input_t,
+      weight_t,
+      bias_opt,
       padding,
       stride,
       dilation,
-      groups);
+      groups,
+      use_channels_last);
+}
 
-  if (input.is_mkldnn()) {
-    return new_with_itensor_mkldnn(std::move(mkldnn_output), input.options());
+Tensor mkldnn_convolution_pointwise(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view attr,
+    torch::List<c10::optional<at::Scalar>> scalars,
+    c10::optional<c10::string_view> algorithm) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  bool use_channels_last =
+      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+  return _mkldnn_convolution(
+      input_t,
+      weight_t,
+      bias_opt,
+      padding,
+      stride,
+      dilation,
+      groups,
+      use_channels_last,
+      attr,
+      scalars,
+      algorithm);
+}
+
+// Fuse convolution+binary_op+unary_op for good performance, which doing such
+// operation: output=unary_op(binary_op(conv(input_t, ...), other_t, alpha)).
+// The binary_attr means which binary_op is, it can be "add", or
+// other binary operation. the unary_attr means which unary_op is,
+// it can be "relu" or other unary operation, if it is none, meaning that
+// there doesn't have a unary post op. unary_scalars and unary_algorithm
+// are the parameters of the unary op, such as "hardtanh" has scalar parameters,
+// "gelu" has algorithm parameters.
+Tensor mkldnn_convolution_pointwise_binary(
+    const Tensor& input_t,
+    const Tensor& other_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view binary_attr,
+    c10::optional<at::Scalar> alpha,
+    c10::optional<c10::string_view> unary_attr,
+    torch::List<c10::optional<at::Scalar>> unary_scalars,
+    c10::optional<c10::string_view> unary_algorithm) {
+  TORCH_CHECK(
+      input_t.ndimension() == 4 || input_t.ndimension() == 5,
+      "mkldnn_convolution_pointwise_binary: currently only support 2d and 3d")
+  TORCH_CHECK(
+      !alpha.has_value() || alpha.value().to<float>() == 1.0,
+      "mkldnn_convolution_pointwise_binary: the alpha value should be none or 1.0");
+
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  // Make sure inputs have same type(device, layout, dtype), device is cpu and
+  // dtype is float or bfloat16.
+  check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
+
+  check_shape_forward(
+      input_t, weight_t, bias, padding, stride, dilation, groups);
+
+  auto output_sizes = conv_output_size(
+      input_t.sizes(), weight_t.sizes(), padding, stride, dilation);
+  // TODO: support broadcast binary fusion.
+  TORCH_CHECK(
+      output_sizes == other_t.sizes(),
+      "Binary Fusion's inputs should have same shape");
+  // Only calling fusion path for channels_last path.
+  // TODO: OneDNN doesn't optimize well for groups > 1 case, it will be enabled
+  // at next OneDNN release.
+  bool use_channels_last =
+      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+  bool can_be_fused = groups == 1 && use_channels_last;
+
+  c10::string_view unary_attr_value = "none";
+  ideep::algorithm unary_alg;
+  if (unary_attr.has_value()) {
+    auto it_unary = fusion_unary_alg_map().find(unary_attr.value());
+    // Now, we only support conv+binary+relu.
+    TORCH_CHECK(
+        it_unary != fusion_unary_alg_map().end(),
+        "Unary Fusion behavior undefined.");
+    unary_attr_value = unary_attr.value();
+    unary_alg = it_unary->second;
+  }
+  auto it_binary = fusion_binary_alg_map().find(binary_attr);
+  TORCH_CHECK(
+      it_binary != fusion_binary_alg_map().end(),
+      "Binary Fusion behavior undefined.");
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  if (can_be_fused) {
+    auto memory_format =
+        mkldnn_convolution_memory_format(input_t.ndimension(), true);
+    auto input = input_t.contiguous(memory_format);
+    auto weight =
+        weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
+    auto other = other_t.contiguous(memory_format);
+    auto output = at::empty_like(other);
+    const ideep::tensor x = itensor_from_tensor(input);
+    const ideep::tensor w = itensor_from_tensor(weight);
+    const ideep::tensor z = itensor_from_tensor(other);
+    ideep::tensor y = itensor_from_tensor(output);
+    auto output_size = other.sizes().vec();
+    ideep::tag format_tag = ideep::tag::nhwc;
+    if (input_t.ndimension() == 5) {
+      format_tag = ideep::tag::ndhwc;
+    }
+    auto other_desc = ideep::tensor::desc(
+        output_size, get_mkldnn_dtype(weight.scalar_type()), format_tag);
+
+    ideep::attr_t op_attr;
+    ideep::post_ops po;
+    po.append_binary(it_binary->second, other_desc);
+    if (unary_attr_value != "none") {
+      po.append_eltwise(1.0, unary_alg, 0.f, 0.f);
+    }
+    op_attr.set_post_ops(po);
+
+    if (bias.defined()) {
+      const ideep::tensor b = itensor_from_tensor(bias);
+      ideep::convolution_forward::compute_binary(
+          x,
+          z,
+          w,
+          b,
+          output_size,
+          y,
+          {stride.begin(), stride.end()},
+          {dilation.begin(), dilation.end()},
+          {padding.begin(), padding.end()},
+          {padding.begin(), padding.end()},
+          groups,
+          /* is_channels_last */ true,
+          op_attr);
+    } else {
+      ideep::convolution_forward::compute_binary(
+          x,
+          z,
+          w,
+          output_size,
+          y,
+          {stride.begin(), stride.end()},
+          {dilation.begin(), dilation.end()},
+          {padding.begin(), padding.end()},
+          {padding.begin(), padding.end()},
+          groups,
+          /* is_channels_last */ true,
+          op_attr);
+    }
+    return output;
   } else {
-    return mkldnn_to_dense(
-        new_with_itensor_mkldnn(std::move(mkldnn_output), input.options()));
+    // Fallback case, if inputs are not channels last or have different dtype,
+    // OneDNN fusion may have performance regression.
+    Tensor output;
+    if (weight_t.is_mkldnn()) {
+      output = _mkldnn_convolution(
+          input_t, weight_t, bias, padding, stride, dilation, groups, true);
+    } else {
+      output = at::convolution(
+          input_t, weight_t, bias, stride, padding, dilation, false, 0, groups);
+    }
+    if (binary_attr == "add" && unary_attr_value != "none") {
+      output = at::native::add_relu_(output, other_t);
+      return output;
+    }
+    if (binary_attr == "add") {
+      output.add_(other_t);
+    } else if (binary_attr == "sub") {
+      output.sub_(other_t);
+    } else if (binary_attr == "mul") {
+      output.mul_(other_t);
+    } else {
+      output.div_(other_t);
+    }
+    if (unary_attr_value != "none") {
+      output.relu_();
+    }
+    return output;
   }
 }
 
-Tensor mkldnn_convolution_backward_input(
-    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined)
-{
-  auto mkldnn_grad_output = get_mkldnn_tensor(grad_output);
-  auto mkldnn_weight = get_mkldnn_tensor(weight);
+// Fuse convolution+binary_op+unary_op for good performance, which doing
+// such operation: other_t=unary_op(binary_op(conv(input_t, ...), other_t,
+// alpha)). The binary_attr means which binary_op is, it can be "add", or other
+// binary operation. the unary_attr means which unary_op is, it can be "relu" or
+// other unary operation, if it is none, meaning that there doesn't have a unary
+// post op. unary_scalars and unary_algorithm are the parameters of the unary
+// op, such as "hardtanh" has scalar parameters "gelu" has algorithm parameters.
 
-  ideep::tensor mkldnn_grad_input;
-  ideep::convolution_backward_data::compute(
-      mkldnn_grad_output,
-      mkldnn_weight,
+Tensor& mkldnn_convolution_pointwise_binary_(
+    const Tensor& input_t,
+    Tensor& other_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view binary_attr,
+    c10::optional<at::Scalar> alpha,
+    c10::optional<c10::string_view> unary_attr,
+    torch::List<c10::optional<at::Scalar>> unary_scalars,
+    c10::optional<c10::string_view> unary_algorithm) {
+  // other_t += convolution(...), other_t = unary(other_t)
+  TORCH_CHECK(
+      input_t.ndimension() == 4 || input_t.ndimension() == 5,
+      "mkldnn_convolution_add_: currently only support 2d and 3d")
+  TORCH_CHECK(
+      binary_attr == "add",
+      "mkldnn_convolution_pointwise_binary_: only support binary op fusion")
+  TORCH_CHECK(
+      !alpha.has_value() || alpha.value().to<float>() == 1.0,
+      "mkldnn_convolution_pointwise_binary: the alpha value for the binary op should be none(meaning 1.0) or 1.0");
+  TORCH_CHECK(
+      !unary_attr.has_value() || unary_attr.value() == "relu",
+      "mkldnn_convolution_pointwise_binary: only support none or relu unary op fusion after binary op");
+
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  // Make sure inputs have same type(device, layout, dtype), device is cpu and
+  // dtype is float or bfloat16.
+  check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
+
+  check_shape_forward(
+      input_t, weight_t, bias, padding, stride, dilation, groups);
+
+  auto output_sizes = conv_output_size(
+      input_t.sizes(), weight_t.sizes(), padding, stride, dilation);
+  TORCH_CHECK(
+      output_sizes == other_t.sizes(),
+      "Add Fusion's inputs should have same shape");
+  // Only calling fusion path for channels_last path and the output is contiguous tensor(channels_last).
+  bool can_be_fused = (weight_t.is_mkldnn() ||
+                       mkldnn_conv_use_channels_last(input_t, weight_t)) &&
+      (other_t.is_contiguous(at::MemoryFormat::ChannelsLast) ||
+       other_t.is_contiguous(at::MemoryFormat::ChannelsLast3d));
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  if (can_be_fused) {
+    ideep::tensor y = itensor_from_tensor(other_t);
+    ideep::attr_t op_attr;
+    if (unary_attr.has_value()) {
+      op_attr = ideep::attr_t::residual();
+    } else {
+      op_attr = ideep::attr_t::fuse_sum();
+    }
+    _mkldnn_convolution_out(
+        input_t,
+        weight_t,
+        bias,
+        output_sizes,
+        y,
+        stride,
+        dilation,
+        padding,
+        groups,
+        true,
+        op_attr);
+  } else {
+    // Fallback case, if inputs are not channels last or have different dtype,
+    // OneDNN fusion may have performance regression.
+    Tensor output;
+    if (weight_t.is_mkldnn()) {
+      output = _mkldnn_convolution(
+          input_t, weight_t, bias, padding, stride, dilation, groups, true);
+    } else {
+      output = at::convolution(
+          input_t, weight_t, bias, stride, padding, dilation, false, 0, groups);
+    }
+    if (unary_attr.has_value()) {
+      other_t = at::native::add_relu_(other_t, output);
+    } else {
+      other_t.add_(output);
+    }
+  }
+  return other_t;
+}
+
+std::vector<int64_t> _original_deconv_weight_size(
+    const Tensor& weight_t,
+    int64_t groups) {
+  TORCH_CHECK(weight_t.is_mkldnn() || weight_t.is_meta(), "expects weight_t to be mkldnn or meta tensor");
+  // The size of weight_t is the prepacked size.
+  //  Groups > 1: [g*o, i/g, ...]
+  //  Groups == 1: [o, i, ...]
+  // Returns original weight size in [i, o, ...]
+  auto dim = weight_t.sizes().size();
+  TORCH_CHECK(dim > 2);
+
+  std::vector<int64_t> weight_IOHW_sizes(dim);
+  if (groups > 1) {
+    weight_IOHW_sizes[0] = weight_t.sizes()[1] * groups;
+    weight_IOHW_sizes[1] = weight_t.sizes()[0] / groups;
+  } else {
+    weight_IOHW_sizes[0] = weight_t.sizes()[1];
+    weight_IOHW_sizes[1] = weight_t.sizes()[0];
+  }
+  for (const auto d : c10::irange(2, dim)) {
+    weight_IOHW_sizes[d] = weight_t.sizes()[d];
+  }
+  return weight_IOHW_sizes;
+}
+
+
+Tensor _mkldnn_convolution_transpose(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool use_channels_last,
+    c10::string_view attr = "none",
+    torch::List<c10::optional<at::Scalar>> scalars =
+        torch::List<c10::optional<at::Scalar>>(),
+    c10::optional<c10::string_view> algorithm = c10::nullopt) {
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (attr != "none") {
+    auto it = fusion_unary_attr_map().find(attr);
+    TORCH_CHECK(it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
+    op_attr = it->second(scalars, algorithm);
+  }
+
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  if (input_t.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
+  std::vector<int64_t> weight_IOHW_sizes = weight_t.is_mkldnn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
+
+  auto memory_format =
+      mkldnn_convolution_memory_format(input_t.ndimension(), use_channels_last);
+
+  auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
+  auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
+
+  auto output_sizes = conv_input_size(input.sizes(), weight_IOHW_sizes, padding, output_padding, stride, dilation, groups);
+  auto output = at::empty({0}, input.options());
+
+  const ideep::tensor x = itensor_from_tensor(input);
+
+  ideep::tensor w = itensor_from_tensor(weight);
+  if (!weight.is_mkldnn()) {
+    // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
+    // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
+    w.transpose_(0, 1);
+  }
+
+  ideep::tensor y;
+  if (use_channels_last) {
+    output.resize_(output_sizes, memory_format);
+    y = itensor_from_tensor(output);
+  }
+
+  if (bias.defined()) {
+    const ideep::tensor b = itensor_from_tensor(bias);
+    ideep::convolution_transpose_forward::compute(
+        x,
+        w,
+        b,
+        output_sizes,
+        y,
+        stride.vec(),
+        padding.vec(),
+        padding_r(padding, output_padding),
+        dilation.vec(),
+        groups,
+        op_attr);
+  } else {
+    ideep::convolution_transpose_forward::compute(
+        x,
+        w,
+        output_sizes,
+        y,
+        stride.vec(),
+        padding.vec(),
+        padding_r(padding, output_padding),
+        dilation.vec(),
+        groups,
+        op_attr);
+  }
+  if (input.is_mkldnn()) {
+    return MKLDNNTensor(y, input.options());
+  } else if (!use_channels_last) {
+    return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
+  } else {
+    TORCH_INTERNAL_ASSERT(y.get_desc().is_nhwc());
+    return output;
+  }
+}
+
+Tensor mkldnn_convolution_transpose_pointwise(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view attr,
+    torch::List<c10::optional<at::Scalar>> scalars,
+    c10::optional<c10::string_view> algorithm) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  bool use_channels_last =
+      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+  return _mkldnn_convolution_transpose(
+      input_t,
+      weight_t,
+      bias_opt,
+      padding,
+      output_padding,
+      stride,
+      dilation,
+      groups,
+      use_channels_last,
+      attr,
+      scalars,
+      algorithm
+  );
+}
+
+Tensor mkldnn_convolution_transpose_pointwise_meta(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view attr,
+    torch::List<c10::optional<at::Scalar>> scalars,
+    c10::optional<c10::string_view> algorithm) {
+
+  std::vector<int64_t> weight_IOHW_sizes = _original_deconv_weight_size(weight_t, groups);
+  auto output_sizes = conv_input_size(input_t.sizes(), weight_IOHW_sizes, padding, output_padding, stride, dilation, groups);
+
+  auto output = at::empty(output_sizes, input_t.options());
+  return output;
+}
+
+Tensor mkldnn_convolution_backward_input(
+    IntArrayRef input_size,
+    const Tensor& grad_output,
+    const Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool bias_defined,
+    bool is_channels_last) {
+  auto grad_input = at::empty({0}, grad_output.options());
+
+  auto grad_y = itensor_from_tensor(grad_output);
+  auto w = itensor_view_from_dense(weight);
+
+  ideep::tensor grad_x;
+  if (is_channels_last) {
+    auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
+    grad_input.resize_(input_size, memory_format);
+    grad_x = itensor_from_tensor(grad_input);
+  }
+  ideep::convolution_backward_data::compute_v2(
+      grad_y,
+      w,
       input_size.vec(),
-      mkldnn_grad_input,
+      grad_x,
       stride.vec(),
       dilation.vec(),
       padding.vec(),
       padding.vec(),
-      groups);
+      groups,
+      is_channels_last);
 
-  return mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_input),
-                                                 grad_output.options()));
+  if (grad_output.is_mkldnn()) {
+    return MKLDNNTensor(grad_x, grad_output.options());
+  } else if (!is_channels_last){
+    return mkldnn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
+  } else {
+    return grad_input;
+  }
 }
 
 std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
-    IntArrayRef weight_size, const Tensor& grad_output, const Tensor& input,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined)
-{
-  const ideep::tensor mkldnn_grad_output = get_mkldnn_tensor(grad_output);
-  const ideep::tensor mkldnn_input = get_mkldnn_tensor(input);
+    IntArrayRef weight_size,
+    const Tensor& grad_output,
+    const Tensor& input,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool bias_defined,
+    bool is_channels_last) {
+  const ideep::tensor grad_y = itensor_from_tensor(grad_output);
+  const ideep::tensor x = itensor_from_tensor(input);
 
-  ideep::tensor mkldnn_grad_weight, mkldnn_grad_bias;
+  ideep::tensor grad_w, grad_b;
   if (bias_defined) {
-    ideep::convolution_backward_weights::compute(
-        mkldnn_input,
-        mkldnn_grad_output,
+    ideep::convolution_backward_weights::compute_v2(
+        x,
+        grad_y,
         weight_size.vec(),
-        mkldnn_grad_weight,
-        mkldnn_grad_bias,
+        grad_w,
+        grad_b,
         stride.vec(),
         dilation.vec(),
         padding.vec(),
         padding.vec(),
-        groups);
+        groups,
+        is_channels_last);
   } else {
-    ideep::convolution_backward_weights::compute(
-        mkldnn_input,
-        mkldnn_grad_output,
+    ideep::convolution_backward_weights::compute_v2(
+        x,
+        grad_y,
         weight_size.vec(),
-        mkldnn_grad_weight,
+        grad_w,
         stride.vec(),
         dilation.vec(),
         padding.vec(),
         padding.vec(),
-        groups);
+        groups,
+        is_channels_last);
   }
 
-  return std::make_tuple(
-      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_weight),
-                                              grad_output.options())),
-      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias),
-                                              grad_output.options())));
+  if (!is_channels_last) {
+    return std::make_tuple(
+        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
+        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+  } else {
+    auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
+    return std::make_tuple(
+        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
+        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+  }
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
-    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
+    const Tensor& input_t, const Tensor& grad_output_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, std::array<bool,3> output_mask)
 {
-  Tensor grad_output = grad_output_t.contiguous();
+  bool is_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
+  auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
+  Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous(memory_format);
 
+  Tensor input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
+  Tensor weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::mkldnn_convolution_backward_input(
-      input.sizes(), grad_output, weight, padding, stride, dilation, groups, output_mask[2]);
+    grad_input = mkldnn_convolution_backward_input(
+      input.sizes(), grad_output, weight, padding, stride, dilation, groups, output_mask[2], is_channels_last);
   }
   if (output_mask[1] || output_mask[2]) {
-    std::tie(grad_weight, grad_bias) = at::mkldnn_convolution_backward_weights(
-      weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2]);
+    std::tie(grad_weight, grad_bias) = mkldnn_convolution_backward_weights(
+      weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2], is_channels_last);
   }
-
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
+REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward);
+
+Tensor mkldnn_convolution_transpose(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups)
+{
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
+  bool use_channels_last = mkldnn_conv_use_channels_last(input, weight);
+  auto memory_format = mkldnn_convolution_memory_format(input.ndimension(), use_channels_last);
+
+  auto output_sizes = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
+  auto output = at::empty({0}, input.options());
+
+  const ideep::tensor x = itensor_from_tensor(input);
+  ideep::tensor w = itensor_from_tensor(weight);
+  // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
+  // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
+  w.transpose_(0, 1);
+
+  ideep::tensor y;
+  if (use_channels_last) {
+    output.resize_(output_sizes, memory_format);
+    y = itensor_from_tensor(output);
+  }
+  if (bias.defined()) {
+    const ideep::tensor b = itensor_from_tensor(bias);
+    ideep::convolution_transpose_forward::compute(
+        x,
+        w,
+        b,
+        output_sizes,
+        y,
+        stride.vec(),
+        padding.vec(),
+        padding_r(padding, output_padding),
+        dilation.vec(),
+        groups);
+  } else {
+    ideep::convolution_transpose_forward::compute(
+        x,
+        w,
+        output_sizes,
+        y,
+        stride.vec(),
+        padding.vec(),
+        padding_r(padding, output_padding),
+        dilation.vec(),
+        groups);
+  }
+
+  if (input.is_mkldnn()) {
+    return MKLDNNTensor(y, input.options());
+  } else if (!use_channels_last) {
+    return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
+  } else {
+    return output;
+  }
+}
+
+Tensor mkldnn_convolution_transpose_backward_input(
+    IntArrayRef input_size,
+    const Tensor& grad_output,
+    const Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool bias_defined,
+    bool is_channels_last) {
+  auto grad_input = at::empty({0}, grad_output.options());
+
+  auto grad_y = itensor_from_tensor(grad_output);
+  auto w = itensor_view_from_dense(weight).transpose_(0, 1);
+
+  ideep::tensor grad_x;
+  if (is_channels_last) {
+    auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
+    grad_input.resize_(input_size, memory_format);
+    grad_x = itensor_from_tensor(grad_input);
+  }
+  ideep::convolution_transpose_backward_data::compute(
+      grad_y,
+      w,
+      input_size.vec(),
+      grad_x,
+      stride.vec(),
+      padding.vec(),
+      padding_r(padding, output_padding),
+      dilation.vec(),
+      groups);
+
+  if (grad_output.is_mkldnn()) {
+    return MKLDNNTensor(grad_x, grad_output.options());
+  } else if (!is_channels_last){
+    return mkldnn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
+  } else {
+    return grad_input;
+  }
+}
+
+std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
+    IntArrayRef weight_size,
+    const Tensor& grad_output,
+    const Tensor& input,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool bias_defined,
+    bool is_channels_last) {
+  auto grad_y = itensor_from_tensor(grad_output);
+  auto x = itensor_from_tensor(input);
+
+  ideep::tensor grad_w, grad_b;
+  if (bias_defined) {
+    ideep::convolution_transpose_backward_weights::compute(
+        x,
+        grad_y,
+        weight_size.vec(),
+        grad_w,
+        grad_b,
+        stride.vec(),
+        padding.vec(),
+        padding_r(padding, output_padding),
+        dilation.vec(),
+        groups);
+  } else {
+    ideep::convolution_transpose_backward_weights::compute(
+        x,
+        grad_y,
+        weight_size.vec(),
+        grad_w,
+        stride.vec(),
+        padding.vec(),
+        padding_r(padding, output_padding),
+        dilation.vec(),
+        groups);
+  }
+
+  if (!is_channels_last) {
+    return std::make_tuple(
+        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
+        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+  } else {
+    auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
+    return std::make_tuple(
+        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
+        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+  }
+}
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
+    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    std::array<bool,3> output_mask)
+{
+  bool is_channels_last = mkldnn_conv_use_channels_last(input, weight);
+  auto memory_format = mkldnn_convolution_memory_format(input.ndimension(), is_channels_last);
+  Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous(memory_format);
+
+  Tensor grad_input, grad_weight, grad_bias;
+  if (output_mask[0]) {
+    grad_input = mkldnn_convolution_transpose_backward_input(
+        input.sizes(), grad_output, weight, padding, output_padding, stride, dilation, groups, output_mask[2], is_channels_last);
+  }
+  if (output_mask[1] || output_mask[2]) {
+    std::tie(grad_weight, grad_bias) = mkldnn_convolution_transpose_backward_weights(
+        weight.sizes(), grad_output, input, padding, output_padding, stride, dilation, groups, output_mask[2], is_channels_last);
+  }
+  return std::make_tuple(grad_input, grad_weight, grad_bias);
+}
+
+REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_stub, &mkldnn_convolution_transpose);
+REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub, &mkldnn_convolution_transpose_backward);
+
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
+      TORCH_FN(mkldnn_convolution_pointwise));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"),
+      TORCH_FN(mkldnn_convolution_pointwise_binary));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
+      TORCH_FN(mkldnn_convolution_pointwise_binary_));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
+      TORCH_FN(mkldnn_convolution_transpose_pointwise));
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
+      TORCH_FN(mkldnn_convolution_pointwise));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"),
+      TORCH_FN(mkldnn_convolution_pointwise_binary));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
+      TORCH_FN(mkldnn_convolution_pointwise_binary_));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
+      TORCH_FN(mkldnn_convolution_transpose_pointwise));
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, Meta, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
+      TORCH_FN(mkldnn_convolution_transpose_pointwise_meta));
+}
 }}  // namespace at::native
 
 #endif

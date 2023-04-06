@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
+
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
@@ -47,7 +48,7 @@ class ModuleUseDeduper {
 
         // path.size() == 0 means we're calling a method
         // on self, we don't need to dedup uses of self
-        if (path.size() == 0) {
+        if (path.empty()) {
           continue;
         }
         value_to_path_map_[instance] = path;
@@ -87,14 +88,14 @@ class ModuleUseDeduper {
       const Module& child_module,
       const std::vector<std::string>& path) {
     TORCH_INTERNAL_ASSERT(
-        path.size() > 0, "path must have at least one element.");
+        !path.empty(), "path must have at least one element.");
     // Parent module of the leaf child module corresponding to
     // the path
     auto parent_of_leaf = findChildModule(
         module, std::vector<std::string>(path.begin(), path.end() - 1));
 
     // Original name of the child module
-    std::string original_name = path[path.size() - 1];
+    const std::string& original_name = path[path.size() - 1];
     int uid = 0;
     std::string child_name = original_name + "_" + c10::to_string(uid++);
     while (parent_of_leaf.hasattr(child_name)) {

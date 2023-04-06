@@ -2,7 +2,7 @@ import os
 import subprocess
 from typing import List, Optional
 
-from ..util.setting import TOOLS_FOLDER, CompilerType, TestType
+from ..util.setting import CompilerType, TestType, TOOLS_FOLDER
 from ..util.utils import print_error, remove_file
 
 
@@ -82,8 +82,7 @@ def get_gcda_files() -> List[str]:
         # TODO use glob
         # output = glob.glob(f"{folder_has_gcda}/**/*.gcda")
         output = subprocess.check_output(["find", folder_has_gcda, "-iname", "*.gcda"])
-        output = output.decode("utf-8").split("\n")
-        return output
+        return output.decode("utf-8").split("\n")
     else:
         return []
 

@@ -56,12 +56,14 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
     const bool isDepthwise = this->group_ > 1 && this->group_ == M &&
         this->group_ == C && KC == 1 && KH * KW == 9 && dilation_w() == 1;
 
-    CHECK_EQ(Y->t.dim32(3), M);
+    TORCH_CHECK_EQ(Y->t.dim32(3), M);
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();
 
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
       pthreadpool_t threadpool =
           reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
+#endif
 
       if (this->qnnpackObject_ == nullptr) {
         CAFFE_ENFORCE(

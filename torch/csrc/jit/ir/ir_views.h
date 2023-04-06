@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
@@ -125,8 +126,9 @@ struct LoopView {
         trip_count->toInt() !=
             std::numeric_limits<int64_t>::max() || // it is a constant but not
                                                    // the default one
-        currentTripCount()->uses().size() >
-            0; // it is actually being used in the body.
+        !currentTripCount()
+             ->uses()
+             .empty(); // it is actually being used in the body.
 
     if (condition_is_always_true) {
       // if the trip count was not specified this was a user-written while True:
@@ -149,7 +151,7 @@ struct LoopView {
       const std::vector<size_t>& index_ordering) {
     std::vector<size_t> adjusted;
     adjusted.reserve(adjust + index_ordering.size());
-    for (size_t i = 0; i < adjust; ++i) {
+    for (const auto i : c10::irange(adjust)) {
       adjusted.push_back(i);
     }
     for (auto index : index_ordering) {

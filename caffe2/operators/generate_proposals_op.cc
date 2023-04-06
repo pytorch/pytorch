@@ -11,9 +11,10 @@ namespace {
 size_t ComputeStartIndex(
     const TensorCPU& tensor,
     const std::vector<int>& index) {
-  DCHECK_EQ(index.size(), tensor.dim());
+  TORCH_DCHECK_EQ(index.size(), tensor.dim());
 
   size_t ret = 0;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < index.size(); i++) {
     ret += index[i] * tensor.size_from_dim(i + 1);
   }
@@ -26,7 +27,7 @@ template <class T>
 utils::ConstTensorView<T> GetSubTensorView(
     const TensorCPU& tensor,
     int dim0_start_index) {
-  DCHECK_EQ(tensor.dtype().itemsize(), sizeof(T));
+  TORCH_DCHECK_EQ(tensor.dtype().itemsize(), sizeof(T));
 
   if (tensor.numel() == 0) {
     return utils::ConstTensorView<T>(nullptr, {});
@@ -80,7 +81,7 @@ ERMatXf ComputeAllAnchors(
         ConstEigenVectorMap<float>(shift_zero.data(), shift_zero.size());
   }
 
-  // Broacast anchors over shifts to enumerate all anchors at all positions
+  // Broadcast anchors over shifts to enumerate all anchors at all positions
   // in the (H, W) grid:
   //   - add A anchors of shape (1, A, box_dim) to
   //   - K shifts of shape (K, 1, box_dim) to get
@@ -179,7 +180,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   if (rpn_pre_nms_topN_ <= 0 || rpn_pre_nms_topN_ >= scores.size()) {
     // 4. sort all (proposal, score) pairs by score from highest to lowest
     // 5. take top pre_nms_topN (e.g. 6000)
-    std::sort(order.begin(), order.end(), [&scores](int lhs, int rhs) {
+    std::stable_sort(order.begin(), order.end(), [&scores](int lhs, int rhs) {
       return scores[lhs] > scores[rhs];
     });
   } else {
@@ -211,6 +212,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
     Eigen::Map<ERMatXf>(bbox_deltas_per_dim.data(), A, K) =
         Eigen::Map<const ERMatXf, 0, EigenOuterStride>(
             bbox_deltas_tensor.data() + j * K, A, K, stride);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < order.size(); ++i) {
       bbox_deltas_sorted(i, j) = bbox_deltas_per_dim[order[i]];
     }
@@ -236,16 +238,18 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   // 2. clip proposals to image (may result in proposals with zero area
   // that will be removed in the next step)
   proposals = utils::clip_boxes(
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       proposals, im_info[0], im_info[1], clip_angle_thresh_, legacy_plus_one_);
 
   // 3. remove predicted boxes with either height or width < min_size
   auto keep =
       utils::filter_boxes(proposals, min_size, im_info, legacy_plus_one_);
-  DCHECK_LE(keep.size(), scores_sorted.size());
+  TORCH_DCHECK_LE(keep.size(), scores_sorted.size());
 
   // 6. apply loose nms (e.g. threshold = 0.7)
   // 7. take after_nms_topN (e.g. 300)
   // 8. return the top proposals (-> RoIs top)
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (post_nms_topN > 0 && post_nms_topN < keep.size()) {
     keep = utils::nms_cpu(
         proposals,
@@ -324,15 +328,21 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   }
 
   int roi_counts = 0;
-  for (int i = 0; i < num_images; i++) {
+  for (int64_t i = 0; i < num_images; i++) {
     roi_counts += im_boxes[i].rows();
   }
-  const int roi_col_count = box_dim + 1;
-  auto* out_rois = Output(0, {roi_counts, roi_col_count}, at::dtype<float>());
-  auto* out_rois_probs = Output(1, {roi_counts}, at::dtype<float>());
+
+  const int64_t roi_col_count = box_dim + 1;
+  auto *const out_rois = Output(0, {roi_counts, roi_col_count}, at::dtype<float>());
+  auto *const out_rois_probs = Output(1, {roi_counts}, at::dtype<float>());
+
+  if(roi_counts == 0){
+    return true;
+  }
+
   float* out_rois_ptr = out_rois->template mutable_data<float>();
   float* out_rois_probs_ptr = out_rois_probs->template mutable_data<float>();
-  for (int i = 0; i < num_images; i++) {
+  for (int64_t i = 0; i < num_images; i++) {
     const ERArrXXf& im_i_boxes = im_boxes[i];
     const EArrXf& im_i_probs = im_probs[i];
     int csz = im_i_boxes.rows();
@@ -360,7 +370,7 @@ OPERATOR_SCHEMA(GenerateProposals)
     .NumInputs(4)
     .NumOutputs(2)
     .SetDoc(R"DOC(
-Generate bounding box proposals for Faster RCNN. The propoasls are generated for
+Generate bounding box proposals for Faster RCNN. The proposals are generated for
 a list of images based on image score 'score', bounding box regression result
 'deltas' as well as predefined bounding box shapes 'anchors'. Greedy
 non-maximum suppression is applied to generate the final bounding boxes.
@@ -415,25 +425,6 @@ SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 } // namespace caffe2
 
 // clang-format off
-C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
-    GenerateProposals2,
-    "__caffe2::GenerateProposals("
-      "Tensor scores, "
-      "Tensor bbox_deltas, "
-      "Tensor im_info, "
-      "Tensor anchors, "
-      "float spatial_scale, "
-      "int pre_nms_topN, "
-      "int post_nms_topN, "
-      "float nms_thresh, "
-      "float min_size, "
-      "bool angle_bound_on, "
-      "int angle_bound_lo, "
-      "int angle_bound_hi, "
-      "float clip_angle_thresh, "
-      "bool legacy_plus_one"
-    ") -> (Tensor output_0, Tensor output_1)",
-    caffe2::GenerateProposalsOp<caffe2::CPUContext>);
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     GenerateProposals,
     "_caffe2::GenerateProposals("

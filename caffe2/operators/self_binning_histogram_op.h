@@ -1,9 +1,11 @@
 #pragma once
 
+#include "caffe2/core/operator.h"
+#include "c10/util/irange.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
@@ -19,7 +21,8 @@ class SelfBinningHistogramOp final : public Operator<Context> {
         bin_spacing_(this->template GetSingleArgument<std::string>(
             "bin_spacing",
             "linear")),
-        logspace_start_(this->template GetSingleArgument<float>("logspace_start", 1e-24))
+        logspace_start_(this->template GetSingleArgument<float>("logspace_start", 1e-24)),
+        abs_(this->template GetSingleArgument<bool>("abs", false))
          {
     CAFFE_ENFORCE_GE(
         num_bins_, 1, "Number of bins must be greater than or equal to 1.");
@@ -58,19 +61,20 @@ class SelfBinningHistogramOp final : public Operator<Context> {
     T max = 0;
     T min = 0;
     int64_t total_count = 0;
-    for (int input_idx = 0; input_idx < InputSize(); input_idx++) {
+    for (const auto input_idx : c10::irange(InputSize())) {
       const auto& x = Input(input_idx);
       const int64_t N = x.numel();
       total_count += N;
       const auto* x_data = x.template data<T>();
-      for (int64_t data_idx = 0; data_idx < N; data_idx++) {
+      for (const auto data_idx : c10::irange(N)) {
+        const T val = this->abs_ ? std::abs(x_data[data_idx]) :  x_data[data_idx];
         if (!first_seen) {
-          max = x_data[data_idx];
-          min = x_data[data_idx];
+          max = val;
+          min = val;
           first_seen = true;
         } else {
-          max = std::max(x_data[data_idx], max);
-          min = std::min(x_data[data_idx], min);
+          max = std::max(val, max);
+          min = std::min(val, min);
         }
       }
     }
@@ -82,14 +86,14 @@ class SelfBinningHistogramOp final : public Operator<Context> {
       return true;
     }
 
-    CAFFE_ENFORCE(min <= max, "Incorrect min-max computation");
+    CAFFE_ENFORCE(min <= max, "Incorrect min-max computation min=", min, " max=", max);
     T scaled_max = 0;  // this is set in both branches
     if (bin_spacing_ == "linear") {
       // Let's scale the range so that the last count is 0.
       scaled_max = min + (max - min) * RANGE_SCALING;
       T scaled_range = (scaled_max - min);
       // Avoid underflow by calculating advancement through multiplication.
-      for (int i = 0; i < num_edges_; i++) {
+      for (const auto i : c10::irange(num_edges_)) {
         T advancement_ratio = T(i) / num_bins_;
         histogram_values_data[i] = min + advancement_ratio * scaled_range;
       }
@@ -110,7 +114,7 @@ class SelfBinningHistogramOp final : public Operator<Context> {
       T log_multiplier_numerator =log(scaled_max) - log(min);
       // Avoid underflow by:
       // - Calculating each advancement separately for each i.
-      for (int i = 0; i < num_edges_; i++) {
+      for (const auto i : c10::irange(num_edges_)) {
         T advancement_ratio = T(i)/num_bins_;
         histogram_values_data[i] = min * exp(log_multiplier_numerator * advancement_ratio);
       }
@@ -125,15 +129,16 @@ class SelfBinningHistogramOp final : public Operator<Context> {
       histogram_counts_data[0] = total_count;
     }
     else {
-      for (int input_idx = 0; input_idx < InputSize(); input_idx++) {
+      for (const auto input_idx : c10::irange(InputSize())) {
         const auto& x = Input(input_idx);
         const int64_t N = x.numel();
         const auto* x_data = x.template data<T>();
-        for (int64_t data_idx = 0; data_idx < N; data_idx++) {
+        for (const auto data_idx : c10::irange(N)) {
+          const T val = this->abs_ ? std::abs(x_data[data_idx]) :  x_data[data_idx];
           const auto bisection_it = std::upper_bound(
               histogram_values_data,
               histogram_values_data + num_edges_,
-              x_data[data_idx]);
+              val);
           const int bisection_idx = bisection_it - histogram_values_data;
           if (bisection_idx > 0 && bisection_idx < num_edges_) {
             histogram_counts_data[bisection_idx - 1]++;
@@ -156,10 +161,11 @@ class SelfBinningHistogramOp final : public Operator<Context> {
   int num_edges_;
   std::string bin_spacing_;
   float logspace_start_;
+  bool abs_; // automatically apply abs() on the input values
 
   void CheckInputs() {
     const auto& input_zero = Input(0);
-    for (int i = 1; i < InputSize(); i++) {
+    for (const auto i : c10::irange(1, InputSize())) {
       CAFFE_ENFORCE_EQ(
           Input(i).dtype(),
           input_zero.dtype(),

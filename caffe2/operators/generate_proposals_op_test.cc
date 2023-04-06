@@ -6,6 +6,8 @@
 
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 static void AddConstInput(
@@ -491,8 +493,8 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
       1.53593004e-01f,  -8.75087008e-02f, -4.92327996e-02f, -3.32239009e-02f};
 
   // Add angle in bbox deltas
-  int num_boxes = scores.size();
-  CHECK_EQ(bbx.size() / 4, num_boxes);
+  auto num_boxes = scores.size();
+  TORCH_CHECK_EQ(bbx.size() / 4, num_boxes);
   vector<float> bbx_with_angle(num_boxes * box_dim);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
   // at each spatial location for each anchor.
@@ -664,8 +666,8 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
       1.53593004e-01f,  -8.75087008e-02f, -4.92327996e-02f, -3.32239009e-02f};
 
   // Add angle in bbox deltas
-  int num_boxes = scores.size();
-  CHECK_EQ(bbx.size() / 4, num_boxes);
+  auto num_boxes = scores.size();
+  TORCH_CHECK_EQ(bbx.size() / 4, num_boxes);
   vector<float> bbx_with_angle(num_boxes * box_dim);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
   // at each spatial location for each anchor.
@@ -719,7 +721,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   // Verify that the resulting angles are correct
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.size(0), rois.size(1));
-  for (int i = 0; i < rois.size(0); ++i) {
+  for (const auto i : c10::irange(rois.size(0))) {
     EXPECT_LE(std::abs(rois_data(i, 5) - expected_angle), 1e-4);
   }
 }

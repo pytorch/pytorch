@@ -7,7 +7,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // Note(Yangqing): this one is copied from my Caffe implementation.
   auto& X = Input(0);
 
-  DCHECK_EQ(X.dim(), 4);
+  TORCH_DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -31,6 +31,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   float* padded_square_data = padded_square.template mutable_data<float>();
   math::Set<float, CPUContext>(
       padded_square.numel(), 0., padded_square_data, &context_);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float alpha_over_size = alpha_ / size_;
   // go through the images
   for (int n = 0; n < N; ++n) {
@@ -80,7 +81,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   // variants have I written...?
   auto& X = Input(0);
 
-  DCHECK_EQ(X.dim(), 4);
+  TORCH_DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
@@ -104,6 +105,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   float* padded_square_data = padded_square.template mutable_data<float>();
   math::Set<float, CPUContext>(
       padded_square.numel(), 0., padded_square_data, &context_);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float alpha_over_size = alpha_ / size_;
 
   for (int n = 0; n < num_rows; ++n) {
@@ -133,7 +135,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& Y = Input(1);
   auto& dY = Input(2);
 
-  DCHECK_EQ(X.dim(), 4);
+  TORCH_DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -141,8 +143,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int image_size = C * H * W;
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  DCHECK_EQ(X.numel(), Y.numel());
-  DCHECK_EQ(X.numel(), dY.numel());
+  TORCH_DCHECK_EQ(X.numel(), Y.numel());
+  TORCH_DCHECK_EQ(X.numel(), dY.numel());
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
 
   const float* Xdata = X.data<float>();
@@ -161,6 +163,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   math::Set<float, CPUContext>(X.numel(), bias_, scale_data, &context_);
   math::Set<float, CPUContext>(
       padded_ratio.numel(), 0., padded_ratio_data, &context_);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float alpha_over_size = alpha_ / size_;
   // go through the images
   for (int n = 0; n < N; ++n) {
@@ -204,6 +207,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   Tensor accum_ratio(vector<int64_t>{H, W}, CPU);
   float* accum_ratio_data = accum_ratio.template mutable_data<float>();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
   const int inverse_pre_pad = size_ - (size_ + 1) / 2;
 
@@ -244,7 +248,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& Y = Input(1);
   auto& dY = Input(2);
 
-  DCHECK_EQ(X.dim(), 4);
+  TORCH_DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
@@ -253,8 +257,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const float* Xdata = X.data<float>();
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  DCHECK_EQ(X.numel(), Y.numel());
-  DCHECK_EQ(X.numel(), dY.numel());
+  TORCH_DCHECK_EQ(X.numel(), Y.numel());
+  TORCH_DCHECK_EQ(X.numel(), dY.numel());
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
   if (!scale_) {
     scale_ = &local_scale_tensor_;
@@ -267,6 +271,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   math::Set<float, CPUContext>(X.numel(), bias_, scale_data, &context_);
   math::Set<float, CPUContext>(
       padded_ratio.numel(), 0., padded_ratio_data, &context_);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float alpha_over_size = alpha_ / size_;
 
   for (int n = 0; n < num_rows; ++n) {
@@ -288,6 +293,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   math::Set<float, CPUContext>(
       padded_ratio.numel(), 0., padded_ratio_data, &context_);
   // the ratio 2*alpha*beta/size
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
   const float* Ydata = Y.data<float>();
 

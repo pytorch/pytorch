@@ -1,45 +1,31 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/Sorting.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
-#include <ATen/native/Sorting.h>
-#include <ATen/native/SortingUtils.h>
+#include <ATen/native/TopKImpl.h>
+#include <c10/core/WrapDimMinimal.h>
+#include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
-void _fill_indices(Tensor& indices, int64_t dim) {
-  auto dim_size = indices.size(dim);
-  auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
-  auto idx_dim_sizes = std::vector<int64_t>(indices.dim(), 1);
-  auto idx_dim_strides = std::vector<int64_t>(indices.dim(), 0);
-  idx_dim_sizes[dim] = dim_size;
-  idx_dim_strides[dim] = 1;
-  auto idx_dim_restrided = idx_dim.as_strided(idx_dim_sizes, idx_dim_strides);
-  indices.copy_(idx_dim_restrided);
-}
-
 template <typename func_t>
 void _dim_apply(
-    Tensor& values,
-    Tensor& indices,
+    const TensorBase &values,
+    const TensorBase &indices,
     int64_t dim,
     const std::string& method_name,
     const func_t& f) {
-  dim = maybe_wrap_dim(dim, values.dim());
-  TORCH_CHECK(
-    dim >= 0 && dim < values.dim(),
-    method_name, "(): invalid dimension parameter ", dim
-  );
-
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .declare_static_shape(values.sizes(), /*squash_dim=*/dim)
+    .declare_static_shape(values.sizes(), /*squash_dims=*/dim)
     .add_output(values)
     .add_output(indices)
     .build();
@@ -47,15 +33,19 @@ void _dim_apply(
   auto values_dim_stride = values.stride(dim);
   auto indices_dim_stride = indices.stride(dim);
   auto dim_size = values.size(dim);
-  
-  AT_DISPATCH_ALL_TYPES_AND2(
-    ScalarType::Bool, ScalarType::Half, iter.dtype(),
-    method_name, [&] {
+
+  AT_DISPATCH_ALL_TYPES_AND3(
+    ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
+    "sorting_kernel_method_name", [&] {
       auto loop = [&](char** data, const int64_t* strides, int64_t n) {
         auto* values_data_bytes = data[0];
         auto* indices_data_bytes = data[1];
 
-        for (int64_t i = 0; i < n; ++i) {
+        if(values_data_bytes==nullptr || indices_data_bytes==nullptr){
+          return;
+        }
+
+        for (const auto i C10_UNUSED : c10::irange(n)) {
           f(
             reinterpret_cast<scalar_t*>(values_data_bytes),
             values_dim_stride,
@@ -68,8 +58,9 @@ void _dim_apply(
           indices_data_bytes += strides[1];
         }
       };
-      
-      iter.for_each(loop);
+
+      int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, dim_size);
+      iter.for_each(loop, /*grain_size=*/grain_size);
     }
   );
 }
@@ -93,12 +84,19 @@ struct KeyValueCompDesc {
 };
 
 static void sort_kernel(
-    Tensor& values,
-    Tensor& indices,
+    const TensorBase& self,
+    const TensorBase& values,
+    const TensorBase& indices,
     int64_t dim,
-    bool descending) {
+    bool descending,
+    bool stable) {
   dim = maybe_wrap_dim(dim, values.dim());
   _fill_indices(indices, dim);
+  if (self.stride(dim) == 0) {
+    // check if stride is zero
+    // https://github.com/pytorch/pytorch/issues/91420
+    return;
+  }
   _dim_apply(
     values, indices, dim,
     "sort_cpu", [&](
@@ -114,90 +112,68 @@ static void sort_kernel(
       auto composite_accessor = CompositeRandomAccessorCPU<
         decltype(values_accessor), decltype(indices_accessor)
       >(values_accessor, indices_accessor);
-      
+
       if (descending) {
-        std::sort(composite_accessor, composite_accessor + dim_size,
-          KeyValueCompDesc<scalar_t>());
+        if (stable) {
+          std::stable_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
+        }
+        else {
+          std::sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
+        }
       }
       else {
-        std::sort(composite_accessor, composite_accessor + dim_size,
-          KeyValueCompAsc<scalar_t>());
+        if (stable) {
+          std::stable_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
+        }
+        else {
+          std::sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
+        }
       }
     }
   );
 }
 
 static void topk_kernel(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+    const TensorBase &values,
+    const TensorBase &indices,
+    const TensorBase &self,
     int64_t k,
     int64_t dim,
     bool largest,
     bool sorted) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "topk_cpu", [&] {
-    dim_apply(
-        {self, values, indices},
-        dim,
-        [&](int64_t i, TensorList tl) {
-          auto tmp_values = tl[0].accessor<scalar_t, 1>();
-          auto mode_values = tl[1].accessor<scalar_t, 1>();
-          auto mode_indices = tl[2].accessor<int64_t, 1>();
+  auto sizes = self.sizes();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(sizes, /*squash_dims=*/dim)
+    .add_output(values)
+    .add_output(indices)
+    .add_input(self)
+    .build();
 
-          auto n = tmp_values.size(0);
-          auto use_partial_sort = k * 64 <= n;
+  auto mode_values_stride = values.strides()[dim];
+  auto mode_indices_stride = indices.strides()[dim];
+  auto tmp_values_stride = self.strides()[dim];
 
-          using elem_t = std::pair<scalar_t, int64_t>;
-          std::vector<elem_t> queue(n);
-          for (int64_t j = 0; j < n; j++) {
-            queue[j].first = tmp_values[j];
-            queue[j].second = j;
-          }
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "topk_cpu", [&] {
+    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+      if (self.scalar_type() == ScalarType::BFloat16) {
+        return topk_impl_loop<scalar_t, float>(
+            mode_values_stride, mode_indices_stride, tmp_values_stride,
+            k, sizes[dim], largest, sorted, data, strides, n);
+      } else {
+        return topk_impl_loop<scalar_t, scalar_t>(
+            mode_values_stride, mode_indices_stride, tmp_values_stride,
+            k, sizes[dim], largest, sorted, data, strides, n);
+      }
+    };
 
-          // we want NaN to be sorted as top for numpy compatibility
-          if (use_partial_sort) {
-            if (largest) {
-              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-                });
-            } else {
-              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-                });
-            }
-          } else {
-            if (largest) {
-              std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-                });
-              if (sorted) {
-                std::sort(queue.begin(), queue.begin() + k - 1,
-                  [](const elem_t& x, const elem_t& y) -> bool {
-                    return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-                  });
-              }
-            } else {
-              std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-                });
-              if (sorted) {
-                std::sort(queue.begin(), queue.begin() + k -1,
-                  [](const elem_t& x, const elem_t& y) -> bool {
-                    return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-                  });
-              }
-            }
-          }
-
-          for (int64_t j = 0; j < k; j++) {
-            mode_values[j] = queue[j].first;
-            mode_indices[j] = queue[j].second;
-          }
-        });
+    int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
+    iter.for_each(loop, /*grain_size=*/grain_size);
   });
 }
 
@@ -206,4 +182,4 @@ static void topk_kernel(
 REGISTER_DISPATCH(sort_stub, &sort_kernel);
 REGISTER_DISPATCH(topk_stub, &topk_kernel);
 
-}} //at::native
+} //at::native

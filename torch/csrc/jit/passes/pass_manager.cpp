@@ -3,6 +3,9 @@
 namespace torch {
 namespace jit {
 
+// Start UUID at 1
+static GraphPassNameType graphPassID = 1;
+
 std::vector<GraphPassEntry>& getCustomPostPasses() {
   static std::vector<GraphPassEntry> passes;
   return passes;
@@ -14,7 +17,7 @@ std::vector<GraphPassEntry>& getCustomPrePasses() {
 }
 
 GraphPassNameType registerPostPass(GraphPass p) {
-  getCustomPostPasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
+  getCustomPostPasses().emplace_back(std::move(p), graphPassID);
   return graphPassID++;
 }
 
@@ -23,7 +26,7 @@ GraphPassNameType registerPass(GraphPass p) {
 }
 
 GraphPassNameType registerPrePass(GraphPass p) {
-  getCustomPrePasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
+  getCustomPrePasses().emplace_back(std::move(p), graphPassID);
   return graphPassID++;
 }
 
@@ -61,7 +64,7 @@ void clearAllPrePasses() {
 
 // LEGACY CALL
 RegisterPostPass::RegisterPostPass(GraphPass p) {
-  registerPass(p);
+  registerPass(std::move(p));
 }
 
 } // namespace jit

@@ -1,13 +1,14 @@
 # ---[ CPU files.
 set(Caffe2_CPU_PYTHON_SRCS
     "/pybind_state.cc"
+    "/pybind_workspace.cc"
     "/pybind_state_dlpack.cc"
     "/pybind_state_nomni.cc"
     "/pybind_state_registry.cc"
     "/pybind_state_int8.cc"
 )
 
-if(CAFFE2_USE_MKLDNN)
+if(USE_MKLDNN)
   set(Caffe2_CPU_PYTHON_SRCS
       ${Caffe2_CPU_PYTHON_SRCS}
       "/pybind_state_ideep.cc"
@@ -33,4 +34,3 @@ prepend(Caffe2_HIP_PYTHON_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_HIP_PYTHON_S
 set(Caffe2_CPU_PYTHON_SRCS ${Caffe2_CPU_PYTHON_SRCS} PARENT_SCOPE)
 set(Caffe2_GPU_PYTHON_SRCS ${Caffe2_GPU_PYTHON_SRCS} PARENT_SCOPE)
 set(Caffe2_HIP_PYTHON_SRCS ${Caffe2_HIP_PYTHON_SRCS} PARENT_SCOPE)
-

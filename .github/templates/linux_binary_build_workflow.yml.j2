@@ -1,0 +1,108 @@
+{% import 'common.yml.j2' as common %}
+{% import 'upload.yml.j2' as upload %}
+
+{%- block name -%}
+# Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: !{{ build_environment }}
+{%- endblock %}
+
+on:
+  push:
+    {%- if branches == "nightly" %}
+    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
+    {%- endif %}
+    branches:
+      - !{{ branches }}
+    {%- if branches == "nightly" %}
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    {%- endif %}
+{%- for label in ciflow_config.labels | sort %}
+    {%- if loop.first and branches != "nightly" %}
+    tags:
+    {%- endif %}
+      - '!{{ label }}/*'
+{%- endfor %}
+  workflow_dispatch:
+
+env:
+  # Needed for conda builds
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  ANACONDA_USER: pytorch
+  AWS_DEFAULT_REGION: us-east-1
+  BINARY_ENV_FILE: /tmp/env
+  BUILD_ENVIRONMENT: !{{ build_environment }}
+  BUILDER_ROOT: /builder
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+  PYTORCH_ROOT: /pytorch
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  SKIP_ALL_TESTS: 1
+!{{ common.concurrency(build_environment) }}
+
+jobs:
+{%- for config in build_configs %}
+  !{{ config["build_name"] }}-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:!{{ upload.binary_env_as_input(config) }}
+      build_name: !{{ config["build_name"] }}
+      build_environment: !{{ build_environment }}
+      {%- if config.pytorch_extra_install_requirements is defined %}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
+      {%- endif %}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  !{{ config["build_name"] }}-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: !{{ config["build_name"] }}-build
+{%- if config["gpu_arch_type"] != "rocm" %}
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:!{{ upload.binary_env_as_input(config) }}
+      build_name: !{{ config["build_name"] }}
+      build_environment: !{{ build_environment }}
+      {%- if config["gpu_arch_type"] == "rocm" %}
+      runs_on: linux.rocm.gpu
+      {%- elif config["gpu_arch_type"] == "cuda" %}
+      runs_on: linux.4xlarge.nvidia.gpu
+      {%- else %}
+      runs_on: linux.4xlarge
+      {%- endif %}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+{%- else %}
+    runs-on: linux.rocm.gpu
+    timeout-minutes: !{{ common.timeout_minutes }}
+    !{{ upload.binary_env(config) }}
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: !{{ common.download_artifact_action }}
+        name: Download Build Artifacts
+        with:
+          name: !{{ config["build_name"] }}
+          path: "${{ runner.temp }}/artifacts/"
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: !{{ config["container_image"] }}
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+{%- endif %}
+
+{%- if branches == "nightly" %}
+  !{{ upload.upload_binaries(config) }}
+{%- endif %}
+{%- endfor %}

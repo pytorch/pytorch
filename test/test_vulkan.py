@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: mobile"]
+
 import unittest
 import torch
 from torch.nn import functional as F
@@ -65,9 +67,9 @@ class TestVulkanRewritePass(TestCase):
 
         class Conv2D(torch.nn.Module):
             def __init__(self):
-                super(Conv2D, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -85,9 +87,9 @@ class TestVulkanRewritePass(TestCase):
 
         class Conv2DRelu(torch.nn.Module):
             def __init__(self):
-                super(Conv2DRelu, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -124,9 +126,9 @@ class TestVulkanRewritePass(TestCase):
 
         class Conv2DHardtanh(torch.nn.Module):
             def __init__(self):
-                super(Conv2DHardtanh, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations

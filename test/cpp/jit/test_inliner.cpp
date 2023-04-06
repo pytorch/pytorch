@@ -43,7 +43,7 @@ TEST(InlinerTest, Basic) {
   CompilationUnit cu(testSource);
   auto& fn = cu.get_function("foo3");
 
-  auto g = fn.graph();
+  auto g = toGraphFunction(fn).graph();
   Inline(*g);
   FileCheck().check_count("prim::Print", 3)->run(*g);
 }

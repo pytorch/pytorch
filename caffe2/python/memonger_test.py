@@ -1,14 +1,8 @@
-
-
-
-
-
 import numpy as np
 
 from caffe2.python import workspace, memonger, core, model_helper, brew
 from caffe2.proto import caffe2_pb2
 import caffe2.python.hypothesis_test_util as hu
-from future.utils import viewvalues
 import hypothesis.strategies as st
 from hypothesis import given, settings
 import unittest
@@ -173,7 +167,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.share_grad_blobs(
             m.net,
             ["name_x/loss"],
-            set(viewvalues(m.param_to_grad)),
+            set(m.param_to_grad.values()),
             "name_x/",
             share_activations=False,
         )
@@ -183,7 +177,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto_wacts = memonger.share_grad_blobs(
             m.net,
             ["name_x/loss"],
-            set(viewvalues(m.param_to_grad)),
+            set(m.param_to_grad.values()),
             "name_x/",
             share_activations=True,
             dont_share_blobs=set([str(input_to_grad["name_x/fc1_w"])]),
@@ -249,7 +243,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.share_grad_blobs(
             m.net,
             ["loss"],
-            set(viewvalues(m.param_to_grad)),
+            set(m.param_to_grad.values()),
             "",
             share_activations=True,
             dont_share_blobs=set(),
@@ -269,7 +263,7 @@ class MemongerTest(hu.HypothesisTestCase):
         device_crossers = device_blobs[caffe2_pb2.CPU].intersection(
             device_blobs[workspace.GpuDeviceType]
         )
-        self.assertEquals(device_crossers, set())
+        self.assertEqual(device_crossers, set())
 
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
@@ -298,7 +292,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.share_grad_blobs(
             m.net,
             ["name_x/loss1", "name_x/loss2"],
-            set(viewvalues(m.param_to_grad)),
+            set(m.param_to_grad.values()),
             "name_x",  # "name_x//shared_gradinp_0_shared" if using "name_x/"
             share_activations=True,
             dont_share_blobs=set(['name_x/fc6', 'name_x/fc5',
@@ -456,6 +450,89 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss1, optimized_loss1)
         np.testing.assert_almost_equal(loss2, optimized_loss2)
 
+    # This test reproduces scenario where dag traversal for finding
+    # shared blobs was not always starting from ops with in degree of 0
+    @settings(deadline=10000)
+    def test_forward_optim_tree_dag_traversal(self):
+        input_dim = 4
+        output_dim = 4
+        batch_size = 4
+
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
+
+            fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
+            fc4 = brew.fc(m, fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
+            fc5 = brew.fc(m, fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
+
+            # Branch
+            fc3b = brew.fc(m, fc2, "fc3b", dim_in=output_dim, dim_out=output_dim)
+            fc4b = brew.fc(m, fc3b, "fc4b", dim_in=output_dim, dim_out=output_dim)
+            fc5b = brew.fc(m, fc4b, "fc5b", dim_in=output_dim, dim_out=output_dim)
+
+            fc5sum = brew.sum(m, [fc5, fc5b], "fc5sum")
+
+            fc5.Relu([], fc5sum) \
+               .Softmax([], "pred1") \
+               .LabelCrossEntropy(["label"], ["xent1"]) \
+               .AveragedLoss([], "loss1")
+            fc6 = brew.fc(m, fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
+            fc6.Relu([], fc6) \
+               .Softmax([], "pred2") \
+               .LabelCrossEntropy(["label"], ["xent2"]) \
+               .AveragedLoss([], "loss2")
+
+        blobs_before = count_blobs(m.net.Proto())
+        # adding name_x/fc5_w as heads (which belongs to non-root op)
+        # to make sure that dag traversal always starts from root ops
+        optim_proto = memonger.optimize_inference_for_dag(
+            m.net, ["name_x/fc5_w", "name_x/data"], "name_x"
+        )
+        blobs_after = count_blobs(optim_proto)
+        self.assertLess(blobs_after, blobs_before)
+
+    # This is specifically to verify the op schema check being done in memonger
+    def test_forward_optim_tree_enforce_inplace_op_invalid(self):
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+
+        net = m.net
+        net.IndexFreeze("A", "B")  # enforce inplace op
+        net.Sum(["B", "B"], "C")
+        net.Relu("C", "D")
+        net.Sum(["D", "D"], "E")
+
+        with self.assertRaises(RuntimeError):
+            memonger.optimize_inference_for_dag(net, ["A"], "")
+
+    # Here inplace op is specifically a root op to repro the scenario where dag
+    # memonger could treat all the output blobs as shareable blobs and fails
+    # assertion of input blob with the same name not allowed to share
+    def test_forward_optim_tree_enforce_inplace_op_valid_and_as_head(self):
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+
+        net = m.net
+        net.IndexFreeze("A", "A")  # enforce inplace op
+        net.Sum(["A", "A"], "B")
+        net.Relu("B", "C")
+        net.Relu("C", "D")
+        net.Sum(["D", "D"], "E")
+
+        blobs_before = count_blobs(m.net.Proto())
+        optim_proto = memonger.optimize_inference_for_dag(
+            net, ["A"], ""
+        )
+        blobs_after = count_blobs(optim_proto)
+        self.assertLess(blobs_after, blobs_before)
+
     def test_rnn(self):
         from caffe2.python import rnn_cell
         T = 5
@@ -494,7 +571,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.share_grad_blobs(
             model.net,
             ["loss"],
-            set(viewvalues(model.param_to_grad)),
+            set(model.param_to_grad.values()),
             "",
             share_activations=True,
             dont_share_blobs=set(),

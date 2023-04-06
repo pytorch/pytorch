@@ -4,30 +4,6 @@ using namespace caffe2;
 
 namespace {
 
-void adam_ideep_update(
-    int N,
-    const float* g,
-    const float* m,
-    const float* v,
-    float* ng,
-    float* nm,
-    float* nv,
-    float beta1,
-    float beta2,
-    float eps_hat,
-    float correction,
-    const float* lr) {
-#ifdef _OPENMP
-    #pragma omp parallel for schedule(static)
-#endif
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
-    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    ng[i] = lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
-  }
-}
-
 void adam_ideep_compute(
     int N,
     const float* w,
@@ -169,8 +145,11 @@ class IDEEPAdamOp final : public IDEEPOperator {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes,cppcoreguidelines-avoid-magic-numbers)
   T beta1_{0.9};
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes,cppcoreguidelines-avoid-magic-numbers)
   T beta2_{0.999};
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes,cppcoreguidelines-avoid-magic-numbers)
   T epsilon_{1e-8};
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, GRAD, LR, ITER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);

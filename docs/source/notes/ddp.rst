@@ -58,9 +58,25 @@ updated, and all models on different processes should be exactly the same.
             join=True)
 
     if __name__=="__main__":
+        # Environment variables which need to be
+        # set when using c10d's default "env"
+        # initialization mode.
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29500"
         main()
 
+DDP works with TorchDynamo.  When used with TorchDynamo, apply the DDP model wrapper
+before compiling the model, such that torchdynamo can apply ``DDPOptimizer``
+(graph-break optimizations) based on DDP bucket sizes.  (See `TorchDynamo DDPOptimizer <./ddp.html#torchdynamo-ddpoptimizer>`_ for more information.)
 
+TorchDynamo support for DDP currently requires setting `static_graph=False`, due to
+interactions between the graph tracing process and DDP's mechanism for observing operations happening on its module,
+but this should be fixed ultimately.
+
+.. code::
+
+        ddp_model = DDP(model, device_ids=[rank])
+        ddp_model = torch.compile(ddp_model)
 
 Internal Design
 ^^^^^^^^^^^^^^^
@@ -143,22 +159,22 @@ the structure of the code.
 ProcessGroup
 ------------
 
-- `ProcessGroup.hpp <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/lib/c10d/ProcessGroup.hpp>`__:
+- `ProcessGroup.hpp <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/lib/c10d/ProcessGroup.hpp>`__:
   contains the abstract API of all process group implementations. The ``c10d``
   library provides 3 implementations out of the box, namely,
-  `ProcessGroupGloo`, `ProcessGroupNCCL`, and `ProcessGroupMPI`. 
-  ``DistributedDataParallel`` uses ``ProcessGroup::broadcast()`` to send  
-  model states from the process with rank 0 to others during initialization  
+  `ProcessGroupGloo`, `ProcessGroupNCCL`, and `ProcessGroupMPI`.
+  ``DistributedDataParallel`` uses ``ProcessGroup::broadcast()`` to send
+  model states from the process with rank 0 to others during initialization
   and ``ProcessGroup::allreduce()`` to sum gradients.
 
 
-- `Store.hpp <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/lib/c10d/Store.hpp>`__:
+- `Store.hpp <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/lib/c10d/Store.hpp>`__:
   assists the rendezvous service for process group instances to find each other.
 
 DistributedDataParallel
 -----------------------
 
-- `distributed.py <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/nn/parallel/distributed.py>`__:
+- `distributed.py <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/nn/parallel/distributed.py>`__:
   is the Python entry point for DDP. It implements the initialization steps and
   the ``forward`` function for the ``nn.parallel.DistributedDataParallel``
   module which call into C++ libraries. Its ``_sync_param`` function performs
@@ -167,12 +183,12 @@ DistributedDataParallel
   all other processes. The inter-process parameter synchronization happens in
   ``Reducer.cpp``.
 
-- `comm.h <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/csrc/distributed/c10d/comm.h>`__:
+- `comm.h <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/csrc/distributed/c10d/comm.h>`__:
   implements the coalesced broadcast helper function which is invoked to
   broadcast model states during initialization and synchronize model buffers
   before the forward pass.
 
-- `reducer.h <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/csrc/distributed/c10d/reducer.h>`__:
+- `reducer.h <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/csrc/distributed/c10d/reducer.h>`__:
   provides the core implementation for gradient synchronization in the backward
   pass. It has three entry point functions:
 
@@ -188,3 +204,24 @@ DistributedDataParallel
 .. image:: https://user-images.githubusercontent.com/16999635/72313120-4e7c1c80-3658-11ea-9c6d-44336b2daeac.png
     :alt: ddp_code.png
     :width: 400 px
+
+
+TorchDynamo DDPOptimizer
+------------------------
+
+DDP's performance advantage comes from overlapping allreduce collectives with computations during backwards.
+AotAutograd prevents this overlap when used with TorchDynamo for compiling a whole forward and whole backward graph,
+because allreduce ops are launched by autograd hooks _after_ the whole optimized backwards computation finishes.
+
+TorchDynamo's DDPOptimizer helps by breaking the forward graph at the logical boundaries of DDP's allreduce buckets
+during backwards.  Note: the goal is to break the graph during backwards, and the simplest implementation is to
+break the forward graphs and then call AotAutograd and compilation on each section.  This allows DDP's allreduce hooks
+to fire in-between sections of backwards, and schedule communications to overlap with compute.
+
+See `this blog post <https://dev-discuss.pytorch.org/t/torchdynamo-update-9-making-ddp-work-with-torchdynamo/860/1>`_ for
+a more in-depth explanation and experimental results, or read the docs and code at
+`torch/_dynamo/optimizations/distributed.py <https://github.com/pytorch/pytorch/blob/4908a12542798a3e8641faae6b74f068fdfc6778/torch/_dynamo/optimizations/distributed.py#L56>`_
+
+To Debug DDPOptimizer, set `torch._dynamo.config.log_level` to DEBUG (for full graph dumps) or INFO
+(for basic info about bucket boundaries).  To disable DDPOptimizer, set `torch._dynamo.config.optimize_ddp=False`.
+DDP and TorchDynamo should still work correctly without DDPOptimizer, but with performance degradation.

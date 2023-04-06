@@ -1,12 +1,13 @@
 #pragma once
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/scope.h>
 
 // helpers for handling constants in the IR
-// - create constant nodes from ints, floats, intlist, Tensors, and other types
+// - create constant nodes from ints, floats, complex, intlist, Tensors, and
+// other types
 // - implement primitive constant ops.
 namespace torch {
 namespace jit {

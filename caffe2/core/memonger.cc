@@ -6,6 +6,19 @@
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
+
+void run_schema_check(const NetDef& net) {
+  for (auto& op : net.op()) {
+    auto* schema = OpSchemaRegistry::Schema(op.type());
+    if (schema) {
+      CAFFE_ENFORCE(
+          schema->Verify(op),
+          "Operator def did not pass schema checking: ",
+          ProtoDebugString(op));
+    }
+  }
+}
+
 namespace memonger {
 
 NetDef optimize_inference_net(
@@ -16,6 +29,10 @@ NetDef optimize_inference_net(
     return net;
   }
 
+  // Memonger modifies the graph. Do an early schema check here to make sure
+  // the operators are valid
+  run_schema_check(net);
+
   std::vector<OperatorDef> ops;
   for (auto& op : net.op()) {
     if (op.type() == "RecurrentNetwork") {
@@ -23,25 +40,6 @@ NetDef optimize_inference_net(
       // to deal with the forward/backward links etc.
       LOG(INFO) << "Memonger does not support RecurrentNetwork yet";
       return net;
-    }
-
-    // Check for in-place ops
-    auto* schema = OpSchemaRegistry::Schema(op.type());
-    if (schema) {
-      // Memonger modifies the graph. Do an early schema check here to make sure
-      // the operators are valid
-      CAFFE_ENFORCE(
-          schema->Verify(op),
-          "Operator def did not pass schema checking: ",
-          ProtoDebugString(op));
-      for (int in_idx = 0; in_idx < op.input_size(); in_idx++) {
-        for (int out_idx = 0; out_idx < op.output_size(); out_idx++) {
-          if (schema->inplace_enforced(in_idx, out_idx)) {
-            LOG(INFO) << "Memonger does not support in-place ops yet";
-            return net;
-          }
-        }
-      }
     }
     ops.push_back(op);
   }
@@ -157,13 +155,20 @@ class ComputeBlobRecyclingForDag {
       const string& namescope,
       const std::unordered_set<string>& dont_share_blob_names,
       const std::unordered_map<string, vector<int>>& blob_shapes) {
+
+    // Memonger modifies the graph. Do an early schema check here to make sure
+    // the operators are valid
+    run_schema_check(net);
     // Construct the set of input blobs.
     std::unordered_set<string> heads_blobs_set(heads.begin(), heads.end());
 
     // Construct the set of output blobs we want to optimize.
+    // Blobs not eligible for sharing are filtered out
     for (const int op_index : op_indices) {
       for (const auto& output : net.op(op_index).output()) {
-        optim_op_outputs_.insert(output);
+        if (has_key(shareable_blob_names, output) && !has_key(dont_share_blob_names, output)) {
+          optim_op_outputs_.insert(output);
+        }
       }
     }
 
@@ -201,10 +206,13 @@ class ComputeBlobRecyclingForDag {
     }
 
     // The main recursive call. Here we do start DFS in the operator graph
-    // from the input blobs.
+    // from the input blobs. Note that the input ordering does not indicate
+    // operator graph ordering. To avoid traversing children operators first,
+    // traversal begins from root ops and then recursively children ops are
+    // visited.
     for (const auto& input_blob : heads) {
       for (const int op_index : blob_to_ops_[input_blob]) {
-        if (!op_visited_[op_index]) {
+        if (!op_visited_[op_index] && !op_inputs_[op_index]) {
           vector<std::pair<int, string>> free_blobs;
           std::unordered_set<int> tokens{tokens_counter_++};
           process_op(
@@ -242,7 +250,7 @@ class ComputeBlobRecyclingForDag {
     bool had_changes = true;
     while (had_changes) {
       had_changes = false;
-      for (const auto mapped_blob : mapping_) {
+      for (const auto& mapped_blob : mapping_) {
         if (has_key(renamed, mapped_blob.second) &&
             renamed[mapped_blob.second] != mapped_blob.second) {
           renamed[mapped_blob.first] = renamed[mapped_blob.second];
@@ -271,6 +279,12 @@ class ComputeBlobRecyclingForDag {
       // can refer to memongered blobs
       if (optimized_net.op(i).type().find("RecurrentNetwork") == 0) {
         apply_recurrent_blob_assignments(optimized_net.mutable_op(i));
+      }
+
+      // Special handling for AsyncIf ops, where internal nets can
+      // refer to memongered blobs
+      if (optimized_net.op(i).type() == "AsyncIf") {
+        apply_asyncif_blob_assignments(optimized_net.mutable_op(i));
       }
 
       for (int j = 0; j < optimized_net.op(i).input_size(); ++j) {
@@ -328,6 +342,39 @@ class ComputeBlobRecyclingForDag {
         Argument* map_arg = op->add_arg();
         map_arg->set_name(b + ".rename");
         map_arg->set_s(mapped);
+      }
+    }
+  }
+
+  void apply_asyncif_blob_assignments(OperatorDef* op) {
+    for (int i = 0; i < op->arg_size(); i++) {
+      Argument* arg = op->mutable_arg(i);
+      const string& name = arg->name();
+      if (name == "then_net" || name == "else_net") {
+        NetDef* step_net_ref = arg->mutable_n();
+        NetDef optimized_net = apply_assignments(*step_net_ref);
+
+        // update external inputs and outputs mappings as well
+        // for this internal net
+        std::vector<string> optim_external_inputs;
+        for (auto& blob_name : optimized_net.external_input()) {
+          optim_external_inputs.push_back(get_blob_or_mapped_blob(blob_name));
+        }
+        optimized_net.mutable_external_input()->Clear();
+        for (const auto& blob_name : optim_external_inputs) {
+          optimized_net.add_external_input(blob_name);
+        }
+
+        std::vector<string> optim_external_outputs;
+        for (auto& blob_name : optimized_net.external_output()) {
+          optim_external_outputs.push_back(get_blob_or_mapped_blob(blob_name));
+        }
+        optimized_net.mutable_external_output()->Clear();
+        for (const auto& blob_name : optim_external_outputs) {
+          optimized_net.add_external_output(blob_name);
+        }
+
+        step_net_ref->CopyFrom(optimized_net);
       }
     }
   }
@@ -430,6 +477,7 @@ class ComputeBlobRecyclingForDag {
         std::push_heap(
             free_blobs->begin(),
             free_blobs->end(),
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::greater<std::pair<int, string>>());
       }
     }
@@ -475,6 +523,7 @@ class ComputeBlobRecyclingForDag {
       return 0;
     }
     int size = 1;
+    // NOLINTNEXTLINE(modernize-loop-convert)
     for (size_t i = 0; i < blob_shapes_iter->second.size(); ++i) {
       size *= blob_shapes_iter->second[i];
     }
@@ -522,6 +571,7 @@ class ComputeBlobRecyclingForDag {
         std::pop_heap(
             free_blobs->begin(),
             free_blobs->end(),
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::greater<std::pair<int, string>>());
         const auto cand_free_blob = free_blobs->back();
         free_blobs->pop_back();
@@ -537,6 +587,7 @@ class ComputeBlobRecyclingForDag {
         std::push_heap(
             free_blobs->begin(),
             free_blobs->end(),
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::greater<std::pair<int, string>>());
       }
     } else {

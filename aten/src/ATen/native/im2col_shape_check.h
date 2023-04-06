@@ -1,5 +1,7 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/div_rtn.h>
 
 namespace at {
 namespace native {
@@ -35,11 +37,20 @@ static inline void col2im_shape_check(
       dilation_height,
       " dilation_width: ",
       dilation_width);
+  TORCH_CHECK(
+      pad_width >= 0 && pad_height >= 0,
+      "padding should be non-negative, but got pad_height: ",
+      pad_height,
+      " pad_width: ",
+      pad_width);
+
 
   int64_t ndim = input.ndimension();
+  // allow dim=0 only the batch dimension.
   TORCH_CHECK(
-      input.numel() != 0 && (ndim == 2 || ndim == 3),
-      "Expected non-empty 2D or 3D input tensor, but got input of sizes",
+      (ndim == 2 && input.size(0) != 0 && input.size(1) != 0) ||
+      (ndim == 3 && input.size(1) != 0 && input.size(2) != 0),
+      "Expected 2D or 3D (batch mode) tensor for input with possibly 0 batch size and non-zero dimensions for input, but got: ",
       input.sizes());
 
   int64_t batch_dim = (ndim == 3) ? 0 : -1;
@@ -104,6 +115,17 @@ static inline void col2im_shape_check(
         ".");
   }
 
+  TORCH_CHECK(
+    n_blocks_height >= 1 && n_blocks_width >= 1,
+    "Given output_size=(", output_height, ", ", output_width, "), ",
+    "kernel_size=(", kernel_height, ", ", kernel_width, "), ",
+    "dilation=(", dilation_height, ", ", dilation_width, "), ",
+    "padding=(", pad_height, ", ", pad_width, "), ",
+    "stride=(", stride_height, ", ", stride_width, "), ",
+    "calculated shape of the array of sliding blocks as ",
+    "(", n_blocks_height, ", ", n_blocks_width, "), ",
+    "which is too small (non-positive)");
+
   if (output_width < 1 || output_height < 1) {
     AT_ERROR(
         "Expected output spatial size to be positive, but got: output_size=(",
@@ -155,9 +177,12 @@ static inline void im2col_shape_check(
 
   int64_t ndim = input.ndimension();
 
+  // allow dim=0 only the batch dimension.
+  bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
   TORCH_CHECK(
-      input.numel() != 0 && (ndim == 3 || ndim == 4),
-      "Expected non-empty 3D or 4D input tensor, but got input of size ",
+      (ndim == 3 && input.size(0) && valid_dims) ||
+      (ndim == 4 && valid_dims && input.size(3) != 0),
+      "Expected 3D or 4D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
       input.sizes());
 
   int64_t dim_batch = 0;
@@ -201,7 +226,7 @@ static inline void im2col_shape_check(
         output_height,
         ", ",
         output_width,
-        "), which is too small (non-positive).");
+        "), but its components must be at least one.");
   }
 }
 

@@ -18,13 +18,13 @@ class OpWrapper {
       : op_(op), qfactory_(qfactory) {
     for (auto name : op->debug_def().input()) {
       local_input_blobs_.push_back(local_ws_.CreateBlob(name));
-      CHECK_NOTNULL(local_input_blobs_.back());
+      TORCH_CHECK_NOTNULL(local_input_blobs_.back());
     }
     OperatorDef def = op->debug_def();
     local_op_.reset(new OpType(def, &local_ws_));
     for (auto name : def.output()) {
       local_output_blobs_.push_back(local_ws_.GetBlob(name));
-      CHECK_NOTNULL(local_output_blobs_.back());
+      TORCH_CHECK_NOTNULL(local_output_blobs_.back());
     }
   }
 

@@ -1,4 +1,4 @@
-ir_version: 6
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -21,8 +21,19 @@ graph {
       f: 0.9
       type: FLOAT
     }
+    attribute {
+      name: "training_mode"
+      i: 0
+      type: INT
+    }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
+  initializer {
+    dims: 2
+    data_type: 1
+    name: "weight"
+    raw_data: "\000\000\200?\000\000\200?"
+  }
   initializer {
     dims: 2
     data_type: 1
@@ -39,12 +50,6 @@ graph {
     dims: 2
     data_type: 1
     name: "running_var"
-    raw_data: "\000\000\200?\000\000\200?"
-  }
-  initializer {
-    dims: 2
-    data_type: 1
-    name: "weight"
     raw_data: "\000\000\200?\000\000\200?"
   }
   input {
@@ -93,5 +98,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

@@ -6,12 +6,12 @@ import caffe2.python.optimizer as optimizer
 from caffe2.python.optimizer import (
     build_sgd, build_multi_precision_sgd, build_ftrl, build_gftrl, build_wngrad,
     build_adagrad, build_adadelta, build_adam, build_yellowfin, build_rms_prop,
-    build_storm, add_weight_decay, SgdOptimizer)
+    build_storm, build_decay_adagrad, add_weight_decay, SgdOptimizer)
 from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import (
     OptimizerTestBase, LRModificationTestBase
 )
-from caffe2.python import core, workspace
+from caffe2.python import core, utils, workspace
 from caffe2.python.test_util import TestCase
 import numpy as np
 from numpy.testing import assert_allclose, assert_equal
@@ -79,7 +79,7 @@ class TestMultiPrecisionSgd(
 
     @unittest.skipIf(not workspace.has_gpu_support, "No GPU support")
     def testGPUDense(self):
-        super(TestMultiPrecisionSgd, self).testGPUDense(core.DataType.FLOAT16)
+        super().testGPUDense(core.DataType.FLOAT16)
 
 
 class TestFtrl(OptimizerTestBase, TestCase):
@@ -135,6 +135,26 @@ class TestAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
             workspace.FetchBlob(param)
+
+
+class TestAdagradWithDedicatedLRIteration(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = False
+        return build_adagrad(model, base_learning_rate=1.0, lars=0.5, use_dedicated_lr_iteration_counter=True, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertFalse(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+        # check iteration counters have the same value by default
+        non_lr_iter = workspace.FetchBlob(utils.OPTIMIZER_ITERATION_NAME)
+        lr_iter = workspace.FetchBlob(utils.OPTIMIZER_ITERATION_LR_NAME)
+        self.assertEqual(non_lr_iter, lr_iter)
+
+    def testGPUDense(self):
+        raise unittest.SkipTest("GPU support is not validated")
 
 
 class TestRowWiseAdagrad(OptimizerTestBase, TestCase):
@@ -241,6 +261,43 @@ class TestAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
         for param in optimizer.get_auxiliary_parameters().local:
             workspace.FetchBlob(param)
 
+class TestSmartDecayAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = False
+        kwargs['beta1'] = 0.0
+        return build_adam(model, base_learning_rate=0.1, use_smart_decay=True, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertTrue(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        self.assertTrue(workspace.HasBlob("optimizer_iteration"))
+        blob_names = workspace.Blobs()
+        self.assertTrue(any((bn.endswith('_last_seen') for bn in blob_names)))
+        for param in optimizer.get_auxiliary_parameters().shared:
+            workspace.FetchBlob(param)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+class TestDecayAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_decay_adagrad(model, base_learning_rate=1.0, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertTrue(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        self.assertTrue(workspace.HasBlob("optimizer_iteration"))
+        iteration_tensor = workspace.FetchBlob("optimizer_iteration")
+        np.testing.assert_allclose(np.array([2000]),
+                                   iteration_tensor,
+                                   atol=1e-5)
+        for param in optimizer.get_auxiliary_parameters().shared:
+            workspace.FetchBlob(param)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+    def testSparse(self):
+        raise unittest.SkipTest("no sparse support")
 
 class TestSparseRAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):

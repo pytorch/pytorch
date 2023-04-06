@@ -15,12 +15,17 @@ _TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
 _int = builtins.int
 _float = builtins.float
 _bool = builtins.bool
+_complex = builtins.complex
 
 _dtype = torch.dtype
 _device = torch.device
 _qscheme = torch.qscheme
 _size = Union[torch.Size, List[_int], Tuple[_int, ...]]
 _layout = torch.layout
+_dispatchkey = Union[str, torch._C.DispatchKey]
+
+class SymInt:
+    pass
 
 # Meta-type for "numeric" things; matches our docs
 Number = Union[builtins.int, builtins.float, builtins.bool]
@@ -28,11 +33,15 @@ Number = Union[builtins.int, builtins.float, builtins.bool]
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
-Device = Union[_device, str, None]
+Device = Union[_device, str, _int, None]
 
 # Storage protocol implemented by ${Type}StorageBase classes
-class Storage(object):
+
+class Storage:
     _cdata: int
+    device: torch.device
+    dtype: torch.dtype
+    _torch_load_uninitialized: bool
 
     def __deepcopy__(self, memo) -> 'Storage':
         ...
@@ -40,7 +49,7 @@ class Storage(object):
     def _new_shared(self, int) -> 'Storage':
         ...
 
-    def _write_file(self, f: Any, is_real_file: _bool, save_size: _bool) -> None:
+    def _write_file(self, f: Any, is_real_file: _bool, save_size: _bool, element_size: int) -> None:
         ...
 
     def element_size(self) -> int:
@@ -52,7 +61,19 @@ class Storage(object):
     def share_memory_(self) -> 'Storage':
         ...
 
-    def size(self) -> int:
+    def nbytes(self) -> int:
+        ...
+
+    def cpu(self) -> 'Storage':
+        ...
+
+    def data_ptr(self) -> int:
+        ...
+
+    def from_file(self, filename: str, shared: bool = False, nbytes: int = 0) -> 'Storage':
+        ...
+
+    def _new_with_file(self, f: Any, element_size: int) -> 'Storage':
         ...
 
     ...

@@ -3,7 +3,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import TEST_NUMBA
+from torch.testing._internal.common_utils import TEST_NUMBA, TEST_WITH_ROCM
 import inspect
 import contextlib
 
@@ -14,6 +14,12 @@ CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE))
 TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
+
+SM53OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3)
+SM60OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0)
+SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+
+PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 TEST_MAGMA = TEST_CUDA
 if TEST_CUDA:
@@ -61,7 +67,7 @@ def tf32_off():
     try:
         torch.backends.cuda.matmul.allow_tf32 = False
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
-            yield 
+            yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
@@ -69,20 +75,20 @@ def tf32_off():
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-    old_precison = self.precision
+    old_precision = self.precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         self.precision = tf32_precision
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
-            yield 
+            yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
-        self.precision = old_precison
+        self.precision = old_precision
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
-# allow_tf32=True, it will use reduced precision as pecified by the
+# allow_tf32=True, it will use reduced precision as specified by the
 # argument. For example:
 #    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
 #    @tf32_on_and_off(0.005)
@@ -94,6 +100,20 @@ def tf32_on(self, tf32_precision=1e-5):
 # on a CUDA >= 11 build on an >=Ampere architecture, the matmul will be running at
 # TF32 mode and TF32 mode off, and on TF32 mode, the assertEqual will use reduced
 # precision to check values.
+#
+# This decorator can be used for function with or without device/dtype, such as
+# @tf32_on_and_off(0.005)
+# def test_my_op(self)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, device)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, device, dtype)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, dtype)
+# if neither device nor dtype is specified, it will check if the system has ampere device
+# if device is specified, it will check if device is cuda
+# if dtype is specified, it will check if dtype is float32 or complex64
+# tf32 and fp32 are different only when all the three checks pass
 def tf32_on_and_off(tf32_precision=1e-5):
     def with_tf32_disabled(self, function_call):
         with tf32_off():
@@ -104,25 +124,23 @@ def tf32_on_and_off(tf32_precision=1e-5):
             function_call()
 
     def wrapper(f):
-        nargs = len(inspect.signature(f).parameters)
-        if nargs == 2:
-            @functools.wraps(f)
-            def wrapped(self, device):
-                if self.device_type == 'cuda' and tf32_is_not_fp32():
-                    with_tf32_disabled(self, lambda: f(self, device))
-                    with_tf32_enabled(self, lambda: f(self, device))
-                else:
-                    f(self, device)
-        else:
-            assert nargs == 3, "this decorator only support function with signature (self, device) or (self, device, dtype)"
+        params = inspect.signature(f).parameters
+        arg_names = tuple(params.keys())
 
-            @functools.wraps(f)
-            def wrapped(self, device, dtype):
-                if self.device_type == 'cuda' and dtype in {torch.float32, torch.complex64} and tf32_is_not_fp32():
-                    with_tf32_disabled(self, lambda: f(self, device, dtype))
-                    with_tf32_enabled(self, lambda: f(self, device, dtype))
-                else:
-                    f(self, device, dtype)
+        @functools.wraps(f)
+        def wrapped(*args, **kwargs):
+            for k, v in zip(arg_names, args):
+                kwargs[k] = v
+            cond = tf32_is_not_fp32()
+            if 'device' in kwargs:
+                cond = cond and (torch.device(kwargs['device']).type == 'cuda')
+            if 'dtype' in kwargs:
+                cond = cond and (kwargs['dtype'] in {torch.float32, torch.complex64})
+            if cond:
+                with_tf32_disabled(kwargs['self'], lambda: f(**kwargs))
+                with_tf32_enabled(kwargs['self'], lambda: f(**kwargs))
+            else:
+                f(**kwargs)
 
         return wrapped
     return wrapper
@@ -141,9 +159,38 @@ def with_tf32_off(f):
 
     return wrapped
 
+def _get_magma_version():
+    if 'Magma' not in torch.__config__.show():
+        return (0, 0)
+    position = torch.__config__.show().find('Magma ')
+    version_str = torch.__config__.show()[position + len('Magma '):].split('\n')[0]
+    return tuple(int(x) for x in version_str.split("."))
 
 def _get_torch_cuda_version():
     if torch.version.cuda is None:
-        return [0, 0]
+        return (0, 0)
     cuda_version = str(torch.version.cuda)
-    return [int(x) for x in cuda_version.split(".")]
+    return tuple(int(x) for x in cuda_version.split("."))
+
+def _get_torch_rocm_version():
+    if not TEST_WITH_ROCM:
+        return (0, 0)
+    rocm_version = str(torch.version.hip)
+    rocm_version = rocm_version.split("-")[0]    # ignore git sha
+    return tuple(int(x) for x in rocm_version.split("."))
+
+def _check_cusparse_generic_available():
+    return not TEST_WITH_ROCM
+
+def _check_hipsparse_generic_available():
+    if not TEST_WITH_ROCM:
+        return False
+
+    rocm_version = str(torch.version.hip)
+    rocm_version = rocm_version.split("-")[0]    # ignore git sha
+    rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+    return not (rocm_version_tuple is None or rocm_version_tuple < (5, 1))
+
+
+TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
+TEST_HIPSPARSE_GENERIC = _check_hipsparse_generic_available()

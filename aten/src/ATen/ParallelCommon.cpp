@@ -7,7 +7,7 @@
 #include <sstream>
 #include <thread>
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
 
@@ -56,7 +56,7 @@ std::string get_parallel_info() {
 #endif
 
   ss << at::get_mkl_version() << std::endl;
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
   ss << "\tmkl_get_max_threads() : " << mkl_get_max_threads() << std::endl;
 #endif
 
@@ -101,7 +101,11 @@ int intraop_default_num_threads() {
   size_t nthreads = get_env_num_threads("OMP_NUM_THREADS", 0);
   nthreads = get_env_num_threads("MKL_NUM_THREADS", nthreads);
   if (nthreads == 0) {
+#if defined(FBCODE_CAFFE2) && defined(__aarch64__)
+    nthreads = 1;
+#else
     nthreads = TaskThreadPoolBase::defaultNumThreads();
+#endif
   }
   return nthreads;
 #endif

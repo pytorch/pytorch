@@ -40,6 +40,7 @@ class IDEEPInt8GivenTensorFillOp final : public IDEEPOperator {
     auto src_size = source_values.size();
     values_.Resize(src_size);
     uint8_t* values_data = values_.template mutable_data<uint8_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < src_size; i++) {
       values_data[i] = static_cast<uint8_t>(source_values[i]);
     }
@@ -50,7 +51,7 @@ class IDEEPInt8GivenTensorFillOp final : public IDEEPOperator {
     auto data_type = zero_point_ == 0 ? idtype::u8 : idtype::s8;
 
     output->init({shape_, data_type});
-    DCHECK_EQ(output->get_nelems(), values_.numel())
+    TORCH_DCHECK_EQ(output->get_nelems(), values_.numel())
         << "output size: " << output->get_nelems()
         << " given size: " << values_.numel();
 
@@ -110,6 +111,7 @@ class IDEEPInt8GivenIntTensorFillOp final : public IDEEPOperator {
     auto src_size = source_values.size();
     values_.Resize(src_size);
     auto* values_data = values_.template mutable_data<int32_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < src_size; i++) {
       values_data[i] = static_cast<int32_t>(source_values[i]);
     }
@@ -119,7 +121,7 @@ class IDEEPInt8GivenIntTensorFillOp final : public IDEEPOperator {
     auto* output = Output(OUTPUT);
     output->init({shape_, idtype::s32});
     output->set_scale(ConvertScales(scales_));
-    DCHECK_EQ(output->get_nelems(), values_.numel())
+    TORCH_DCHECK_EQ(output->get_nelems(), values_.numel())
         << "output size: " << output->get_nelems()
         << " given size: " << values_.numel();
 

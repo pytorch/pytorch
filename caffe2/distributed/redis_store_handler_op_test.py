@@ -6,7 +6,7 @@
 import os
 import uuid
 
-from caffe2.distributed.python import StoreHandlerTimeoutError  # type: ignore[import]
+from caffe2.distributed.python import StoreHandlerTimeoutError
 from caffe2.distributed.store_ops_test_util import StoreOpsTests
 from caffe2.python import core, workspace, dyndep
 from caffe2.python.test_util import TestCase
@@ -17,11 +17,8 @@ dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:store_ops")
 
 class TestRedisStoreHandlerOp(TestCase):
     def setUp(self):
-        super(TestRedisStoreHandlerOp, self).setUp()
+        super().setUp()
         self.uuid = str(uuid.uuid4()) + "/"
-
-    def tearDown(self):
-        super(TestRedisStoreHandlerOp, self).tearDown()
 
     def create_store_handler(self):
         store_handler = "store_handler"

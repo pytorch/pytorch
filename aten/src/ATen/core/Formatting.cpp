@@ -1,4 +1,5 @@
 #include <ATen/core/Formatting.h>
+#include <c10/util/irange.h>
 
 #include <cmath>
 #include <cstdint>
@@ -10,6 +11,34 @@
 namespace c10 {
 std::ostream& operator<<(std::ostream & out, Backend b) {
   return out << toString(b);
+}
+
+std::ostream& operator<<(std::ostream & out, const Scalar& s) {
+  if (s.isFloatingPoint()) {
+    return out << s.toDouble();
+  }
+  if (s.isComplex()) {
+    return out << s.toComplexDouble();
+  }
+  if (s.isBoolean()) {
+    return out << (s.toBool() ? "true" : "false");
+  }
+  if (s.isSymInt()) {
+    return out << (s.toSymInt());
+  }
+  if (s.isSymFloat()) {
+    return out << (s.toSymFloat());
+  }
+  if (s.isIntegral(false)) {
+    return out << s.toLong();
+  }
+  throw std::logic_error("Unknown type in Scalar");
+}
+
+std::string toString(const Scalar& s) {
+  std::stringstream out;
+  out << s;
+  return out.str();
 }
 }
 namespace at {
@@ -44,7 +73,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
   }
   bool intMode = true;
   auto self_p = self.data_ptr<double>();
-  for(int64_t i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     auto z = self_p[i];
     if(std::isfinite(z)) {
       if(z != std::ceil(z)) {
@@ -60,15 +89,12 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
       break;
     }
   }
-  double expMin;
-  double expMax;
-  if(offset == size) {
-    expMin = 1;
-    expMax = 1;
-  } else {
+  double expMin = 1;
+  double expMax = 1;
+  if(offset != size) {
     expMin = fabs(self_p[offset]);
     expMax = fabs(self_p[offset]);
-    for(int64_t i = offset; i < size; i++) {
+    for (const auto i : c10::irange(offset, size)) {
       double z = fabs(self_p[i]);
       if(std::isfinite(z)) {
         if(z < expMin) {
@@ -91,7 +117,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
     }
   }
   double scale = 1;
-  int64_t sz;
+  int64_t sz = 11;
   if(intMode) {
     if(expMax > 9) {
       sz = 11;
@@ -127,7 +153,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
 
 static void __printIndent(std::ostream &stream, int64_t indent)
 {
-  for(int64_t i = 0; i < indent; i++) {
+  for (C10_UNUSED const auto i : c10::irange(indent)) {
     stream << " ";
   }
 }
@@ -138,8 +164,8 @@ static void printScale(std::ostream & stream, double scale) {
 }
 static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
 {
-  double scale;
-  int64_t sz;
+  double scale = 0.0;
+  int64_t sz = 0;
   std::tie(scale, sz) = __printFormat(stream, self);
 
   __printIndent(stream, indent);
@@ -163,10 +189,10 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
       printScale(stream,scale);
       __printIndent(stream, indent);
     }
-    for(int64_t l = 0; l < self.size(0); l++) {
+    for (const auto l : c10::irange(self.size(0))) {
       Tensor row = self.select(0,l);
       double *row_ptr = row.data_ptr<double>();
-      for(int64_t c = firstColumn; c < lastColumn+1; c++) {
+      for (const auto c : c10::irange(firstColumn, lastColumn+1)) {
         stream << std::setw(sz) << row_ptr[c]/scale;
         if(c == lastColumn) {
           stream << std::endl;
@@ -193,8 +219,9 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
   bool start = true;
   bool finished = false;
   counter[0] = -1;
-  for(size_t i = 1; i < counter.size(); i++)
+  for (const auto i : c10::irange(1, counter.size())) {
     counter[i] = 0;
+  }
   while(true) {
     for(int64_t i = 0; self.ndimension()-2; i++) {
       counter[i] = counter[i] + 1;
@@ -218,7 +245,7 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
     }
     stream << "(";
     Tensor tensor = self;
-    for(int64_t i=0; i < self.ndimension()-2; i++) {
+    for (const auto i : c10::irange(self.ndimension()-2)) {
       tensor = tensor.select(0, counter[i]);
       stream << counter[i]+1 << ",";
     }
@@ -227,6 +254,9 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
   }
 }
 
+void print(const Tensor & t, int64_t linesize) {
+  print(std::cout,t,linesize);
+}
 std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize) {
   FormatGuard guard(stream);
   if(!tensor_.defined()) {
@@ -241,6 +271,12 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     Tensor tensor;
     if (tensor_.is_quantized()) {
       tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
+    } else if (tensor_.is_mkldnn()) {
+      stream << "MKLDNN Tensor: ";
+      tensor = tensor_.to_dense().to(kCPU, kDouble).contiguous();
+    } else if (tensor_.is_mps()) {
+      // MPS does not support double tensors, so first copy then convert
+      tensor = tensor_.to(kCPU).to(kDouble).contiguous();
     } else {
       tensor = tensor_.to(kCPU, kDouble).contiguous();
     }
@@ -249,14 +285,14 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
-        double scale;
-        int64_t sz;
+        double scale = 0.0;
+        int64_t sz = 0;
         std::tie(scale, sz) =  __printFormat(stream, tensor);
         if(scale != 1) {
           printScale(stream, scale);
         }
         double* tensor_p = tensor.data_ptr<double>();
-        for(int64_t i = 0; i < tensor.size(0); i++) {
+        for (const auto i : c10::irange(tensor.size(0))) {
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }
       }
@@ -271,7 +307,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         __printTensor(stream, tensor, linesize);
       }
       stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
-      for(int64_t i = 1; i < tensor.ndimension(); i++) {
+      for (const auto i : c10::irange(1, tensor.ndimension())) {
         stream << "," << tensor.size(i);
       }
       stream << "}";
@@ -290,6 +326,14 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         Tensor zero_points = tensor_.q_per_channel_zero_points();
         print(stream, zero_points, linesize);
         stream << ", axis: " << tensor_.q_per_channel_axis();
+      }
+    }
+
+    // Proxy check for if autograd was built
+    if (tensor.getIntrusivePtr()->autograd_meta()) {
+      auto& fw_grad = tensor._fw_grad(/* level */ 0);
+      if (fw_grad.defined()) {
+        stream << ", tangent:" << std::endl << fw_grad;
       }
     }
     stream << " ]";

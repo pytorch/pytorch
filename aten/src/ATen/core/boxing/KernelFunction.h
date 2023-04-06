@@ -1,6 +1,10 @@
 #pragma once
 
+#include <ATen/core/ATen_fwd.h>
+#include <ATen/core/boxing/BoxedKernel.h>
 #include <ATen/core/stack.h>
+#include <c10/core/DispatchKeySet.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/TypeList.h>
 
 namespace c10 {
@@ -9,34 +13,57 @@ using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack
 
 class OperatorHandle;
 struct OperatorKernel;
+class KernelFunction;
 
-// This kernel implements the behavior of falling through to the next available
-// registered dispatch key.  The implementation of this function is FAST; it is
-// no overhead to fallthrough to the next key.  See cpp file for some more
-// implementation notes; notably, this does NOT actually go through the
-// boxing/unboxing codepath.
-CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+template <typename T>
+using has_symint =
+  guts::disjunction<
+    std::is_same<c10::SymInt, std::decay_t<T>>,
+    std::is_same<c10::SymIntArrayRef, std::decay_t<T>>,
+    std::is_same<at::OptionalSymIntArrayRef, std::decay_t<T>>,
+    std::is_same<c10::optional<c10::SymInt>, std::decay_t<T>>
+  >;
 
-// Note [Ambiguity in AutogradOther kernel]
-// This kernel implements reporting an error message when there're kernels registered
-// to both Math and a backend of AutogradOther, we don't know which kernel to pick:
-// - if we pick Math kernel for AutogradOther, the kernel registered to backend will be
-//   silently ignored and never called.
-// - if we skip using Math kernel for AutogradOther (it might pick Autograd kernel if available),
-//   it'll break all backends mapped to AutogradOther without a direct registration to backend.
-//   See c10/core/DispatchKeySet.cpp for a list of backends mapped to AutogradOther.
-// Thus if backend extender indeed want to override Math kernel behavior, they should request
-// a dedicated Autograd key for their backend to resolve the ambiguity.
-CAFFE2_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+template <typename T>
+struct remove_symint {
+  using type = T;
+};
 
-// Note [named_not_supported_kernel]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// This kernel implements reporting an error message saying that named tensor is
-// not supported.  This kernel doesn't rely on the Stack, and so it is special
-// cased in the dispatcher to be triggered before we attempt boxing (so we can
-// give a good error message in cases when boxing is not supported).  When
-// boxing is universally supported this can be removed.
-[[noreturn]] CAFFE2_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+template <>
+struct remove_symint<c10::SymInt> {
+  using type = int64_t;
+};
+
+template <>
+struct remove_symint<at::OptionalSymIntArrayRef> {
+  using type = OptionalIntArrayRef;
+};
+
+template <>
+struct remove_symint<c10::SymIntArrayRef> {
+  using type = c10::IntArrayRef;
+};
+
+template <>
+struct remove_symint<c10::optional<c10::SymInt>> {
+  using type = c10::optional<int64_t>;
+};
+
+
+template <bool symint, typename T>
+struct maybe_keep_symint final {};
+
+template <typename T>
+struct maybe_keep_symint<true, T> { using type = T; };
+
+template <typename T>
+struct maybe_keep_symint<false, T> { using type = typename remove_symint<T>::type; };
+
+template <typename T>
+using fn_has_symint = typename guts::typelist::true_for_any_type<
+  has_symint,
+  typename guts::infer_function_traits<T>::type::parameter_types
+>;
 
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
@@ -44,15 +71,18 @@ CAFFE2_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHa
  * and call it in a boxed or unboxed way. If the way it was created doesn't
  * match the way it was called, it will do boxing or unboxing as necessary.
  */
-class CAFFE2_API KernelFunction final {
+class TORCH_API KernelFunction final {
 public:
-  // This is how boxed kernels are actually stored
-  using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, Stack*);
-  // This is the public API for how boxed kernels are defined
-  using BoxedKernelFunction = void(const OperatorHandle&, Stack*);
+  using InternalBoxedKernelFunction = BoxedKernel::InternalBoxedKernelFunction;
+  using BoxedKernelFunction = BoxedKernel::BoxedKernelFunction;
+  using BoxedKernelFunction_withDispatchKeys = BoxedKernel::BoxedKernelFunction_withDispatchKeys;
 
   KernelFunction();
 
+  // Fast path for dispatch to allow not touching the boxed kernel in
+  // the common case where unboxed is available.
+  bool isValidUnboxed() const;
+  bool isValidSymUnboxed() const;
   bool isValid() const;
   bool isFallthrough() const;
 
@@ -74,7 +104,7 @@ public:
    * >      [] (Tensor a, bool b) -> Tensor {...});
    * > Tensor result = func.callBoxed(stack);
    */
-  void callBoxed(const OperatorHandle& opHandle, Stack* stack) const;
+  void callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const;
 
   /**
    * Call the function in an unboxed way.
@@ -96,7 +126,12 @@ public:
    * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    */
   template<class Return, class... Args>
-  Return call(const OperatorHandle& opHandle, Args... args) const;
+  Return call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
+
+  /**
+   * Create a KernelFunction from a BoxedKernel.
+   */
+  static KernelFunction makeFromBoxedKernel(BoxedKernel boxed_fn);
 
   /**
    * Create a KernelFunction from a boxed function.
@@ -110,38 +145,39 @@ public:
   static KernelFunction makeFromBoxedFunction();
 
   /**
+   * TODO: This will only be useful if we write a backend fallback that plumbs dispatch keys (currently there are none)
+   * See Note [Plumbing Keys Through The Dispatcher] for details.
+   */
+  template<BoxedKernelFunction_withDispatchKeys* func>
+  static KernelFunction makeFromBoxedFunction();
+
+  /**
    * Create a KernelFunction from an unboxed functor.
    *
    * Example:
    *
-   * > class MyFunctor final {
+   * > class MyFunctor final : public c10::OperatorKernel {
    * >   public:
    * >     Tensor operator()(Tensor a, Tensor b) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor(std::make_unique<MyFunctor>());
+   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor<MyFunctor>(std::make_unique<MyFunctor>());
    */
   template<bool AllowLegacyTypes = false, class KernelFunctor>
   static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
 
   /**
-   * Create a KernelFunction from an unboxed functor and prevent creation of an
-   * unboxing-wrapper. This means that you cannot call this KernelFunction
-   * using KernelFunction::callBoxed()
-   *
-   * This is necessary because our unboxing wrappers don't work for all types
-   * yet, so if you want to use one of these types as function arguments,
-   * you need to use makeFromUnboxedOnlyFunctor.
+   * Create a KernelFunction from a boxed functor.
    *
    * Example:
    *
-   * > class MyFunctor final {
+   * > class MyFunctor final : public c10::OperatorKernel {
    * >   public:
-   * >     Tensor operator()(Tensor a, Tensor b) {...}
+   * >     void operator()(const OperatorHandle&, DispatchKeySet, Stack*) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor(std::make_unique<MyFunctor>());
+   * > KernelFunction func = KernelFunction::makeFromBoxedFunctor(std::make_unique<MyFunctor>());
    */
   template<class KernelFunctor>
-  static KernelFunction makeFromUnboxedOnlyFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
+  static KernelFunction makeFromBoxedFunctor(std::unique_ptr<KernelFunctor> kernelFunctor);
 
   /**
    * Create a KernelFunction from an unboxed function.
@@ -159,23 +195,6 @@ public:
   static KernelFunction makeFromUnboxedFunction(FuncPtr);
 
   /**
-   * Create a KernelFunction from an unboxed function and prevent creation of an
-   * unboxing-wrapper. This means that you cannot call this KernelFunction
-   * using KernelFunction::callBoxed()
-   *
-   * This is necessary because our unboxing wrappers don't work for all types
-   * yet, so if you want to use one of these types as function arguments,
-   * you need to use makeFromUnboxedOnlyFunctor.
-   *
-   * Example:
-   *
-   * > Tensor unboxed_func(Tensor a, Tensor b) {...}
-   * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(unboxed_func), &unboxed_func>();
-   */
-  template<class FuncPtr>
-  static KernelFunction makeFromUnboxedOnlyFunction(FuncPtr);
-
-  /**
    * Create a KernelFunction from an unboxed function.
    * KernelFunction::makeFromUnboxedFunction is usually a better choice than
    * this if you know the function pointer at compile time, see doc comment
@@ -188,9 +207,6 @@ public:
    */
   template<bool AllowLegacyTypes = false, class FuncType>
   static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func);
-
-  template<class FuncType>
-  static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
 
   static KernelFunction makeFallthrough();
   static KernelFunction makeAmbiguousAutogradOther();
@@ -205,33 +221,29 @@ public:
    * >      [] (Tensor a, bool b) -> Tensor {...});
    */
   template<bool AllowLegacyTypes = false, class Lambda>
-  static KernelFunction makeFromUnboxedLambda(Lambda&& lambda);
+  static std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
+  template<bool AllowLegacyTypes = false, class Lambda>
+  static std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
 
   std::string dumpState() const;
   // For testing internal invariants only
   bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
 
-  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic. This can be done once https://github.com/pytorch/pytorch/issues/32366 is fixed.
-  void setManuallyBoxedKernel_(InternalBoxedKernelFunction* func);
-
 private:
 
-  explicit KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);
+  explicit KernelFunction(
+      std::unique_ptr<OperatorKernel> functor,
+      InternalBoxedKernelFunction* boxed_kernel_func,
+      void* unboxed_kernel_func,
+      void* sym_unboxed_kernel_func);
+  explicit KernelFunction(
+      BoxedKernel boxed_fn,
+      void* unboxed_kernel_func,
+      void* sym_unboxed_kernel_func);
 
-  template<BoxedKernelFunction* func>
-  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack);
-
-  void checkBoxedKernel(const OperatorHandle& opHandle) const;
-
-  OperatorKernel* getFunctor_() const;
-
-  std::shared_ptr<OperatorKernel> functor_;
-
-  InternalBoxedKernelFunction* boxed_kernel_func_;
+  BoxedKernel boxed_kernel_func_;
   void* unboxed_kernel_func_;
+  void* sym_unboxed_kernel_func_;
 };
 
 }

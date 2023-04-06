@@ -4,6 +4,32 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("//tools/rules:workspace.bzl", "new_patched_local_repository")
 
 http_archive(
+    name = "rules_cc",
+    strip_prefix = "rules_cc-40548a2974f1aea06215272d9c2b47a14a24e556",
+    patches = [
+        "//:tools/rules_cc/cuda_support.patch",
+    ],
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_cc/archive/40548a2974f1aea06215272d9c2b47a14a24e556.tar.gz",
+        "https://github.com/bazelbuild/rules_cc/archive/40548a2974f1aea06215272d9c2b47a14a24e556.tar.gz",
+    ],
+)
+
+http_archive(
+    name = "rules_cuda",
+    strip_prefix = "runtime-b1c7cce21ba4661c17ac72421c6a0e2015e7bef3/third_party/rules_cuda",
+    urls = ["https://github.com/tensorflow/runtime/archive/b1c7cce21ba4661c17ac72421c6a0e2015e7bef3.tar.gz"],
+)
+
+load("@rules_cuda//cuda:dependencies.bzl", "rules_cuda_dependencies")
+
+rules_cuda_dependencies(with_rules_cc = False)
+
+load("@rules_cc//cc:repositories.bzl", "rules_cc_toolchains")
+
+rules_cc_toolchains()
+
+http_archive(
     name = "bazel_skylib",
     urls = [
         "https://github.com/bazelbuild/bazel-skylib/releases/download/1.0.2/bazel-skylib-1.0.2.tar.gz",
@@ -11,18 +37,9 @@ http_archive(
 )
 
 http_archive(
-    name = "com_google_googletest",
-    strip_prefix = "googletest-cd6b9ae3243985d4dc725abd513a874ab4161f3e",
-    urls = [
-        "https://github.com/google/googletest/archive/cd6b9ae3243985d4dc725abd513a874ab4161f3e.tar.gz",
-    ],
-)
-
-http_archive(
   name = "pybind11_bazel",
-  strip_prefix = "pybind11_bazel-7f397b5d2cc2434bbd651e096548f7b40c128044",
-  urls = ["https://github.com/pybind/pybind11_bazel/archive/7f397b5d2cc2434bbd651e096548f7b40c128044.zip"],
-  sha256 = "e4a9536f49d4a88e3c5a09954de49c4a18d6b1632c457a62d6ec4878c27f1b5b",
+  strip_prefix = "pybind11_bazel-992381ced716ae12122360b0fbadbc3dda436dbf",
+  urls = ["https://github.com/pybind/pybind11_bazel/archive/992381ced716ae12122360b0fbadbc3dda436dbf.zip"],
 )
 
 new_local_repository(
@@ -45,7 +62,6 @@ http_archive(
     urls = [
         "https://github.com/gflags/gflags/archive/v2.2.2.tar.gz",
     ],
-    sha256 = "34af2f15cf7367513b352bdcd2493ab14ce43692d2dcd9dfc499492966c64dcf",
 )
 
 new_local_repository(
@@ -78,9 +94,16 @@ new_local_repository(
 )
 
 new_local_repository(
+    name = "cutlass",
+    build_file = "//third_party:cutlass.BUILD",
+    path = "third_party/cutlass",
+)
+
+new_local_repository(
     name = "fbgemm",
     build_file = "//third_party:fbgemm/BUILD.bazel",
     path = "third_party/fbgemm",
+    repo_mapping = {"@cpuinfo" : "@org_pytorch_cpuinfo"}
 )
 
 new_local_repository(
@@ -96,8 +119,8 @@ new_local_repository(
 )
 
 new_local_repository(
-    name = "cpuinfo",
-    build_file = "//third_party:cpuinfo.BUILD",
+    name = "org_pytorch_cpuinfo",
+    build_file = "//third_party:cpuinfo/BUILD.bazel",
     path = "third_party/cpuinfo",
 )
 
@@ -117,6 +140,12 @@ new_local_repository(
     name = "fmt",
     build_file = "//third_party:fmt.BUILD",
     path = "third_party/fmt",
+)
+
+new_local_repository(
+    name = "kineto",
+    build_file = "//third_party:kineto.BUILD",
+    path = "third_party/kineto",
 )
 
 new_patched_local_repository(
@@ -161,7 +190,7 @@ http_archive(
 )
 
 load("@pybind11_bazel//:python_configure.bzl", "python_configure")
-python_configure(name = "local_config_python")
+python_configure(name = "local_config_python", python_version="3")
 
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
@@ -170,3 +199,112 @@ protobuf_deps()
 load("@rules_python//python:repositories.bzl", "py_repositories")
 
 py_repositories()
+
+new_local_repository(
+    name = "cuda",
+    build_file = "@//third_party:cuda.BUILD",
+    path = "/usr/local/cuda",
+)
+
+new_local_repository(
+    name = "cudnn",
+    build_file = "@//third_party:cudnn.BUILD",
+    path = "/usr/",
+)
+
+local_repository(
+    name = "com_github_google_flatbuffers",
+    path = "third_party/flatbuffers",
+)
+
+local_repository(
+    name = "google_benchmark",
+    path = "third_party/benchmark",
+)
+
+local_repository(
+    name = "com_google_googletest",
+    path = "third_party/googletest",
+)
+
+local_repository(
+    name = "pthreadpool",
+    path = "third_party/pthreadpool",
+    repo_mapping = {"@com_google_benchmark" : "@google_benchmark"}
+)
+
+local_repository(
+    name = "FXdiv",
+    path = "third_party/FXdiv",
+    repo_mapping = {"@com_google_benchmark" : "@google_benchmark"}
+)
+
+local_repository(
+    name = "XNNPACK",
+    path = "third_party/XNNPACK",
+    repo_mapping = {"@com_google_benchmark" : "@google_benchmark"}
+)
+
+local_repository(
+    name = "gemmlowp",
+    path = "third_party/gemmlowp/gemmlowp",
+)
+
+### Unused repos start
+
+# `unused` repos are defined to hide bazel files from submodules of submodules.
+# This allows us to run `bazel build //...` and not worry about the submodules madness.
+# Otherwise everything traverses recursively and a lot of submodules of submodules have
+# they own bazel build files.
+
+local_repository(
+    name = "unused_tensorpipe_googletest",
+    path = "third_party/tensorpipe/third_party/googletest",
+)
+
+local_repository(
+    name = "unused_fbgemm",
+    path = "third_party/fbgemm",
+)
+
+local_repository(
+    name = "unused_ftm_bazel",
+    path = "third_party/fmt/support/bazel",
+)
+
+local_repository(
+    name = "unused_kineto_fmt_bazel",
+    path = "third_party/kineto/libkineto/third_party/fmt/support/bazel",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_googletest",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/googletest",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_gflags",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/gflags",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_glog",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/glog",
+)
+
+local_repository(
+    name = "unused_kineto_googletest",
+    path = "third_party/kineto/libkineto/third_party/googletest",
+)
+
+local_repository(
+    name = "unused_onnx_benchmark",
+    path = "third_party/onnx/third_party/benchmark",
+)
+
+local_repository(
+    name = "unused_onnx_tensorrt_benchmark",
+    path = "third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark",
+)
+
+### Unused repos end

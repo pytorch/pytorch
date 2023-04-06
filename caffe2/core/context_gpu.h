@@ -69,7 +69,9 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // CUDAContext::SwitchToDevice
   void SetCurrentStreamId(DeviceIndex gpu, StreamId stream_id) {
     // TODO: use current device id from thread local instead of passing gpu in
-    c10::cuda::setCurrentCUDAStream(GetCUDAStream(gpu, stream_id));
+    if (stream_id != -1) {
+      c10::cuda::setCurrentCUDAStream(GetCUDAStream(gpu, stream_id));
+    }
   }
 
   // Retrieves the CUDAStream corresponding to a logical stream ID, ensuring
@@ -146,7 +148,15 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
 #ifdef CAFFE2_USE_CUDNN
     for (auto element : cudnn_handles_) {
       if (element.second) {
+#ifdef _WIN32
+        // this is because of something dumb in the ordering of
+        // destruction. Sometimes at exit, the cuda context would already
+        // be destroyed by the time this gets destroyed. This happens on
+        // windows with cuda 11 and cuda 12.
+        cudnnDestroy(element.second);
+#else
         CUDNN_CHECK(cudnnDestroy(element.second));
+#endif // _WIN32
       }
     }
 #endif // CAFFE2_USE_CUDNN
@@ -193,14 +203,14 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   // SwitchToDevice()
   void FinishDeviceComputation() override {
     CUDA_ENFORCE(cudaStreamSynchronize(getCudaObjects().GetStream(gpu_id_)));
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-      CAFFE_THROW("Encountered CUDA error: ", cudaGetErrorString(error));
-    }
   }
 
   inline int device_id() const {
     return gpu_id_;
+  }
+
+  inline c10::cuda::CUDAStream stream() const {
+    return at::cuda::getStreamFromExternal(getCudaObjects().GetStream(gpu_id_), gpu_id_);
   }
 
   inline cudaStream_t cuda_stream() const {
@@ -228,7 +238,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
           curandCreateGenerator(&curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
       CURAND_ENFORCE(
           curandSetPseudoRandomGeneratorSeed(curand_generator_, random_seed_));
-      CHECK_NOTNULL(curand_generator_);
+      TORCH_CHECK_NOTNULL(curand_generator_);
     }
     CURAND_ENFORCE(curandSetStream(curand_generator_, cuda_stream()));
     return curand_generator_;
@@ -279,7 +289,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
   template <class SrcContext, class DstContext>
   inline void
-  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+  CopyItems(const TypeMeta meta, size_t n, const void* src, void* dst) {
     CAFFE_ENFORCE(!meta.copy(), "CUDAContext requires fundamental types.");
     CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
   }
@@ -307,8 +317,15 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   }
 
   static bool IsStreamFree(const DeviceOption& option, StreamId stream_id) {
-    auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
-    return cudaStreamQuery(stream) == cudaSuccess;
+    const auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
+    const auto status = C10_CUDA_ERROR_HANDLED(cudaStreamQuery(stream));
+    if (status == cudaErrorNotReady) {
+      // ignore and clear the error if not ready
+      C10_CUDA_CLEAR_ERROR();
+    } else {
+      C10_CUDA_CHECK(status); // Reraise error
+    }
+    return status == cudaSuccess;
   }
 
   at::Device device() const override {

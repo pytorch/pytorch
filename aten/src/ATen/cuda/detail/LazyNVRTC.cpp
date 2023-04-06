@@ -18,15 +18,67 @@ at::DynamicLibrary& getCUDALibrary() {
   return lib;
 }
 
-at::DynamicLibrary& getNVRTCLibrary() {
+static std::string getLibVersion() {
+  // [NVRTC versioning]
+  // Quote of https://docs.nvidia.com/cuda/nvrtc/index.html Section 8.1. NVRTC library versioning
+  //
+  // In the following, MAJOR and MINOR denote the major and minor versions of the CUDA Toolkit.
+  // e.g. for CUDA 11.2, MAJOR is "11" and MINOR is "2".
+  //
+  // Linux:
+  //   - In CUDA toolkits prior to CUDA 11.3, the soname was set to "MAJOR.MINOR".
+  //   - In CUDA 11.3 and later 11.x toolkits, the soname field is set to "11.2".
+  //   - In CUDA toolkits with major version > 11 (e.g. CUDA 12.x), the soname field is set to "MAJOR".
+  //
+  // Windows:
+  //   - In CUDA toolkits prior to cuda 11.3, the DLL name was of the form "nvrtc64_XY_0.dll", where X = MAJOR, Y = MINOR.
+  //   - In CUDA 11.3 and later 11.x toolkits, the DLL name is "nvrtc64_112_0.dll".
+  //   - In CUDA toolkits with major version > 11 (e.g. CUDA 12.x), the DLL name is of the form "nvrtc64_X0_0.dll" where X = MAJOR.
+  //
+  // Consider a CUDA toolkit with major version > 11. The NVRTC library in this CUDA toolkit will have the same soname (Linux)
+  // or DLL name (Windows) as an NVRTC library in a previous minor version of the same CUDA toolkit. Similarly, the NVRTC
+  // library in CUDA 11.3 and later 11.x releases will have the same soname (Linux) or DLL name (Windows) as the NVRTC library in CUDA 11.2.
   constexpr auto major = CUDA_VERSION / 1000;
   constexpr auto minor = ( CUDA_VERSION / 10 ) % 10;
 #if defined(_WIN32)
-  auto libname = std::string("nvrtc64_") + std::to_string(major) + std::to_string(minor) + "_0.dll";
+  if (major < 11 || (major == 11 && minor < 3)) {
+    return std::to_string(major) + std::to_string(minor);
+  } else if (major == 11) {
+    return "112";
+  } else {
+    return std::to_string(major) + "0";
+  }
 #else
-  static auto libname = std::string("libnvrtc.so.") + std::to_string(major) + "." + std::to_string(minor);
+  if (major < 11 || (major == 11 && minor < 3)) {
+    return std::to_string(major) + "." + std::to_string(minor);
+  } else if (major == 11) {
+    return "11.2";
+  } else {
+    return std::to_string(major);
+  }
 #endif
-  static at::DynamicLibrary lib(libname.c_str());
+}
+
+static std::string getLibName() {
+#if defined(_WIN32)
+  return std::string("nvrtc64_") + getLibVersion() + "_0.dll";
+#else
+  return std::string("libnvrtc.so.") + getLibVersion();
+#endif
+}
+
+static std::string getAltLibName() {
+#if !defined(_WIN32) && defined(NVRTC_SHORTHASH)
+  return std::string("libnvrtc-") + C10_STRINGIZE(NVRTC_SHORTHASH) + ".so." + getLibVersion();
+#else
+  return {};
+#endif
+}
+
+at::DynamicLibrary& getNVRTCLibrary() {
+  static std::string libname = getLibName();
+  static std::string alt_libname = getAltLibName();
+  static at::DynamicLibrary lib(libname.c_str(), alt_libname.empty() ? nullptr : alt_libname.c_str());
   return lib;
 }
 
@@ -94,6 +146,10 @@ nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog,
 NVRTC_STUB1(nvrtcDestroyProgram, nvrtcProgram *);
 NVRTC_STUB2(nvrtcGetPTXSize, nvrtcProgram, size_t *);
 NVRTC_STUB2(nvrtcGetPTX, nvrtcProgram, char *);
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+NVRTC_STUB2(nvrtcGetCUBINSize, nvrtcProgram, size_t *);
+NVRTC_STUB2(nvrtcGetCUBIN, nvrtcProgram, char *);
+#endif
 NVRTC_STUB3(nvrtcCompileProgram, nvrtcProgram, int, const char * const *);
 _STUB_1(NVRTC, nvrtcGetErrorString, const char *, nvrtcResult);
 NVRTC_STUB2(nvrtcGetProgramLogSize,nvrtcProgram, size_t*);
@@ -109,6 +165,8 @@ CUDA_STUB1(cuModuleUnload, CUmodule);
 CUDA_STUB3(cuDevicePrimaryCtxGetState, CUdevice, unsigned int *, int *);
 CUDA_STUB4(cuLinkCreate, unsigned int, CUjit_option *, void **, CUlinkState *);
 CUDA_STUB3(cuLinkComplete, CUlinkState, void **, size_t *);
+CUDA_STUB3(cuFuncSetAttribute, CUfunction, CUfunction_attribute, int);
+CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction);
 
 // Irregularly shaped functions
 CUresult CUDAAPI cuLaunchKernel(CUfunction f,
@@ -129,6 +187,36 @@ CUresult CUDAAPI cuLaunchKernel(CUfunction f,
   return fn(f,
             gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
             sharedMemBytes, hStream, kernelParams, extra);
+}
+
+// Irregularly shaped functions
+CUresult CUDAAPI cuLaunchCooperativeKernel(
+    CUfunction f,
+    unsigned int gridDimX,
+    unsigned int gridDimY,
+    unsigned int gridDimZ,
+    unsigned int blockDimX,
+    unsigned int blockDimY,
+    unsigned int blockDimZ,
+    unsigned int sharedMemBytes,
+    CUstream hStream,
+    void** kernelParams) {
+  auto fn = reinterpret_cast<decltype(&cuLaunchCooperativeKernel)>(
+      getCUDALibrary().sym(__func__));
+  if (!fn)
+    throw std::runtime_error("Can't get cuLaunchCooperativeKernel");
+  lazyNVRTC.cuLaunchCooperativeKernel = fn;
+  return fn(
+      f,
+      gridDimX,
+      gridDimY,
+      gridDimZ,
+      blockDimX,
+      blockDimY,
+      blockDimZ,
+      sharedMemBytes,
+      hStream,
+      kernelParams);
 }
 
 CUresult CUDAAPI cuModuleLoadDataEx(CUmodule *module,

@@ -72,7 +72,7 @@ are sorted by the corresponding KEY.
         "min_observation",
         "The number of observations needed before deciding that the ratio of "
         "mismatched ranges is alarming, also determines whether an info "
-        "sumarizing the empty and mismatch ratio will be printed at the end.")
+        "summarizing the empty and mismatch ratio will be printed at the end.")
     .Arg(
         "max_mismatched_ratio",
         "An error is raised when ratio of mismatched ranges exceeds this.")
@@ -91,6 +91,7 @@ are sorted by the corresponding KEY.
       }
       CAFFE_ENFORCE_GT(lengths.size(), 0, "lengths should be non-empty.");
       std::vector<TensorShape> out(lengths.size());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < lengths.size(); ++i) {
         out[i].set_data_type(in[0].data_type());
         out[i].add_dims(in[1].dims(0));

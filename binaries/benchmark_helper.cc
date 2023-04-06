@@ -16,9 +16,13 @@
 
 #include <chrono>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <thread>
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <psapi.h>
 #endif
@@ -169,7 +173,7 @@ int loadInput(
           LOG(INFO) << "Running on GPU.";
 #ifdef __CUDA_ARCH__
           caffe2::TensorCUDA* tensor = blob->GetMutable<caffe2::TensorCUDA>();
-          CHECK_NOTNULL(tensor);
+          TORCH_CHECK_NOTNULL(tensor);
           tensor->Resize(input_dims);
           if (input_type_list[i] == "uint8_t") {
             tensor->mutable_data<uint8_t>();
@@ -185,17 +189,17 @@ int loadInput(
           if (input_type_list[i] == "uint8_t") {
             caffe2::int8::Int8TensorCPU* tensor =
                 blob->GetMutable<caffe2::int8::Int8TensorCPU>();
-            CHECK_NOTNULL(tensor);
+            TORCH_CHECK_NOTNULL(tensor);
             tensor->t.Resize(input_dims);
             tensor->t.mutable_data<uint8_t>();
           } else if (input_type_list[i] == "float") {
             caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
-            CHECK_NOTNULL(tensor);
+            TORCH_CHECK_NOTNULL(tensor);
             tensor->Resize(input_dims);
             tensor->mutable_data<float>();
           } else if (input_type_list[i] == "int") {
             caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
-            CHECK_NOTNULL(tensor);
+            TORCH_CHECK_NOTNULL(tensor);
             tensor->Resize(input_dims);
             tensor->mutable_data<int>();
           } else {
@@ -278,13 +282,18 @@ void runNetwork(
       iter,
       ".");
   LOG(INFO) << "net runs.";
+  long long duration_sum = 0;
   for (int i = 0; i < iter; ++i) {
     caffe2::ObserverConfig::initSampleRate(1, 1, 1, 0, warmup);
     fillInputBlob(workspace, tensor_protos_map, i);
     if (wipe_cache) {
       caffe2::wipe_cache();
     }
+    auto start = std::chrono::high_resolution_clock::now();
     CAFFE_ENFORCE(net->Run(), "Main run ", i, " has failed.");
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+    duration_sum += duration.count();
     // Write the output for the first num_blobs times
     writeOutput(
         workspace,
@@ -302,6 +311,7 @@ void runNetwork(
           std::chrono::seconds(sleep_between_iteration));
     }
   }
+  std::cout << "Average Duration: " << (duration_sum/iter) << " us" << std::endl;
   if (run_individual) {
     LOG(INFO) << "operator runs.";
     if (sleep_between_net_and_operator > 0) {
@@ -485,7 +495,7 @@ int benchmark(
     net_def.set_name("benchmark");
   }
   caffe2::NetBase* net = workspace->CreateNet(net_def);
-  CHECK_NOTNULL(net);
+  TORCH_CHECK_NOTNULL(net);
   runNetwork(
       workspace,
       net,

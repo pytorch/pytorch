@@ -1,3 +1,5 @@
+#include <utility>
+
 #pragma once
 
 namespace at { namespace native {
@@ -60,7 +62,7 @@ public:
 
   C10_HOST_DEVICE
   references_holder(references refs)
-    : refs{refs}
+    : refs{std::move(refs)}
   {}
 
   C10_HOST_DEVICE
@@ -123,13 +125,16 @@ public:
   using iterator_category = std::random_access_iterator_tag;
 
   C10_HOST_DEVICE
+  CompositeRandomAccessor() = default;
+
+  C10_HOST_DEVICE
   CompositeRandomAccessor(KeyAccessor keys, ValueAccessor values)
     : keys(keys), values(values)
   {}
 
   // Pointer-like operations {
   C10_HOST_DEVICE
-  reference operator*() {
+  reference operator*() const {
     return TupleInfo::tie(*keys, *values);
   }
 

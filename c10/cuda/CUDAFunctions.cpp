@@ -1,22 +1,21 @@
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/macros/Macros.h>
 
-namespace c10 {
-namespace cuda {
+#include <limits>
+
+namespace c10::cuda {
 
 namespace {
 // returns -1 on failure
 int32_t driver_version() {
   int driver_version = -1;
-  cudaError_t err = cudaDriverGetVersion(&driver_version);
-  if (err != cudaSuccess) {
-    cudaError_t last_err C10_UNUSED = cudaGetLastError();
-  }
+  C10_CUDA_IGNORE_ERROR(cudaDriverGetVersion(&driver_version));
   return driver_version;
 }
 
-int device_count_impl() {
+int device_count_impl(bool fail_if_no_driver) {
   int count;
-  auto err = cudaGetDeviceCount(&count);
+  auto err = C10_CUDA_ERROR_HANDLED(cudaGetDeviceCount(&count));
   if (err == cudaSuccess) {
     return count;
   }
@@ -32,6 +31,11 @@ int device_count_impl() {
     case cudaErrorInsufficientDriver: {
       auto version = driver_version();
       if (version <= 0) {
+        if (!fail_if_no_driver) {
+          // No CUDA driver means no devices
+          count = 0;
+          break;
+        }
         TORCH_CHECK(
             false,
             "Found no NVIDIA driver on your system. Please check that you "
@@ -93,7 +97,11 @@ DeviceIndex device_count() noexcept {
   // initialize number of devices only once
   static int count = []() {
     try {
-      return device_count_impl();
+      auto result = device_count_impl(/*fail_if_no_driver=*/false);
+      TORCH_INTERNAL_ASSERT(
+          result <= std::numeric_limits<DeviceIndex>::max(),
+          "Too many CUDA devices, DeviceIndex overflowed");
+      return result;
     } catch (const c10::Error& ex) {
       // We don't want to fail, but still log the warning
       // msg() returns the message without the stack trace
@@ -106,7 +114,7 @@ DeviceIndex device_count() noexcept {
 
 DeviceIndex device_count_ensure_non_zero() {
   // Call the implementation every time to throw the exception
-  int count = device_count_impl();
+  int count = device_count_impl(/*fail_if_no_driver=*/true);
   // Zero gpus doesn't produce a warning in `device_count` but we fail here
   TORCH_CHECK(count, "No CUDA GPUs are available");
   return static_cast<DeviceIndex>(count);
@@ -123,8 +131,55 @@ void set_device(DeviceIndex device) {
 }
 
 void device_synchronize() {
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_device_synchronization();
+  }
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-} // namespace cuda
-} // namespace c10
+// this function has to be called from callers performing cuda synchronizing
+// operations, to raise proper error or warning
+void warn_or_error_on_sync() {
+  if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_ERROR) {
+    TORCH_CHECK(false, "called a synchronizing CUDA operation");
+  } else if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_WARN) {
+    TORCH_WARN("called a synchronizing CUDA operation");
+  }
+}
+
+c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
+  // check current device first
+  int64_t current_device_index = current_device();
+  if (current_device_index >= 0) {
+    if (hasPrimaryContext(current_device_index)) {
+      return current_device_index;
+    }
+  }
+  for (const auto device_index : c10::irange(at::cuda::device_count())) {
+    if (device_index == current_device_index)
+      continue;
+    if (hasPrimaryContext(device_index)) {
+      return device_index;
+    }
+  }
+  return c10::nullopt;
+}
+
+namespace _internal {
+bool dummyHasPrimaryContext(C10_UNUSED int64_t device_index) {
+  TORCH_CHECK(false, "Should never been called");
+}
+bool (*hasPrimaryContext)(int64_t) = dummyHasPrimaryContext;
+
+// Private api to be called from CUDAHooks.cpp
+C10_CUDA_API void setHasPrimaryContext(bool (*func)(int64_t)) {
+  hasPrimaryContext = func ? func : dummyHasPrimaryContext;
+}
+} // namespace _internal
+
+bool hasPrimaryContext(int64_t device_index) {
+  return _internal::hasPrimaryContext(device_index);
+}
+
+} // namespace c10::cuda

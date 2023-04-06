@@ -19,7 +19,7 @@ _DISTRIBUTIONS = (
 )
 
 
-class FuzzedParameter(object):
+class FuzzedParameter:
     """Specification for a parameter to be generated during fuzzing."""
     def __init__(
         self,
@@ -126,7 +126,7 @@ class FuzzedParameter(object):
         return list(self._distribution.keys())[index]
 
 
-class ParameterAlias(object):
+class ParameterAlias:
     """Indicates that a parameter should alias the value of another parameter.
 
     When used in conjunction with a custom distribution, this allows fuzzed
@@ -161,7 +161,7 @@ class ParameterAlias(object):
 def dtype_size(dtype):
     if dtype == torch.bool:
         return 1
-    if dtype.is_floating_point:
+    if dtype.is_floating_point or dtype.is_complex:
         return int(torch.finfo(dtype).bits / 8)
     return int(torch.iinfo(dtype).bits / 8)
 
@@ -176,7 +176,7 @@ def prod(values, base=1):
     return functools.reduce(lambda x, y: int(x) * int(y), values, base)
 
 
-class FuzzedTensor(object):
+class FuzzedTensor:
     def __init__(
         self,
         name: str,
@@ -216,7 +216,7 @@ class FuzzedTensor(object):
             min_elements:
                 The minimum number of parameters that this Tensor must have for a
                 set of parameters to be valid. (Otherwise they are resampled.)
-            max_elemnts:
+            max_elements:
                 Like `min_elements`, but setting an upper bound.
             max_allocation_bytes:
                 Like `max_elements`, but for the size of Tensor that must be
@@ -259,7 +259,7 @@ class FuzzedTensor(object):
 
     @staticmethod
     def default_tensor_constructor(size, dtype, **kwargs):
-        if dtype.is_floating_point:
+        if dtype.is_floating_point or dtype.is_complex:
             return torch.rand(size=size, dtype=dtype, device="cpu")
         else:
             return torch.randint(1, 127, size=size, dtype=dtype, device="cpu")
@@ -340,7 +340,7 @@ class FuzzedTensor(object):
         ))
 
 
-class Fuzzer(object):
+class Fuzzer:
     def __init__(
         self,
         parameters: List[Union[FuzzedParameter, List[FuzzedParameter]]],

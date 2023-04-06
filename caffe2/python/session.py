@@ -10,14 +10,14 @@ from caffe2.python import core, workspace
 from caffe2.python.task import Cluster, Task, TaskGroup, WorkspaceType
 
 
-class CompiledRunnable(object):
+class CompiledRunnable:
     """ Wrapper for compiled runnable returned from session.compile() """
     def __init__(self, obj, session_class):
         self.obj = obj
         self.session_class = session_class
 
 
-class Session(object):
+class Session:
     """
     Allows to run Nets, ExecutionSteps, Plans, Tasks and TaskGroups.
     A session can potentially run in multiple nodes concurrently.
@@ -192,7 +192,7 @@ class LocalSession(Session):
             task = task_group.to_task()
         plan = core.Plan('task_group_plan')
         plan.AddStep(task.get_step())
-        return (plan, task.output_list(), task.workspace_type)
+        return (plan, task.output_list(), task.workspace_type())
 
     def _run_compiled(self, compiled):
         plan, output_list, workspace_type = compiled

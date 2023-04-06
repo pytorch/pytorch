@@ -3,7 +3,6 @@
 
 
 from caffe2.python import core, workspace
-from caffe2.proto import caffe2_pb2
 from caffe2.python.test_util import TestCase
 
 import numpy as np
@@ -34,7 +33,7 @@ class OperatorFPExceptionsTest(TestCase):
                 workspace.RunNetOnce(net)
             except Exception as e:
                 exception_raised = True
-            self.assertEquals(exception_raised, throw_if_fp_exceptions)
+            self.assertEqual(exception_raised, throw_if_fp_exceptions)
 
 
 if __name__ == '__main__':

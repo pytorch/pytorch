@@ -14,15 +14,8 @@ import json
 from caffe2.proto import caffe2_pb2
 
 # Import urllib
-try:
-    import urllib.error as urlliberror
-    import urllib.request as urllib
-    HTTPError = urlliberror.HTTPError
-    URLError = urlliberror.URLError
-except ImportError:
-    import urllib2 as urllib
-    HTTPError = urllib.HTTPError
-    URLError = urllib.URLError
+from urllib.error import HTTPError, URLError
+import urllib.request as urllib
 
 # urllib requires more work to deal with a redirect, so not using vanity url
 DOWNLOAD_BASE_URL = "https://s3.amazonaws.com/download.caffe2.ai/models/"
@@ -76,10 +69,10 @@ def downloadFromURLToFile(url, filename, show_progress=True):
         print("")  # New line to fix for progress bar
     except HTTPError as e:
         raise Exception("Could not download model. [HTTP Error] {code}: {reason}."
-                        .format(code=e.code, reason=e.reason))
+                        .format(code=e.code, reason=e.reason)) from e
     except URLError as e:
         raise Exception("Could not download model. [URL Error] {reason}."
-                        .format(reason=e.reason))
+                        .format(reason=e.reason)) from e
 
 
 def getURLFromName(name, filename):

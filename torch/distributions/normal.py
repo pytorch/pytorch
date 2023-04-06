@@ -7,6 +7,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
 
+__all__ = ['Normal']
 
 class Normal(ExponentialFamily):
     r"""
@@ -15,6 +16,7 @@ class Normal(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Normal(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # normally distributed with loc=0 and scale=1
         tensor([ 0.1046])
@@ -34,6 +36,10 @@ class Normal(ExponentialFamily):
         return self.loc
 
     @property
+    def mode(self):
+        return self.loc
+
+    @property
     def stddev(self):
         return self.scale
 
@@ -47,7 +53,7 @@ class Normal(ExponentialFamily):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
-        super(Normal, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Normal, _instance)
@@ -82,8 +88,6 @@ class Normal(ExponentialFamily):
         return 0.5 * (1 + torch.erf((value - self.loc) * self.scale.reciprocal() / math.sqrt(2)))
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         return self.loc + self.scale * torch.erfinv(2 * value - 1) * math.sqrt(2)
 
     def entropy(self):

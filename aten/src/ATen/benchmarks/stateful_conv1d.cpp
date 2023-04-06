@@ -1,4 +1,5 @@
 #include <benchmark/benchmark.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
@@ -33,10 +34,9 @@ static void stateful_conv1d(benchmark::State& state) {
   )");
 
   std::vector<std::vector<torch::jit::IValue>> inputs;
-  for (int i = 0; i < 10; ++i) {
-    std::vector<torch::jit::IValue> input;
-    input.push_back(torch::rand({batch_size, input_channels, width}));
-    inputs.push_back(input);
+  for (const auto i : c10::irange(10)) {
+    inputs.emplace_back(
+        {torch::jit::IValue(torch::rand({batch_size, input_channels, width}))});
   }
 
   auto m_cloned = m.clone();
@@ -69,8 +69,8 @@ static void GenerateSizes(benchmark::internal::Benchmark* b) {
 
   for (size_t input_channels = 32; input_channels < 256; input_channels *= 2) {
     for (size_t output_channels = 32; output_channels < 256; output_channels *= 2) {
-      for (size_t kernel = 3; kernel < 8; ++kernel) {
-        for (size_t batch_size = 1; batch_size < 5; ++batch_size) {
+      for (const auto kernel : c10::irange(3, 8)) {
+        for (const auto batch_size : c10::irange(1, 5)) {
           for (size_t width = 32; width < 256; width *= 2) {
             b->Args({input_channels, output_channels, kernel, batch_size, width, true});
             b->Args({input_channels, output_channels, kernel, batch_size, width, false});

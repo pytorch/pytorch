@@ -1,4 +1,4 @@
-ir_version: 6
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -11,8 +11,6 @@ graph {
     output: "6"
     output: "7"
     output: "8"
-    output: "batch_norm_dead_output-13"
-    output: "batch_norm_dead_output-14"
     name: "BatchNormalization_0"
     op_type: "BatchNormalization"
     attribute {
@@ -25,8 +23,19 @@ graph {
       f: 0.9
       type: FLOAT
     }
+    attribute {
+      name: "training_mode"
+      i: 1
+      type: INT
+    }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
+  initializer {
+    dims: 2
+    data_type: 1
+    name: "weight"
+    raw_data: "\000\000\200?\000\000\200?"
+  }
   initializer {
     dims: 2
     data_type: 1
@@ -44,12 +53,6 @@ graph {
     data_type: 1
     name: "running_var"
     raw_data: "fff?fff?"
-  }
-  initializer {
-    dims: 2
-    data_type: 1
-    name: "weight"
-    raw_data: "\000\000\200?\000\000\200?"
   }
   input {
     name: "input"
@@ -149,5 +152,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

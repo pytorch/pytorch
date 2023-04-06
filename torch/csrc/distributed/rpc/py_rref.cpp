@@ -1,5 +1,8 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 
+#include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/distributed/autograd/autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -53,7 +56,7 @@ RRefForkData fromPyTuple(const py::tuple& pyTuple) {
 TypePtr tryInferTypeWithTypeHint(
     const py::object& value,
     const py::object& type_hint) {
-  // If the py::object to be contained by the RRef is a ScripModule, we enforce
+  // If the py::object to be contained by the RRef is a ScriptModule, we enforce
   // users to specify its ModuleInterface type.
   if (auto module = jit::as_module(value)) {
     TORCH_CHECK(
@@ -69,7 +72,7 @@ TypePtr tryInferTypeWithTypeHint(
     TORCH_CHECK(
         type_hint_ptr != nullptr &&
             module.value().type()->isSubtypeOfExt(
-                type_hint_ptr, &subtype_check_msg),
+                *type_hint_ptr, &subtype_check_msg),
         module.value().type()->repr_str(),
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
@@ -82,8 +85,23 @@ TypePtr tryInferTypeWithTypeHint(
         "type_hint should only be specified when the RRef being created contains a ScriptModule.");
   }
 
+  // Check if value is an instance of a ScriptClass. If not, skip type inference
+  // because it will try to script the class that value is in instance of, and
+  // this should be avoided.
+  py::bool_ can_compile = py::module::import("torch._jit_internal")
+                              .attr("can_compile_class")(value.get_type());
+
+  if (py::cast<bool>(can_compile)) {
+    py::object existing_ty = py::module::import("torch.jit._state")
+                                 .attr("_get_script_class")(value.get_type());
+
+    if (existing_ty.is_none()) {
+      return PyObjectType::get();
+    }
+  }
+
   // NB: `jit::tryToInferType(..)` infers types including ScriptClass, but
-  // excluding ScripModule.
+  // excluding ScriptModule.
   jit::InferredType type_inferred = jit::tryToInferType(value);
   if (type_inferred.success()) {
     // If we could infer the type from the pyobject, we create
@@ -103,10 +121,11 @@ TypePtr tryInferTypeWithTypeHint(
 PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
     : rref_(std::move(rref)), profilingFuture_(c10::nullopt) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
+  C10_LOG_API_USAGE_ONCE("torch.distributed.rref");
 }
 
 PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
-    : PyRRef([&value, &type_hint]() {
+    : PyRRef([&value, &type_hint]() mutable {
         TypePtr elem_type = tryInferTypeWithTypeHint(value, type_hint);
         auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
         // jit::toIValue takes a py::handle as the first argument, and it calls
@@ -134,8 +153,7 @@ c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
   // Marking hasValue to false, as this Future is only used for signaling
   // profiler to update profiling result and the profiler does not retrieve
   // any value from it.
-  return wrapFutureMessageInJitFuture(
-      rref_->getOwnerCreationFuture(), false /* hasValue */);
+  return toPyJitFuture(rref_->getOwnerCreationFuture(), false /* hasValue */);
 }
 
 c10::intrusive_ptr<JitFuture> PyRRef::getProfilingFuture() const {
@@ -164,6 +182,7 @@ std::string PyRRef::ownerName() const {
 }
 
 py::object PyRRef::toHere(const float timeoutSeconds) const {
+  C10_LOG_API_USAGE_ONCE("torch.distributed.rref.to_here");
   if (rref_->isOwner()) {
     return localValue();
   } else {
@@ -174,10 +193,10 @@ py::object PyRRef::toHere(const float timeoutSeconds) const {
 
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.
-      auto rfr_values = value.toTuple()->elements();
+      auto rfr_values = value.toTupleRef().elements().vec();
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       auto ret = pythonRpcHandler.deserialize(
-          SerializedPyObj::fromIValues(rfr_values));
+          SerializedPyObj::fromIValues(std::move(rfr_values)));
       pythonRpcHandler.handleException(ret);
       return ret;
     } else {
@@ -226,20 +245,22 @@ std::string PyRRef::str() const {
   }
 }
 
-py::object PyRRef::createRRefProxy(const RRefProxyType& type) const {
+py::object PyRRef::createRRefProxy(
+    const RRefProxyType& type,
+    float timeoutSeconds) const {
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   pybind11::gil_scoped_acquire ag;
   auto& functions = pythonRpcHandler.getRRefProxyFunctions();
   auto& ctor = functions.rrefProxyCtor_;
   switch (type) {
     case RRefProxyType::RPC_SYNC: {
-      return ctor(*this, functions.rpcSync_);
+      return ctor(*this, functions.rpcSync_, timeoutSeconds);
     }
     case RRefProxyType::RPC_ASYNC: {
-      return ctor(*this, functions.rpcAsync_);
+      return ctor(*this, functions.rpcAsync_, timeoutSeconds);
     }
     case RRefProxyType::REMOTE: {
-      return ctor(*this, functions.remote_);
+      return ctor(*this, functions.remote_, timeoutSeconds);
     }
     default: {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized RRefProxy type ", type);
@@ -247,16 +268,17 @@ py::object PyRRef::createRRefProxy(const RRefProxyType& type) const {
   }
 }
 
-py::object PyRRef::getRRefType() {
+py::object PyRRef::getRRefType(float timeout, bool blocking) {
   // GIL is not released when calling this function.
   if (!type_.has_value()) {
     pybind11::gil_scoped_release release;
     auto& pythonRpcHandler = PythonRpcHandler::getInstance();
     auto& typeFuncs = pythonRpcHandler.getRRefTypeFunctions();
     pybind11::gil_scoped_acquire acquire;
-    type_ = isOwner() ? typeFuncs.onOwner_(*this) : typeFuncs.onUser_(*this);
+    type_ = isOwner() ? typeFuncs.onOwner_(*this, blocking)
+                      : typeFuncs.onUser_(*this, timeout, blocking);
   }
-
+  // Returns py::object that can be Python type or future.
   return *type_;
 }
 
@@ -281,6 +303,63 @@ c10::IValue PyRRef::toIValue() const {
   // cast to RRefInterface to hold it into IValue
   auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
   return IValue(rrefPtr);
+}
+
+void PyRRef::backward(int64_t autogradContextId, bool retainGraph) {
+  backward(autogradContextId, retainGraph, rref_);
+}
+
+void PyRRef::backwardOwnerRRef(
+    int64_t autogradContextId,
+    bool retainGraph,
+    IValue value) {
+  // If we have a PyObj, retrieve the underlying tensor.
+  if (value.isPyObject()) {
+    py::gil_scoped_acquire gil;
+    py::object obj = torch::jit::toPyObject(value);
+    try {
+      value = torch::jit::toIValue(obj, c10::TensorType::get());
+    } catch (py::cast_error& e) {
+      TORCH_CHECK(false, "RRef should contain a tensor for .backward()");
+    }
+  }
+
+  TORCH_CHECK(value.isTensor(), "RRef should contain a tensor for .backward()");
+  auto root = value.toTensor();
+
+  if (autogradContextId == -1) {
+    torch::autograd::backward({root});
+  } else {
+    torch::distributed::autograd::backward(
+        autogradContextId, {root}, retainGraph);
+  }
+}
+
+void PyRRef::backward(
+    int64_t autogradContextId,
+    bool retainGraph,
+    const c10::intrusive_ptr<RRef>& rref) {
+  if (rref->isOwner()) {
+    backwardOwnerRRef(
+        autogradContextId,
+        retainGraph,
+        c10::static_intrusive_pointer_cast<const OwnerRRef>(rref)->getValue());
+  } else {
+    TORCH_CHECK(
+        autogradContextId != -1,
+        "User RRefs require 'dist_autograd_ctx_id' to be specified");
+
+    autograd::RRefBackwardReq rrefBackwardReq(
+        rref->rrefId(), autogradContextId, retainGraph);
+
+    // Invoke distributed backward remotely.
+    auto rpcAgent = rpc::RpcAgent::getCurrentRpcAgent();
+    rpcAgent
+        ->send(
+            rpcAgent->getWorkerInfo(rref->owner()),
+            std::move(rrefBackwardReq).toMessage())
+        ->waitAndThrow();
+  }
 }
 
 } // namespace rpc

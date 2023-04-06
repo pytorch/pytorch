@@ -1,6 +1,9 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/FunctionOfAMatrixUtils.h>
 
-#include <ATen/native/cpu/Loops.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
+#include <c10/util/irange.h>
 
 #if (defined(_WIN32) || defined(_WIN64))
 #define RESTRICT __restrict
@@ -8,7 +11,7 @@
 #define RESTRICT __restrict__
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -27,14 +30,14 @@ void _compute_linear_combination_cpu_kernel(
         auto* RESTRICT in_ptr = data[1];
         auto* RESTRICT coeff_ptr = data[2];
 
-        for (int64_t elem = 0; elem < n; ++elem) {
+        for (const auto elem C10_UNUSED : c10::irange(n)) {
           auto* RESTRICT out_data = reinterpret_cast<scalar_t*>(out_ptr);
           auto* RESTRICT in_data = reinterpret_cast<scalar_t*>(in_ptr);
           using primitive_t = typename scalar_value_type<scalar_t>::type;
           auto* RESTRICT coeff_data = reinterpret_cast<primitive_t*>(coeff_ptr);
 
           // perform summation
-          for (int32_t i = 0; i < num_summations; ++i) {
+          for (const auto i : c10::irange(num_summations)) {
             *out_data += in_data[i * in_stride] * coeff_data[i * coeff_stride];
           }
 
@@ -51,4 +54,4 @@ void _compute_linear_combination_cpu_kernel(
 
 REGISTER_DISPATCH(_compute_linear_combination_stub, &_compute_linear_combination_cpu_kernel);
 
-}} // namespace at::native
+} // namespace at::native

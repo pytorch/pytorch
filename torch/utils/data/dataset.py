@@ -1,13 +1,33 @@
 import bisect
-import random
 import warnings
+import math
+from typing import (
+    Generic,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union
+)
 
-from torch._utils import _accumulate
-from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
-from torch import default_generator  # type: ignore
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
-from ... import Tensor, Generator
+from torch import default_generator, randperm
+from torch._utils import _accumulate
+
+from ... import Generator, Tensor
+
+__all__ = [
+    "Dataset",
+    "IterableDataset",
+    "TensorDataset",
+    "ConcatDataset",
+    "ChainDataset",
+    "Subset",
+    "random_split",
+]
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -61,6 +81,8 @@ class IterableDataset(Dataset[T_co]):
 
     Example 1: splitting workload across all workers in :meth:`__iter__`::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DATALOADER)
+        >>> # xdoctest: +SKIP("Fails on MacOS12")
         >>> class MyIterableDataset(torch.utils.data.IterableDataset):
         ...     def __init__(self, start, end):
         ...         super(MyIterableDataset).__init__()
@@ -86,19 +108,23 @@ class IterableDataset(Dataset[T_co]):
 
         >>> # Single-process loading
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
-        [3, 4, 5, 6]
+        [tensor([3]), tensor([4]), tensor([5]), tensor([6])]
 
+        >>> # xdoctest: +REQUIRES(POSIX)
         >>> # Mult-process loading with two worker processes
         >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
+        >>> # xdoctest: +IGNORE_WANT("non deterministic")
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=2)))
-        [3, 5, 4, 6]
+        [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
         >>> # With even more workers
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20)))
-        [3, 4, 5, 6]
+        >>> # xdoctest: +IGNORE_WANT("non deterministic")
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12)))
+        [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
     Example 2: splitting workload across all workers using :attr:`worker_init_fn`::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DATALOADER)
         >>> class MyIterableDataset(torch.utils.data.IterableDataset):
         ...     def __init__(self, start, end):
         ...         super(MyIterableDataset).__init__()
@@ -139,17 +165,16 @@ class IterableDataset(Dataset[T_co]):
         [3, 5, 4, 6]
 
         >>> # With even more workers
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
-
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
 
     def __add__(self, other: Dataset[T_co]):
         return ChainDataset([self, other])
 
-    # No `def __len__(self)` default?
+    # No `def __len__(self)` default? Subclasses raise `TypeError` when needed.
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
 
@@ -158,13 +183,13 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
 
     Each sample will be retrieved by indexing tensors along the first dimension.
 
-    Arguments:
+    Args:
         *tensors (Tensor): tensors that have the same size of the first dimension.
     """
     tensors: Tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
-        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
+        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors), "Size mismatch between tensors"
         self.tensors = tensors
 
     def __getitem__(self, index):
@@ -179,7 +204,7 @@ class ConcatDataset(Dataset[T_co]):
 
     This class is useful to assemble different existing datasets.
 
-    Arguments:
+    Args:
         datasets (sequence): List of datasets to be concatenated
     """
     datasets: List[Dataset[T_co]]
@@ -195,10 +220,9 @@ class ConcatDataset(Dataset[T_co]):
         return r
 
     def __init__(self, datasets: Iterable[Dataset]) -> None:
-        super(ConcatDataset, self).__init__()
-        # Cannot verify that datasets is Sized
-        assert len(datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore
+        super().__init__()
         self.datasets = list(datasets)
+        assert len(self.datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore[arg-type]
         for d in self.datasets:
             assert not isinstance(d, IterableDataset), "ConcatDataset does not support IterableDataset"
         self.cumulative_sizes = self.cumsum(self.datasets)
@@ -226,96 +250,37 @@ class ConcatDataset(Dataset[T_co]):
 
 
 class ChainDataset(IterableDataset):
-    r"""Dataset for chainning multiple :class:`IterableDataset` s.
+    r"""Dataset for chaining multiple :class:`IterableDataset` s.
 
     This class is useful to assemble different existing dataset streams. The
-    chainning operation is done on-the-fly, so concatenating large-scale
+    chaining operation is done on-the-fly, so concatenating large-scale
     datasets with this class will be efficient.
 
-    Arguments:
+    Args:
         datasets (iterable of IterableDataset): datasets to be chained together
     """
     def __init__(self, datasets: Iterable[Dataset]) -> None:
-        super(ChainDataset, self).__init__()
+        super().__init__()
         self.datasets = datasets
 
     def __iter__(self):
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            for x in d:
-                yield x
+            yield from d
 
     def __len__(self):
         total = 0
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            # Cannot verify that all self.datasets are Sized
-            total += len(d)  # type: ignore
+            total += len(d)  # type: ignore[arg-type]
         return total
-
-
-class BufferedShuffleDataset(IterableDataset[T_co]):
-    r"""Dataset shuffled from the original dataset.
-
-    This class is useful to shuffle an existing instance of an IterableDataset.
-    The buffer with `buffer_size` is filled with the items from the dataset first. Then,
-    each item will be yielded from the buffer by reservoir sampling via iterator.
-
-    `buffer_size` is required to be larger than 0. For `buffer_size == 1`, the
-    dataset is not shuffled. In order to fully shuffle the whole dataset, `buffer_size`
-    is required to be greater than or equal to the size of dataset.
-
-    When it is used with :class:`~torch.utils.data.DataLoader`, each item in the
-    dataset will be yielded from the :class:`~torch.utils.data.DataLoader` iterator.
-    And, the method to set up a random seed is different based on :attr:`num_workers`.
-
-    For single-process mode (:attr:`num_workers == 0`), the random seed is required to
-    be set before the :class:`~torch.utils.data.DataLoader` in the main process.
-
-        >>> ds = BufferedShuffleDataset(dataset)
-        >>> random.seed(...)
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
-
-    For multi-process mode (:attr:`num_workers > 0`), the random seed is set by a callable
-    function in each worker.
-
-        >>> ds = BufferedShuffleDataset(dataset)
-        >>> def init_fn(worker_id):
-        ...     random.seed(...)
-        >>> print(list(torch.utils.data.DataLoader(ds, ..., num_workers=n, worker_init_fn=init_fn)))
-
-    Arguments:
-        dataset (IterableDataset): The original IterableDataset.
-        buffer_size (int): The buffer size for shuffling.
-    """
-    dataset: IterableDataset[T_co]
-    buffer_size: int
-
-    def __init__(self, dataset: IterableDataset[T_co], buffer_size: int) -> None:
-        super(BufferedShuffleDataset, self).__init__()
-        assert buffer_size > 0, "buffer_size should be larger than 0"
-        self.dataset = dataset
-        self.buffer_size = buffer_size
-
-    def __iter__(self) -> Iterator[T_co]:
-        buf: List[T_co] = []
-        for x in self.dataset:
-            if len(buf) == self.buffer_size:
-                idx = random.randint(0, self.buffer_size - 1)
-                yield buf[idx]
-                buf[idx] = x
-            else:
-                buf.append(x)
-        random.shuffle(buf)
-        while buf:
-            yield buf.pop()
 
 
 class Subset(Dataset[T_co]):
     r"""
     Subset of a dataset at specified indices.
 
-    Arguments:
+    Args:
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
     """
@@ -327,28 +292,64 @@ class Subset(Dataset[T_co]):
         self.indices = indices
 
     def __getitem__(self, idx):
+        if isinstance(idx, list):
+            return self.dataset[[self.indices[i] for i in idx]]
         return self.dataset[self.indices[idx]]
 
     def __len__(self):
         return len(self.indices)
 
 
-def random_split(dataset: Dataset[T], lengths: Sequence[int],
+def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
                  generator: Optional[Generator] = default_generator) -> List[Subset[T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
+
+    If a list of fractions that sum up to 1 is given,
+    the lengths will be computed automatically as
+    floor(frac * len(dataset)) for each fraction provided.
+
+    After computing the lengths, if there are any remainders, 1 count will be
+    distributed in round-robin fashion to the lengths
+    until there are no remainders left.
+
     Optionally fix the generator for reproducible results, e.g.:
 
-    >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> generator1 = torch.Generator().manual_seed(42)
+        >>> generator2 = torch.Generator().manual_seed(42)
+        >>> random_split(range(10), [3, 7], generator=generator1)
+        >>> random_split(range(30), [0.3, 0.3, 0.4], generator=generator2)
 
-    Arguments:
+    Args:
         dataset (Dataset): Dataset to be split
-        lengths (sequence): lengths of splits to be produced
+        lengths (sequence): lengths or fractions of splits to be produced
         generator (Generator): Generator used for the random permutation.
     """
+    if math.isclose(sum(lengths), 1) and sum(lengths) <= 1:
+        subset_lengths: List[int] = []
+        for i, frac in enumerate(lengths):
+            if frac < 0 or frac > 1:
+                raise ValueError(f"Fraction at index {i} is not between 0 and 1")
+            n_items_in_split = int(
+                math.floor(len(dataset) * frac)  # type: ignore[arg-type]
+            )
+            subset_lengths.append(n_items_in_split)
+        remainder = len(dataset) - sum(subset_lengths)  # type: ignore[arg-type]
+        # add 1 to all the lengths in round-robin fashion until the remainder is 0
+        for i in range(remainder):
+            idx_to_add_at = i % len(subset_lengths)
+            subset_lengths[idx_to_add_at] += 1
+        lengths = subset_lengths
+        for i, length in enumerate(lengths):
+            if length == 0:
+                warnings.warn(f"Length of split at index {i} is 0. "
+                              f"This might result in an empty dataset.")
+
     # Cannot verify that dataset is Sized
-    if sum(lengths) != len(dataset):  # type: ignore
+    if sum(lengths) != len(dataset):    # type: ignore[arg-type]
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    indices = randperm(sum(lengths), generator=generator).tolist()
+    indices = randperm(sum(lengths), generator=generator).tolist()  # type: ignore[call-overload]
     return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]

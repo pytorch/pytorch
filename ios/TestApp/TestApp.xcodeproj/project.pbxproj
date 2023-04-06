@@ -3,18 +3,17 @@
     archiveVersion = 1;
     classes = {
     };
-    objectVersion = 52;
+    objectVersion = 50;
     objects = {
 
 /* Begin PBXBuildFile section */
-        A03C2960235EA3C1000B4408 /* Benchmark.mm in Sources */ = {isa = PBXBuildFile; fileRef = A03C295F235EA3C1000B4408 /* Benchmark.mm */; };
+        4C636CFD28DDAE0200FF9B4D /* Benchmark.mm in Sources */ = {isa = PBXBuildFile; fileRef = 4C636CFB28DDAE0200FF9B4D /* Benchmark.mm */; };
         A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB4232F0DB200763E16 /* AppDelegate.m */; };
         A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB7232F0DB200763E16 /* ViewController.mm */; };
         A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CB9232F0DB200763E16 /* Main.storyboard */; };
         A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBC232F0DB200763E16 /* Assets.xcassets */; };
         A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */; };
         A06D4CC3232F0DB200763E16 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CC2232F0DB200763E16 /* main.m */; };
-        A0EA3B0A237FCB72007CEA34 /* TestAppTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = A0EA3B09237FCB72007CEA34 /* TestAppTests.mm */; platformFilter = ios; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,8 +27,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-        A03C295E235EA3C0000B4408 /* Benchmark.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Benchmark.h; sourceTree = "<group>"; };
-        A03C295F235EA3C1000B4408 /* Benchmark.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = Benchmark.mm; sourceTree = "<group>"; };
+        4C636CFB28DDAE0200FF9B4D /* Benchmark.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = Benchmark.mm; sourceTree = "<group>"; };
+        4C636CFC28DDAE0200FF9B4D /* Benchmark.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Benchmark.h; sourceTree = "<group>"; };
         A06D4CB0232F0DB200763E16 /* TestApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
         A06D4CB3232F0DB200763E16 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
         A06D4CB4232F0DB200763E16 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
@@ -42,7 +41,6 @@
         A06D4CC2232F0DB200763E16 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
         A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TestAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
         A0EA3B03237FCB08007CEA34 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-        A0EA3B09237FCB72007CEA34 /* TestAppTests.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = TestAppTests.mm; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -84,8 +82,8 @@
         A06D4CB2232F0DB200763E16 /* TestApp */ = {
             isa = PBXGroup;
             children = (
-                A03C295E235EA3C0000B4408 /* Benchmark.h */,
-                A03C295F235EA3C1000B4408 /* Benchmark.mm */,
+                4C636CFC28DDAE0200FF9B4D /* Benchmark.h */,
+                4C636CFB28DDAE0200FF9B4D /* Benchmark.mm */,
                 A06D4CB3232F0DB200763E16 /* AppDelegate.h */,
                 A06D4CB4232F0DB200763E16 /* AppDelegate.m */,
                 A06D4CB6232F0DB200763E16 /* ViewController.h */,
@@ -102,7 +100,6 @@
         A0EA3B00237FCB08007CEA34 /* TestAppTests */ = {
             isa = PBXGroup;
             children = (
-                A0EA3B09237FCB72007CEA34 /* TestAppTests.mm */,
                 A0EA3B03237FCB08007CEA34 /* Info.plist */,
             );
             path = TestAppTests;
@@ -154,12 +151,12 @@
             attributes = {
                 LastUpgradeCheck = 1030;
                 TargetAttributes = {
-                    A06D4CAF232F0DB200763E16 = {
-                        CreatedOnToolsVersion = 10.3;
-                    };
-                    A0EA3AFE237FCB08007CEA34 = {
-                        CreatedOnToolsVersion = 11.2.1;
-                    };
+                        A06D4CAF232F0DB200763E16 = {
+                                CreatedOnToolsVersion = 10.3;
+                        };
+                        A0EA3AFE237FCB08007CEA34 = {
+                                CreatedOnToolsVersion = 11.2.1;
+                        };
                 };
             };
             buildConfigurationList = A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */;
@@ -209,7 +206,7 @@
                 A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */,
                 A06D4CC3232F0DB200763E16 /* main.m in Sources */,
                 A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */,
-                A03C2960235EA3C1000B4408 /* Benchmark.mm in Sources */,
+                4C636CFD28DDAE0200FF9B4D /* Benchmark.mm in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -217,7 +214,6 @@
             isa = PBXSourcesBuildPhase;
             buildActionMask = 2147483647;
             files = (
-                A0EA3B0A237FCB72007CEA34 /* TestAppTests.mm in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -257,7 +253,7 @@
                 ALWAYS_SEARCH_USER_PATHS = NO;
                 CLANG_ANALYZER_NONNULL = YES;
                 CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-                CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+                CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
                 CLANG_CXX_LIBRARY = "libc++";
                 CLANG_ENABLE_MODULES = YES;
                 CLANG_ENABLE_OBJC_ARC = YES;
@@ -293,8 +289,8 @@
                 GCC_NO_COMMON_BLOCKS = YES;
                 GCC_OPTIMIZATION_LEVEL = 0;
                 GCC_PREPROCESSOR_DEFINITIONS = (
-                    "DEBUG=1",
-                    "$(inherited)",
+                        "DEBUG=1",
+                        "$(inherited)",
                 );
                 GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
                 GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
@@ -316,7 +312,7 @@
                 ALWAYS_SEARCH_USER_PATHS = NO;
                 CLANG_ANALYZER_NONNULL = YES;
                 CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-                CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+                CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
                 CLANG_CXX_LIBRARY = "libc++";
                 CLANG_ENABLE_MODULES = YES;
                 CLANG_ENABLE_OBJC_ARC = YES;
@@ -372,8 +368,8 @@
                 ENABLE_BITCODE = NO;
                 INFOPLIST_FILE = TestApp/Info.plist;
                 LD_RUNPATH_SEARCH_PATHS = (
-                    "$(inherited)",
-                    "@executable_path/Frameworks",
+                        "$(inherited)",
+                        "@executable_path/Frameworks",
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
                 PRODUCT_NAME = "$(TARGET_NAME)";
@@ -391,8 +387,8 @@
                 ENABLE_BITCODE = NO;
                 INFOPLIST_FILE = TestApp/Info.plist;
                 LD_RUNPATH_SEARCH_PATHS = (
-                    "$(inherited)",
-                    "@executable_path/Frameworks",
+                        "$(inherited)",
+                        "@executable_path/Frameworks",
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
                 PRODUCT_NAME = "$(TARGET_NAME)";
@@ -410,9 +406,9 @@
                 INFOPLIST_FILE = TestAppTests/Info.plist;
                 IPHONEOS_DEPLOYMENT_TARGET = 12.4;
                 LD_RUNPATH_SEARCH_PATHS = (
-                    "$(inherited)",
-                    "@executable_path/Frameworks",
-                    "@loader_path/Frameworks",
+                        "$(inherited)",
+                        "@executable_path/Frameworks",
+                        "@loader_path/Frameworks",
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
                 PRODUCT_NAME = "$(TARGET_NAME)";
@@ -429,9 +425,9 @@
                 INFOPLIST_FILE = TestAppTests/Info.plist;
                 IPHONEOS_DEPLOYMENT_TARGET = 12.4;
                 LD_RUNPATH_SEARCH_PATHS = (
-                    "$(inherited)",
-                    "@executable_path/Frameworks",
-                    "@loader_path/Frameworks",
+                        "$(inherited)",
+                        "@executable_path/Frameworks",
+                        "@loader_path/Frameworks",
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
                 PRODUCT_NAME = "$(TARGET_NAME)";

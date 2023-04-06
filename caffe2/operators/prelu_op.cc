@@ -176,7 +176,7 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
 
   CAFFE_ENFORCE(&Y != &X, "Cannot backpropagate through an in-place PReLU");
 
-  DCHECK_EQ(dY.numel(), Y.numel());
+  TORCH_DCHECK_EQ(dY.numel(), Y.numel());
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   auto* dW = Output(1, W.sizes(), at::dtype<float>());
 
@@ -201,6 +201,7 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
 
       for (int i = 0; i < Y.numel(); ++i) {
         if (Xdata[i] <= 0) {
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           int c = (i / dim) % C / div_factor;
           dWdata[c] += dYdata[i] * Xdata[i];
         }
@@ -210,6 +211,7 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
         if (Xdata[i] > 0) {
           dXdata[i] = dYdata[i];
         } else {
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           int c = (i / dim) % C / div_factor;
           dXdata[i] = Wdata[c] * dYdata[i];
         }

@@ -2,7 +2,7 @@
 ##############################################################################
 # Example command to build Caffe2 on Tegra X1.
 ##############################################################################
-# 
+#
 # This script shows how one can build a Caffe2 binary for NVidia's TX1.
 # The build script assumes that you have the most recent libraries installed
 # via the JetPack toolkit available at
@@ -40,10 +40,6 @@ sudo apt-get install \
 # Obtain python hypothesis, which Caffe2 uses for unit testing. Note that
 # the one provided by apt-get is quite old so we install it via pip
 sudo pip install hypothesis
-
-# Install the six module, which includes Python 2 and 3 compatibility utilities,
-# and is required for Caffe2
-sudo pip install six
 
 # Now, actually build the android target.
 echo "Building caffe2"

@@ -11,7 +11,7 @@ namespace impl {
 
 bool has_cuda_gpu() {
   int count;
-  C10_CUDA_CHECK(cudaGetDeviceCount(&count));
+  C10_CUDA_IGNORE_ERROR(cudaGetDeviceCount(&count));
 
   return count != 0;
 }
@@ -29,4 +29,6 @@ int c10_cuda_private_test() {
   return 2;
 }
 
-}}} // namespace c10::cuda::impl
+} // namespace impl
+} // namespace cuda
+} // namespace c10

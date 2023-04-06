@@ -4,11 +4,10 @@ import enum
 import itertools as it
 from typing import DefaultDict, List, Optional, Tuple
 
-import numpy as np
-
 from torch.utils.benchmark.utils import common
+from torch import tensor as _tensor
 
-__all__ = ["Compare"]
+__all__ = ["Colorize", "Compare"]
 
 BEST = "\033[92m"
 GOOD = "\033[34m"
@@ -25,7 +24,7 @@ class Colorize(enum.Enum):
 
 
 # Classes to separate internal bookkeeping from what is rendered.
-class _Column(object):
+class _Column:
     def __init__(
         self,
         grouped_results: List[Tuple[Optional[common.Measurement], ...]],
@@ -44,7 +43,7 @@ class _Column(object):
             and any(r.has_warnings for r in self._flat_results if r)
         )
         leading_digits = [
-            int(np.ceil(np.log10(r.median / self._time_scale))) if r else None
+            int(_tensor(r.median / self._time_scale).log10().ceil()) if r else None
             for r in self._flat_results
         ]
         unit_digits = max(d for d in leading_digits if d is not None)
@@ -71,10 +70,15 @@ class _Column(object):
             f" (! {spread * 100:.0f}%)" if self._highlight_warnings and spread is not None else "")
 
 
-class _Row(object):
+def optional_min(seq):
+    l = list(seq)
+    return None if len(l) == 0 else min(l)
+
+
+class _Row:
     def __init__(self, results, row_group, render_env, env_str_len,
                  row_name_str_len, time_scale, colorize, num_threads=None):
-        super(_Row, self).__init__()
+        super().__init__()
         self._results = results
         self._row_group = row_group
         self._render_env = render_env
@@ -130,20 +134,20 @@ class _Row(object):
             best_values = [row_min for _ in column_strings]
         elif self._colorize == Colorize.COLUMNWISE:
             best_values = [
-                min(r.median for r in column.get_results_for(self._row_group) if r is not None)
+                optional_min(r.median for r in column.get_results_for(self._row_group) if r is not None)
                 for column in (self._columns or ())
             ]
 
         row_contents = [column_strings[0].ljust(col_widths[0])]
         for col_str, width, result, best_value in zip(column_strings[1:], col_widths[1:], self._results, best_values):
             col_str = col_str.center(width)
-            if self._colorize != Colorize.NONE and result is not None:
+            if self._colorize != Colorize.NONE and result is not None and best_value is not None:
                 col_str = self.color_segment(col_str, result.median, best_value)
             row_contents.append(col_str)
         return row_contents
 
 
-class Table(object):
+class Table:
     def __init__(
             self,
             results: List[common.Measurement],
@@ -151,7 +155,7 @@ class Table(object):
             trim_significant_figures: bool,
             highlight_warnings: bool
     ):
-        assert len(set(r.label for r in results)) == 1
+        assert len({r.label for r in results}) == 1
 
         self.results = results
         self._colorize = colorize
@@ -261,7 +265,7 @@ Times are in {common.unit_to_english(self.time_unit)}s ({self.time_unit}).
 {'(! XX%) Measurement has high variance, where XX is the IQR / median * 100.' + newline if has_warnings else ""}"""[1:]
 
 
-class Compare(object):
+class Compare:
     def __init__(self, results: List[common.Measurement]):
         self._results: List[common.Measurement] = []
         self.extend_results(results)

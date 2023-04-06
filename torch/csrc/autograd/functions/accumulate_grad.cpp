@@ -1,24 +1,22 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
-#include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <cstdint>
 #include <stdexcept>
 #include <utility>
 
-using at::Tensor;
-
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 // AccumulateGrad sets sequence_nr to the max value so it's always called
 // ASAP during backwards.
 AccumulateGrad::AccumulateGrad(Variable variable_)
-    : Node(/*sequence_nr=*/UINT64_MAX)
-    , variable(std::move(variable_)) {
+    : Node(/*sequence_nr=*/UINT64_MAX), variable(std::move(variable_)) {
   add_input_metadata(variable);
 }
 
@@ -34,7 +32,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     return {};
 
   // std::move(grads[0]) to avoid bumping up refcount
-  at::Tensor new_grad = callHooks(variable, std::move(grads[0]));
+  at::Tensor new_grad = std::move(grads[0]);
 
   // Acquire lock to here protect thread safety on variable, this ensures
   // AccumulateGrad does not race to shared variable from different threads
@@ -60,4 +58,5 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
   return variable_list();
 }
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

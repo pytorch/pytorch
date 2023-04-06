@@ -85,7 +85,7 @@ If you want to push these to caffe2.ai, go to your docs checkout:
 1. `cd c2docs`
 2. Copy the files generated in build/docs to your gh-pages branch, commit, and push.
 3. `doxygen-c` and `doxygen-python` both go in the root folder of `gh-pages`
-4. `operators-catalogue.md` goes in `_docs` 
+4. `operators-catalogue.md` goes in `_docs`
 
 ### Running Doxygen Manually
 

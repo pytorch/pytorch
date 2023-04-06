@@ -1,7 +1,10 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 
 import torch
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -13,10 +16,11 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+@skipIfTorchDynamo()
 class TestProfiler(JitTestCase):
     def setUp(self):
         self.prev_exec = torch._C._jit_set_profiling_executor(True)
-        self.prev_profiling = torch._C._jit_set_profiling_mode(True)
+        self.prev_profiling = torch._C._get_graph_executor_optimize(True)
         self.inline_autodiff = torch._C._debug_set_autodiff_subgraph_inlining(False)
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         self.can_fuse_on_cpu = torch._C._jit_can_fuse_on_cpu()
@@ -25,16 +29,21 @@ class TestProfiler(JitTestCase):
         self.default_dtype = torch.get_default_dtype()
         self.old_reduction_enabled = torch._C._jit_set_texpr_reductions_enabled(True)
         torch.set_default_dtype(torch.double)
-
+        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
+        torch._C._debug_set_fusion_group_inlining(False)
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.prev_exec)
-        torch._C._jit_set_profiling_mode(self.prev_profiling)
+        torch._C._get_graph_executor_optimize(self.prev_profiling)
         torch._C._debug_set_autodiff_subgraph_inlining(self.inline_autodiff)
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.can_fuse_on_cpu)
         torch.set_default_dtype(self.default_dtype)
         torch._C._jit_set_texpr_reductions_enabled(self.old_reduction_enabled)
+        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
     def test_tensor_type_not_determined_by_inputs(self):
         @torch.jit.script
@@ -115,7 +124,7 @@ class TestProfiler(JitTestCase):
 
         g = torch.jit.last_executed_optimized_graph()
         # Types should remain specialized for typecheck outputs & fusion outputs
-        FileCheck().check("Double(").check_same("prim::TypeCheck").check("Double").check_same("TensorExpr").run(g)
+        FileCheck().check("Double(").check_same("prim::TypeCheck").check_same("\n").check("Double").check_same("TensorExpr").run(g)
 
         # other outputs should not be specialized
         FileCheck().check("Tensor = prim::If").run(g)
@@ -136,6 +145,25 @@ class TestProfiler(JitTestCase):
         g = torch.jit.last_executed_optimized_graph()
         self.assertEqual(len(list(g.findAllNodes("prim::TypeCheck"))), 2)
         FileCheck().check("TensorExpr").check("aten::add_").check("TensorExpr").run(g)
+
+    def test_use_not_profiled(self):
+        def foo(t1, t2, t3, t4, t: float):
+            h = t1 + t2 + t3 + t4
+            if t > 0.5:
+                # Putting a use of t1 in a never-executed conditional prevents
+                return t1 + 1
+            return h
+
+        t = torch.rand(8, dtype=torch.float)
+
+        foo_script = torch.jit.script(foo)
+        for _ in range(torch._C._jit_get_num_profiled_runs() + 1):
+            foo_script(t, t, t, t, 0.1)
+
+        self.assertEqual(foo(t, t, t, t, 0.1), foo_script(t, t, t, t, 0.1))
+        g = torch.jit.last_executed_optimized_graph()
+        # all adds fused
+        FileCheck().check("graph").check_not("aten::add").check("prim::If").run(g)
 
     def test_not_fusing_scalar_ops(self):
         @torch.jit.script
@@ -192,6 +220,37 @@ class TestProfiler(JitTestCase):
 
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check("fallback_function").check_next("CallFunction").run(g)
+
+    def test_tensor_constant(self):
+        def foo(a, b):
+            return a + b + torch.tensor([2])
+
+        x = torch.ones(1, requires_grad=False)
+        foo_script = torch.jit.script(foo)
+        foo_script(x, x)
+        foo_script(x, x)
+
+        self.assertEqual(foo_script(x, x), foo(x, x))
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_count("aten::add", 2, exactly=True).run(g)
+
+    def test_local_fusion_strategy(self):
+        @torch.jit.script
+        def foo(x):
+            return x + x + x
+
+        torch.jit.set_fusion_strategy([("STATIC", 1)])
+        for _ in range(3):
+            foo(torch.rand([10]))
+
+        torch.jit.set_fusion_strategy([("STATIC", 10)])
+
+        for i in range(10):
+            foo(torch.rand([i]))
+            foo(torch.rand([i]))
+
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_count(":TensorExprGroup", 2, exactly=True).run(g)
 
     def test_iterative_fusion(self):
         @torch.jit.script

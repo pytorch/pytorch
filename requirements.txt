@@ -1,8 +1,16 @@
-future
+# Python dependencies required for development
+astunparse
+expecttest
+hypothesis
 numpy
+psutil
 pyyaml
 requests
 setuptools
-six
-typing_extensions
-dataclasses
+types-dataclasses
+typing-extensions
+sympy
+filelock
+networkx
+jinja2
+fsspec

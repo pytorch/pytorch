@@ -1,5 +1,7 @@
+# Owner(s): ["module: cuda"]
+
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocmVersionLessThan, NoTest
 import sys
 import unittest
 
@@ -14,7 +16,7 @@ TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
 
 
 class TestCudaPrimaryCtx(TestCase):
@@ -23,7 +25,7 @@ class TestCudaPrimaryCtx(TestCase):
         "where CUDA contexts are never created. Use either run_test.py or add "
         "--subprocess to run each test in a different subprocess.")
 
-    @skipIfRocm
+    @skipIfRocmVersionLessThan((4, 4, 21504))
     def setUp(self):
         for device in range(torch.cuda.device_count()):
             # Ensure context has not been created beforehand

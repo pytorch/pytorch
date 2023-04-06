@@ -264,6 +264,12 @@ Y:
 </details>
 
     )DOC")
+    .TensorInferenceFunction([](const OperatorDef& /*unused*/,
+                                const std::vector<TensorShape>& in) {
+      vector<int64_t> output_dims = {in[0].dims()[0], in[0].dims()[2]};
+      return vector<TensorShape>{
+          CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
+    })
     .Input(
         0,
         "X",
@@ -299,7 +305,7 @@ bool SumElementsGradientOp<T, Context>::RunOnDevice()
   Tensor sum_grad(Input(1), CPU);
 
   auto* dX = Output(0, X.sizes(), at::dtype<T>());
-  DCHECK_EQ(sum_grad.numel(), 1);
+  TORCH_DCHECK_EQ(sum_grad.numel(), 1);
   math::Set<T, Context>(
       dX->numel(),
       static_cast<T>(

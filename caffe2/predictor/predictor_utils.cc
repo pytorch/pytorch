@@ -9,15 +9,23 @@
 namespace caffe2 {
 namespace predictor_utils {
 
-CAFFE2_API const NetDef& getNet(
-    const MetaNetDef& def,
-    const std::string& name) {
+TORCH_API const NetDef& getNet(const MetaNetDef& def, const std::string& name) {
+  std::string net_names;
+  bool is_first = true;
   for (const auto& n : def.nets()) {
+    if (!is_first) {
+      net_names += ", ";
+    }
+    is_first = false;
+    net_names += n.key();
     if (n.key() == name) {
       return n.value();
     }
   }
-  CAFFE_THROW("Net not found: ", name);
+  CAFFE_THROW("Net not found: ",
+              name,
+              "; available nets: ",
+              net_names);
 }
 
 std::unique_ptr<MetaNetDef> extractMetaNetDef(
@@ -60,6 +68,7 @@ std::unique_ptr<MetaNetDef> runGlobalInitialization(
   }
   VLOG(1) << "Extracted meta net def";
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   const auto globalInitNet = getNet(
       *metaNetDef, PredictorConsts::default_instance().global_init_net_type());
   VLOG(1) << "Global init net: " << ProtoDebugString(globalInitNet);

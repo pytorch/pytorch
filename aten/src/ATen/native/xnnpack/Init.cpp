@@ -1,6 +1,7 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 namespace native {
@@ -32,7 +33,7 @@ bool initialize() {
   return is_initialized_;
 }
 
-bool deinitialize() {
+bool C10_UNUSED deinitialize() {
   using namespace internal;
 
   // This implementation allows for retries.
@@ -49,13 +50,13 @@ bool deinitialize() {
 }
 
 } // namespace
+} // namespace internal
 
 bool available() {
   // Add extra conditions here that should disable mobile CPU impl at runtime in its totality.
   return internal::initialize();
 }
 
-} // namespace internal
 } // namespace xnnpack
 } // namespace native
 } // namespace at

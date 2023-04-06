@@ -9,6 +9,7 @@
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 namespace {
@@ -18,7 +19,7 @@ using int64_tValue = int64_t;
 
 struct IndexBase {
  public:
-  IndexBase(int64_tValue maxElements, const TypeMeta& type)
+  IndexBase(int64_tValue maxElements, const TypeMeta type)
       : maxElements_{maxElements}, meta_(type), frozen_{false} {}
 
   void Freeze() {
@@ -35,7 +36,7 @@ struct IndexBase {
 
   virtual ~IndexBase() {}
 
-  const TypeMeta& Type() const {
+  const TypeMeta Type() const {
     return meta_;
   }
 
@@ -63,7 +64,8 @@ struct Index : IndexBase {
       return;
     }
     std::lock_guard<std::mutex> lock(dictMutex_);
-    for (int i = 0; i < numKeys; ++i) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    for (const auto i : c10::irange(numKeys)) {
       auto it = dict_.find(keys[i]);
       if (it != dict_.end()) {
         values[i] = it->second;
@@ -79,10 +81,11 @@ struct Index : IndexBase {
 
   bool Load(const T* keys, size_t numKeys) {
     CAFFE_ENFORCE(
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         numKeys <= maxElements_,
         "Cannot load index: Tensor is larger than max_elements.");
     decltype(dict_) dict;
-    for (auto i = 0U; i < numKeys; ++i) {
+    for (const auto i : c10::irange(0U, numKeys)) {
       CAFFE_ENFORCE(
           dict.insert({keys[i], i + 1}).second,
           "Repeated elements found: cannot load into dictionary.");
@@ -109,7 +112,7 @@ struct Index : IndexBase {
 
  private:
   void FrozenGet(const T* keys, int64_tValue* values, size_t numKeys) {
-    for (auto i = 0U; i < numKeys; ++i) {
+    for (const auto i : c10::irange(0U, numKeys)) {
       auto it = dict_.find(keys[i]);
       values[i] = it != dict_.end() ? it->second : 0;
     }

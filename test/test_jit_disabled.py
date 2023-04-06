@@ -1,9 +1,10 @@
-import unittest
+# Owner(s): ["oncall: jit"]
+
 import sys
 import os
 import contextlib
 import subprocess
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
 
 
 @contextlib.contextmanager
@@ -16,7 +17,7 @@ def _jit_disabled():
         os.environ["PYTORCH_JIT"] = cur_env
 
 
-class TestJitDisabled(unittest.TestCase):
+class TestJitDisabled(TestCase):
     """
     These tests are separate from the rest of the JIT tests because we need
     run a new subprocess and `import torch` with the correct environment
@@ -45,9 +46,10 @@ class TestJitDisabled(unittest.TestCase):
     def test_attribute(self):
         _program_string = """
 import torch
+
 class Foo(torch.jit.ScriptModule):
     def __init__(self, x):
-        super(Foo, self).__init__()
+        super().__init__()
         self.x = torch.jit.Attribute(x, torch.Tensor)
 
     def forward(self, input):
@@ -63,8 +65,6 @@ print(s.x)
 import torch
 
 class AModule(torch.jit.ScriptModule):
-    def __init__(self):
-        super(AModule, self).__init__()
     @torch.jit.script_method
     def forward(self, input):
         pass
@@ -79,9 +79,6 @@ print("Didn't throw exception")
 import torch
 
 class AModule(torch.nn.Module):
-    def __init__(self):
-        super(AModule, self).__init__()
-
     def forward(self, input):
         pass
 
@@ -91,4 +88,4 @@ print("Didn't throw exception")
         self.compare_enabled_disabled(_program_string)
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

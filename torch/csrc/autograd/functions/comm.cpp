@@ -1,10 +1,10 @@
 #include <torch/csrc/autograd/functions/comm.h>
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/cuda/comm.h>
-#include <ATen/core/functional.h>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -18,17 +18,17 @@ namespace torch {
 namespace autograd {
 Scatter::Scatter(
     std::vector<at::Device> devices,
-    const c10::optional<std::vector<int64_t>>& chunk_sizes,
+    c10::optional<std::vector<int64_t>> chunk_sizes,
     int64_t dim,
-    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams,
+    c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams,
     bool unsqueeze_scalars)
     : devices_(std::move(devices)),
-      chunk_sizes_(chunk_sizes),
+      chunk_sizes_(std::move(chunk_sizes)),
       dim_(dim),
-      streams_(streams),
+      streams_(std::move(streams)),
       unsqueeze_scalars_(unsqueeze_scalars) {}
 
-Scatter::~Scatter() {}
+Scatter::~Scatter() = default;
 
 variable_list Scatter::apply(variable_list&& inputs) {
   AT_ASSERT(inputs.size() == 1);
@@ -69,7 +69,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
 Gather::Gather(const at::Device& destination_device, int64_t dim)
     : destination_device_(destination_device), dim_(dim) {}
 
-Gather::~Gather() {}
+Gather::~Gather() = default;
 
 variable_list Gather::apply(variable_list&& inputs) {
   bool all_are_zero_dim = true;
@@ -95,7 +95,9 @@ variable_list Gather::apply(variable_list&& inputs) {
   // compute this before moving variables from `inputs`
   if (compute_requires_grad(inputs)) {
     std::vector<at::Device> source_devices;
+    source_devices.reserve(inputs.size());
     std::vector<int64_t> input_sizes;
+    input_sizes.reserve(inputs.size());
     for (auto& input : inputs) {
       source_devices.push_back(input.device());
       input_sizes.push_back(input.size(dim_));
@@ -119,10 +121,17 @@ variable_list Gather::apply(variable_list&& inputs) {
     }
   }
 
-  // This is special logic for torch::cuda::gather!
-  const auto destination_index =
-      destination_device_.is_cpu() ? -1 : destination_device_.index();
-  auto variable = torch::cuda::gather(tensors, dim_, destination_index);
+  // Disable the autograd during the actual computation
+  // torch::cuda::gather does not return a view or change things inplace
+  // so no need for extra logic here
+  at::Tensor variable;
+  {
+    at::AutoDispatchBelowAutograd mode;
+    // This is special logic for torch::cuda::gather!
+    const auto destination_index =
+        destination_device_.is_cpu() ? -1 : destination_device_.index();
+    variable = torch::cuda::gather(tensors, dim_, destination_index);
+  }
   if (grad_fn) {
     set_history(variable, grad_fn);
   }

@@ -17,11 +17,9 @@ from caffe2.python.optimizer_context import (
 )
 from caffe2.python.regularizer_context import RegularizerContext
 
-from future.utils import viewitems, viewkeys
 from itertools import chain
 
 import logging
-import six
 
 
 # _known_working_ops are operators that do not need special care.
@@ -74,7 +72,7 @@ _known_working_ops = [
 ]
 
 
-class ModelHelper(object):
+class ModelHelper:
     """A helper model so we can manange models more easily. It contains net def
     and parameter storages. You can add an Operator yourself, e.g.
 
@@ -199,7 +197,7 @@ class ModelHelper(object):
         # ParameterSharing will be applied.
         if isinstance(param_name, core.BlobReference):
             param_name = str(param_name)
-        elif isinstance(param_name, six.string_types):
+        elif isinstance(param_name, str):
             # Parameter name will be equal to current Namescope that got
             # resolved with the respect of parameter sharing of the scopes.
             param_name = parameter_sharing_context.get_parameter_name(
@@ -361,7 +359,7 @@ class ModelHelper(object):
             param_to_grad = self.get_param_to_grad(params)
 
         return [
-            self.get_param_info(param) for param, grad in viewitems(param_to_grad)
+            self.get_param_info(param) for param, grad in param_to_grad.items()
             if (
                 not self.skip_sparse_optim or
                 not isinstance(grad, core.GradientSlice)
@@ -446,7 +444,7 @@ class ModelHelper(object):
     def __dir__(self):
         return sorted(set(chain(
             dir(type(self)),
-            viewkeys(self.__dict__),
+            self.__dict__.keys(),
             _known_working_ops
         )))
 
@@ -541,8 +539,8 @@ def ExtractPredictorNet(
                 'StopGradient'
             ]
         )
-    except ValueError:
-        raise Exception("No ops with input={}".format(input_blobs))
+    except ValueError as e:
+        raise Exception("No ops with input={}".format(input_blobs)) from e
     try:
         last_op_with_output = max(
             [
@@ -550,8 +548,8 @@ def ExtractPredictorNet(
                 if output_blobs.intersection(ops[j].output)
             ]
         )
-    except ValueError:
-        raise Exception("No ops with output={}".format(output_blobs))
+    except ValueError as e:
+        raise Exception("No ops with output={}".format(output_blobs)) from e
 
     def validate_op(op):
         # Check that the op does not have is_test = 0 set. This is a common

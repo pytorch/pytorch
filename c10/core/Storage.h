@@ -8,18 +8,19 @@ struct C10_API Storage {
  public:
   struct use_byte_size_t {};
 
-  Storage() {}
-  Storage(c10::intrusive_ptr<StorageImpl> ptr) : storage_impl_(std::move(ptr)) {}
+  Storage() = default;
+  Storage(c10::intrusive_ptr<StorageImpl> ptr)
+      : storage_impl_(std::move(ptr)) {}
 
   // Allocates memory buffer using given allocator and creates a storage with it
   Storage(
-      use_byte_size_t use_byte_size,
-      size_t size_bytes,
-      Allocator* allocator,
-      bool resizable)
+      use_byte_size_t /*use_byte_size*/,
+      SymInt size_bytes,
+      Allocator* allocator = nullptr,
+      bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
-            size_bytes,
+            std::move(size_bytes),
             allocator,
             resizable)) {}
 
@@ -27,11 +28,11 @@ struct C10_API Storage {
   // potential future reallocations, however it can be nullptr if the storage
   // is non-resizable
   Storage(
-      use_byte_size_t use_byte_size,
+      use_byte_size_t /*use_byte_size*/,
       size_t size_bytes,
       at::DataPtr data_ptr,
-      at::Allocator* allocator,
-      bool resizable)
+      at::Allocator* allocator = nullptr,
+      bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
             size_bytes,
@@ -52,15 +53,30 @@ struct C10_API Storage {
         true));
   }
 
-  template <typename T>
-  T* data() const { return storage_impl_->data<T>(); }
+  // Mimic create_legacy, but without requiring a newly-created StorageImpl.
+  void reset_legacy() {
+    TORCH_CHECK(resizable() && allocator());
+    set_nbytes(0);
+    set_data_ptr_noswap(allocator()->allocate(0));
+  }
 
   template <typename T>
-  T* unsafe_data() const { return storage_impl_->unsafe_data<T>(); }
+  T* data() const {
+    return unsafe_data<T>();
+  }
+
+  template <typename T>
+  T* unsafe_data() const {
+    return static_cast<T*>(storage_impl_->mutable_data());
+  }
 
   // TODO: remove later
   void set_nbytes(size_t size_bytes) const {
     storage_impl_.get()->set_nbytes(size_bytes);
+  }
+
+  void set_nbytes(c10::SymInt size_bytes) const {
+    storage_impl_.get()->set_nbytes(std::move(size_bytes));
   }
 
   bool resizable() const {
@@ -70,14 +86,18 @@ struct C10_API Storage {
   size_t nbytes() const {
     return storage_impl_->nbytes();
   }
+
+  SymInt sym_nbytes() const {
+    return storage_impl_->sym_nbytes();
+  }
   // get() use here is to get const-correctness
 
   void* data() const {
-    return storage_impl_.get()->data();
+    return storage_impl_->mutable_data();
   }
 
   at::DataPtr& data_ptr() {
-    return storage_impl_->data_ptr();
+    return storage_impl_->mutable_data_ptr();
   }
 
   const at::DataPtr& data_ptr() const {
@@ -87,7 +107,11 @@ struct C10_API Storage {
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) const {
     return storage_impl_.get()->set_data_ptr(std::move(data_ptr));
-  };
+  }
+
+  void set_data_ptr_noswap(at::DataPtr&& data_ptr) const {
+    return storage_impl_.get()->set_data_ptr_noswap(std::move(data_ptr));
+  }
 
   DeviceType device_type() const {
     return storage_impl_->device_type();
@@ -107,6 +131,10 @@ struct C10_API Storage {
 
   StorageImpl* unsafeGetStorageImpl() const noexcept {
     return storage_impl_.get();
+  }
+
+  c10::weak_intrusive_ptr<StorageImpl> getWeakStorageImpl() const {
+    return c10::weak_intrusive_ptr<StorageImpl>(storage_impl_);
   }
 
   operator bool() const {
@@ -130,7 +158,8 @@ struct C10_API Storage {
       size_t capacity,
       DeleterFnPtr d = nullptr) {
     if (!storage_impl_.unique()) {
-      AT_ERROR(
+      TORCH_CHECK(
+          false,
           "UniqueStorageShareExternalPointer can only be called when use_count == 1");
     }
     storage_impl_->UniqueStorageShareExternalPointer(src, capacity, d);
@@ -140,7 +169,8 @@ struct C10_API Storage {
       at::DataPtr&& data_ptr,
       size_t capacity) {
     if (!storage_impl_.unique()) {
-      AT_ERROR(
+      TORCH_CHECK(
+          false,
           "UniqueStorageShareExternalPointer can only be called when use_count == 1");
     }
     storage_impl_->UniqueStorageShareExternalPointer(

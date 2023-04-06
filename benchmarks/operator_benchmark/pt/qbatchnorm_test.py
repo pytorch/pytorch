@@ -23,15 +23,17 @@ class QBatchNormBenchmark(op_bench.TorchBenchmarkBase):
         self._init(M, N, K, device)
         x_scale = 0.1
         x_zero_point = 0
-        self.q_input_one = torch.quantize_per_tensor(
-            self.input_one, scale=x_scale, zero_point=x_zero_point, dtype=dtype)
-        self.mean = torch.rand(N)
-        self.var = torch.rand(N)
-        self.weight = torch.rand(N)
-        self.bias = torch.rand(N)
-        self.eps = 1e-5
-        self.Y_scale = 0.1
-        self.Y_zero_point = 0
+        self.inputs = {
+            "q_input_one": torch.quantize_per_tensor(
+                self.input_one, scale=x_scale, zero_point=x_zero_point, dtype=dtype),
+            "mean": torch.rand(N),
+            "var": torch.rand(N),
+            "weight": torch.rand(N),
+            "bias": torch.rand(N),
+            "eps": 1e-5,
+            "Y_scale": 0.1,
+            "Y_zero_point": 0
+        }
 
     def _init(self, M, N, K, device):
         pass
@@ -45,10 +47,20 @@ class QBatchNorm1dBenchmark(QBatchNormBenchmark):
         self.set_module_name("QBatchNorm1d")
         self.input_one = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
 
-    def forward(self):
+    def forward(
+        self,
+        q_input_one,
+        weight,
+        bias,
+        mean,
+        var,
+        eps: float,
+        Y_scale: float,
+        Y_zero_point: int
+    ):
         return torch.ops.quantized.batch_norm1d(
-            self.q_input_one, self.weight, self.bias, self.mean, self.var, self.eps,
-            self.Y_scale, self.Y_zero_point)
+            q_input_one, weight, bias, mean, var, eps,
+            Y_scale, Y_zero_point)
 
 
 class QBatchNorm2dBenchmark(QBatchNormBenchmark):
@@ -58,10 +70,20 @@ class QBatchNorm2dBenchmark(QBatchNormBenchmark):
         # add a 1 as the last dimension
         self.input_one = torch.rand(M, N, K, 1, device=device, requires_grad=self.auto_set())
 
-    def forward(self):
+    def forward(
+        self,
+        q_input_one,
+        weight,
+        bias,
+        mean,
+        var,
+        eps: float,
+        Y_scale: float,
+        Y_zero_point: int
+    ):
         return torch.ops.quantized.batch_norm2d(
-            self.q_input_one, self.weight, self.bias, self.mean, self.var, self.eps,
-            self.Y_scale, self.Y_zero_point)
+            q_input_one, weight, bias, mean, var, eps,
+            Y_scale, Y_zero_point)
 
 
 op_bench.generate_pt_test(batchnorm_configs_short, QBatchNorm1dBenchmark)

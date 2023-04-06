@@ -5,7 +5,6 @@ from caffe2.python import core, context
 from caffe2.python.schema import Field, from_blob_list
 from collections import defaultdict
 from copy import copy
-from future.utils import viewitems
 
 
 def _merge_node_kwargs(a, b):
@@ -19,8 +18,7 @@ def _merge_node_kwargs(a, b):
     return c
 
 
-@context.define_context(allow_default=True)
-class Cluster(object):
+class Cluster(context.DefaultManaged):
     """
     Context that keeps track of all the node names used.
     Users shouldn't have to use them directly, since a Cluster is automatically
@@ -53,8 +51,7 @@ class Cluster(object):
             self.nodes(), self.node_kwargs())
 
 
-@context.define_context(allow_default=True)
-class Node(object):
+class Node(context.DefaultManaged):
     """
     A Node context is used to indicate that all Tasks instantiated within will
     run on the given node name. (Only the name of the node actually counts.)
@@ -92,7 +89,7 @@ class Node(object):
         return self._kwargs
 
 
-class WorkspaceType(object):
+class WorkspaceType:
     """
     Determines whether tasks of a TaskGroup will run directly at the global
     workspace, which is kept alive across runs, or whether a new child
@@ -158,8 +155,7 @@ def add_setup_steps(step, init_nets, exit_nets, name):
     return core.execution_step(name, steps)
 
 
-@context.define_context(allow_default=False)
-class TaskGroup(object):
+class TaskGroup(context.Managed):
     """
     Context that gathers tasks which will run concurrently, potentially on
     multiple nodes. All tasks in the same node will share the same workspace
@@ -279,7 +275,7 @@ class TaskGroup(object):
             return tasks_by_node
 
         # now we have report_steps. report_net is deprecated
-        for node, (net, interval) in viewitems(self._report_nets):
+        for node, (net, interval) in self._report_nets.items():
             self.report_step(net, node=node, interval_ms=interval * 1000)
         self._report_nets = {}
 
@@ -293,7 +289,7 @@ class TaskGroup(object):
             report_steps_by_node[node_map[original_node]].append(step)
 
         grouped_by_node = TaskGroup()
-        for node, tasks in viewitems(tasks_by_node):
+        for node, tasks in tasks_by_node.items():
             report_steps = report_steps_by_node[node]
             node_inits, node_exits = get_setup_nets(
                 TaskGroup.LOCAL_SETUP,
@@ -355,7 +351,7 @@ class TaskGroup(object):
             self.remote_nets())
 
 
-class TaskOutput(object):
+class TaskOutput:
     """
     Represents the output of a task. An output can be a blob,
     a list of blob, or a record.
@@ -413,7 +409,7 @@ def final_output(blob_or_record):
     return cur_task.add_output(blob_or_record)
 
 
-class TaskOutputList(object):
+class TaskOutputList:
     """ Keeps a list of outputs for a task """
     def __init__(self, outputs=None):
         self.outputs = outputs or []
@@ -440,8 +436,7 @@ class TaskOutputList(object):
         return "TaskOutputList(outputs={})".format(self.outputs)
 
 
-@context.define_context()
-class Task(object):
+class Task(context.Managed):
     """
     A Task is composed of an execution step and zero or more outputs.
     Tasks are executed in the context of a TaskGroup, which, in turn, can
@@ -540,6 +535,8 @@ class Task(object):
         self._num_instances = num_instances
 
     def __enter__(self):
+        super().__enter__()
+
         # temporarily remove from _tasks_to_add to ensure correct order
         if self.group is not None:
             self.group._tasks_to_add.remove(self)
@@ -551,6 +548,8 @@ class Task(object):
         return self
 
     def __exit__(self, type, value, traceback):
+        super().__exit__(type, value, traceback)
+
         self._net_builder.__exit__(type, value, traceback)
         if type is None:
             self.set_step(self._net_builder)
@@ -645,7 +644,7 @@ class Task(object):
             self.name, self.node, self.outputs())
 
 
-class SetupNets(object):
+class SetupNets:
     """
     Allow to register a list of nets to be run at initialization
     and finalization of Tasks or TaskGroups.

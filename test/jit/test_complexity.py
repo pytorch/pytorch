@@ -1,5 +1,8 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
+import unittest
 
 import torch
 
@@ -12,7 +15,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, enable_profiling_mode
 from torch.testing._internal.jit_metaprogramming_utils import try_get_nn_module_compiled_mod_and_inputs, \
     get_nn_mod_test_name, get_all_nn_module_tests, nn_functional_tests, get_nn_functional_compiled_fn_and_inputs
-from torch.testing._internal.common_utils import run_tests, suppress_warnings
+from torch.testing._internal.common_utils import run_tests, suppress_warnings, IS_FBCODE
 
 
 def num_ifs_loops(graph):
@@ -41,12 +44,12 @@ def num_non_tensor_nodes(block):
 
 class TestComplexity(JitTestCase):
     def setUp(self):
-        super(TestComplexity, self).setUp()
+        super().setUp()
         self.grad_enabled = torch.is_grad_enabled()
         torch.set_grad_enabled(False)
 
     def tearDown(self):
-        super(TestComplexity, self).tearDown()
+        super().tearDown()
         torch.set_grad_enabled(self.grad_enabled)
 
     @suppress_warnings
@@ -66,6 +69,7 @@ class TestComplexity(JitTestCase):
             print(line)
 
     @suppress_warnings
+    @unittest.skipIf(IS_FBCODE, "Causes a RecursionError in fbcode")
     def test_nn_module_tests(self):
         with enable_profiling_mode():
             stats = [("Name", "Ifs/Loops", "non-tensor ops")]

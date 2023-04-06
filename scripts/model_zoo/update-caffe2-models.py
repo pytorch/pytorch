@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 
 import os
 import subprocess
@@ -6,7 +6,7 @@ import sys
 import tarfile
 import tempfile
 
-from six.moves.urllib.request import urlretrieve
+from urllib.request import urlretrieve
 
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 

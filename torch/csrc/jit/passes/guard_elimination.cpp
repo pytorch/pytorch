@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/guard_elimination.h>
+
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -88,7 +89,7 @@ struct GuardElimination {
     // uses on *all* parameters are moved to the same anchor node
     // and they may come in different order after the anchor node
     // e.g. (anchor, guard_x, guard_y, guard_x, guard_y)
-    // this pass recognizes contigious streches of guards and
+    // this pass recognizes contiguous stretches of guards and
     // keeps track of the guards it's seen for each def. the next time
     // the guard on the same def, it simply removes it.
     std::unordered_map<Value*, Node*> inputs_to_guards;
@@ -116,16 +117,6 @@ struct GuardElimination {
     }
   }
 
-  bool isDominatedBy(Node* node, Node* dominator) {
-    while (node) {
-      if (node->owningBlock() == dominator->owningBlock()) {
-        return dominator->isBefore(node);
-      }
-      node = node->owningBlock()->owningNode();
-    }
-    return false;
-  }
-
   void removeDominatedGuards(Block* b) {
     // If a Node guards a value which isn't mutated, then that node
     // can replace all other guards of the value which it dominates
@@ -140,7 +131,7 @@ struct GuardElimination {
 
         // find all uses of the input that the guard node dominates
         std::vector<Use> uses = input->uses();
-        while (uses.size() > 0) {
+        while (!uses.empty()) {
           auto use = uses.at(uses.size() - 1);
           uses.pop_back();
 
@@ -149,7 +140,7 @@ struct GuardElimination {
             continue;
           }
 
-          if (!isDominatedBy(use.user, n)) {
+          if (!use.user->isDominatedBy(n)) {
             continue;
           }
 
@@ -241,9 +232,9 @@ struct GuardElimination {
     size_t i = 0;
     for (auto input : n->inputs()) {
       if ((input->node()->kind() == prim::Guard &&
-           !input->type()->expect<TensorType>()->isSummarized()) ||
+           !input->type()->expectRef<TensorType>().isSummarized()) ||
           input->node()->kind() == prim::Constant ||
-          (allow_numbers && input->type()->isSubtypeOf(NumberType::get())) ||
+          (allow_numbers && input->type()->isSubtypeOf(*NumberType::get())) ||
           except.count(i) != 0) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||
@@ -376,7 +367,7 @@ struct GuardElimination {
       case aten::conv3d:
         return checkInputs(n, std::unordered_set<size_t>{2, 6}, false);
       case aten::slice:
-        return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+        return !n->input(0)->type()->expectRef<TensorType>().isSummarized() &&
             // check that the dimension argument is constant
             n->input(1)->node()->kind() == prim::Constant &&
             // the start offset is constant
@@ -388,7 +379,7 @@ struct GuardElimination {
       case aten::max_pool1d:
       case aten::max_pool2d:
       case aten::max_pool3d:
-        return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+        return !n->input(0)->type()->expectRef<TensorType>().isSummarized() &&
             // check that the kernel size is constant
             n->input(1)->node()->kind() == prim::Constant &&
             // check that the stride is constant
@@ -401,7 +392,7 @@ struct GuardElimination {
             n->input(5)->node()->kind() == prim::Constant;
       case aten::unsqueeze:
         // check that the dimension argument is constant
-        return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+        return !n->input(0)->type()->expectRef<TensorType>().isSummarized() &&
             n->input(1)->node()->kind() == prim::Constant;
       case aten::cat:
         // check that the dimension argument is constant
@@ -426,8 +417,8 @@ struct GuardElimination {
             // aten::size is effectively a constant
             if (asize->input()
                     ->type()
-                    ->expect<TensorType>()
-                    ->sizes()
+                    ->expectRef<TensorType>()
+                    .sizes()
                     .concrete_sizes()) {
               return true;
             }

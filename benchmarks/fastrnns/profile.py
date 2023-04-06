@@ -25,8 +25,9 @@ def run_rnn(name, rnn_creator, nloops=5,
 
         # "Update" parameters
         if modeldef.backward is not None:
-            for param in modeldef.params:
-                param.grad.data.zero_()
+            with torch.no_grad():
+                for param in modeldef.params:
+                    param.grad.zero_()
         torch.cuda.synchronize()
 
     assert device == 'cuda'
@@ -94,7 +95,7 @@ def full_profile(rnns, **args):
     for k, v in args.items():
         profile_args.append('--{}={}'.format(k, v))
     profile_args.append('--rnns {}'.format(' '.join(rnns)))
-    profile_args.append('--internal_run')
+    profile_args.append('--internal-run')
 
     outpath = nvprof_output_filename(rnns, **args)
 
@@ -113,7 +114,7 @@ if __name__ == '__main__':
     parser.add_argument('--inputSize', default='512', type=int)
     parser.add_argument('--hiddenSize', default='512', type=int)
     parser.add_argument('--miniBatch', default='64', type=int)
-    parser.add_argument('--sleep_between_seconds', default='1', type=int)
+    parser.add_argument('--sleep-between-seconds', '--sleep_between_seconds', default='1', type=int)
     parser.add_argument('--nloops', default='5', type=int)
 
     parser.add_argument('--rnns', nargs='*',
@@ -121,7 +122,7 @@ if __name__ == '__main__':
 
     # if internal_run, we actually run the rnns.
     # if not internal_run, we shell out to nvprof with internal_run=T
-    parser.add_argument('--internal_run', default=False, action='store_true',
+    parser.add_argument('--internal-run', '--internal_run', default=False, action='store_true',
                         help='Don\'t use this')
     args = parser.parse_args()
     if args.rnns is None:

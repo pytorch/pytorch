@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
+
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/api/include/torch/jit.h>
 
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-
+namespace torch::jit {
 // Note [Versioned Symbols]
 // When the schema or behavior of a symbol changes, serialized Torchscript
 // programs using that symbol are likely to break. To prevent those breaks,
@@ -105,5 +105,4 @@ uint64_t get_min_version_for_kind(const NodeKind& kind) {
   return it->second;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

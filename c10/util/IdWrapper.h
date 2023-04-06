@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <cstddef>
 #include <functional>
 #include <utility>
 
@@ -66,12 +67,12 @@ class IdWrapper {
 
 } // namespace c10
 
-#define C10_DEFINE_HASH_FOR_IDWRAPPER(ClassName)\
-  namespace std {                               \
-  template <>                                   \
-  struct hash<ClassName> {                      \
-    size_t operator()(ClassName x) const {      \
-      return hash_value(x);                     \
-    }                                           \
-  };                                            \
+#define C10_DEFINE_HASH_FOR_IDWRAPPER(ClassName) \
+  namespace std {                                \
+  template <>                                    \
+  struct hash<ClassName> {                       \
+    size_t operator()(ClassName x) const {       \
+      return hash_value(x);                      \
+    }                                            \
+  };                                             \
   }

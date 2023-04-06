@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <torch/csrc/autograd/variable.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/Variadic.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <cstdint>
 #include <tuple>
@@ -17,6 +17,9 @@ struct CountTensors : IterArgs<CountTensors> {
   size_t out = 0;
   void operator()(const at::Tensor& x) {
     out += 1;
+  }
+  void operator()(const c10::optional<at::Tensor>& x) {
+    out += x.has_value();
   }
   void operator()(at::ArrayRef<at::Tensor> xs) {
     out += xs.size();
@@ -119,11 +122,16 @@ void apply(Function function, Ts&&... ts) {
   // according to the comma operator, it is evaluated and its result (`void`)
   // is discarded. Then the zero is evaluated and used as an element in the
   // array. The first zero ensures the array is not empty.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int _[]{0, (function(std::forward<Ts>(ts)), 0)...};
   (void)_;
 }
 
-template <typename ReturnType, typename... Ts, typename Function, typename Accessor>
+template <
+    typename ReturnType,
+    typename... Ts,
+    typename Function,
+    typename Accessor>
 ReturnType unpack(Function function, Accessor accessor) {
   return ReturnType(unpack<ReturnType, Ts...>(
       std::move(function),
@@ -131,7 +139,12 @@ ReturnType unpack(Function function, Accessor accessor) {
       typename MakeIndices<sizeof...(Ts)>::indices()));
 }
 
-template <typename ReturnType, typename... Ts, typename Function, typename Accessor, size_t... Is>
+template <
+    typename ReturnType,
+    typename... Ts,
+    typename Function,
+    typename Accessor,
+    size_t... Is>
 ReturnType unpack(Function function, Accessor accessor, Indices<Is...>) {
   return ReturnType(function(accessor.template operator()<Ts>(Is)...));
 }

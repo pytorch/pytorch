@@ -11,7 +11,6 @@ import os
 import time
 import signal
 import logging
-from future.utils import viewitems
 
 
 '''
@@ -55,10 +54,11 @@ class WatcherThread(threading.Thread):
                 log.info("Prepared output, dumping threads. ")
                 print("Caller thread was: {}".format(self.caller_thread))
                 print("-----After force------")
+                log.info("-----After force------")
                 import sys
                 import traceback
                 code = []
-                for threadId, stack in viewitems(sys._current_frames()):
+                for threadId, stack in sys._current_frames().items():
                     if threadId == self.caller_thread.ident:
                         code.append("\n# ThreadID: %s" % threadId)
                         for filename, lineno, name, line in traceback.extract_stack(stack):
@@ -66,7 +66,9 @@ class WatcherThread(threading.Thread):
                             if line:
                                 code.append("  %s" % (line.strip()))
 
+                # Log also with logger, as it is comment practice to suppress print().
                 print("\n".join(code))
+                log.info("\n".join(code))
                 log.error("Process did not terminate cleanly in 10 s, forcing")
                 os.abort()
 
@@ -78,14 +80,16 @@ class WatcherThread(threading.Thread):
             import sys
             import traceback
             code = []
-            for threadId, stack in viewitems(sys._current_frames()):
+            for threadId, stack in sys._current_frames().items():
                 code.append("\n# ThreadID: %s" % threadId)
                 for filename, lineno, name, line in traceback.extract_stack(stack):
                     code.append('File: "%s", line %d, in %s' % (filename, lineno, name))
                     if line:
                         code.append("  %s" % (line.strip()))
 
+            # Log also with logger, as it is comment practice to suppress print().
             print("\n".join(code))
+            log.info("\n".join(code))
             os.kill(os.getpid(), signal.SIGINT)
 
 

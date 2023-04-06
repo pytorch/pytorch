@@ -7,6 +7,9 @@ sudo rm -f /etc/apt/heroku.list
 sudo rm -f /etc/apt/openjdk-r-ubuntu-ppa-xenial.list
 sudo rm -f /etc/apt/partner.list
 
+# To increase the network reliability, let apt decide which mirror is best to use
+sudo sed -i -e 's/http:\/\/.*archive/mirror:\/\/mirrors/' -e 's/\/ubuntu\//\/mirrors.txt/' /etc/apt/sources.list
+
 retry () {
   $*  || $* || $* || $* || $*
 }
@@ -24,10 +27,12 @@ retry sudo apt-get -y install \
 echo "== DOCKER VERSION =="
 docker version
 
-retry sudo pip -q install awscli==1.16.35
+if ! command -v aws >/dev/null; then
+  retry sudo pip3 -q install awscli==1.19.64
+fi
 
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-  DRIVER_FN="NVIDIA-Linux-x86_64-450.51.06.run"
+  DRIVER_FN="NVIDIA-Linux-x86_64-515.76.run"
   wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
   sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
   nvidia-smi
@@ -35,12 +40,12 @@ if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
   # Taken directly from https://github.com/NVIDIA/nvidia-docker
   # Add the package repositories
   distribution=$(. /etc/os-release;echo "$ID$VERSION_ID")
-  curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-  curl -s -L "https://nvidia.github.io/nvidia-docker/${distribution}/nvidia-docker.list" | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+  curl -s -L --retry 3 --retry-all-errors https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+  curl -s -L --retry 3 --retry-all-errors "https://nvidia.github.io/nvidia-docker/${distribution}/nvidia-docker.list" | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
 
-  sudo apt-get update -qq
+  retry sudo apt-get update -qq
   # Necessary to get the `--gpus` flag to function within docker
-  sudo apt-get install -y nvidia-container-toolkit
+  retry sudo apt-get install -y nvidia-container-toolkit
   sudo systemctl restart docker
 else
   # Explicitly remove nvidia docker apt repositories if not building for cuda
@@ -48,43 +53,50 @@ else
 fi
 
 add_to_env_file() {
-  local content
-  content=$1
-  # BASH_ENV should be set by CircleCI
-  echo "${content}" >> "${BASH_ENV:-/tmp/env}"
+  local name=$1
+  local value=$2
+  case "$value" in
+    *\ *)
+      # BASH_ENV should be set by CircleCI
+      echo "${name}='${value}'" >> "${BASH_ENV:-/tmp/env}"
+      ;;
+    *)
+      echo "${name}=${value}" >> "${BASH_ENV:-/tmp/env}"
+      ;;
+  esac
 }
 
-add_to_env_file "IN_CIRCLECI=1"
-add_to_env_file "COMMIT_SOURCE=${CIRCLE_BRANCH:-}"
-add_to_env_file "BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
-add_to_env_file "CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}"
+add_to_env_file CI_MASTER "${CI_MASTER:-}"
+add_to_env_file COMMIT_SOURCE "${CIRCLE_BRANCH:-}"
+add_to_env_file BUILD_ENVIRONMENT "${BUILD_ENVIRONMENT}"
+add_to_env_file CIRCLE_PULL_REQUEST "${CIRCLE_PULL_REQUEST}"
 
 
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
-  add_to_env_file "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2"
+  add_to_env_file SCCACHE_BUCKET ossci-compiler-cache-circleci-v2
 
   SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
   MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
   MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
-  add_to_env_file "MAX_JOBS=${MAX_JOBS}"
+  add_to_env_file MAX_JOBS "${MAX_JOBS}"
 
   if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-    add_to_env_file "TORCH_CUDA_ARCH_LIST=5.2"
+    add_to_env_file TORCH_CUDA_ARCH_LIST 5.2
   fi
 
   if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     # This IAM user allows write access to S3 bucket for sccache & bazels3cache
     set +x
-    add_to_env_file "XLA_CLANG_CACHE_S3_BUCKET_NAME=${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}"
-    add_to_env_file "AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}"
-    add_to_env_file "AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}"
+    add_to_env_file XLA_CLANG_CACHE_S3_BUCKET_NAME "${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}"
+    add_to_env_file AWS_ACCESS_KEY_ID "${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}"
+    add_to_env_file AWS_SECRET_ACCESS_KEY "${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}"
     set -x
   else
     # This IAM user allows write access to S3 bucket for sccache
     set +x
-    add_to_env_file "XLA_CLANG_CACHE_S3_BUCKET_NAME=${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}"
-    add_to_env_file "AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}"
-    add_to_env_file "AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}"
+    add_to_env_file XLA_CLANG_CACHE_S3_BUCKET_NAME "${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}"
+    add_to_env_file AWS_ACCESS_KEY_ID "${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}"
+    add_to_env_file AWS_SECRET_ACCESS_KEY "${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}"
     set -x
   fi
 fi
@@ -93,5 +105,7 @@ fi
 set +x
 export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4:-}
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4:-}
-eval "$(aws ecr get-login --region us-east-1 --no-include-email)"
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+export AWS_REGION=us-east-1
+aws ecr get-login-password --region $AWS_REGION|docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 set -x

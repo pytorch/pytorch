@@ -3,7 +3,6 @@
 
 
 
-from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -151,9 +150,9 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
             indexer = [slice(None)] * m.ndim
             try:
                 indexer[axis] = slice(None, None, -1)
-            except IndexError:
+            except IndexError as e:
                 raise ValueError("axis=%i is invalid for the %i-dimensional input array"
-                                 % (axis, m.ndim))
+                                 % (axis, m.ndim)) from e
             return m[tuple(indexer)]
 
         def roialign_ref(X, R):

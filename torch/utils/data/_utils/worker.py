@@ -7,11 +7,13 @@ static methods.
 import torch
 import random
 import os
+import queue
 from dataclasses import dataclass
-from torch._six import queue
 from torch._utils import ExceptionWrapper
-from typing import Union
-from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS
+from typing import Optional, Union, TYPE_CHECKING
+from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS, HAS_NUMPY
+if TYPE_CHECKING:
+    from torch.utils.data import Dataset
 
 if IS_WINDOWS:
     import ctypes
@@ -20,12 +22,12 @@ if IS_WINDOWS:
     # On Windows, the parent ID of the worker process remains unchanged when the manager process
     # is gone, and the only way to check it through OS is to let the worker have a process handle
     # of the manager and ask if the process status has changed.
-    class ManagerWatchdog(object):
+    class ManagerWatchdog:
         def __init__(self):
             self.manager_pid = os.getppid()
 
             # mypy cannot detect this code is windows only
-            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)  # type: ignore
+            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)  # type: ignore[attr-defined]
             self.kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
             self.kernel32.OpenProcess.restype = HANDLE
             self.kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
@@ -36,7 +38,7 @@ if IS_WINDOWS:
             self.manager_handle = self.kernel32.OpenProcess(SYNCHRONIZE, 0, self.manager_pid)
 
             if not self.manager_handle:
-                raise ctypes.WinError(ctypes.get_last_error())  # type: ignore
+                raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
 
             self.manager_dead = False
 
@@ -46,7 +48,7 @@ if IS_WINDOWS:
                 self.manager_dead = self.kernel32.WaitForSingleObject(self.manager_handle, 0) == 0
             return not self.manager_dead
 else:
-    class ManagerWatchdog(object):  # type: ignore[no-redef]
+    class ManagerWatchdog:  # type: ignore[no-redef]
         def __init__(self):
             self.manager_pid = os.getppid()
             self.manager_dead = False
@@ -59,7 +61,11 @@ else:
 _worker_info = None
 
 
-class WorkerInfo(object):
+class WorkerInfo:
+    id: int
+    num_workers: int
+    seed: int
+    dataset: 'Dataset'
     __initialized = False
 
     def __init__(self, **kwargs):
@@ -71,7 +77,7 @@ class WorkerInfo(object):
     def __setattr__(self, key, val):
         if self.__initialized:
             raise RuntimeError("Cannot assign attributes to {} objects".format(self.__class__.__name__))
-        return super(WorkerInfo, self).__setattr__(key, val)
+        return super().__setattr__(key, val)
 
     def __repr__(self):
         items = []
@@ -80,7 +86,7 @@ class WorkerInfo(object):
         return '{}({})'.format(self.__class__.__name__, ', '.join(items))
 
 
-def get_worker_info():
+def get_worker_info() -> Optional[WorkerInfo]:
     r"""Returns the information about the current
     :class:`~torch.utils.data.DataLoader` iterator worker process.
 
@@ -104,24 +110,104 @@ def get_worker_info():
        set up each worker process differently, for instance, using ``worker_id``
        to configure the ``dataset`` object to only read a specific fraction of a
        sharded dataset, or use ``seed`` to seed other libraries used in dataset
-       code (e.g., NumPy).
+       code.
     """
     return _worker_info
 
 
 r"""Dummy class used to signal the end of an IterableDataset"""
 @dataclass(frozen=True)
-class _IterableDatasetStopIteration(object):
+class _IterableDatasetStopIteration:
     worker_id: int
 
 r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 @dataclass(frozen=True)
-class _ResumeIteration(object):
-    pass
+class _ResumeIteration:
+    seed: Optional[int] = None
+
+# The function `_generate_state` is adapted from `numpy.random.SeedSequence`
+# from https://github.com/numpy/numpy/blob/main/numpy/random/bit_generator.pyx
+# It's MIT licensed, here is the copyright:
+
+# Copyright (c) 2015 Melissa E. O'Neill
+# Copyright (c) 2019 NumPy Developers
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# This function generates an array of int32 as the seed for
+# `numpy.random`, in order to prevent state collision due to same
+# seed and algorithm for `numpy.random` and `random` modules.
+# TODO: Implement `SeedSequence` like object for `torch.random`
+def _generate_state(base_seed, worker_id):
+    INIT_A = 0x43b0d7e5
+    MULT_A = 0x931e8875
+    INIT_B = 0x8b51f9dd
+    MULT_B = 0x58f38ded
+    MIX_MULT_L = 0xca01f9dd
+    MIX_MULT_R = 0x4973f715
+    XSHIFT = 4 * 8 // 2
+    MASK32 = 0xFFFFFFFF
+
+    entropy = [worker_id, base_seed & MASK32, base_seed >> 32, 0]
+    pool = [0] * 4
+
+    hash_const_A = INIT_A
+
+    def hash(value):
+        nonlocal hash_const_A
+        value = (value ^ hash_const_A) & MASK32
+        hash_const_A = (hash_const_A * MULT_A) & MASK32
+        value = (value * hash_const_A) & MASK32
+        value = (value ^ (value >> XSHIFT)) & MASK32
+        return value
+
+    def mix(x, y):
+        result_x = (MIX_MULT_L * x) & MASK32
+        result_y = (MIX_MULT_R * y) & MASK32
+        result = (result_x - result_y) & MASK32
+        result = (result ^ (result >> XSHIFT)) & MASK32
+        return result
+
+    # Add in the entropy to the pool.
+    for i in range(len(pool)):
+        pool[i] = hash(entropy[i])
+
+    # Mix all bits together so late bits can affect earlier bits.
+    for i_src in range(len(pool)):
+        for i_dst in range(len(pool)):
+            if i_src != i_dst:
+                pool[i_dst] = mix(pool[i_dst], hash(pool[i_src]))
+
+    hash_const_B = INIT_B
+    state = []
+    for i_dst in range(4):
+        data_val = pool[i_dst]
+        data_val = (data_val ^ hash_const_B) & MASK32
+        hash_const_B = (hash_const_B * MULT_B) & MASK32
+        data_val = (data_val * hash_const_B) & MASK32
+        data_val = (data_val ^ (data_val >> XSHIFT)) & MASK32
+        state.append(data_val)
+    return state
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
-                 auto_collation, collate_fn, drop_last, seed, init_fn, worker_id,
-                 num_workers, persistent_workers):
+                 auto_collation, collate_fn, drop_last, base_seed, init_fn, worker_id,
+                 num_workers, persistent_workers, shared_seed):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -134,8 +220,22 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         signal_handling._set_worker_signal_handlers()
 
         torch.set_num_threads(1)
+        seed = base_seed + worker_id
         random.seed(seed)
         torch.manual_seed(seed)
+        if HAS_NUMPY:
+            np_seed = _generate_state(base_seed, worker_id)
+            import numpy as np
+            np.random.seed(np_seed)
+
+        from torch.utils.data import IterDataPipe
+        from torch.utils.data.graph_settings import apply_random_seed
+
+        shared_rng = torch.Generator()
+        if isinstance(dataset, IterDataPipe):
+            assert shared_seed is not None
+            shared_rng.manual_seed(shared_seed)
+            dataset = apply_random_seed(dataset, shared_rng)
 
         global _worker_info
         _worker_info = WorkerInfo(id=worker_id, num_workers=num_workers,
@@ -177,8 +277,14 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 continue
             if isinstance(r, _ResumeIteration):
                 # Acknowledge the main process
-                data_queue.put(r)
+                data_queue.put((r, None))
                 iteration_end = False
+
+                if isinstance(dataset, IterDataPipe):
+                    assert r.seed is not None
+                    shared_rng.manual_seed(r.seed)
+                    dataset = apply_random_seed(dataset, shared_rng)
+
                 # Recreate the fetcher for worker-reuse policy
                 fetcher = _DatasetKind.create_fetcher(
                     dataset_kind, dataset, auto_collation, collate_fn, drop_last)

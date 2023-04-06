@@ -1,17 +1,20 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 
 #include <ATen/core/functional.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 
 #include <ATen/ATen.h>
 #include <algorithm>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -108,16 +111,16 @@ bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
 
 RegisterOperators mm_tree_reduction_reg({Operator(
     "prim::MMTreeReduce(...) -> Tensor",
-    [](Stack* stack) {
+    [](Stack& stack) {
       auto num_inputs = pop(stack).toInt();
       std::vector<at::Tensor> inputs;
       inputs.reserve(num_inputs);
-      for (auto it = stack->end() - num_inputs; it != stack->end(); ++it) {
+      for (auto it = stack.end() - num_inputs; it != stack.end(); ++it) {
         inputs.push_back(std::move(*it).toTensor());
       }
       drop(stack, num_inputs);
 
-      AT_ASSERT(inputs.size() > 0);
+      AT_ASSERT(!inputs.empty());
       AT_ASSERT(inputs.size() % 2 == 0);
       size_t side_num_elems = inputs.size() / 2;
       auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
@@ -151,7 +154,7 @@ RegisterOperators mm_tree_reduction_reg({Operator(
         push(stack, at::mm(lhs, rhs));
       } else {
         auto acc = at::mm(inputs[0], inputs[side_num_elems]);
-        for (size_t i = 1; i < side_num_elems; ++i) {
+        for (const auto i : c10::irange(1, side_num_elems)) {
           acc.add_(at::mm(inputs[i], inputs[side_num_elems + i]));
         }
         push(stack, std::move(acc));
@@ -248,22 +251,26 @@ struct TreeToken {
 
 enum class Side { LHS, RHS };
 
-void BatchMMTreeReduce(Block* block) {
+void BatchMMTreeReduce(Block* block, AliasDb& alias_db) {
   auto graph = block->owningGraph();
 
   // Look for trees in the block
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : block->nodes()) {
-    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") &&
+        !alias_db.hasWriters(node)) {
       tokens[node] = TreeToken::mm(node);
-    } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
+    } else if (
+        node->matches("aten::t(Tensor self) -> Tensor") &&
+        !alias_db.hasWriters(node)) {
       auto input_it = tokens.find(node->input()->node());
       if (input_it != tokens.end()) {
         tokens[node] = TreeToken::transpose(node, input_it->second);
       }
     } else if (
         node->matches(
-            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
+            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") &&
+        !alias_db.hasWriters(node)) {
       Node* lhs = node->inputs()[0]->node();
       Node* rhs = node->inputs()[1]->node();
       auto lhs_it = tokens.find(lhs);
@@ -284,7 +291,7 @@ void BatchMMTreeReduce(Block* block) {
       }
     } else {
       for (auto block : node->blocks()) {
-        BatchMMTreeReduce(block);
+        BatchMMTreeReduce(block, alias_db);
       }
     }
   }
@@ -319,11 +326,11 @@ RegisterOperators mm_batch_side_reg({Operator(
     [](const Node* node) -> Operation {
       size_t num_other_side_inputs = node->inputs().size() - 1;
       Side single_side = static_cast<Side>(node->i(Symbol::attr("side")));
-      return [num_other_side_inputs, single_side](Stack* stack) {
+      return [num_other_side_inputs, single_side](Stack& stack) {
         at::Tensor side_input;
         std::vector<at::Tensor> other_side_inputs;
         other_side_inputs.reserve(num_other_side_inputs);
-        for (auto it = stack->end() - num_other_side_inputs; it != stack->end();
+        for (auto it = stack.end() - num_other_side_inputs; it != stack.end();
              ++it) {
           other_side_inputs.push_back(std::move(*it).toTensor());
         }
@@ -342,18 +349,18 @@ RegisterOperators mm_batch_side_reg({Operator(
               mm_out,
               num_other_side_inputs,
               /*dim=*/single_side == Side::LHS ? 1 : 0);
-          stack->insert(
-              stack->end(),
+          stack.insert(
+              stack.end(),
               std::make_move_iterator(outputs.begin()),
               std::make_move_iterator(outputs.end()));
         } else {
           if (single_side == Side::LHS) {
             for (at::Tensor& other : other_side_inputs) {
-              stack->emplace_back(side_input.mm(other));
+              stack.emplace_back(side_input.mm(other));
             }
           } else {
             for (at::Tensor& other : other_side_inputs) {
-              stack->emplace_back(other.mm(side_input));
+              stack.emplace_back(other.mm(side_input));
             }
           }
         }
@@ -365,7 +372,7 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     Value* value,
     AliasDb& alias_db) {
   const auto postprocess = [&](std::vector<Node*> mms) {
-    if (mms.size() == 0) {
+    if (mms.empty()) {
       return mms;
     }
     std::sort(mms.begin(), mms.end(), [](Node* n, Node* m) {
@@ -374,7 +381,7 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     // Filter out dependent MMs. This algorithm might do very badly if e.g. you
     // have a lot of independent MMs, that depend on the first one, but I doubt
     // this will be a common scenario.
-    for (size_t i = 0; i < mms.size(); ++i) {
+    for (const auto i : c10::irange(mms.size())) {
       if (mms[i] == nullptr)
         continue;
       for (size_t j = i + 1; j < mms.size(); ++j) {
@@ -393,7 +400,8 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
   std::vector<Node*> rhses; // Like above, but rhs
   for (Use u : value->uses()) {
     if (u.user->owningBlock() == block &&
-        u.user->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+        u.user->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") &&
+        !alias_db.hasWriters(u.user)) {
       if (u.offset == 0 && u.user->inputs()[1] != value) {
         lhses.push_back(u.user);
       } else if (u.offset == 1 && u.user->inputs()[0] != value) {
@@ -401,7 +409,8 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
       }
     }
   }
-  return std::make_pair(postprocess(lhses), postprocess(rhses));
+  return std::make_pair(
+      postprocess(std::move(lhses)), postprocess(std::move(rhses)));
 }
 
 void BatchMMSide(Block* block, AliasDb& alias_db) {
@@ -423,7 +432,7 @@ void BatchMMSide(Block* block, AliasDb& alias_db) {
     batch_mm->i_(Symbol::attr("side"), static_cast<int>(side));
     Value* const_side = mms[0]->inputs().at(side == Side::LHS ? 0 : 1);
     batch_mm->addInput(const_side);
-    for (size_t i = 0; i < mms.size(); ++i) {
+    for (const auto i : c10::irange(mms.size())) {
       batch_mm->addInput(mms[i]->inputs().at(side == Side::LHS ? 1 : 0));
       mms[i]->output()->replaceAllUsesWith(batch_mm->outputs().at(i));
     }
@@ -431,7 +440,8 @@ void BatchMMSide(Block* block, AliasDb& alias_db) {
 
   std::unordered_set<Value*> considered_values;
   for (Node* node : block->nodes()) {
-    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") &&
+        !alias_db.hasWriters(node)) {
       for (Value* input : node->inputs()) {
         if (/*bool not_inserted = */ !considered_values.emplace(input).second) {
           continue;
@@ -464,13 +474,23 @@ bool hasMutableOperators(Block* block) {
   return false;
 }
 
+bool hasMMOperators(std::shared_ptr<Graph>& graph) {
+  DepthFirstGraphNodeIterator it(graph);
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void BatchMM(std::shared_ptr<Graph>& graph) {
-  if (hasMutableOperators(graph->block())) {
-    // TODO(suo): make BatchMM mutability-safe
+  if (!hasMMOperators(graph)) {
     return;
   }
   AliasDb alias_db(graph);
-  BatchMMTreeReduce(graph->block());
+  BatchMMTreeReduce(graph->block(), alias_db);
   BatchMMSide(graph->block(), alias_db);
   EliminateDeadCode(graph);
   // It's possible that transpose rearrangements have created sequences of

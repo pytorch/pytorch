@@ -6,10 +6,8 @@
 from caffe2.python.core import DataType, BlobReference, ScopedBlobReference
 from caffe2.python.modeling.parameter_info import ParameterInfo
 
-import six
 
-
-class Initializer(object):
+class Initializer:
     '''
     This class abstracts out parameter creation. One can come up with a new
     Initializer in order to implement more complex parameter initialization logic
@@ -35,7 +33,7 @@ class Initializer(object):
         )
 
 
-class ExternalInitializer(object):
+class ExternalInitializer:
     '''
     This class is used in cases when the parameter should not be initialized by
     the initializer, but rather provided in the workspace when param_init_net is
@@ -47,7 +45,7 @@ class ExternalInitializer(object):
     def create_param(self, param_name, init_net, shape):
         if isinstance(param_name, BlobReference):
             param = BlobReference(str(param_name), init_net)
-        elif isinstance(param_name, six.string_types):
+        elif isinstance(param_name, str):
             param = ScopedBlobReference(param_name, init_net)
         else:
             raise TypeError("Unsupported type for param_name")

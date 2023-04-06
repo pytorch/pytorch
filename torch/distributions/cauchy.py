@@ -1,5 +1,5 @@
 import math
-from torch._six import inf, nan
+from torch import inf, nan
 from numbers import Number
 
 import torch
@@ -7,6 +7,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Cauchy']
 
 class Cauchy(Distribution):
     r"""
@@ -16,6 +17,7 @@ class Cauchy(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Cauchy(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Cauchy distribution with loc=0 and scale=1
         tensor([ 2.3214])
@@ -34,7 +36,7 @@ class Cauchy(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
-        super(Cauchy, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Cauchy, _instance)
@@ -50,6 +52,10 @@ class Cauchy(Distribution):
         return torch.full(self._extended_shape(), nan, dtype=self.loc.dtype, device=self.loc.device)
 
     @property
+    def mode(self):
+        return self.loc
+
+    @property
     def variance(self):
         return torch.full(self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device)
 
@@ -61,7 +67,7 @@ class Cauchy(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        return -math.log(math.pi) - self.scale.log() - (1 + ((value - self.loc) / self.scale)**2).log()
+        return -math.log(math.pi) - self.scale.log() - (((value - self.loc) / self.scale)**2).log1p()
 
     def cdf(self, value):
         if self._validate_args:
@@ -69,8 +75,6 @@ class Cauchy(Distribution):
         return torch.atan((value - self.loc) / self.scale) / math.pi + 0.5
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         return torch.tan(math.pi * (value - 0.5)) * self.scale + self.loc
 
     def entropy(self):

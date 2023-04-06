@@ -1,18 +1,26 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/div_rtn.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <ATen/native/cuda/im2col.cuh>
 #include <ATen/native/im2col_shape_check.h>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/col2im_native.h>
+#include <ATen/ops/im2col_native.h>
+#endif
+
+namespace at::native {
 namespace {
 
 static void im2col_out_cuda_template(
@@ -53,7 +61,7 @@ static void im2col_out_cuda_template(
 
   TensorArg input_arg{input_, "input", 1};
   TensorArg output_arg{output, "output", 2};
-  checkAllSameGPU("im2col_cuda", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   im2col_shape_check(
       input_,
@@ -73,7 +81,7 @@ static void im2col_out_cuda_template(
 
   if (input.dim() == 3) {
     batched_input = false;
-    input.resize_({1, input.size(0), input.size(1), input.size(2)});
+    input = input.view({1, input.size(0), input.size(1), input.size(2)});
   }
 
   int64_t batch_size = input.size(0);
@@ -93,10 +101,9 @@ static void im2col_out_cuda_template(
   int64_t output_length = output_height * output_width;
 
   output.resize_({batch_size, n_output_plane, output_length});
-  output.zero_();
 
   // Launch kernel
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "im2col_out_cuda", [&] {
     Tensor input_n;
     Tensor output_n;
@@ -130,38 +137,14 @@ static void im2col_out_cuda_template(
   });
 }
 
-static void im2col_backward_out_cuda_template(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    IntArrayRef input_size,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  TORCH_CHECK(
-      input_size.size() == 2,
-      "It is expected input_size equals to 2, but got size ",
-      input_size.size());
-  // col2im_out_cuda checks size of kernel_size, dilation, padding and stride
-  col2im_out_cuda(
-      grad_input,
-      grad_output,
-      input_size,
-      kernel_size,
-      dilation,
-      padding,
-      stride);
-}
-
 } // namespace
 
-Tensor& im2col_out_cuda(
-    Tensor& output,
-    const Tensor& input,
+Tensor& im2col_out_cuda(const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
-    IntArrayRef stride) {
+    IntArrayRef stride,
+    Tensor& output) {
   im2col_out_cuda_template(
       output, input, kernel_size, dilation, padding, stride);
   return output;
@@ -179,43 +162,4 @@ Tensor im2col_cuda(
   return output;
 }
 
-Tensor& im2col_backward_out_cuda(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    IntArrayRef input_size,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  im2col_backward_out_cuda_template(
-      grad_input,
-      grad_output,
-      input_size,
-      kernel_size,
-      dilation,
-      padding,
-      stride);
-  return grad_input;
-}
-
-Tensor im2col_backward_cuda(
-    const Tensor& grad_output,
-    IntArrayRef input_size,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  im2col_backward_out_cuda_template(
-      grad_input,
-      grad_output,
-      input_size,
-      kernel_size,
-      dilation,
-      padding,
-      stride);
-  return grad_input;
-}
-
-} // namespace native
-} // namespace at
+} // namespace at::native
