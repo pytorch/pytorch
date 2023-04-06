@@ -16,7 +16,8 @@
 namespace at {
 namespace vec {
 
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 template <typename T>
 constexpr bool is_zarch_implemented() {
@@ -290,6 +291,8 @@ constexpr int64_t allbitset(int16_t x) {
   return (onex << x) - onex;
 }
 
+namespace { /* unnamed namespace */
+
 ZSimdVect<float> vec_mergee(ZSimdVect<float> x, ZSimdVect<float> y) {
   constexpr ZSimdVectBinary<uint8_t> mergee_mask{
       0, 1, 2, 3, 16, 17, 18, 19, 8, 9, 10, 11, 24, 25, 26, 27};
@@ -309,6 +312,8 @@ ZSimdVect<float> vec_mergeo(ZSimdVect<float> x, ZSimdVect<float> y) {
 ZSimdVect<double> vec_mergeo(ZSimdVect<double> x, ZSimdVect<double> y) {
   return vec_mergel(x, y);
 }
+
+} /* unnamed namespace */
 
 //
 template <typename T>
@@ -696,8 +701,27 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return set_inner<1, size()>(a, b, count);
   }
 
-  const T& operator[](int idx) const = delete;
-  T& operator[](int idx) = delete;
+  const ElementType& operator[](int idx) const {
+    if (idx < size() / 2)
+    {
+      return _vec0[idx];
+    }
+    else
+    {
+      return _vec1[idx - (size() / 2)];
+    }
+  }
+
+  ElementType& operator[](int idx) {
+    if (idx < size() / 2)
+    {
+      return _vec0[idx];
+    }
+    else
+    {
+      return _vec1[idx - (size() / 2)];
+    }
+  }
 
   Vectorized<T> C10_ALWAYS_INLINE operator+(const Vectorized<T>& other) const {
     return Vectorized<T>{_vec0 + other._vec0, _vec1 + other._vec1};
@@ -1247,6 +1271,8 @@ ZSimdVect<int> vec_flt_int(const ZSimdVect<float> x) {
 #define vec_flt_int vec_signed
 #endif
 
+namespace { /* unnamed namespace */
+
 Vectorized<float> convert_to_float(const Vectorized<int32_t>& x) {
   return {vec_int_flt(x.vec0()), vec_int_flt(x.vec1())};
 }
@@ -1262,6 +1288,8 @@ Vectorized<double> convert_to_float(const Vectorized<int64_t>& x) {
 Vectorized<int64_t> convert_to_int(const Vectorized<double>& x) {
   return {vec_signed(x.vec0()), vec_signed(x.vec1())};
 }
+
+} /* unnamed namespace */
 
 template <typename T, typename V>
 Vectorized<V> cast_zvector(const Vectorized<T>& x) {
@@ -1408,6 +1436,8 @@ struct pack_type<int32_t> {
   using type = int16_t;
 };
 
+namespace { /* unnamed namespace */
+
 template <typename T, typename V = typename unpack_type<T>::type>
 std::pair<Vectorized<V>, Vectorized<V>> unpack(const Vectorized<T>& x) {
   auto vec0 = vec_unpackh(x.vec0());
@@ -1450,6 +1480,8 @@ Vectorized<uint8_t> pack(
   auto vec1 = vec_packsu(second.vec0(), second.vec1());
   return Vectorized<uint8_t>{vec0, vec1};
 }
+
+} /* unnamed namespace */
 
 //////////////////////////////////QUANT///////////////////////////////////////////
 template <typename T>
@@ -1869,7 +1901,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
  public:
   Vectorized() {}
 
-  explicit C10_ALWAYS_INLINE Vectorized(vinner_type v) : _vec{v} {}
+  C10_ALWAYS_INLINE Vectorized(vinner_type v) : _vec{v} {}
 
   template <typename U = T, std::enable_if_t<(sizeof(U) == 16), int> = 0>
   C10_ALWAYS_INLINE Vectorized(T s1, T s2)
@@ -1892,6 +1924,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
 
   template <typename U = T, std::enable_if_t<(sizeof(U) == 8), int> = 0>
   C10_ALWAYS_INLINE Vectorized(T s) : Vectorized<T>(s, s, s, s) {}
+
+  C10_ALWAYS_INLINE operator vinner_type() const {
+    return _vec;
+  }
 
   C10_ALWAYS_INLINE const vinner_type& vec() const {
     return _vec;
@@ -2252,6 +2288,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     return mapOrdinary(std::exp);
   }
 
+  Vectorized<T> exp2() const {
+    return mapOrdinary(exp2_impl);
+  }
+
   Vectorized<T> log() const {
     return mapOrdinary(std::log);
   }
@@ -2265,6 +2305,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   Vectorized<T> log10() const {
     auto ret = log();
     return Vectorized<T>{ret._vec * vinner_type(log10e_inv<underline_type>())};
+  }
+
+  Vectorized<T> log1p() const {
+    return mapOrdinary(std::log1p);
   }
 
   Vectorized<T> sgn() const {
