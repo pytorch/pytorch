@@ -141,16 +141,18 @@ def _retrieve_or_adapt_input_to_graph_set(
         # is dynamic, each dimension would be variable (i.e., sym variable in Pytorch
         # FX graph. Note that sym variable is mapped to tensor in ONNX Script world)
         # calculated by other operators.
-        sequence_elements: List[Union[graph_building.TorchScriptTensor, torch.Tensor]] = []  # type: ignore[no-redef]
+        sequence_mixed_elements: List[
+            Union[graph_building.TorchScriptTensor, List[int]]
+        ] = []
         for tensor in onnx_tensor:
             if isinstance(tensor, torch.fx.Node) and isinstance(
                 tensor.meta["val"], torch.SymInt
             ):
-                sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
+                sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
             elif isinstance(tensor, int):
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
                 # dim, and onnx-script will promote it to tensot(int64)
-                sequence_elements.append([tensor])
+                sequence_mixed_elements.append([tensor])
         # Concat all the elements in the sequence.
         # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
         # so list of sym_ints is concatenated to a tensor before calling ONNX op.
@@ -162,11 +164,16 @@ def _retrieve_or_adapt_input_to_graph_set(
         # onnx-script auto wraps python number with op.Constants,
         # so we don't need to specifically process them.
         with evaluator.default_as(tracer):
-            return opset18.Concat(*sequence_elements, axis=0)
+            return opset18.Concat(*sequence_mixed_elements, axis=0)
     elif isinstance(onnx_tensor, (tuple, list)) and all(
         isinstance(node, torch.fx.Node) for node in onnx_tensor
     ):
-        sequence_elements: List[Union[graph_building.TorchScriptTensor, Tuple[graph_building.TorchScriptTensor, ...]]] = []  # type: ignore[no-redef]
+        sequence_elements: List[
+            Union[
+                graph_building.TorchScriptTensor,
+                Tuple[graph_building.TorchScriptTensor, ...],
+            ]
+        ] = []
         for tensor in onnx_tensor:
             sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
         return sequence_elements
