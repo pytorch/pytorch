@@ -415,7 +415,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if nnmodule_has_hooks(target, check_forward=True):
+            if nnmodule_has_hooks(target, check_forward_hooks=True):
                 torch._logging.warning_once(
                     log,
                     "nn.Module forward/_pre hooks are only partially supported, and were detected in your model. "
@@ -424,7 +424,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     "to ensure recompiling after changing hooks."
                     f"{nnmodule_doc_url_msg} ",
                 )
-            if nnmodule_has_hooks(target, check_backward=True, check_state_dict=True):
+            if nnmodule_has_hooks(
+                target, check_backward_hooks=True, check_state_dict_hooks=True
+            ):
                 torch._logging.warning_once(
                     log,
                     "nn.Module state_dict and backward hooks are not yet supported by torch.compile, "
