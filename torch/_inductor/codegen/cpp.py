@@ -63,6 +63,11 @@ DTYPE_TO_ATEN = {
     torch.bfloat16: "at::ScalarType::BFloat16",
 }
 
+DEVICE_TO_ATEN = {
+    "cpu": "at::kCPU",
+    "cuda": "at::kCUDA",
+}
+
 INDEX_TYPE = "long"
 
 RTYPE_TO_CPP = {
@@ -863,6 +868,18 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
+
+    @staticmethod
+    def bitwise_and(x, y):
+        return f"decltype({x})({x} & {y})"
+
+    @staticmethod
+    def bitwise_or(x, y):
+        return f"decltype({x})({x} | {y})"
+
+    @staticmethod
+    def bitwise_xor(x, y):
+        return f"decltype({x})({x} ^ {y})"
 
     @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
@@ -2121,6 +2138,7 @@ class CppKernelProxy(CppKernel):
             if (
                 len(contig_vars_sorted) == 2
                 and contig_vars_sorted[-1] in contig_and_const_stride
+                and contig_vars_sorted[-1] == len(self.itervars) - 1
             ):
                 return contig_vars_sorted
             return sorted(contig_vars_sorted, key=lambda i: contig_vars_list.count(i))[
