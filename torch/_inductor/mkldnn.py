@@ -9,7 +9,7 @@ import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch._dynamo.utils import fake_mode_from_tensors
+from torch._dynamo.utils import detect_fake_mode
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -546,10 +546,7 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     if not is_cpu:
         return gm
-    # For binary fusion, we need to check inputs info to make sure
-    # the binary inputs have same tensor info(device, dtype, and layout).
-
-    fake_mode = fake_mode_from_tensors(example_inputs)
+    fake_mode = detect_fake_mode(example_inputs)
     if not dynamo_config.dynamic_shapes:
         ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
     gm = fuse_unary(gm)

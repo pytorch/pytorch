@@ -7,7 +7,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 from torch import _prims
-from torch._dynamo.utils import fake_mode_from_tensors
+from torch._dynamo.utils import detect_fake_mode
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -70,7 +70,7 @@ def replace_fx(gm: torch.fx.GraphModule, example_inputs):
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = is_cpu_device(example_inputs)
 
-    fake_mode = fake_mode_from_tensors(example_inputs)
+    fake_mode = detect_fake_mode(example_inputs)
 
     gm = sink_cat_after_pointwise(gm)
     if config.permute_fusion and not is_cpu:
