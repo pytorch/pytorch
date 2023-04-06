@@ -25,12 +25,7 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import (
-    CppAotWrapperCodeGen,
-    CppWrapperCodeGen,
-    CudaAotWrapperCodeGen,
-    WrapperCodeGen,
-)
+from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -618,10 +613,10 @@ class GraphLowering(torch.fx.Interpreter):
             device = self.get_single_device()
             self.check_cpp_wrapper()
             if device == "cpu":
-                self.wrapper_code = CppAotWrapperCodeGen()
+                self.wrapper_code = CppWrapperCodeGen()
             else:
                 assert device == "cuda", "Non-supported device for AOT compilation"
-                self.wrapper_code = CudaAotWrapperCodeGen()
+                self.wrapper_code = CudaWrapperCodeGen()
         elif self.cpp_wrapper:
             self.check_cpp_wrapper()
             if self.cpp_wrapper:
@@ -689,6 +684,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         code, linemap = self.codegen()
         mod = PyCodeCache.load(code, linemap=linemap)
+
         for name, value in self.constants.items():
             setattr(mod, name, value)
 

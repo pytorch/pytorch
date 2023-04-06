@@ -6,7 +6,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
@@ -17,7 +16,8 @@ namespace c10 {
 namespace cuda {
 namespace impl {
 
-struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
+struct C10_CUDA_EXPORT CUDAGuardImpl final
+    : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
 
   CUDAGuardImpl() = default;
@@ -209,10 +209,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
-      const override {
-    CUDAStream cuda_stream{stream};
-    CUDACachingAllocator::recordStream(data_ptr, cuda_stream);
-  }
+      const override;
 };
 
 } // namespace impl
