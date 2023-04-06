@@ -77,7 +77,10 @@ def config_of(args):
             return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
-    divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
+    if config.triton.divisible_by_16 and not dynamo_config.dynamic_shapes:
+        divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
+    else:
+        divisible_by_16 = []
     return instance_descriptor(tuple(divisible_by_16), ())
 
 
@@ -662,6 +665,8 @@ class TritonKernel(Kernel):
         """
         if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
+        if dynamo_config.dynamic_shapes:
+            return False
         threshold = {
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
@@ -986,9 +991,8 @@ class TritonKernel(Kernel):
 
         self._load_mask = mask
         try:
-            with self.swap_buffers(self.compute, self.compute):
-                # TODO(jansel): do we need a reshape here?
-                yield mask
+            # TODO(jansel): do we need a reshape here?
+            yield mask
         finally:
             self._load_mask = prior
 
@@ -1026,24 +1030,27 @@ class TritonKernel(Kernel):
             if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
 
-        if (
+        if "tmp" in mask:
+            # Masked loads must come after the mask is computed
+            load_buffer = self.compute
+        elif (
             self.inside_reduction
             and not self.persistent_reduction
             and "rmask" not in mask
-            and "tmp" not in mask
             and not indirect_indexing
         ):
             # can lift a common load outside of reduction loop
             # One exception is when this is an indirect_load.
-            result_var = self.cse.generate(
-                self.body, line, append_broadcast=append_broadcast
-            )
+            load_buffer = self.body
         else:
-            result_var = self.cse.generate(
-                self.loads, line, append_broadcast=append_broadcast
-            )
+            load_buffer = self.loads
 
+        result_var = self.cse.generate(load_buffer, line)
         result_var.mask_vars = mask_vars
+
+        if append_broadcast:
+            line = f"tl.broadcast_to({result_var}, {append_broadcast})"
+            result_var = self.cse.generate(load_buffer, line)
 
         if not self.inside_reduction or "rmask" not in mask:
             self.outside_loop_vars.add(result_var)
@@ -1460,11 +1467,20 @@ class TritonKernel(Kernel):
                 call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
-        call_args = ", ".join(call_args)
-        stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
-        code.writeline(
-            f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
-        )
+
+        if V.graph.aot_mode:
+            V.graph.wrapper_code.generate_kernel_call(
+                name, call_args, V.graph.scheduler.current_device.index
+            )
+        else:
+            # TODO: refactor generate_kernel_call
+            call_args_str = ", ".join(call_args)
+            stream_name = code.write_get_cuda_stream(
+                V.graph.scheduler.current_device.index
+            )
+            code.writeline(
+                f"{name}.run({call_args_str}, grid=grid({', '.join(grid)}), stream={stream_name})"
+            )
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)
@@ -1676,6 +1692,7 @@ class TritonScheduling:
 
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
+
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
         self.scheduler.free_buffers()
 
