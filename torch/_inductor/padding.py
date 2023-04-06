@@ -59,7 +59,6 @@ def pad_and_slice_matrices(new_graph, a, b, pad_amount, batched=False):
     )
 
     # Pad the second input matrix with zeroes
-    breakpoint()
     new_b_pad = new_graph.call_function(
         torch.ops.aten.cat,
         (
@@ -114,4 +113,6 @@ def pad_mm(fx_g: torch.fx.GraphModule):
         else:
             new_node = new_graph.node_copy(node, lambda n: env[n])
             env[node] = new_node
+        
+    breakpoint()
     return torch.fx.GraphModule(fx_g, new_graph)
