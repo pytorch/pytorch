@@ -8314,7 +8314,7 @@ class DistributedTest:
                     dist.get_backend(group_to_use) == dist.Backend.NCCL
                     and not is_detail_dbg_mode
                 ):
-                    expected_err = "Caught collective operation timeout"
+                    expected_err = "caught collective operation timeout"
                     ctx = self.assertRaisesRegex(RuntimeError, expected_err)
                 else:
                     expected_err = None
@@ -8767,7 +8767,7 @@ class DistributedTest:
                 if dist.get_debug_level() == dist.DebugLevel.DETAIL:
                     err_regex = "Timed out waiting"
                 else:
-                    err_regex = "Caught collective operation timeout"
+                    err_regex = "caught collective operation timeout"
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     nccl_pg.allreduce(tensors).wait(timedelta(seconds=0.1))
             else:
