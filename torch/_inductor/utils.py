@@ -914,10 +914,7 @@ def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
         for ev in profile_events:
             total_time += ev.self_cuda_time_ms
             percent = f"{ev.self_cuda_time_ms / wall_time_ms * 100:.2f}%"
-            key = ev.key
-            if key.startswith("triton_poi_fused_"):
-                key = key[len("triton_poi_fused_"):]
-            rows.append([key[:120], ev.self_cuda_time_ms, ev.count, percent])
+            rows.append([ev.key[:120], ev.self_cuda_time_ms, ev.count, percent])
         rows.append(
             ["Total", total_time, "", f"{total_time / wall_time_ms * 100:.2f}%"]
         )
