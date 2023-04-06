@@ -101,6 +101,7 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       # This option is used when cross-compiling arm64 from x86-64. Specifically, we need arm64 conda
       # environment even though the arch is x86-64
@@ -110,6 +111,7 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
           environment-file: ${{ inputs.environment-file }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Install macOS homebrew dependencies
         uses: nick-fields/retry@v2.8.2
