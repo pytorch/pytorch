@@ -5298,7 +5298,7 @@ class TestCudaComm(TestCase):
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
             for i in range(N):
-                while total >= 1024 * 1024 * 1024:
+                while total >= 1024 * 1024 * 1024 / 4:
                     free()
                 action, = random.choices(choices, weights=[1, 1 if mem else 0, .1])
                 action()
