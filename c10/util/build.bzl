@@ -48,6 +48,12 @@ def define_targets(rules):
     )
 
     rules.cc_library(
+        name = "bit_cast",
+        hdrs = ["bit_cast.h"],
+        visibility = ["//:__subpackages__"],
+    )
+
+    rules.cc_library(
         name = "ssize",
         hdrs = ["ssize.h"],
         linkstatic = True,
@@ -74,6 +80,7 @@ def define_targets(rules):
         srcs = rules.glob(
             ["*.h"],
             exclude = [
+                "bit_cast.h",
                 "ssize.h",
             ],
         ),

@@ -90,6 +90,10 @@ comment_origin = False
 # Convert 1x1 convs into matmuls
 conv_1x1_as_mm = False
 
+# Enable split reductions for better utilization when the dimension
+# being reduced over is large (by splitting it)
+split_reductions = True
+
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -126,13 +130,11 @@ def decide_compile_threads():
 
 compile_threads = decide_compile_threads()
 
-# autotuning global cache path
+# gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil
-
-    global_cache_path = parutil.get_file_path("fb/global_cache", pkg=__package__)
+    global_cache_dir = "fb/cache"
 else:
-    global_cache_path = None
+    global_cache_dir = None
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this
@@ -238,6 +240,9 @@ class triton:
 
     # use alternate codegen for smaller reductions
     persistent_reductions = True
+
+    # hint to Triton when arguments are divisible by 16
+    divisible_by_16 = True
 
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
