@@ -960,20 +960,27 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.prefix.splice(
             """
             #include <ATen/ATen.h>
-            #include <ATen/cuda/CUDAContext.h>
-            #include <ATen/cuda/Exceptions.h>
-            #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+            #include <c10/util/Exception.h>
             #include <c10/cuda/CUDAGuard.h>
 
-            CUfunction loadKernel(const std::string &filePath, const std::string &funcName) {
+            #define AT_CUDA_DRIVER_CHECK_OVERRIDE(EXPR)                                     \
+            do {                                                                            \
+                CUresult __err = EXPR;                                                      \
+                if (__err != CUDA_SUCCESS) {                                                \
+                    AT_ERROR("CUDA driver error: ", static_cast<int>(__err));               \
+                }                                                                           \
+            } while (0)
+
+            static inline CUfunction loadKernel(const std::string &filePath,
+                    const std::string &funcName) {
                 CUmodule mod;
                 CUfunction func;
-                AT_CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
-                AT_CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleLoad(&mod, filePath.c_str()));
+                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 return func;
             }
 
-            void launchKernel(
+            static inline void launchKernel(
                     CUfunction func,
                     int gridX,
                     int gridY,
@@ -982,7 +989,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int sharedMemBytes,
                     void* args[],
                     int device_index) {
-                AT_CUDA_DRIVER_CHECK(cuLaunchKernel(
+                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
                     func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
                     at::cuda::getCurrentCUDAStream(device_index), args, nullptr));
             }

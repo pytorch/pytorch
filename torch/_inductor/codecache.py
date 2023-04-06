@@ -492,7 +492,6 @@ def get_include_and_linking_paths(
         libs = ["c10", "torch", "torch_cpu", "torch_python"]
         if cuda:
             libs += ["c10_cuda", "cuda", "torch_cuda"]
-            ipaths += [f"{cpp_extension._TORCH_PATH}/../aten/src/"]
         else:
             libs += ["gomp"]
             macros = vec_isa.build_macro()
