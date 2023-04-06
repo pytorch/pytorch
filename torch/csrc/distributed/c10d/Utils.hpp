@@ -98,8 +98,8 @@ inline int parseEnvVarInt(const char* envVarName) {
   return C10D_ENV_NOT_SET;
 }
 
-inline char* parseEnvVarString(const char* envVarName, char* default_val) {
-  char* val = std::getenv(envVarName);
+inline const char* parseEnvVarString(const char* envVarName, const char* default_val) {
+  const char* val = std::getenv(envVarName);
   if (val == nullptr) {
     val = default_val;
   }

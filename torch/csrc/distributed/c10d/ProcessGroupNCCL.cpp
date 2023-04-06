@@ -659,8 +659,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 #endif
 
   init();
-  char * torch_distributed_debug = parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", "OFF");
-  char * nccl_debug = parseEnvVarString("NCCL_DEBUG", "OFF");
+  const std::string OFF = "OFF";
+  const char* torch_distributed_debug =
+      parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
+  const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
             << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
@@ -671,8 +673,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream
             << "\n TORCH_DISTRIBUTED_DEBUG: "
             << std::string(torch_distributed_debug)
-            << "\n NCCL_DEBUG: "
-            << std::string(nccl_debug);
+            << "\n NCCL_DEBUG: " << std::string(nccl_debug);
 
   RECORD_PARAM_COMMS(
       0, // seq
