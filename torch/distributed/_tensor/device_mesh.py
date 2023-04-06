@@ -1,13 +1,16 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
-from typing import List, Optional, Sequence, TypeVar, Union
+from typing import List, Optional, TYPE_CHECKING, Union
 
 import torch
+import torch.distributed._functional_collectives as funcol
+
 from torch.distributed.distributed_c10d import (
     _get_default_group,
-    all_gather,
     all_to_all,
+    Backend,
     broadcast,
+    get_backend,
     get_global_rank,
     get_rank,
     get_world_size,
@@ -16,14 +19,20 @@ from torch.distributed.distributed_c10d import (
     is_initialized,
     new_group,
     ProcessGroup,
-    reduce_scatter,
     ReduceOp,
     scatter,
     Work,
 )
 
-import torch.distributed.distributed_c10d as c10d
-import torch.distributed._functional_collectives as funcol
+# only import numpy typing when type checking
+if TYPE_CHECKING:
+    try:
+        from numpy.typing import ArrayLike
+    except ImportError:
+        warnings.warn(
+            "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
+        )
+
 
 _global_device_mesh: Optional["DeviceMesh"] = None
 
@@ -39,20 +48,7 @@ def set_global_device_mesh(mesh: Optional["DeviceMesh"]) -> None:
     _global_device_mesh = mesh
 
 
-# We want a type for "can be passed to torch.as_tensor()";
-# this is a recursive sequence type, which isn't fully supported
-# yet in python. This construct simulates that up to depth 7.
-T = TypeVar("T")
-_L = Union[T, Sequence[T]]
-NDIntList = _L[_L[_L[_L[_L[_L[_L[int]]]]]]]
-
-MeshExprT = Union[
-    torch.Tensor,
-    NDIntList,
-]
-
-
-class DeviceMesh:
+class DeviceMesh(object):
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
     represented as a n-d dimension array, and each value of the n-d dimensional
@@ -103,7 +99,7 @@ class DeviceMesh:
     def __init__(
         self,
         device_type: str,
-        mesh: MeshExprT,
+        mesh: Union[torch.Tensor, "ArrayLike"],
         *,
         _init_process_groups: bool = True,
     ) -> None:
@@ -121,32 +117,41 @@ class DeviceMesh:
             self._dim_groups = self._init_process_groups()
 
     def _get_or_create_default_group(self):
-        self._backend = "gloo" if self.device_type == "cpu" else "nccl"
-        if not is_initialized():
+        self._backend = Backend.GLOO if self.device_type == "cpu" else Backend.NCCL
+        default_initialized = is_initialized()
+        if not default_initialized:
             init_process_group(backend=self._backend)
-        else:
-            world_size = get_world_size()
-            if self.mesh.numel() > world_size:
-                raise RuntimeError(
-                    f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
-                )
+
+        world_size = get_world_size()
+        if self.mesh.numel() > world_size:
+            raise RuntimeError(
+                f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
+            )
 
         # TODO: we should do allgather the mesh tensor to ensure every rank have the same mesh value
         # TODO: if user want to pass pg_options, offer a way to do it
-        # check default pg backend, should support device_type
+        world_backend = get_backend()
         if self.device_type == "cpu":
+            cpu_backends = ["gloo", "threaded"]
             assert (
-                self._backend == "gloo" or self._backend == "threaded"
-            ), f"ProcessGroup backend: {self._backend} not supporting CPU!"
+                world_backend in cpu_backends
+            ), f"Default PG backend: {world_backend} not supporting CPU!"
         elif self.device_type == "cuda":
-            if self._backend == "gloo":
+            cuda_backends = ["nccl", "gloo", "threaded"]
+            if world_backend == "gloo":
                 warnings.warn(
                     "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
                 )
-            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "threaded"
+            assert (
+                world_backend in cuda_backends
+            ), f"Default PG backend: {world_backend} not supporting CUDA!"
+            if not default_initialized:
+                # automatically set the current cuda device base on num of gpu devices available in each host
+                # NOTE: This device selection would only work for homogenous hardware.
+                torch.cuda.set_device(get_rank() % torch.cuda.device_count())
         else:
             raise RuntimeError(
-                f"DeviceMesh only support cpu or cuda device type, but got {self.device_type}"
+                f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"
             )
 
         # calculate the coordinates of the current global rank on the mesh
@@ -169,9 +174,9 @@ class DeviceMesh:
         # one valid process group per rank
         dim_groups: List[ProcessGroup] = []
 
-        if self.mesh.ndim == 1 and len(unique_mesh_values) == get_world_size() - 1:
+        if self.mesh.ndim == 1 and len(unique_mesh_values) == get_world_size():
             # if the mesh is the same as world_pg, we just append the default
-            # pg to the first dim goups, as new_group cannot have the exact
+            # pg to the first dim groups, as new_group cannot have the exact
             # same ranks as world
             dim_groups.append(default_pg)
         else:
@@ -342,11 +347,10 @@ class DeviceMesh:
 
     def all_gather(
         self,
-        tensor_list: List[torch.Tensor],
         tensor: torch.Tensor,
         mesh_dim: int = 0,
-        async_op: bool = False,
-    ) -> Optional[Work]:
+        gather_dim: int = 0,
+    ) -> torch.Tensor:
         """
         all_gather the tensor on each rank to the tensor_list on a
         device mesh dimension.
@@ -357,12 +361,14 @@ class DeviceMesh:
             mesh_dim (int, optional): indicate which mesh dimension we want
                 to scatter on, we by default choose the first rank on the
                 mesh dimension as source of truth.
+            gather_dim (int, optional): Dimension to concatenate the resulting tensor.
 
+            This suppport up to 1 elem of padding on gather_dim.
         Returns:
-            A :class:`Work` object
+            A :class:`torch.Tensor` object
         """
         dim_group = self._dim_groups[mesh_dim]
-        return all_gather(tensor_list, tensor, group=dim_group, async_op=async_op)
+        return funcol.all_gather_tensor(tensor, gather_dim=gather_dim, group=dim_group)
 
     def all_reduce(
         self,
@@ -387,23 +393,28 @@ class DeviceMesh:
         """
         dim_group = self._dim_groups[mesh_dim]
         op_name: str = op.name  # type: ignore[attr-defined]
-        return funcol.all_reduce(tensor, reduceOp=op_name, group=(self, mesh_dim,))
+        return funcol.all_reduce(
+            tensor,
+            reduceOp=op_name,
+            group=(
+                self,
+                mesh_dim,
+            ),
+        )
 
     def reduce_scatter(
         self,
-        output: torch.Tensor,
-        input_list: List[torch.Tensor],
+        input: torch.Tensor,
         op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
         mesh_dim: int = 0,
-        async_op: bool = False,
-    ) -> Optional[Work]:
+        scatter_dim: int = 0,
+    ) -> torch.Tensor:
         """
-        reduce the input_list on each rank on a device mesh dimension, and scatter
+        reduce the input on each rank on a device mesh dimension, and scatter
         the results to the output tensor on each rank.
 
         Args:
-            output (torch.Tensor): tensor to receive the scattered result.
-            input_list (List[torch.Tensor]): tensor list to be reduced and scattered
+            input (torch.Tensor): tensor to be reduced and scattered
                 and scattered on each rank.
             op (:class:`torch.distributed.distributed_c10d.ReduceOp, optional):
                 the reduction op of reduce_scatter (i.e. ReduceOp.SUM)
@@ -411,12 +422,13 @@ class DeviceMesh:
                 to scatter on.
 
         Returns:
-            A :class:`Work` object
+            A :class:`torch.Tensor` object
         """
-        if self._backend == "nccl":
+        op_name: str = op.name  # type: ignore[attr-defined]
+        if self._backend == "nccl" or self._backend == "threaded":
             dim_group = self._dim_groups[mesh_dim]
-            fut = reduce_scatter(
-                output, input_list, op=op, group=dim_group, async_op=async_op
+            scatter_tensor = funcol.reduce_scatter_tensor(
+                input, reduceOp=op_name, scatter_dim=scatter_dim, group=dim_group
             )
 
         elif self._backend == "gloo":
@@ -425,41 +437,22 @@ class DeviceMesh:
             warnings.warn(
                 "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
             )
-            my_coordinate = self.get_coordinate()
-            # TODO: what should happen if rank is not in the mesh?
-            # see issue https://github.com/pytorch/tau/pull/492
-            assert (
-                my_coordinate is not None
-            ), "Rank if not part of mesh"  # TODO: figure out behavior here
-            fut = None
-            flattened_list = []
-            offset_list = []
-
-            offset = 0
-            for input in input_list:
-                offset_list.append(offset)
-                offset += input.numel()
-                flattened_list.append(input.flatten())
-
-            # all reduce since gloo does not support reduce_scatter
-            flat_tensor = torch.cat(flattened_list).clone(
-                memory_format=torch.contiguous_format
-            )
             dim_group = self._dim_groups[mesh_dim]
-            fut = c10d.all_reduce(flat_tensor, op=op, group=dim_group, async_op=async_op)
+            group_size = get_world_size(dim_group)
+            group_rank = get_rank(dim_group)
+            if scatter_dim != 0:
+                tensor_list = torch.chunk(input, group_size, dim=scatter_dim)
+                input = torch.cat(tensor_list)
 
-            # scatter the tensor
-            output_offset = offset_list[my_coordinate[mesh_dim]]
-            output.copy_(
-                flat_tensor[output_offset : output_offset + output.numel()].view(
-                    output.shape
-                )
-            )
+            flat_tensor = funcol.all_reduce(input, reduceOp=op_name, group=dim_group)
+            chunks = flat_tensor.chunk(group_size, dim=0)
+            scatter_tensor = chunks[group_rank]
         else:
             raise RuntimeError(
                 f"backend {self._backend} does not support reduce_scatter!"
             )
-        return fut
+
+        return scatter_tensor
 
     # TODO: test uneven split on GLOO and NCCL
     def all_to_all(
