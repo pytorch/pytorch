@@ -465,6 +465,8 @@ void ProcessGroupWrapper::runCollectiveChecks(
   // API does not expose timeout.
   auto seq = getSequenceNumberForGroup();
   auto finger_print = CollectiveFingerPrint(op_type, tensors, seq);
+  LOG(INFO) << "[Rank " << getRank() << "] "
+            << "Running collective: " << finger_print;
   try {
     glooBackend_->monitoredBarrier(options, /* waitAllRanks */ true);
   } catch (const std::runtime_error& e) {
