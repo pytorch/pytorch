@@ -229,6 +229,7 @@ cudaError_t SetDevice(int device) {
 }
 
 cudaError_t MaybeSetDevice(int device) {
+  TORCH_CHECK(targetDeviceIndex < 0, "targetDeviceIndex was not expected");
   if (hasPrimaryContext(device)) {
     return c10::cuda::SetDevice(device);
   }
@@ -237,27 +238,29 @@ cudaError_t MaybeSetDevice(int device) {
 }
 
 int ExchangeDevice(int to_device) {
-  int cur_device = -1;
-  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
-  if (to_device == cur_device) {
-    targetDeviceIndex = -1;
-    return cur_device;
-  }
+  int cur_device = targetDeviceIndex;
   targetDeviceIndex = -1;
+  if (cur_device < 0) {
+    C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+    if (to_device == cur_device) {
+      return cur_device;
+    }
+  }
   C10_CUDA_CHECK(cudaSetDevice(to_device));
+  C10_CUDA_CHECK(cudaFree(0));
   return cur_device;
 }
 
 int MaybeExchangeDevice(int to_device) {
+  TORCH_CHECK(targetDeviceIndex < 0, "targetDeviceIndex was not expected!");
   int cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
   if (to_device == cur_device) {
-    targetDeviceIndex = -1;
     return cur_device;
   }
   if (hasPrimaryContext(to_device)) {
-    targetDeviceIndex = -1;
     C10_CUDA_CHECK(cudaSetDevice(to_device));
+    C10_CUDA_CHECK(cudaFree(0));
   } else {
     targetDeviceIndex = to_device;
   }
