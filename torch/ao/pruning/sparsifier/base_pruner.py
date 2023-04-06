@@ -16,18 +16,18 @@ from .utils import (
     module_to_fqn,
 )
 
-__all__ = ["BaseSparsifier"]
+__all__ = ["BasePruner"]
 
 SUPPORTED_MODULES = {nn.Linear}
 
 KEYS_NOT_IN_STATE_DICT = ["module", "module_fqn", "tensor_name"]
 
-__all__ = ["BaseSparsifier"]
+__all__ = ["BasePruner"]
 
 
 # TODO update desc with new config args
-class BaseSparsifier(abc.ABC):
-    r"""Base class for all sparsifiers.
+class BasePruner(abc.ABC):
+    r"""Base class for all pruners.
 
     Abstract methods that need to be implemented:
 
@@ -49,7 +49,7 @@ class BaseSparsifier(abc.ABC):
         >>> config = [{'tensor_fqn': 'layer1.weight', 'tensor_fqn': 'linear2.weight2', 'sparsity_level': 0.5}]
         >>> defaults = {'sparsity_level': 0.7}
         >>> # model.layer1.weight will have `sparsity_level` = 0.7 (getting default)
-        >>> sparsifier = BaseSparsifier(config, defaults)
+        >>> sparsifier = BasePruner(config, defaults)
     """
 
     def __init__(self, defaults: Optional[Dict[str, Any]] = None):
