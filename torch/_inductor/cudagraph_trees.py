@@ -321,7 +321,7 @@ def is_live(weak_ref):
 
 class StorageWeakRefWrapper:
     """
-    Wrapper around a storage weak ref.
+    Wrapper around a storage weak ref. Will deallocate it upon expiration if invoked.
     """
 
     __slots__ = ["ref", "_data_ptr"]
@@ -345,7 +345,11 @@ class StorageWeakRefWrapper:
         return instance
 
     def __call__(self) -> Optional[StorageWeakRefPointer]:
+        if self.ref is None:
+            return None
+
         if self.ref.expired():
+            self.ref = None
             return None
 
         return self.ref.cdata
@@ -355,7 +359,7 @@ class StorageWeakRefWrapper:
         return self._data_ptr
 
     def __repr__(self):
-        if self.ref.expired():
+        if self.ref is None or self.ref.expired():
             return f"StorageWeakRefWrapper to {self.data_ptr()}; dead"
         else:
             return f"StorageWeakRefWrapper to {self.data_ptr()}; alive"
