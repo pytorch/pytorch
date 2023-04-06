@@ -1100,7 +1100,10 @@ class CppKernel(Kernel):
 
             def gen_loop(loop: LoopLevel, in_reduction=False):
                 with contextlib.ExitStack() as stack:
-                    code.writelines(loop.lines())
+                    loop_lines = loop.lines()
+                    if loop_lines is None:
+                        return
+                    code.writelines(loop_lines)
                     stack.enter_context(code.indent())
                     # generate inner loops or loop body
                     if loop.inner:
@@ -2615,6 +2618,10 @@ class LoopLevel:
         return loop
 
     def lines(self):
+        offset_expr = cexpr_index(self.offset)
+        size_expr = cexpr_index(self.size)
+        if config.cpp.no_redundant_loops and offset_expr == size_expr:
+            return None
         if self.reduction_var_map:
             reduction = " " + " ".join(
                 f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
@@ -2642,8 +2649,8 @@ class LoopLevel:
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
-        offset_str = f"{INDEX_TYPE} {self.var}={cexpr_index(self.offset)}"
-        size_str = f"{self.var}<{cexpr_index(self.size)}"
+        offset_str = f"{INDEX_TYPE} {self.var}={offset_expr}"
+        size_str = f"{self.var}<{size_expr}"
         steps_str = f"{self.var}+={cexpr_index(self.steps)}"
         line2 = f"for({offset_str}; {size_str}; {steps_str})"
         if self.collapsed or not line1:
