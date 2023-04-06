@@ -3088,28 +3088,4 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
 
-@register_meta(aten.all_reduce)
-def all_reduce_meta(self, reduceOp, tag, rankset, group_size):
-    return torch.empty_like(self)
-
-
-@register_meta(aten.all_gather_into_tensor)
-def all_gather_into_tensor_meta(shard, tag, rankset, group_size):
-    out_size = list(shard.size())
-    out_size[0] *= group_size
-    return shard.new_empty(out_size)
-
-
-@register_meta(aten.reduce_scatter_tensor)
-def reduce_scatter_tensor_meta(input, reduce_op, scatter_dim, tag, rankset, group_size):
-    out_size = list(input.size())
-    out_size[scatter_dim] //= group_size
-    return input.new_empty(out_size)
-
-
-@register_meta(aten.wait_tensor)
-def wait_tensor_meta(self):
-    return torch.empty_like(self)
-
-
 activate_meta()
