@@ -2852,7 +2852,13 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
                          # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
-    torch.nn.LocalResponseNorm  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.LocalResponseNorm,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
+    torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
+    torch.nn.AvgPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.MaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.MaxPool3d,  # torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                         # aten.max_pool3d_with_indices.default
 }
 
 
