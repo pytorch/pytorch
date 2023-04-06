@@ -166,6 +166,12 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
+
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+
           ${CONDA_RUN} .ci/pytorch/macos-build.sh
 
       - name: Archive artifacts into zip
