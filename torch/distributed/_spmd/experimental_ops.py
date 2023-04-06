@@ -170,6 +170,48 @@ def _prop__fused_adam(op_schema: OpSchema):
         return OutputSharding(output_spec=(op_schema.args_schema[0],) * NT)  # type: ignore[arg-type]
 
 
+@register_prop_rule(aten.nll_loss_forward.default)  # pyre-ignore
+def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
+    if torch.distributed.get_rank() == 0:
+        print("===== nll args schema: ", op_schema.args_schema)
+    self, target = op_schema.args_schema[:2]
+    # FIXME: weight is optional
+    if self != target:
+        return OutputSharding(
+            output_spec=None,
+            schema_suggestions=[
+                OpSchema(
+                    func_schema=op_schema.func_schema,
+                    args_schema=(target, target) + op_schema.args_schema[2:],
+                    kwargs_schema=op_schema.kwargs_schema,
+                    is_inplace=op_schema.is_inplace,
+                    is_out_variant=op_schema.is_out_variant,
+                )
+            ],
+        )
+    else:
+        from torch.fx.passes.shape_prop import TensorMetadata
+        #return OutputSharding(output_spec=(target,))
+        return OutputSharding(
+            output_spec=(
+                target,
+                DTensorSpec(
+                    mesh=self.mesh,
+                    placements=[Replicate()],
+                    tensor_meta=TensorMetadata(
+                        shape=self.tensor_meta.shape[1:],
+                        dtype=self.tensor_meta.dtype,
+                        memory_format=self.tensor_meta.memory_format,
+                        requires_grad=False,
+                        stride=(1,),
+                        is_quantized=False,
+                        qparams={},
+                    ),
+                )
+            )
+        )
+
+
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
 def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:
     input, normalized_shape, weight, bias, eps = op_schema.args_schema
