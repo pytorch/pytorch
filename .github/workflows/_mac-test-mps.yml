@@ -106,6 +106,12 @@ jobs:
         run: |
           # shellcheck disable=SC1090
           set -ex
+
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+
           # As wheels are cross-compiled they are reported as x86_64 ones
           ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl

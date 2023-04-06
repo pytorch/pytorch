@@ -204,7 +204,7 @@ class Backend:
 
     def __new__(cls, name: str):
         if not isinstance(name, str):
-            raise ValueError("Backend name must be a string, but got: {}".format(name))
+            raise ValueError(f"Backend name must be a string, but got: {name}")
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
         if value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
@@ -3352,8 +3352,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
     if device_ids is not None:
         if get_backend(group) != Backend.NCCL:
             raise RuntimeError(
-                "Function argument device_ids not supported "
-                "for the selected backend {}".format(get_backend(group))
+                f"Function argument device_ids not supported for the selected backend {get_backend(group)}"
             )
         if isinstance(device_ids, list):
             opts.device_ids = device_ids
@@ -3821,9 +3820,7 @@ def new_subgroups_by_enumeration(
         for rank in ranks:
             if rank in rank_to_ranks_dict:
                 raise ValueError(
-                    "Rank {} has appeared in both subgroup {} and {}".format(
-                        rank, rank_to_ranks_dict[rank], ranks
-                    )
+                    f"Rank {rank} has appeared in both subgroup {rank_to_ranks_dict[rank]} and {ranks}"
                 )
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:

@@ -77,7 +77,10 @@ def config_of(args):
             return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
-    divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
+    if config.triton.divisible_by_16 and not dynamo_config.dynamic_shapes:
+        divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
+    else:
+        divisible_by_16 = []
     return instance_descriptor(tuple(divisible_by_16), ())
 
 
@@ -1465,7 +1468,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r":
                 grid.append(expr)
 
-        if V.graph.aot_mode:
+        if V.graph.cpp_wrapper:
             V.graph.wrapper_code.generate_kernel_call(
                 name, call_args, V.graph.scheduler.current_device.index
             )
