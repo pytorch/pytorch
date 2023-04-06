@@ -41,7 +41,7 @@ def get_alignment_size(dtype):
 
 def pad_and_slice_matrices(new_graph, a, b, pad_amount, batched=False):
     # Pad the first input matrix with zeroes
-    if not hasattr(b, "meta") and not hasattr(a, "meta"):
+    if not (hasattr(a, "meta") and "val" in a.meta and hasattr(b, "meta") and "val" in b.meta):
         return new_graph
     
     # breakpoint()
