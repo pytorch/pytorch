@@ -130,6 +130,21 @@ class TestAvgPool(TestCase):
                 x.to('cuda'), ceil_mode=True, count_include_pad=True, kernel_size=(1, 2, 3), stride=2)
             self.assertTrue(not torch.isnan(y).any())
 
+    def test_avg_pool1d_corner_cases(self):
+        dtypes = [torch.float, torch.double]
+
+        def check(x, args, expected):
+            model = torch.nn.AvgPool1d(*args)
+            for dtype in dtypes:
+                if isinstance(x, list):
+                    x = torch.tensor(x, dtype=dtype)
+                    expected = torch.tensor(expected, dtype=dtype)
+                self.assertEqual(model(x), expected)
+
+        # Pooling args: (kernel_size, stride, padding, ceil_mode, count_include_pad)
+        # https://github.com/pytorch/pytorch/issues/95116
+        check([[[2], [1]]], (4, 1, 0, True, True), [[[2], [1]]])
+
 
 class TestPoolingNN(NNTestCase):
     _do_cuda_memory_leak_check = True
@@ -771,6 +786,8 @@ torch.cuda.synchronize()
         check([[1], [1]], (2, None, 1, 2, False, False), [[float('-inf')], [float('-inf')]])
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
+        # https://github.com/pytorch/pytorch/issues/88464
+        check([[[2], [1]]], (4, 1, 0, 1, False, True), [[[2], [1]]])
 
     @onlyCPU
     @dtypes(torch.float, torch.double)

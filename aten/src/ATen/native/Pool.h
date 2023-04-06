@@ -52,6 +52,9 @@ static inline T pooling_output_shape_pad_lr(
         if ((outputSize - 1) * stride >= inputSize + pad_l) {
           --outputSize;
         }
+        // output size may be < 1 when kernel size > input size
+        // here, output size under ceil mode is forced to be >= 1
+        outputSize = std::max(outputSize, (int64_t)1);
     }
     return outputSize;
 }
