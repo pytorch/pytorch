@@ -16,7 +16,7 @@ import torch._dynamo.config as dynamo_config
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
-from torch._dynamo.utils import fake_mode_from_tensors
+from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
@@ -51,6 +51,15 @@ class BoxedBool:
             obj.value = False
             return obj
         return False
+
+
+@dataclasses.dataclass
+class BoxedDeviceIndex:
+    value: Optional[int]
+
+    def set(self, device_idx):
+        assert device_idx is None or isinstance(device_idx, int)
+        self.value = device_idx
 
 
 # copy_ fails when trying to write to tensors with memory overlap,
@@ -145,6 +154,7 @@ def compile_fx_inner(
     graph_id=None,
     aot_mode=False,
     is_inference=False,
+    boxed_forward_device_index=None,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -169,7 +179,7 @@ def compile_fx_inner(
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
-    fake_mode = fake_mode_from_tensors(example_inputs)
+    fake_mode = detect_fake_mode(example_inputs)
     if not fake_mode:
         fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
         FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
@@ -210,7 +220,9 @@ def compile_fx_inner(
         ]
 
         complex_memory_overlap_inputs = any(
-            complex_memory_overlap(t) for t in example_inputs
+            complex_memory_overlap(t)
+            for t in example_inputs
+            if isinstance(t, torch.Tensor)
         )
 
         if (
@@ -218,8 +230,16 @@ def compile_fx_inner(
             and not graph.mutated_inputs
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
+            and all(isinstance(t, torch.Tensor) for t in example_inputs)
             and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
+            if (
+                boxed_forward_device_index is not None
+                and not is_inference
+                and not is_backward
+            ):
+                boxed_forward_device_index.set(next(iter(graph.device_idxs)))
+
             compiled_fn = cudagraphify(
                 compiled_fn,
                 example_inputs,
@@ -231,6 +251,23 @@ def compile_fx_inner(
             )
         else:
             BoxedBool.disable(cudagraphs)
+
+            # See [Backward Generation Handling]
+            # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+            # know we are we running the backward even if we will not run it in cudagraphs
+            if is_backward and config.triton.cudagraph_trees:
+                assert boxed_forward_device_index.value is not None
+                compiled_fn_inner = compiled_fn
+
+                manager = torch._inductor.cudagraph_trees.get_manager(
+                    boxed_forward_device_index.value, create_if_none_exists=False
+                )
+                # should already exist from forward
+                assert manager is not None
+
+                def compiled_fn(new_inputs):
+                    manager.set_to_running_backward()
+                    return compiled_fn_inner(new_inputs)
 
             if len(set(graph.device_types)) > 1:
                 developer_warning("skipping cudagraphs due to multiple devices")
@@ -589,6 +626,8 @@ def compile_fx(
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes
     )
+    forward_device = BoxedDeviceIndex(None)
+
     graph_id = next(_graph_counter)
 
     @dynamo_utils.dynamo_timed
@@ -609,6 +648,7 @@ def compile_fx(
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             is_inference=is_inference,
+            boxed_forward_device_index=forward_device,
         )
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
@@ -636,6 +676,7 @@ def compile_fx(
                 cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=graph_id,
+                boxed_forward_device_index=forward_device,
             )
 
     with overrides.patch_functions():
@@ -656,7 +697,7 @@ def compile_fx(
 
 def _shape_env_from_inputs(inputs):
     shape_env = None
-    fake_mode = fake_mode_from_tensors(inputs)
+    fake_mode = detect_fake_mode(inputs)
 
     # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
     # pass in real inputs for now.
