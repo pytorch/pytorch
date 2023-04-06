@@ -15,13 +15,15 @@ from torch.utils import _pytree as pytree
 
 class DynamoOptimizeExporter(fx_exporter.FXGraphModuleExporter):
     def export(self) -> torch.onnx.ExportOutput:
+        # Fill in default values for optional args and kwargs. The goal is to preserve
+        # them as inputs in `dynamo.optimize` produced FX graph. Otherwise, they will
+        # be traced as constants.
         _, named_args = self._apply_input_format_step(
             fx_exporter.BindInputStep,
             self.model_args,
             self.model_kwargs,
             step_init_args=(self.model_signature,),
         )
-
         model_args, _ = self._apply_input_format_step(
             fx_exporter.MergeKwargsIntoArgsStep,
             [],
@@ -58,7 +60,7 @@ class DynamoOptimizeExporter(fx_exporter.FXGraphModuleExporter):
         # Apply and record this output format step.
         self._output_formatter.append_step(DynamoFlattenOutputStep())
         # TODO: `dynamo.optimize` does not capture non computation part of the graph.
-        # Hence a same tensor that is returned multiple times will only appear once
+        # Hence any tensor that is returned multiple times will only appear once
         # in the return statement of `dynamo.optimize` traced graph. A specialized
         # output formatter is required to map this gap between PyTorch model.
 
@@ -184,10 +186,10 @@ def _wrap_model_with_output_formatter(
     """Wrap model with output formatter.
 
     This is a helper function to enable :func:`dynamo.export` on models that produce
-    custom user defined types outputs by wrapping the model with an output formatter to
+    custom user defined types outputs. It wraps the model with an output formatter to
     convert the outputs to :func:`dynamo.export` compatible types, i.e. :class:`torch.Tensor`.
 
-    The formatting logic is controlled by the passed in ``output_formatter``.
+    The formatting logic is controlled by ``output_formatter``.
 
     Args:
         model: PyTorch model or function.
@@ -211,10 +213,14 @@ class DynamoExporter(fx_exporter.FXGraphModuleExporter):
         args = copy.deepcopy(self.model_args)
         kwargs = copy.deepcopy(self.model_kwargs)
 
+        # `dynamo.export` does not recognize custom user defined classes as output type.
+        # Apply wrapper to format the outputs back to `dynamo.export` compatible types,
+        # i.e. :class:`torch.Tensor`.
         dynamo_flatten_output_step = DynamoFlattenOutputStep()
         wrapped_model = _wrap_model_with_output_formatter(
             self.model, dynamo_flatten_output_step
         )
+        # Record the output formatter step.
         self._output_formatter.append_step(dynamo_flatten_output_step)
 
         # Translate callable to FX graph.
@@ -228,7 +234,6 @@ class DynamoExporter(fx_exporter.FXGraphModuleExporter):
         )
         del graph_guard  # Unused
         torch._dynamo.reset()
-        graph_module.print_readable()
 
         # Export FX graph to ONNX ModelProto.
         #

@@ -169,6 +169,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # Tensor optional kwargs are an exception. It is always traced as input.
         # It is unclear if this behavior is intended or not. But in general it is bad
         # practice to set mutable default values.
+        # `DynamoOptimizeExporter` applies a workaround by binding args and kwargs to
+        # model signature and fill in the default values of unprovided optional arguments.
         def func(x, b=torch.tensor(1.0)):
             y = x + b
             z = y.relu()
