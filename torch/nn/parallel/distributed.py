@@ -38,6 +38,7 @@ if torch.distributed.rpc.is_available():
 from torch._utils import _get_device_index
 
 from ..modules import Module
+from ._common_types import _device_t, _devices_t
 from .scatter_gather import gather, scatter_kwargs  # noqa: F401
 
 __all__ = ["DistributedDataParallel"]
@@ -639,23 +640,24 @@ class DistributedDataParallel(Module, Joinable):
     # used to track whether the given thread is inside ddp forward for torchdynamo purposes
     _active_ddp_module = None
 
+    # TODO type process_group once `distributed` module is stubbed
     def __init__(
         self,
-        module,
-        device_ids=None,
-        output_device=None,
-        dim=0,
-        broadcast_buffers=True,
-        process_group=None,
-        bucket_cap_mb=25,
-        find_unused_parameters=False,
-        check_reduction=False,
-        gradient_as_bucket_view=False,
-        static_graph=False,
+        module: Module,
+        device_ids: Optional[_devices_t] = None,
+        output_device: Optional[_device_t] = None,
+        dim: int = 0,
+        broadcast_buffers: bool = True,
+        process_group: Optional[Any] = None,
+        bucket_cap_mb: float = 25,
+        find_unused_parameters: bool = False,
+        check_reduction: bool = False,
+        gradient_as_bucket_view: bool = False,
+        static_graph: bool = False,
         delay_all_reduce_named_params=None,
         param_to_hook_all_reduce=None,
         mixed_precision: Optional[_MixedPrecision] = None,
-    ):
+    ) -> None:
         super().__init__()
         Joinable.__init__(self)
         self.logger = None
@@ -670,7 +672,7 @@ class DistributedDataParallel(Module, Joinable):
 
         self._delay_all_reduce_params = []
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
-            self.parameters_to_ignore = set(module._ddp_params_and_buffers_to_ignore)
+            self.parameters_to_ignore = set(module._ddp_params_and_buffers_to_ignore)  # type: ignore[arg-type]
         else:
             self.parameters_to_ignore = set()
         if delay_all_reduce_named_params is not None:
@@ -1003,12 +1005,12 @@ class DistributedDataParallel(Module, Joinable):
             for submodule in self.module.modules():
                 for param in submodule.parameters(recurse=False):
                     # Do not cast DDP ignored parameters.
-                    if hasattr(param, "_ddp_ignored") and param._ddp_ignored:
+                    if hasattr(param, "_ddp_ignored") and param._ddp_ignored:  # type: ignore[attr-defined]
                         continue
-                    _alloc_storage(param._mp_param, param.size())
+                    _alloc_storage(param._mp_param, param.size())  # type: ignore[attr-defined]
                     # copy() implicitly casts to low precision
                     with torch.no_grad():
-                        param._mp_param.copy_(param.data)
+                        param._mp_param.copy_(param.data)  # type: ignore[attr-defined]
                         # TODO: when zero_grad(set_to_none=False) or in grad
                         # accumulation case, accumulated grads can be in fp32
                         # which can cause errors when running DDP backwards due
@@ -1022,7 +1024,7 @@ class DistributedDataParallel(Module, Joinable):
                             param.grad.data = param.grad.to(
                                 self.mixed_precision.param_dtype  # type: ignore[union-attr]
                             )
-                    param.data = param._mp_param
+                    param.data = param._mp_param  # type: ignore[attr-defined]
                 copy_event = torch.cuda.Event()
                 copy_event.record()
                 self._submodule_to_event[submodule].append(copy_event)
