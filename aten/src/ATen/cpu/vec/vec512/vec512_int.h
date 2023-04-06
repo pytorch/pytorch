@@ -882,6 +882,21 @@ public:
   Vectorized<uint8_t> ge(const Vectorized<uint8_t>& other) const;
   Vectorized<uint8_t> lt(const Vectorized<uint8_t>& other) const;
   Vectorized<uint8_t> le(const Vectorized<uint8_t>& other) const;
+
+  static Vectorized<float> convert_to_float(const uint8_t* src_data) {
+    Vectorized<uint8_t> input_vec_512 = loadu(src_data, 16);
+    __m512i input_512 = input_vec_512.values;
+    // Take the first 128bit
+    __m128i input_128 = _mm512_castsi512_si128(input_512);
+    // Convert from 16*u8 to 16*int32
+    __m512i input_512_extended = _mm512_cvtepu8_epi32(input_128);
+    // Convert from 16*int32 to 16*float32
+    __m512 float_val0 = _mm512_cvtepi32_ps(input_512_extended);
+    Vectorized<float> res(float_val0);
+
+    return res;
+  }
+
 };
 
 template <>
