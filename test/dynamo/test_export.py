@@ -2137,6 +2137,15 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.export(my_dyn_fn, x)
 
     @config.patch(dynamic_shapes=True)
+    def test_symbool(self):
+        def f(x):
+            a = torch.scalar_tensor(x.shape[0] > 4)
+            return x.sin().sum() + a.sum()
+
+        gm, _  = torch._dynamo.export(f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic")
+        self.assertEqual(gm(torch.ones(3, 4)), f(torch.ones(3, 4)))
+
+    @config.patch(dynamic_shapes=True)
     def test_export_multi_dynamic_dim_constraint(self):
         x = torch.randn([3, 3, 3])
         y = torch.randn([2, 2, 2])

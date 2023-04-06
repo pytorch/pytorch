@@ -475,7 +475,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       } else if (torch::is_symfloat(obj)) {
         return py::cast<c10::SymFloat>(obj);
       } else if (torch::is_symbool(obj)) {
-        return py::handle(obj).cast<c10::SymBool>();
+        return py::cast<c10::SymBool>(obj);
       } else {
         throw py::cast_error(
             c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
