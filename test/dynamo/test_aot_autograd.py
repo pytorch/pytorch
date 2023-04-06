@@ -51,11 +51,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(4)
         x = torch.nn.Parameter(torch.randn(4))
         aot_fn = torch._dynamo.optimize("aot_eager")(fn)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "a leaf Variable that requires grad is being used in an in-place operation.",
-        ):
-            aot_fn(x, y)
+        # This should not error: we mutated an autograd leaf under no_grad mode.
+        aot_fn(x, y)
 
     def test_mutation1(self):
         def fn(_stack0: torch.Tensor, diagonal_chunked_attention_scores: torch.Tensor):
@@ -122,7 +119,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_call_fn_with_non_const_inputs_aot_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
             def __init__(self):
-                super(ModuleSpecialFwd, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=20, kernel_size=(5, 5)
                 )
@@ -151,9 +148,6 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
     def test_call_fn_with_non_const_inputs_aot_unsafe(self):
         class ModuleSpecialFwd(torch.nn.Module):
-            def __init__(self):
-                super(ModuleSpecialFwd, self).__init__()
-
             def _some_bad_fwd(self, param, y):
                 prev_grad = torch.is_grad_enabled()
                 try:
@@ -182,17 +176,11 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         # Run exported graph with AOT
         aot_fn = torch._dynamo.optimize("aot_eager")(graph)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "a leaf Variable that requires grad is being used in an in-place operation.",
-        ):
-            aot_fn(x, y)
+        # This should not error: we mutated an autograd leaf under no_grad mode.
+        aot_fn(x, y)
 
     def test_call_fn_with_non_const_inputs_aot_unsafe_control_flow(self):
         class ModuleSpecialFwd(torch.nn.Module):
-            def __init__(self):
-                super(ModuleSpecialFwd, self).__init__()
-
             def _some_bad_fwd(self, param, y):
                 if y[0][0] < 3:
                     return y + param
@@ -292,9 +280,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         compare_equal_outs_and_grads(self, F(), fxy, (x, y))
         compare_equal_outs_and_grads(self, F(), fxy, (x, z))
-        self.assertEqual(
+        self.assertExpectedInline(
             failure_reason,
-            "tensor 'y' requires_grad mismatch. expected requires_grad=1",
+            """tensor 'L['y']' requires_grad mismatch. expected requires_grad=1""",
         )
 
         # Reset failure reason
@@ -411,7 +399,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxx(x3, x3)
         fxx(x4, y4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "x is y")
+        self.assertExpectedInline(failure_reason, """L['x'] is L['y']""")
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_metadata_mutation_on_input_causes_recompile(self):
@@ -436,9 +424,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a)
         f(a)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(
+        self.assertExpectedInline(
             failure_reason,
-            "tensor 'a' strides mismatch at index 0. expected 3, actual 1",
+            """tensor 'L['a']' strides mismatch at index 0. expected 3, actual 1""",
         )
 
         torch._dynamo.reset()
@@ -476,7 +464,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "a is b")
+        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
 
         torch._dynamo.reset()
 
@@ -491,7 +479,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a3, b3, c3, c3, 3, 3)
         f(a4, b4, c4, d4, 3, 3)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "c is d")
+        self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_with_global(self):
@@ -529,7 +517,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "a is b")
+        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg_list(self):
@@ -564,7 +552,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f([3, 2, 1], [4, 5, 6], a1, a1, a1, a1)
         f([3, 2, 1], [4, 5, 6], a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "a is b")
+        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
 
         torch._dynamo.reset()
 
@@ -613,7 +601,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "a is b")
+        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
 
         torch._dynamo.reset()
 
@@ -628,7 +616,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a3, b3, c3, c3)
         f(a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "c is d")
+        self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args(self):
@@ -659,7 +647,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "a is b")
+        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
 
         torch._dynamo.reset()
 
@@ -674,7 +662,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a3, b3, c3, c3)
         f(a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "c is d")
+        self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_multiple_aot_autograd_calls_dupe_args(self):

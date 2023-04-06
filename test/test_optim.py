@@ -14,7 +14,6 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.nn import Parameter
 from torch.optim import Adam, SGD, Optimizer
-from torch import sparse
 from torch.optim.lr_scheduler import (
     LambdaLR,
     MultiplicativeLR,
@@ -46,9 +45,10 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from typing import Dict, Any, Tuple
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
+from unittest.mock import patch
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -109,7 +109,7 @@ class TestOptim(TestCase):
                 i = torch.LongTensor([[1, 1]])
                 y = grad[1]
                 v = torch.tensor([y - y / 4.0, y / 4.0])
-            x = sparse.DoubleTensor(i, v, torch.Size([2])).to(dtype=v.dtype)
+            x = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)
             with torch.no_grad():
                 if sparse_grad:
                     params.grad = x
@@ -145,8 +145,8 @@ class TestOptim(TestCase):
         constructor_accepts_maximize=True,
         constructor_accepts_foreach=False,
     ):
-        maximize_options = set([False, constructor_accepts_maximize])
-        foreach_options = set([False, constructor_accepts_foreach])
+        maximize_options = {False, constructor_accepts_maximize}
+        foreach_options = {False, constructor_accepts_foreach}
 
         four_arg_constructor = constructor
         if constructor_accepts_maximize and constructor_accepts_foreach:
@@ -252,21 +252,26 @@ class TestOptim(TestCase):
         )
 
         # Make sure that optimizers that support maximize can load older models
-        state_dict = optimizer.state_dict()
-        if "maximize" in state_dict["param_groups"][0]:
-            for group in state_dict["param_groups"]:
+        old_state_dict = deepcopy(optimizer.state_dict())
+        state_dict_no_maximize = deepcopy(optimizer.state_dict())
+        if "maximize" in state_dict_no_maximize["param_groups"][0]:
+            for group in state_dict_no_maximize["param_groups"]:
                 del group["maximize"]
-            optimizer.load_state_dict(state_dict)
+            optimizer.load_state_dict(state_dict_no_maximize)
             # Make sure we can still step
             optimizer.step()
+            # Undo these changes before proceeding!
+            optimizer.load_state_dict(old_state_dict)
         # Make sure that optimizers that support foreach can load older models
-        state_dict = optimizer.state_dict()
-        if "foreach" in state_dict["param_groups"][0]:
-            for group in state_dict["param_groups"]:
+        state_dict_no_foreach = deepcopy(optimizer.state_dict())
+        if "foreach" in state_dict_no_foreach["param_groups"][0]:
+            for group in state_dict_no_foreach["param_groups"]:
                 del group["foreach"]
-            optimizer.load_state_dict(state_dict)
+            optimizer.load_state_dict(state_dict_no_foreach)
             # Make sure we can still step
             optimizer.step()
+            # Undo these changes before proceeding!
+            optimizer.load_state_dict(old_state_dict)
 
         # Make sure that loading optimizers with step not wrapped in tensor can work
         state_dict = optimizer.state_dict()
@@ -317,7 +322,7 @@ class TestOptim(TestCase):
 
         # validate deepcopy() copies all public attributes
         def getPublicAttr(obj):
-            return set(k for k in obj.__dict__ if not k.startswith("_"))
+            return {k for k in obj.__dict__ if not k.startswith("_")}
 
         self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
@@ -346,8 +351,8 @@ class TestOptim(TestCase):
             return constructor
 
         for maximize, foreach in itertools.product(
-            set([False, constructor_accepts_maximize]),
-            set([False, constructor_accepts_foreach]),
+            {False, constructor_accepts_maximize},
+            {False, constructor_accepts_foreach},
         ):
             self._test_state_dict(
                 torch.randn(10, 5),
@@ -430,8 +435,8 @@ class TestOptim(TestCase):
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
-            f(a1).backward()
-            f(a2).backward()
+            f(a1).abs().backward()
+            f(a2).abs().backward()
 
             self.assertEqual(a1.grad.real, a1_real.grad)
             self.assertEqual(a1.grad.imag, a1_imag.grad)
@@ -646,7 +651,6 @@ class TestOptim(TestCase):
                 )
             )
 
-
     def _test_derived_optimizers_varying_tensors(self, optimizer_with_kwargs, kwarg):
         if not torch.cuda.is_available():
             return
@@ -716,7 +720,6 @@ class TestOptim(TestCase):
                         actual = actual[0]
                     self.assertEqual(st_p_state[k], actual)
 
-
     def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
         if not torch.cuda.is_available():
             return
@@ -729,7 +732,7 @@ class TestOptim(TestCase):
         device = "cuda"
         for optimizer_constructor, params in optimizer_pairs_with_flags:
             res, state = [], []
-            for enabled in (False, True):
+            for flag_value in (False, True):
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device
                 ).reshape(3, 2)
@@ -743,20 +746,20 @@ class TestOptim(TestCase):
                 )
                 model.to(dtype=torch.float64, device=device)
                 params_with_flags = deepcopy(params)
-                params_with_flags[flag] = enabled
+                params_with_flags[flag] = flag_value
 
                 optimizer = optimizer_constructor(
                     model.parameters(), **params_with_flags
                 )
 
-                for _ in range(kIterations):
+                for i in range(kIterations):
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()
                     loss.backward()
 
                     # Test that step behaves as expected (a no-op) when grads are set to None
-                    if iter == 0:
+                    if i == 0:
                         optimizer.zero_grad(set_to_none=True)
 
                     optimizer.step()
@@ -774,16 +777,7 @@ class TestOptim(TestCase):
                 mt_p_state = mt_state[mt_p]
 
                 for k in st_p_state:
-                    actual = mt_p_state[k]
-                    # If `torch.optim.Adam` is `__init__`ed with either `fused=True` or `capturable=True`,
-                    # `step` Tensor is 1D while usually it's 0D.
-                    if (
-                        k == "step"
-                        and isinstance(actual, torch.Tensor)
-                        and actual.ndim == 1
-                    ):
-                        actual = actual[0]
-                    self.assertEqual(st_p_state[k], actual)
+                    self.assertEqual(st_p_state[k], mt_p_state[k])
 
     def test_multi_tensor_optimizers(self):
         optimizer_pairs_with_flags = [
@@ -871,22 +865,28 @@ class TestOptim(TestCase):
         self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "foreach")
 
     def test_fused_optimizers(self):
-        optimizer_pairs_with_flags = [
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=True)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
-        ]
+        optimizer_pairs_with_flags = tuple(itertools.product(
+            (optim.Adam, optim.AdamW),
+            (
+                dict(weight_decay=1., amsgrad=False),
+                dict(weight_decay=1., amsgrad=True),
+                dict(weight_decay=0., amsgrad=False),
+                dict(weight_decay=0., amsgrad=True),
+            ),
+        ))
         self._test_derived_optimizers(optimizer_pairs_with_flags, "fused")
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_fused_optimizers_with_varying_tensors(self):
-        optimizer_pairs_with_flags = [
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=True)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
-        ]
+        optimizer_pairs_with_flags = tuple(itertools.product(
+            (optim.Adam, optim.AdamW),
+            (
+                dict(weight_decay=1., amsgrad=False),
+                dict(weight_decay=1., amsgrad=True),
+                dict(weight_decay=0., amsgrad=False),
+                dict(weight_decay=0., amsgrad=True),
+            ),
+        ))
         self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "fused")
 
     def test_adam(self):
@@ -1602,35 +1602,23 @@ class TestOptim(TestCase):
             opt.step()
 
     # make sure that `state_steps` is correctly either updated or not updated when `found_inf`.
-    def test_functional_fused_adam_with_foundinf(self):
+    def test_functional_fused_optimizer_with_foundinf(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
 
-        from torch.optim import adam
+        from torch.optim import adam, adamw
 
         num_tensors = 5
-        for amsgrad in (False, True):
+        for functional_optim, amsgrad, no_grad_scale in itertools.product((adam.adam, adamw.adamw), (False, True), (False, True)):
             params, grads, exp_avgs, exp_avg_sqs = [
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)]
-                for _ in range(4)
-            ]
-            max_exp_avg_sqs = (
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)]
-                if amsgrad
-                else []
-            )
-            state_steps = [
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-                for _ in range(num_tensors)
-            ]
-            grad_scale = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-            )
-            found_inf = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-            )
+                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            prev_params = [t.clone().detach() for t in params]
+            max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
+            state_steps = [torch.ones((), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
+            grad_scale = None if no_grad_scale else torch.ones((1,), dtype=torch.float32, device="cuda")
+            found_inf = torch.ones((), dtype=torch.float32, device="cuda")
 
-            adam.adam(
+            functional_optim(
                 params,
                 grads,
                 exp_avgs,
@@ -1654,10 +1642,11 @@ class TestOptim(TestCase):
             self.assertEqual(
                 state_steps,
                 [
-                    torch.ones((1,), dtype=torch.float32, device="cuda")
+                    torch.ones((), dtype=torch.float32, device="cuda")
                     for _ in range(num_tensors)
                 ],
             )
+            self.assertEqual(params, prev_params)
 
     def test_empty_grad(self):
         optimizers = [
@@ -1788,10 +1777,19 @@ class TestOptim(TestCase):
         opt2.step()
         self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
 
+    def test_fused_optimizer_raises(self):
+        if not torch.cuda.is_available():
+            self.skipTest("Requires CUDA devices")
+        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+            with self.assertRaisesRegex(RuntimeError, "`fused` and `foreach` cannot be `True` together."):
+                optimizer_ctor([torch.empty((), device="cuda")], foreach=True, fused=True)
+            with self.assertRaisesRegex(RuntimeError, "`fused` does not support `differentiable`"):
+                optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
+
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
-        super(SchedulerTestNet, self).__init__()
+        super().__init__()
         self.conv1 = torch.nn.Conv2d(1, 1, 1)
         self.conv2 = torch.nn.Conv2d(1, 1, 1)
 
@@ -1817,7 +1815,7 @@ class TestLRScheduler(TestCase):
     exact_dtype = True
 
     def setUp(self):
-        super(TestLRScheduler, self).setUp()
+        super().setUp()
         self.net = SchedulerTestNet()
         self.opt = SGD(
             [
@@ -1870,23 +1868,10 @@ class TestLRScheduler(TestCase):
         scheduler = LambdaLR(optim, lambda epoch: 1.0)
         del scheduler
 
-        # Prior to Python 3.7, local variables in a function will be referred by the current frame.
-        import sys
-
-        if sys.version_info < (3, 7):
-            import inspect
-
-            referrers = gc.get_referrers(optim)
-            self.assertTrue(
-                len(referrers) == 1 and referrers[0] is inspect.currentframe(),
-                "Optimizer should contain no cyclic references (except current frame)",
-            )
-            del referrers
-        else:
-            self.assertTrue(
-                len(gc.get_referrers(optim)) == 0,
-                "Optimizer should contain no cyclic references",
-            )
+        self.assertTrue(
+            len(gc.get_referrers(optim)) == 0,
+            "Optimizer should contain no cyclic references",
+        )
 
         gc.collect()
         del optim
@@ -3854,9 +3839,7 @@ class TestLRScheduler(TestCase):
     def _test_reduce_lr_on_plateau(
         self, schedulers, targets, metrics, epochs=10, verbose=False
     ):
-        if isinstance(schedulers, LRScheduler) or isinstance(
-            schedulers, ReduceLROnPlateau
-        ):
+        if isinstance(schedulers, (LRScheduler, ReduceLROnPlateau)):
             schedulers = [schedulers]
         for epoch in range(epochs):
             self.opt.step()
@@ -3981,7 +3964,7 @@ class TestLRScheduler(TestCase):
 
 class SWATestDNN(torch.nn.Module):
     def __init__(self, input_features):
-        super(SWATestDNN, self).__init__()
+        super().__init__()
         self.n_features = 100
         self.fc1 = torch.nn.Linear(input_features, self.n_features)
         self.bn = torch.nn.BatchNorm1d(self.n_features)
@@ -3997,7 +3980,7 @@ class SWATestDNN(torch.nn.Module):
 
 class SWATestCNN(torch.nn.Module):
     def __init__(self, input_channels):
-        super(SWATestCNN, self).__init__()
+        super().__init__()
         self.n_features = 10
         self.conv1 = torch.nn.Conv2d(
             input_channels, self.n_features, kernel_size=3, padding=1
@@ -4089,6 +4072,15 @@ class TestSWAUtils(TestCase):
         for p_swa, p_swa2 in zip(averaged_dnn.parameters(), averaged_dnn2.parameters()):
             self.assertEqual(p_swa, p_swa2)
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
+
+    def test_averaged_model_default_avg_fn_picklable(self):
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.BatchNorm2d(5),
+            torch.nn.Linear(5, 5),
+        )
+        averaged_dnn = AveragedModel(dnn)
+        pickle.dumps(averaged_dnn)
 
     def test_averaged_model_exponential(self):
         # Test AveragedModel with EMA as avg_fn
@@ -4549,6 +4541,40 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
+
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_defaults_changed_to_foreach(self):
+        from torch.optim import (adam, adamw, nadam, sgd, radam, rmsprop, rprop,
+                                 asgd, adamax, adadelta, adagrad)
+        multi_optims = ((optim.Adam, adam, "_multi_tensor_adam"),
+                        (optim.AdamW, adamw, "_multi_tensor_adamw"),
+                        (optim.NAdam, nadam, "_multi_tensor_nadam"),
+                        (optim.SGD, sgd, "_multi_tensor_sgd"),
+                        (optim.RAdam, radam, "_multi_tensor_radam"),
+                        (optim.RMSprop, rmsprop, "_multi_tensor_rmsprop"),
+                        (optim.Rprop, rprop, "_multi_tensor_rprop"),
+                        (optim.ASGD, asgd, "_multi_tensor_asgd"),
+                        (optim.Adamax, adamax, "_multi_tensor_adamax"),
+                        (optim.Adadelta, adadelta, "_multi_tensor_adadelta"),
+                        (optim.Adagrad, adagrad, "_multi_tensor_adagrad"),)
+
+        model = torch.nn.Linear(5, 5)
+        model.to(dtype=torch.float64, device="cuda")
+        input = torch.rand(2, 5, dtype=torch.float64, device="cuda")
+
+        for opt, mod, func in multi_optims:
+            defaults = {}
+            if opt == optim.SGD:
+                defaults["lr"] = 1e-2
+            optimizer = opt(model.parameters(), **defaults)
+            optimizer.zero_grad()
+            output = model(input)
+            loss = output.sum()
+            loss.backward()
+            with patch.object(mod, func) as mocked_foreach_impl:
+                optimizer.step()
+                self.assertTrue(mocked_foreach_impl.called)
 
 
 if __name__ == "__main__":

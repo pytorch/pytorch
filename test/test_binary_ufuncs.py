@@ -4,6 +4,7 @@ import torch
 import numpy as np
 
 import itertools
+from itertools import chain
 from itertools import product
 import math
 import random
@@ -14,7 +15,7 @@ import operator
 from functools import partial
 
 import torch.autograd.forward_ad as fwAD
-from torch._six import inf, nan
+from torch import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase,
     slowTest,
@@ -53,6 +54,7 @@ from torch.testing._internal.common_dtype import (
     floating_types_and,
     floating_and_complex_types,
     get_all_math_dtypes,
+    get_all_int_dtypes,
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
@@ -496,7 +498,7 @@ class TestBinaryUfuncs(TestCase):
         )
 
         def _supported(dtypes):
-            return all(map(lambda x: x in supported_dtypes, dtypes))
+            return all((x in supported_dtypes for x in dtypes))
 
         # int x int type promotion
         if _supported((torch.int16, torch.int32, torch.int64)):
@@ -1110,13 +1112,11 @@ class TestBinaryUfuncs(TestCase):
                         complex(1.0, 0.0),
                         complex(0.0, -1.0),
                         complex(0.0, 0.0)]
-        # using tensor of size-1 because we still need to fix the vectorized path
-        for nom, denom, expected in zip(nom_lst, denom_lst, expected_lst):
-            nom_tens = torch.tensor(nom, dtype=dtype, device=device)
-            denom_tens = torch.tensor(denom, dtype=dtype, device=device)
-            expected_tens = torch.tensor(expected, dtype=dtype, device=device)
-            res_tens = nom_tens / denom_tens
-            self.assertEqual(res_tens, expected_tens)
+        nom = torch.tensor(nom_lst, dtype=dtype, device=device)
+        denom = torch.tensor(denom_lst, dtype=dtype, device=device)
+        expected = torch.tensor(expected_lst, dtype=dtype, device=device)
+        res = nom / denom
+        self.assertEqual(res, expected)
 
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
@@ -1559,7 +1559,7 @@ class TestBinaryUfuncs(TestCase):
             ((2, 1), (2, 2)),
             ((2, 2), (2, 1, 1)),
         )
-        test_inputs = list(
+        test_inputs = [
             (
                 make_tensor(
                     base_size, dtype=torch.float64, device=device, high=10.0, low=0.0
@@ -1569,7 +1569,7 @@ class TestBinaryUfuncs(TestCase):
                 ),
             )
             for base_size, exp_size in test_cases
-        )
+        ]
         for base, exponent in test_inputs:
             regex = "doesn't match the broadcast shape"
             self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
@@ -1607,10 +1607,10 @@ class TestBinaryUfuncs(TestCase):
             (2, 1),
             (2, 2, 2),
         )
-        tensors = list(
+        tensors = [
             make_tensor(shape, dtype=dtype, device=device, low=0)
             for shape in exponent_shapes
-        )
+        ]
         floats_tensor = torch.tensor(floats, dtype=dtype, device=device)
         for base in floats:
             self._test_pow(base, floats_tensor)
@@ -3141,6 +3141,41 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(a >> 1, expected_r)
         self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
+    @onlyCPU
+    @dtypes(*get_all_int_dtypes())
+    def test_shift_limits(self, device, dtype):
+        "Ensure that CPU integer bit shifting works as expected with out-of-limits shift values."
+        # Issue #70904
+        iinfo = torch.iinfo(dtype)
+        bits = iinfo.bits
+        low = iinfo.min
+        high = iinfo.max
+        exact_dtype = dtype != torch.uint8  # numpy changes dtype from uint8 to int16 for some out-of-limits shift values
+        for input in (
+            torch.tensor([-1, 0, 1], device=device, dtype=dtype),  # small for non-vectorized operation
+            torch.tensor([low, high], device=device, dtype=dtype),  # small for non-vectorized operation
+            make_tensor((64, 64, 64), low=low, high=high, device=device, dtype=dtype),  # large for vectorized operation
+        ):
+            shift_left_expected = torch.zeros_like(input)
+            shift_right_expected = torch.clamp(input, -1, 0)
+            for shift in chain(range(-100, -1), range(bits, 100)):
+                shift_left = input << shift
+                self.assertEqual(shift_left, shift_left_expected, msg=f"<< {shift}")
+                self.compare_with_numpy(
+                    lambda x: x << shift,
+                    lambda x: np.left_shift(x, shift),
+                    input,
+                    exact_dtype=exact_dtype, msg=f"<< {shift}"
+                )
+                shift_right = input >> shift
+                self.assertEqual(shift_right, shift_right_expected, msg=f">> {shift}")
+                self.compare_with_numpy(
+                    lambda x: x >> shift,
+                    lambda x: np.right_shift(x, shift),
+                    input,
+                    exact_dtype=exact_dtype, msg=f">> {shift}"
+                )
+
     @onlyNativeDeviceTypes
     @dtypes(
         *list(
@@ -3417,6 +3452,12 @@ class TestBinaryUfuncs(TestCase):
         if base2:
             ref_func = np.logaddexp2
             our_func = torch.logaddexp2
+        elif dtype in (torch.complex64, torch.complex128):
+            # numpy has not implemented logaddexp for complex
+            def _ref_func(x, y):
+                return scipy.special.logsumexp(np.stack((x, y), axis=0), axis=0)
+            ref_func = _ref_func
+            our_func = torch.logaddexp
         else:
             ref_func = np.logaddexp
             our_func = torch.logaddexp
@@ -3455,7 +3496,8 @@ class TestBinaryUfuncs(TestCase):
         )
         _test_helper(a, b)
 
-    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128)
     def test_logaddexp(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=False)
 

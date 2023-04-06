@@ -1,8 +1,8 @@
 import torch
 from torch import Tensor
 
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
-                        _default_to_foreach, _differentiable_doc, _foreach_doc, _maximize_doc)
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from torch._utils import is_compiling
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
@@ -43,7 +43,7 @@ class ASGD(Optimizer):
             maximize=maximize,
             differentiable=differentiable,
         )
-        super(ASGD, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -185,8 +185,7 @@ def asgd(
     """
 
     if foreach is None:
-        foreach = _default_to_foreach([params, grads, axs, mus, etas, state_steps],
-                                      differentiable=differentiable)
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")

@@ -22,7 +22,7 @@ class LSTMCell(torch.nn.Module):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> rnn = nnqa.LSTMCell(10, 20)
         >>> input = torch.randn(6, 10)
         >>> hx = torch.randn(3, 20)
@@ -83,6 +83,7 @@ class LSTMCell(torch.nn.Module):
         fgate_cx_igate_cgate = self.fgate_cx_igate_cgate.add(fgate_cx, igate_cgate)
         cy = fgate_cx_igate_cgate
 
+        # TODO: make this tanh a member of the module so its qparams can be configured
         tanh_cy = torch.tanh(cy)
         hy = self.ogate_cy.mul(out_gate, tanh_cy)
         return hy, cy
@@ -146,8 +147,9 @@ class _LSTMSingleLayer(torch.nn.Module):
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
         result = []
-        for xx in x:
-            hidden = self.cell(xx, hidden)
+        seq_len = x.shape[0]
+        for i in range(seq_len):
+            hidden = self.cell(x[i], hidden)
             result.append(hidden[0])  # type: ignore[index]
         result_tensor = torch.stack(result, 0)
         return result_tensor, hidden
@@ -272,7 +274,7 @@ class LSTM(torch.nn.Module):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> rnn = nnqa.LSTM(10, 20, 2)
         >>> input = torch.randn(5, 3, 10)
         >>> h0 = torch.randn(2, 3, 20)
@@ -349,11 +351,11 @@ class LSTM(torch.nn.Module):
             if isinstance(hidden_non_opt[0], Tensor):
                 hx = hidden_non_opt[0].reshape(self.num_layers, num_directions,
                                                max_batch_size,
-                                               self.hidden_size).unbind(0)
+                                               self.hidden_size)
                 cx = hidden_non_opt[1].reshape(self.num_layers, num_directions,
                                                max_batch_size,
-                                               self.hidden_size).unbind(0)
-                hxcx = [(hx[idx].squeeze_(0), cx[idx].squeeze_(0)) for idx in range(self.num_layers)]
+                                               self.hidden_size)
+                hxcx = [(hx[idx].squeeze(0), cx[idx].squeeze(0)) for idx in range(self.num_layers)]
             else:
                 hxcx = hidden_non_opt
 

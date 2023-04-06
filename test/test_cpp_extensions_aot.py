@@ -191,7 +191,7 @@ class TestPybindTypeCasters(common.TestCase):
         In these cases we expect to get exactly one function per python type.
         """
         # Verify that all functions have the same return type.
-        union_type = set(self.expected_return_type(f) for f in funcs)
+        union_type = {self.expected_return_type(f) for f in funcs}
         assert len(union_type) == 1
         union_type = union_type.pop()
         self.assertIs(Union, get_origin(union_type))
@@ -282,7 +282,7 @@ class TestORTTensor(common.TestCase):
 class TestRNGExtension(common.TestCase):
 
     def setUp(self):
-        super(TestRNGExtension, self).setUp()
+        super().setUp()
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_rng(self):

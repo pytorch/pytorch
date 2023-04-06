@@ -3,9 +3,11 @@ from dataclasses import dataclass
 from typing import Callable, cast, Dict, Iterable, Optional, Sequence, Set, Tuple, Union
 
 import torch
+
 from torch import Tensor
+from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import Shard
-from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
+from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import (
     normalize_dim,
     normalize_dims,
@@ -15,6 +17,7 @@ from torch.distributed._tensor.ops.utils import (
 
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 
+aten = torch.ops.aten
 
 Shape = Tuple[int, ...]
 
@@ -368,7 +371,7 @@ def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
     dim2 = normalize_dim(dim2, ndim)
     assert dim1 < ndim
     assert dim2 < ndim
-    dimmap = list(InputDim(i) for i in range(ndim))
+    dimmap = [InputDim(i) for i in range(ndim)]
     swapdim = dimmap[dim1]
     dimmap[dim1] = dimmap[dim2]
     dimmap[dim2] = swapdim
@@ -379,7 +382,7 @@ def dim_squeeze(shape: Shape, dim: Optional[int] = None) -> DimMap:
     # FIXME: this is wrong when dim=None and one of the dimensions
     # equals size of the mesh. For example squeeze(DTensor(tensor(4), Shard[0])) could
     # end up as squeeze(tensor(1)) if we have 4 devices; this would lead to
-    # removal of a dimension that is not acutally a singleton.
+    # removal of a dimension that is not actually a singleton.
     return tuple(
         InputDim(i)
         for i, s in enumerate(shape)
@@ -478,7 +481,7 @@ def propagate_shape_and_sharding(
       if the leftmost split size is divisible by the mesh dimension
     """
     assert len(in_shard) == len(mesh_sizes)
-    sharded_in_dims: Set[int] = set(s.dim for s in in_shard if isinstance(s, Shard))
+    sharded_in_dims: Set[int] = {s.dim for s in in_shard if isinstance(s, Shard)}
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     shardable_dims: torch.Tensor = torch.ones(
         (len(local_in_shape), len(mesh_sizes)), dtype=torch.bool
@@ -522,7 +525,7 @@ def propagate_shape_and_sharding(
             _, in_dim = get_dim_size(cmd.input_dim)
             out_size = cmd.group_shape[cmd.split_id]
             if cmd.split_id == 0 and in_dim is not None:
-                # we need to check that the input dimension is divisble
+                # we need to check that the input dimension is divisible
                 # by the size of the submesh we're sharding it on
                 # NOTE: it would be possible to shard the same input dimension
                 # on more than one mesh dimension. In that case, the dimension
@@ -585,14 +588,15 @@ def propagate_shape_and_sharding(
 
 
 def register_prop_rule_map(
-    aten_op_name: str, local_op_name: Callable[..., torch.Tensor]
+    aten_op_overload: torch._ops.OpOverload, local_op_name: Callable[..., torch.Tensor]
 ) -> None:
     spec: Op = ops[local_op_name]
 
-    @register_prop_rule(aten_op_name)
+    @register_prop_rule(aten_op_overload)
     def reshape_prop(op_schema: OpSchema) -> OutputSharding:
         rules = spec.dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
-        input_dtensor_spec = op_schema.args_schema[0]
+        input_dtensor_spec = cast(DTensorSpec, op_schema.args_schema[0])
+        mesh = input_dtensor_spec.mesh
 
         assert isinstance(
             input_dtensor_spec, DTensorSpec
@@ -600,24 +604,25 @@ def register_prop_rule_map(
         global_in_shape = input_dtensor_spec.shape
         assert global_in_shape is not None, "Shape required."
 
-        (global_out_shape, shard_out, shardable_dims,) = propagate_shape_and_sharding(
+        (
+            global_out_shape,
+            shard_out,
+            shardable_dims,
+        ) = propagate_shape_and_sharding(
             input_dtensor_spec.placements,
             tuple(global_in_shape),
             rules,
-            tuple(input_dtensor_spec.mesh.mesh.shape),
+            tuple(mesh.mesh.shape),
         )
 
         if shard_out is not None:
             # no reshard needed
-            output_dtensor_spec = DTensorSpec(
-                mesh=input_dtensor_spec.mesh,
-                placements=shard_out,
-                shape=torch.Size(global_out_shape),
-                ndim=len(global_out_shape),
+            output_dtensor_spec = DTensorSpec(mesh=mesh, placements=shard_out)
+            local_out_shape = compute_local_shape(
+                list(global_out_shape), mesh, shard_out
             )
-            local_out_shape = output_dtensor_spec.local_shape
 
-            # We only need the local shape to lower he call into the local op
+            # We only need the local shape to lower the call into the local op
             args = op_schema.args_schema
             shape_argnum = spec.shape_argnum
             if shape_argnum is not None:
@@ -649,8 +654,7 @@ def register_prop_rule_map(
                             DTensorSpec(
                                 placements=suggested_placements,
                                 mesh=input_dtensor_spec.mesh,
-                                ndim=input_dtensor_spec.ndim,
-                                shape=input_dtensor_spec.shape,
+                                tensor_meta=input_dtensor_spec.tensor_meta,
                             ),
                         )
                         + op_schema.args_schema[1:],
@@ -660,13 +664,12 @@ def register_prop_rule_map(
             )
 
 
-register_prop_rule_map("aten.squeeze.default", torch.squeeze)
-register_prop_rule_map("aten.squeeze.dim", torch.squeeze)
-register_prop_rule_map("aten.view.default", Tensor.view)
-register_prop_rule_map("aten.view.SymInt", Tensor.view)
-register_prop_rule_map("aten._unsafe_view.default", Tensor.view)
-register_prop_rule_map("aten.unsqueeze.default", torch.unsqueeze)
-register_prop_rule_map("aten.expand.default", Tensor.expand)
-register_prop_rule_map("aten.permute.default", torch.permute)
-register_prop_rule_map("aten.repeat.default", Tensor.repeat)
-register_prop_rule_map("aten.transpose.int", torch.transpose)
+register_prop_rule_map(aten.squeeze.default, torch.squeeze)
+register_prop_rule_map(aten.squeeze.dim, torch.squeeze)
+register_prop_rule_map(aten.view.default, Tensor.view)
+register_prop_rule_map(aten._unsafe_view.default, Tensor.view)
+register_prop_rule_map(aten.unsqueeze.default, torch.unsqueeze)
+register_prop_rule_map(aten.expand.default, Tensor.expand)
+register_prop_rule_map(aten.permute.default, torch.permute)
+register_prop_rule_map(aten.repeat.default, Tensor.repeat)
+register_prop_rule_map(aten.transpose.int, torch.transpose)

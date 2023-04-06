@@ -20,26 +20,26 @@ class ParameterSharingTest(LayersTestCase):
                 self.model.input_feature_schema.float_features,
                 output_dims
             )
-            self.assertEquals(self.model.layers[-1].w, 'global_scope/fc/w')
-            self.assertEquals(fc1_output(), 'global_scope/fc/output')
+            self.assertEqual(self.model.layers[-1].w, 'global_scope/fc/w')
+            self.assertEqual(fc1_output(), 'global_scope/fc/output')
 
             with scope.NameScope('nested_scope'):
                 fc2_output = self.model.FC(
                     fc1_output,
                     output_dims
                 )
-                self.assertEquals(self.model.layers[-1].w,
+                self.assertEqual(self.model.layers[-1].w,
                                   'global_scope/nested_scope/fc/w')
-                self.assertEquals(fc2_output(),
+                self.assertEqual(fc2_output(),
                                   'global_scope/nested_scope/fc/output')
 
                 fc3_output = self.model.FC(
                     fc1_output,
                     output_dims
                 )
-                self.assertEquals(self.model.layers[-1].w,
+                self.assertEqual(self.model.layers[-1].w,
                                   'global_scope/nested_scope/fc_auto_0/w')
-                self.assertEquals(fc3_output(),
+                self.assertEqual(fc3_output(),
                                   'global_scope/nested_scope/fc_auto_0/output')
 
     def test_layer_shared_parameter_name_different_namescopes(self):
@@ -51,9 +51,9 @@ class ParameterSharingTest(LayersTestCase):
                         self.model.input_feature_schema.float_features,
                         output_dims
                     )
-                    self.assertEquals(self.model.layers[-1].w,
+                    self.assertEqual(self.model.layers[-1].w,
                                       'global_scope/scope_0/fc/w')
-                    self.assertEquals(fc1_output(),
+                    self.assertEqual(fc1_output(),
                                       'global_scope/scope_0/fc/output')
 
                 with scope.NameScope('scope_1'):
@@ -61,9 +61,9 @@ class ParameterSharingTest(LayersTestCase):
                         self.model.input_feature_schema.float_features,
                         output_dims
                     )
-                    self.assertEquals(self.model.layers[-1].w,
+                    self.assertEqual(self.model.layers[-1].w,
                                       'global_scope/scope_0/fc/w')
-                    self.assertEquals(fc2_output(),
+                    self.assertEqual(fc2_output(),
                                       'global_scope/scope_1/fc/output')
 
     def test_layer_shared_parameter_name_within_same_namescope(self):
@@ -74,14 +74,14 @@ class ParameterSharingTest(LayersTestCase):
                     self.model.input_feature_schema.float_features,
                     output_dims
                 )
-                self.assertEquals(self.model.layers[-1].w,
+                self.assertEqual(self.model.layers[-1].w,
                                   'global_scope/fc/w')
 
                 self.model.FC(
                     self.model.input_feature_schema.float_features,
                     output_dims
                 )
-                self.assertEquals(self.model.layers[-1].w,
+                self.assertEqual(self.model.layers[-1].w,
                                   'global_scope/fc/w')
 
     def test_layer_shared_parameter_name_within_same_namescope_customized_name(self):
@@ -93,7 +93,7 @@ class ParameterSharingTest(LayersTestCase):
                     output_dims,
                     name='shared_fc'
                 )
-                self.assertEquals(self.model.layers[-1].w,
+                self.assertEqual(self.model.layers[-1].w,
                                   'global_scope/shared_fc/w')
 
                 self.model.FC(
@@ -101,7 +101,7 @@ class ParameterSharingTest(LayersTestCase):
                     output_dims,
                     name='new_fc'
                 )
-                self.assertEquals(self.model.layers[-1].w,
+                self.assertEqual(self.model.layers[-1].w,
                                   'global_scope/shared_fc/w')
 
     def test_layer_shared_parameter_name_different_shapes(self):
@@ -112,7 +112,7 @@ class ParameterSharingTest(LayersTestCase):
                     self.model.input_feature_schema.float_features,
                     output_dims
                 )
-                self.assertEquals(self.model.layers[-1].w,
+                self.assertEqual(self.model.layers[-1].w,
                                   'global_scope/fc/w')
 
                 with self.assertRaisesRegex(ValueError, 'Got inconsistent shapes .*'):
@@ -145,7 +145,7 @@ class ParameterSharingTest(LayersTestCase):
             op_outputs.extend(op.output)
 
         # only fill these parameter blobs once
-        self.assertEquals(
+        self.assertEqual(
             sorted(op_outputs),
             ['global_scope/shared_fc/b', 'global_scope/shared_fc/w']
         )

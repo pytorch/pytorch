@@ -261,7 +261,7 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
   std::vector<c10::FunctionSchema> nondeterministic_ops;
   nondeterministic_ops.reserve(nondeterministic_op_strings.size());
   for (const std::string& signature : nondeterministic_op_strings) {
-    nondeterministic_ops.push_back(torch::jit::parseSchema(signature));
+    nondeterministic_ops.emplace_back(torch::jit::parseSchema(signature));
   }
 
   return nondeterministic_ops;

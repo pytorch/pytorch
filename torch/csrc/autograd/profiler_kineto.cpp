@@ -192,7 +192,7 @@ struct AddGenericMetadata : public MetadataBase {
 
     if (config_ && !config_->experimental_config.performance_events.empty()) {
       auto& event_names = config_->experimental_config.performance_events;
-      for (auto i = 0; i < op_event.perf_event_counters_->size(); ++i) {
+      for (const auto i : c10::irange(op_event.perf_event_counters_->size())) {
         addMetadata(
             event_names[i],
             std::to_string((*op_event.perf_event_counters_)[i]));
@@ -218,24 +218,16 @@ struct AddGenericMetadata : public MetadataBase {
     addMetadata("Device Id", std::to_string(alloc.device_index_));
     addMetadata("Addr", std::to_string(reinterpret_cast<intptr_t>(alloc.ptr_)));
     addMetadata("Bytes", std::to_string(alloc.alloc_size_));
-    if (alloc.total_allocated_ >= 0) {
-      addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
-    }
-    if (alloc.total_reserved_ >= 0) {
-      addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
-    }
+    addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
+    addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
   }
 
   void operator()(const ExtraFields<EventType::OutOfMemory>& alloc) {
     addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
     addMetadata("Device Id", std::to_string(alloc.device_index_));
     addMetadata("Bytes", std::to_string(alloc.alloc_size_));
-    if (alloc.total_allocated_ >= 0) {
-      addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
-    }
-    if (alloc.total_reserved_ >= 0) {
-      addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
-    }
+    addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
+    addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
   }
 
   template <typename T>
@@ -283,8 +275,8 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   void reportMemoryUsage(
       void* ptr,
       int64_t alloc_size,
-      int64_t total_allocated,
-      int64_t total_reserved,
+      size_t total_allocated,
+      size_t total_reserved,
       c10::Device device) override {
     if (config_.profile_memory && !config_.disabled()) {
       record_queue_.getSubqueue()->emplace_allocation_event(
@@ -300,8 +292,8 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
   void reportOutOfMemory(
       int64_t alloc_size,
-      int64_t total_allocated,
-      int64_t total_reserved,
+      size_t total_allocated,
+      size_t total_reserved,
       c10::Device device) override {
     if (config_.profile_memory && !config_.disabled()) {
       record_queue_.getSubqueue()->emplace_ooms_event(
@@ -575,7 +567,9 @@ void prepareProfiler(
           config.state == ProfilerState::KINETO_GPU_FALLBACK,
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!at::hasCUDA(), activities, config.experimental_config);
+      /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU()),
+      activities,
+      config.experimental_config);
 
   if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */

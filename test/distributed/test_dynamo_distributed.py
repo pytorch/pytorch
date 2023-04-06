@@ -1,16 +1,16 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import functools
-import os
+from io import StringIO
 import random
 import unittest
 from unittest.mock import patch
 import numpy as np
 import torch
+from torch._C import FileCheck
 import torch._dynamo
-from torch._dynamo.optimizations.distributed import DDPOptimizer
+from torch._dynamo.backends.distributed import DDPOptimizer
 import torch._dynamo.test_case
-import torch.distributed as dist
 from contextlib import contextmanager
 from torch import nn
 from torch._dynamo import config
@@ -21,13 +21,15 @@ from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    DynamoDistributedSingleProcTestCase,
+    DynamoDistributedMultiProcTestCase,
     import_transformers_or_skip,
     skip_if_lt_x_gpu,
-    requires_nccl
+    requires_nccl,
+    _dynamo_dist_per_rank_init,
 )
 import torch._dynamo.logging
-
+from torch._dynamo.comptime import comptime
 
 def reset_rng_state():
     torch.manual_seed(1337)
@@ -62,7 +64,7 @@ def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
 def get_custom_model(device):
     class MyCustomLinear(torch.nn.Module):
         def __init__(self):
-            super(MyCustomLinear, self).__init__()
+            super().__init__()
             self.weight = nn.Parameter(torch.randn(512, 512))
 
         def forward(self, x):
@@ -73,7 +75,7 @@ def get_custom_model(device):
 
     class MyLinear(torch.nn.Module):
         def __init__(self):
-            super(MyLinear, self).__init__()
+            super().__init__()
             self.linear = torch.nn.Linear(512, 512)
 
         def forward(self, x):
@@ -81,7 +83,7 @@ def get_custom_model(device):
 
     class MyModule(torch.nn.Module):
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             mods = [
                 (MyLinear(), torch.nn.ReLU()),
                 # sandwich the custom in the middle so it comes before and after
@@ -127,21 +129,6 @@ class CheckSplitsCompiler:
     def compile_fn(self, gm, example_inputs):
         self.compiler_called += 1
         return gm
-
-@contextmanager
-def _per_rank_init(rank, world_size):
-    # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
-    # Just manually implement the most important part of the dynamo behavior to reset/clear.
-    torch.cuda.set_device(rank)
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '6789'
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-    torch._dynamo.reset()
-    torch._dynamo.utils.counters.clear()
-    yield
-    torch._dynamo.reset()
-    torch._dynamo.utils.counters.clear()
-    dist.destroy_process_group()
 
 
 # This simulates DDP, but it doesn't actually do any process communication;
@@ -219,39 +206,16 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 # single process version; if it's just a problem in the Dynamo distributed
 # optimizer, you should be able to repro it single process!
 @requires_nccl()
-class TestDistributedMultiProc(MultiProcessTestCase):
-    def setUp(self):
-        super(TestDistributedMultiProc, self).setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super(TestDistributedMultiProc, self).tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    @property
-    def world_size(self) -> int:
-        return torch.cuda.device_count()
-
-    @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
-        # Don't enable DDP + ReplicatedTensor, as that breaks Dynamo+DDP
-        # TODO(whc) why is ReplicatedTensor defaulted=True in MultiProcessTestCase, and should we support it?
-        # from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
-        # _set_ddp_with_replicated_tensor(True)
-
-        # The rest is copypasta from MultiProcessTestCase._run
-        self = cls(test_name)
-        self.rank = rank
-        self.file_name = file_name
-        self.run_test(test_name, parent_pipe)
-
+class TestMultiProc(DynamoDistributedMultiProcTestCase):
+    """
+    Note: MultiProcTestCase spawns processes per test and is slow.
+    Prefer MultiThreadedTestCase for most tests. Perhaps use this one
+    sparingly for integration tests.
+    """
     @skip_if_lt_x_gpu(2)
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_aot_eager_multiprocess(self):
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             self.assertFalse(config.optimize_ddp)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             m = DDP(m, device_ids=[self.rank])
@@ -266,7 +230,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor(self):
 
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             model, inputs = get_hf_bert(self.rank)
             model = DDP(model)
             run_hf_bert_ddp(self, model, inputs, "inductor")
@@ -275,14 +239,14 @@ class TestDistributedMultiProc(MultiProcessTestCase):
     @import_transformers_or_skip()
     @patch.object(config, "optimize_ddp", True)
     def test_hf_bert_ddp_aot_eager(self):
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             model, inputs = get_hf_bert(self.rank)
             model = DDP(model)
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
     @skip_if_lt_x_gpu(1)
     def test_fsdp_aot_eager(self):
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
@@ -306,7 +270,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_inductor(self):
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
@@ -343,7 +307,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             )
             return model
 
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             for (wrap_policy, test_instance) in (
                 (
                     None,
@@ -379,33 +343,13 @@ class TestDistributedMultiProc(MultiProcessTestCase):
 
 
 @requires_nccl()
-class TestDistributed(torch._dynamo.test_case.TestCase):
+class TestSingleProc(DynamoDistributedSingleProcTestCase):
     """
-    Test harness initializes dist process group
+    Test harness initializes dist process group.
+
+    Test simple things here since they are simpler to debug.
+    Use TestMultiProc for things that really need to run on multiple nodes
     """
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        # _exit_stack is set up in TestCase
-        cls._exit_stack.enter_context(
-            patch.dict(
-                os.environ,
-                {
-                    "MASTER_ADDR": "localhost",
-                    "MASTER_PORT": "12355",
-                },
-            )
-        )
-        cls.rank = 0
-        cls.device = f"cuda:{cls.rank}"
-        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
-        dist.init_process_group("nccl", rank=cls.rank, world_size=1)
-
-    @classmethod
-    def tearDownClass(cls):
-        dist.destroy_process_group()
-        super().tearDownClass()
 
     def get_model(self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
         m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat).to(self.device)
@@ -456,6 +400,13 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
+
+        # ensure compatibilty with dynamo explain
+
+        explain_out = torch._dynamo.explain(ddp_m, inputs)
+        break_reasons = explain_out[4]
+        self.assertEqual(len(break_reasons), 3)
+        self.assertTrue(all(["DDPOptimizer" in r.reason for r in break_reasons]))
 
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -583,6 +534,68 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         fsdp_m = FSDP(m, use_orig_params=False)
         fsdp_m = torch._dynamo.optimize()(fsdp_m)
         self.assertRaisesRegex(AssertionError, "Dynamo only supports FSDP with use_orig_params=True", fsdp_m, inputs)
+
+    def test_fsdp_skip_guards(self):
+        """
+        It's currently difficult to test dynamo guards.  Most guards tests are indirect- modify something and
+        observe that the guard in question failed. In this case, since the FSDP guards were already deemed
+        useless and skipping them is expected to have no practical effect, it's pretty contrived to even try to
+        make those guards fail.  Instead, we observe the 'guard source' printed by dynamo's comptime print_guards
+        function.
+
+        Note: comptime prints the guards before the time they get installed or not installed, so in both cases
+        (skip or no skip) the same guards get printed.  The difference is that in the skip case, they show up
+        with a special 'guard source' which will cuase them to not be installed.  So all we check for is the expected
+        guard source 'local_fsdp_module'.
+        """
+        global GUARDS_FILE
+        GUARDS_FILE = StringIO()
+
+        for skip_guards, expected_guard_source in (
+            (True, "local_fsdp_module"),
+            (False, "local")
+        ):
+            torch._dynamo.reset()
+            torch._dynamo.config.skip_fsdp_guards = skip_guards
+
+            class ToyModel(nn.Module):
+                def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
+                    super().__init__()
+                    self.net = nn.Sequential(
+                        *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
+                        + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+                        + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+                        + [nn.Linear(hidden_feat, out_feat), nn.ReLU()]
+                    )
+
+                def forward(self, inputs):
+                    out = self.net(inputs)
+
+                    @comptime
+                    def _(ctx):
+                        ctx.print_guards(file=GUARDS_FILE)
+
+                    return out
+            device = f"cuda:{self.rank}"
+            m = ToyModel(in_feat=10, hidden_feat=5000, out_feat=5,).to(device)
+            inputs = torch.rand(20, 10).to(device)
+            m.apply(init_weights)
+            correct_outputs = m(inputs)
+            fsdp_m = FSDP(m, use_orig_params=True)
+            opt_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+            outputs = opt_m(inputs)
+
+            # far from an exhaustive check of all the expected guards, just check a couple of them.
+            FileCheck() \
+                .check("""local "L['self']" TYPE_MATCH""") \
+                .check("""local "L['self']" ID_MATCH""") \
+                .check(f"""{expected_guard_source} "L['self'].net" TYPE_MATCH""") \
+                .check(f"""{expected_guard_source} "L['self'].net" ID_MATCH""") \
+                .check(f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH""") \
+                .check(f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH""") \
+                .run(GUARDS_FILE.getvalue())
+            self.assertTrue(same(correct_outputs, outputs))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

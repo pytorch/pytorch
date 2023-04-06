@@ -85,6 +85,15 @@ TypePtr ScriptTypeParser::subscriptToType(
     auto elem_type =
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return FutureType::create(elem_type);
+  } else if (typeName == "Await" || typeName == "torch.jit._Await") {
+    if (subscript.subscript_exprs().size() != 1) {
+      throw ErrorReport(subscript)
+          << " expected exactly one element type but found "
+          << subscript.subscript_exprs().size();
+    }
+    auto elem_type =
+        parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
+    return AwaitType::create(elem_type);
   } else if (typeName == "RRef") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
@@ -456,6 +465,10 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
   if (assign.lhs().kind() != TK_VAR) {
     throw ErrorReport(assign.range())
         << "Expected to a variable for class constant";
+  }
+  if (!assign.type().present()) {
+    throw ErrorReport(assign.range())
+        << "Expected a type to present for class constant";
   }
   const auto final_type = assign.type().get();
   auto expr = assign.rhs().get();

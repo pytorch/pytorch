@@ -152,8 +152,8 @@ def sparsify_model(path_to_model, sparsified_model_dump_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_path', type=str)
-    parser.add_argument('--sparsified_model_dump_path', type=str)
+    parser.add_argument('--model-path', '--model_path', type=str)
+    parser.add_argument('--sparsified-model-dump-path', '--sparsified_model_dump_path', type=str)
     args = parser.parse_args()
 
     sparsify_model(args.model_path, args.sparsified_model_dump_path)

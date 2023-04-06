@@ -55,7 +55,7 @@ class Transformer(Module):
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(Transformer, self).__init__()
+        super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
 
         if custom_encoder is not None:
@@ -184,7 +184,7 @@ class TransformerEncoder(Module):
     __constants__ = ['norm']
 
     def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
-        super(TransformerEncoder, self).__init__()
+        super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
@@ -217,6 +217,15 @@ class TransformerEncoder(Module):
             other_type=F._none_or_dtype(mask),
             other_name="mask",
             target_type=src.dtype
+        )
+
+        mask = F._canonical_mask(
+            mask=mask,
+            mask_name="mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
         )
 
         output = src
@@ -332,7 +341,7 @@ class TransformerDecoder(Module):
     __constants__ = ['norm']
 
     def __init__(self, decoder_layer, num_layers, norm=None):
-        super(TransformerDecoder, self).__init__()
+        super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
@@ -340,7 +349,8 @@ class TransformerDecoder(Module):
 
     def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, tgt_key_padding_mask: Optional[Tensor] = None,
-                memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+                memory_key_padding_mask: Optional[Tensor] = None, tgt_is_causal: bool = False,
+                memory_is_causal: bool = False) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
         Args:
@@ -350,6 +360,10 @@ class TransformerDecoder(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
+            tgt_is_causal: If specified, applies a causal mask as tgt mask.
+                Mutually exclusive with providing tgt_mask. Default: ``False``.
+            memory_is_causal: If specified, applies a causal mask as memory mask.
+                Mutually exclusive with providing memory_mask. Default: ``False``.
 
         Shape:
             see the docs in Transformer class.
@@ -360,7 +374,9 @@ class TransformerDecoder(Module):
             output = mod(output, memory, tgt_mask=tgt_mask,
                          memory_mask=memory_mask,
                          tgt_key_padding_mask=tgt_key_padding_mask,
-                         memory_key_padding_mask=memory_key_padding_mask)
+                         memory_key_padding_mask=memory_key_padding_mask,
+                         tgt_is_causal=tgt_is_causal,
+                         memory_is_causal=memory_is_causal)
 
         if self.norm is not None:
             output = self.norm(output)
@@ -399,7 +415,8 @@ class TransformerEncoderLayer(Module):
         >>> out = encoder_layer(src)
 
     Fast path:
-        forward() will use a special optimized implementation if all of the following
+        forward() will use a special optimized implementation described in
+        `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_ if all of the following
         conditions are met:
 
         - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor
@@ -419,6 +436,10 @@ class TransformerEncoderLayer(Module):
         mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ will be
         returned, and an additional speedup proportional to the fraction of the input that
         is padding can be expected.
+
+        .. _`FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`:
+         https://arxiv.org/abs/2205.14135
+
     """
     __constants__ = ['batch_first', 'norm_first']
 
@@ -427,7 +448,7 @@ class TransformerEncoderLayer(Module):
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(TransformerEncoderLayer, self).__init__()
+        super().__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
                                             **factory_kwargs)
         # Implementation of Feedforward model
@@ -456,7 +477,7 @@ class TransformerEncoderLayer(Module):
         self.activation = activation
 
     def __setstate__(self, state):
-        super(TransformerEncoderLayer, self).__setstate__(state)
+        super().__setstate__(state)
         if not hasattr(self, 'activation'):
             self.activation = F.relu
 
@@ -485,6 +506,15 @@ class TransformerEncoderLayer(Module):
             other_type=F._none_or_dtype(src_mask),
             other_name="src_mask",
             target_type=src.dtype
+        )
+
+        src_mask = F._canonical_mask(
+            mask=src_mask,
+            mask_name="src_mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
         )
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
@@ -562,21 +592,21 @@ class TransformerEncoderLayer(Module):
 
         x = src
         if self.norm_first:
-            x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)
+            x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal)
             x = x + self._ff_block(self.norm2(x))
         else:
-            x = self.norm1(x + self._sa_block(x, src_mask, src_key_padding_mask))
+            x = self.norm1(x + self._sa_block(x, src_mask, src_key_padding_mask, is_causal=is_causal))
             x = self.norm2(x + self._ff_block(x))
 
         return x
 
     # self-attention block
     def _sa_block(self, x: Tensor,
-                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
+                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool = False) -> Tensor:
         x = self.self_attn(x, x, x,
                            attn_mask=attn_mask,
                            key_padding_mask=key_padding_mask,
-                           need_weights=False)[0]
+                           need_weights=False, is_causal=is_causal)[0]
         return self.dropout1(x)
 
     # feed forward block
@@ -626,7 +656,7 @@ class TransformerDecoderLayer(Module):
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(TransformerDecoderLayer, self).__init__()
+        super().__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
                                             **factory_kwargs)
         self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
@@ -653,7 +683,7 @@ class TransformerDecoderLayer(Module):
     def __setstate__(self, state):
         if 'activation' not in state:
             state['activation'] = F.relu
-        super(TransformerDecoderLayer, self).__setstate__(state)
+        super().__setstate__(state)
 
     def forward(
         self,
@@ -677,7 +707,7 @@ class TransformerDecoderLayer(Module):
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
             tgt_is_causal: If specified, applies a causal mask as tgt mask.
                 Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as tgt mask.
+            memory_is_causal: If specified, applies a causal mask as memory mask.
                 Mutually exclusive with providing memory_mask. Default: ``False``.
         Shape:
             see the docs in Transformer class.

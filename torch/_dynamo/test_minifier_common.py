@@ -31,12 +31,6 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         cls._debug_dir_obj.cleanup()
         cls._exit_stack.close()
 
-    def setUp(self):
-        super().setUp()
-
-    def tearDown(self):
-        super().tearDown()
-
     # Search for the name of the first function defined in a code string.
     def _get_fn_name(self, code):
         fn_name_match = re.search(r"def (\w+)\(", code)
@@ -51,6 +45,8 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         proc = subprocess.run(
             ["python3", "-c", code], capture_output=True, cwd=self.DEBUG_DIR
         )
+        print("stdout:", proc.stdout.decode("utf-8"))
+        print("stderr:", proc.stderr.decode("utf-8"))
         repro_dir_match = re.search(
             r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")
         )

@@ -47,11 +47,12 @@
 #endif
 
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <algorithm>
 #include <numeric>
 
 namespace at {
@@ -497,23 +498,52 @@ std::vector<Tensor> _to_cpu(TensorList tensors) {
     return cpu_tensors;
 }
 
-Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
+Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, c10::optional<bool> masked_grad_) {
+  /*
+    For historical reasons, to_dense backward implements masked
+    semantics for sparse tensors, that is, gradients with respect to
+    unspecified elements are ignored.  The masked_grad kw argument of
+    to_dense is introduced to allow to_dense to be used in the
+    non-masked semantics context. However, for BC reasons, the default
+    value to masked_grad kw argument is set True as a first instance.
+    Eventually, we should eliminate the masked_grad kw argument and
+    let to_dense backward to behave according to non-masked
+    semantics. Masked semantics of tensors is implemented in the
+    framework of masked tensors.
+  */
   const auto input_layout = input_.layout();
+  const bool masked_grad = masked_grad_.value_or(true);
   switch (input_layout) {
     case kStrided:
-      return grad.to_dense();
+      // TODO: return grad as it is
+      return grad.to_dense(input_.scalar_type(), masked_grad_);
     case kSparse:
       // Autograd operates on the coalesced assumption, i.e. no duplicate values.
-      return grad.sparse_mask(input_.coalesce());
+      if (masked_grad) {
+        return grad.sparse_mask(input_.coalesce());
+      } else {
+        // TODO: return grad as it is
+        return grad.to_sparse(input_.sparse_dim());
+      }
     case kSparseCsr:
     case kSparseCsc:
       // TODO: add efficient CSR/CSC support for sparse_mask
-      return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout);
+      if (masked_grad) {
+        return grad.sparse_mask(input_.to_sparse(input_.sparse_dim())).to_sparse(input_layout);
+      } else {
+        // TODO: return grad as it is
+        return grad.to_sparse(input_layout, /*blocksize=*/c10::nullopt, /*dense_dim=*/input_.dense_dim());
+      }
     case kSparseBsr:
     case kSparseBsc: {
       // TODO: add efficient BSR/BSC support for sparse_mask
-      const auto blocksize = at::DimVector(input_.values().sizes().slice(1, 2));
-      return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout, blocksize);
+      const auto blocksize = at::sparse_csr::getBlockSize(input_);
+      if (masked_grad) {
+        return grad.sparse_mask(input_.to_sparse(input_.sparse_dim())).to_sparse(input_layout, blocksize);
+      } else {
+        // TODO: return grad as it is
+        return grad.to_sparse(input_layout, blocksize, input_.dense_dim());
+      }
     }
     case kMkldnn:
       return grad.to_mkldnn(input_.scalar_type());
@@ -528,18 +558,18 @@ Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   return grad.to_dense(input_.scalar_type());
 }
 
-Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
+Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype, c10::optional<bool> masked_grad) {
   if (tensor.layout() == c10::kSparse) {
-    return tensor._to_dense(dtype);
+    return tensor._to_dense(dtype, masked_grad);
   }
   if (tensor.layout() == c10::kSparseCsr ||
       tensor.layout() == c10::kSparseCsc ||
       tensor.layout() == c10::kSparseBsr ||
       tensor.layout() == c10::kSparseBsc) {
-    return tensor._to_dense(dtype);
+    return tensor._to_dense(dtype, masked_grad);
   }
   if (tensor.layout() == c10::kMkldnn) {
-    return tensor._to_dense(dtype);
+    return tensor._to_dense(dtype, masked_grad);
   }
   TORCH_CHECK(
       tensor.layout() == c10::kStrided,
@@ -551,7 +581,7 @@ Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
   return tensor;
 }
 
-Tensor sparse_to_dense(const Tensor& self, c10::optional<ScalarType> dtype) {
+Tensor sparse_to_dense(const Tensor& self, c10::optional<ScalarType> dtype, c10::optional<bool> masked) {
   TORCH_CHECK(
       !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
@@ -560,7 +590,8 @@ Tensor sparse_to_dense(const Tensor& self, c10::optional<ScalarType> dtype) {
 
 Tensor sparse_compressed_to_dense(
     const Tensor& self,
-    c10::optional<ScalarType> dtype) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<bool> masked_grad) {
   TORCH_CHECK(
       !dtype.has_value(),
       "dtype argument is not supported by sparse_csr_to_dense");
@@ -904,9 +935,9 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksi
   auto values = blocked_layout ? _batch_tile_tensor(self, blocksize, dense_dim) :  self;
   auto not_zero_mask = blocked_layout ? _batch_tile_tensor(self != 0, blocksize, dense_dim) : self != 0;
   if (blocked_layout || dense_dim > 0) {
-    std::vector<int64_t> reduce_dims((blocked_layout ? 2 : 0) + dense_dim);
-    std::iota(reduce_dims.begin(), reduce_dims.end(), n_batch_dim + 2);
-    not_zero_mask = not_zero_mask.sum(reduce_dims) != 0;
+    std::vector<int64_t> reduce_dim((blocked_layout ? 2 : 0) + dense_dim);
+    std::iota(reduce_dim.begin(), reduce_dim.end(), n_batch_dim + 2);
+    not_zero_mask = not_zero_mask.sum(reduce_dim) != 0;
   }
 
   if (is_batched) {
@@ -1066,17 +1097,18 @@ Tensor sparse_compressed_to_flipped(
     values.unsqueeze_(0);
   }
 
-  // NOTE: these sparse_dims are true sparse dims only for CSR/CSC inputs.
-  // And for BSR/BSC these are <true sparse dims> / <blocksize>.
-  // In other words, sparse_dims stores ranges of valid indices in the row/col dims.
-  const auto sparse_dims = [&]() -> at::DimVector {
-    auto sparse_dims = at::DimVector(self.sizes().slice(n_batches, 2));
+  // NOTE: these sparse_dim are true sparse dims only for CSR/CSC
+  // inputs.  And for BSR/BSC these are <true sparse dims> /
+  // <blocksize>.  In other words, sparse_dim stores ranges of valid
+  // indices in the row/col dims.
+  const auto sparse_dim = [&]() -> at::DimVector {
+    auto sparse_dim = at::DimVector(self.sizes().slice(n_batches, 2));
     if (layout == at::kSparseBsr || layout == at::kSparseBsc) {
       auto blocksize = at::sparse_csr::getBlockSize(self);
-      sparse_dims[0] /= blocksize[0];
-      sparse_dims[1] /= blocksize[1];
+      sparse_dim[0] /= blocksize[0];
+      sparse_dim[1] /= blocksize[1];
     }
-    return sparse_dims;
+    return sparse_dim;
   }();
 
   // batch_sizes_nonempty stores at least one, potentially fake, batch dimension.
@@ -1167,10 +1199,10 @@ Tensor sparse_compressed_to_flipped(
     // NOTE: we used transposed=true above!
     auto i = coo_indices_2d.select(0, 1);
     auto j = coo_indices_2d.select(0, 0);
-    auto b = i.div(is_transposed_indices ? sparse_dims[1] : sparse_dims[0], "trunc");
+    auto b = i.div(is_transposed_indices ? sparse_dim[1] : sparse_dim[0], "trunc");
     // Modify i, j in-place.
-    i.fmod_(is_transposed_indices ? sparse_dims[1] : sparse_dims[0]);
-    j.add_(b * (is_transposed_indices ? sparse_dims[0] : sparse_dims[1]));
+    i.fmod_(is_transposed_indices ? sparse_dim[1] : sparse_dim[0]);
+    j.add_(b * (is_transposed_indices ? sparse_dim[0] : sparse_dim[1]));
     return coo_indices_2d;
   }();
 
@@ -1182,8 +1214,8 @@ Tensor sparse_compressed_to_flipped(
   // more "weight" (aka stride) placed on the "transposed" dimension.
   const auto coo_indices_2d_transposed_hashed = at::sparse::flatten_indices(
       coo_indices_2d_transposed,
-      is_transposed_indices ? at::DimVector({sparse_dims[0], sparse_dims[1] * batch_numel_nonzero})
-                            : at::DimVector({sparse_dims[1], sparse_dims[0] * batch_numel_nonzero}));
+      is_transposed_indices ? at::DimVector({sparse_dim[0], sparse_dim[1] * batch_numel_nonzero})
+                            : at::DimVector({sparse_dim[1], sparse_dim[0] * batch_numel_nonzero}));
   const auto hash_argsort = std::get<1>(coo_indices_2d_transposed_hashed.sort());
   const auto coo_indices_2d_transposed_sorted = coo_indices_2d_transposed.index_select(1, hash_argsort);
 
@@ -1195,8 +1227,8 @@ Tensor sparse_compressed_to_flipped(
       _convert_indices_from_coo_to_csr(
         new_compressed_indices_coo_2d,
         is_transposed_indices
-          ? batch_numel_nonzero * sparse_dims[0]
-          : batch_numel_nonzero * sparse_dims[1],
+          ? batch_numel_nonzero * sparse_dim[0]
+          : batch_numel_nonzero * sparse_dim[1],
         is_out_int32),
       batch_numel_nonzero,
       is_out_int32)
@@ -1235,6 +1267,22 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self, c10::optional<int64_t
       self.layout());
 }
 
+Tensor sparse_compressed_to_sparse_csc(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
+  if (dense_dim_opt.has_value()) {
+    AT_ERROR("sparse_compressed_to_sparse_csc conversion does not support specifying number of dense dimensions");
+  }
+  if (self.layout() == kSparseCsr) {
+    return sparse_compressed_to_flipped(self, c10::nullopt, "to_sparse_csc");
+  }
+  if (self.layout() == kSparseCsc) {
+    return sparse_compressed_clone(self, c10::nullopt, "to_sparse_csc");
+  }
+  AT_ERROR(
+      "sparse_compressed_to_sparse_csc expected SparseCsr or SparseCsc layout but got ",
+      self.layout());
+  return self;
+}
+
 Tensor coo_to_sparse_csr(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
   TORCH_CHECK(
       self.sparse_dim() == 2,
@@ -1266,29 +1314,29 @@ Tensor coo_to_sparse_csc(const Tensor& self, c10::optional<int64_t> dense_dim_op
   if (dense_dim_opt.has_value()) {
     AT_ERROR("coo_to_sparse_csc conversion does not support specifying number of dense dimensions");
   }
-  auto coalesced_self = self.transpose(0, 1).coalesce().to_sparse_csr();
+  auto transposed_csr = self.transpose(0, 1).to_sparse_csr(dense_dim_opt);
   return at::native::_sparse_csc_tensor_unsafe(
-      coalesced_self.crow_indices(),
-      coalesced_self.col_indices(),
-      coalesced_self.values(),
+      transposed_csr.crow_indices(),
+      transposed_csr.col_indices(),
+      transposed_csr.values(),
       self.sizes(),
-      coalesced_self.scalar_type(),
+      transposed_csr.scalar_type(),
       c10::kSparseCsc,
-      coalesced_self.device());
+      transposed_csr.device());
 }
 
 Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   if (dense_dim_opt.has_value()) {
     AT_ERROR("coo_to_sparse_bsr conversion does not support specifying number of dense dimensions");
   }
-  return self.to_sparse_csr().to_sparse_bsr(blocksize, dense_dim_opt);
+  return self.to_sparse_csr(dense_dim_opt).to_sparse_bsr(blocksize);
 }
 
 Tensor coo_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   if (dense_dim_opt.has_value()) {
     AT_ERROR("coo_to_sparse_bsc conversion does not support specifying number of dense dimensions");
   }
-  return self.to_sparse_bsr(blocksize, dense_dim_opt).to_sparse_bsc(blocksize, dense_dim_opt);
+  return self.to_sparse_csc(dense_dim_opt).to_sparse_bsc(blocksize);
 }
 
 namespace {
@@ -1399,90 +1447,89 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu)
  * https://github.com/scipy/scipy/blob/8a64c938ddf1ae4c02a08d2c5e38daeb8d061d38/scipy/sparse/sparsetools/csr.h
  * Modified to ensure sorted BSR column indices.
  */
-template <class I, class T>
-void _csr_to_block_csr_cpu_kernel(
-    const I n_row,
-    const I n_col,
-    const I R,
-    const I C,
-    const I* input_crow_indices,
-    const I* input_col_indices,
-    const T* input_values,
-    I* result_crow_indices,
-    I* result_col_indices,
-    T* result_values) {
-  // All blocks are possible, that is, may be allocated if a single non-zero
-  // value lives within them. Otherwise they're not.
+template <class index_t, class scalar_t, bool compressed_rows>
+void _compressed_to_block_compressed_cpu_kernel(
+    const index_t n_compressed, // Tensor size along compressed dimension
+    const index_t n_plain, // Tensor size along plain dimension
+    const index_t C, // Block size along compressed dimensions
+    const index_t P, // Block size along plain dimension
+    const index_t D, // Number of elements in dense dimensions
+    const index_t* input_compressed_indices,
+    const index_t* input_plain_indices,
+    const scalar_t* input_values,
+    index_t* result_compressed_indices,
+    index_t* result_plain_indices,
+    scalar_t* result_values) {
+  // All blocks are possible, that is, may be allocated if a single
+  // non-zero value lives within them. Otherwise they're not.
 
-  // Allocate pointers for all possible column blocks plus 1
-  std::vector<T*> blocks(n_col / C + 1, nullptr);
+  // Allocate pointers for all possible plain blocks plus 1
+  std::vector<scalar_t*> blocks(n_plain / P + 1, nullptr);
 
-  assert(n_row % R == 0);
-  assert(n_col % C == 0);
+  assert(n_compressed % C == 0);
+  assert(n_plain % P == 0);
 
-  // Major assumptions
-  // 1. Blocks must be square
-
-  // Number of blocks along rows
-  I n_brow = n_row / R;
-  // Number of blocks along columns
-  I n_bcol = n_col / C;
+  // Number of blocks along compressed dim
+  index_t n_bcompressed = n_compressed / C;
+  // Number of blocks along plain_dim
+  index_t n_bplain = n_plain / P;
 
   // Number of elements per block
-  I RC = R * C;
+  index_t CPD = C * P * D;
   // Number of blocks overall
-  I n_blks = 0;
+  index_t n_blks = 0;
 
-  result_crow_indices[0] = 0;
+  result_compressed_indices[0] = 0;
 
-  // Iterate over blocks along rows
-  for (I block_i = 0; block_i < n_brow; block_i++) {
-    // Iterate over blocks along columns to locate non-zero blocks,
-    // this guarantees sorted block-column indices
-    for (I block_j = 0; block_j < n_bcol; block_j ++) {
-      for (I jj = input_crow_indices[R * block_i]; jj < input_crow_indices[R * (block_i + 1)]; jj++) {
-        I j = input_col_indices[jj]; // column index
-        if (j / C == block_j) {
-          blocks[block_j] = result_values + RC * n_blks;
-          result_col_indices[n_blks] = block_j;
+  // Iterate over blocks along compressed dim
+  for (index_t block_c = 0; block_c < n_bcompressed; block_c++) {
+    // Iterate over blocks along plain dim to locate non-zero blocks,
+    // this guarantees sorted plain dim indices
+    for (index_t block_p = 0; block_p < n_bplain; block_p ++) {
+      for (index_t i = input_compressed_indices[C * block_c]; i < input_compressed_indices[C * (block_c + 1)]; i++) {
+        index_t p = input_plain_indices[i]; // plain dim element index
+        if (p / P == block_p) {
+          blocks[block_p] = result_values + CPD * n_blks;
+          result_plain_indices[n_blks] = block_p;
           n_blks++;
           break;
         }
       }
     }
 
-    // Iterate over rows within block
-    for (I r = 0; r < R; r++) {
-      I i = R * block_i + r; // row index
-      for (I jj = input_crow_indices[i]; jj < input_crow_indices[i + 1]; jj++) {
-        I j = input_col_indices[jj]; // column index
+    // Iterate over compressed dim within block
+    for (index_t cb = 0; cb < C; cb++) {
+      index_t c = C * block_c + cb; // compressed dim index
+      for (index_t i = input_compressed_indices[c]; i < input_compressed_indices[c + 1]; i++) {
+        index_t p = input_plain_indices[i]; // plain dim index
 
-        // Block corresponding to column index
-        I block_j = j / C;
-        // Column within block
-        I c = j % C;
+        // Block corresponding to plain dim index
+        index_t block_p = p / P;
+        // Plain dim index within block
+        index_t pb = p % P;
 
-        // Specific blocks entries should not be visited more than once.
-        // Scipy code does an addition here. Why?
+        // Specific blocks entries should not be visited more than
+        // once.  Scipy code does an addition here. Why?
         // A possible answer: Scipy code supports "uncoalesced CSR"
-        // format that allows repeated columns per row and column
-        // indices may be unsorted.
-        *(blocks[block_j] + C * r + c) = input_values[jj];
+        // format that allows repeated plain dim indices, and
+        // compressed and plain indices may be unsorted.
+        std::copy(input_values + i * D, input_values + (i + 1) * D,
+                  blocks[block_p] + (compressed_rows ? P * cb + pb : C * pb + cb) * D);
       }
     }
 
     // Scipy code has
     /*
-      for (I jj = input_crow_indices[R * block_i];
-           jj < input_crow_indices[R * (block_i + 1)];
-           jj++) {
-             blocks[input_col_indices[jj] / C] = 0;
+      for (I i = input_compressed_indices[C * block_c];
+           i < input_compressed_indices[C * (block_c + 1)];
+           i++) {
+             blocks[input_plain_indices[i] / P] = 0;
            }
     */
-    // but we don't need it because the modified code (see the block_j
-    // loop above) does not need to evaluate `blocks[block_j] == 0`
+    // but we don't need it because the modified code (see the block_p
+    // loop above) does not need to evaluate `blocks[block_p] == 0`
     // that the original code did.
-    result_crow_indices[block_i + 1] = n_blks;
+    result_compressed_indices[block_c + 1] = n_blks;
   }
 }
 
@@ -1490,22 +1537,23 @@ void _csr_to_block_csr_cpu_kernel(
  * Based on
  * https://github.com/scipy/scipy/blob/8a64c938ddf1ae4c02a08d2c5e38daeb8d061d38/scipy/sparse/sparsetools/csr.h
  */
-template <class I>
-I csr_count_blocks(
-    const I n_row,
-    const I n_col,
-    const I R,
-    const I C,
-    const I Ap[],
-    const I Aj[]) {
-  std::vector<I> mask(n_col / C + 1, -1);
-  I n_blks = 0;
-  for (I i = 0; i < n_row; i++) {
-    I bi = i / R;
-    for (I jj = Ap[i]; jj < Ap[i + 1]; jj++) {
-      I bj = Aj[jj] / C;
-      if (mask[bj] != bi) {
-        mask[bj] = bi;
+template <class index_t>
+index_t compressed_count_blocks(
+    const index_t n_compressed, // Tensor size along compressed dimension
+    const index_t n_plain, // Tensor size along plain dimension
+    const index_t C, // Block size along compressed dimensions
+    const index_t P, // Block size along plain dimension
+    const index_t Ac[], // Compressed indices
+    const index_t Ap[] // Plain indices
+  ) {
+  std::vector<index_t> mask(n_plain / P + 1, -1);
+  index_t n_blks = 0;
+  for (index_t c = 0; c < n_compressed; c++) {
+    index_t bc = c / C;
+    for (index_t i = Ac[c]; i < Ac[c + 1]; i++) {
+      index_t bp = Ap[i] / P;
+      if (mask[bp] != bc) {
+        mask[bp] = bc;
         n_blks++;
       }
     }
@@ -1513,15 +1561,11 @@ I csr_count_blocks(
   return n_blks;
 }
 
-Tensor _csr_to_block_csr_cpu(const Tensor& self, IntArrayRef blocksize) {
-  TORCH_CHECK(
-      blocksize[0] == blocksize[1],
-      "blocks must be square. ",
-      "Got (",
-      blocksize[0],
-      ", ",
-      blocksize[1],
-      ") instead.");
+template<Layout target_layout>
+Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef blocksize) {
+  static_assert(target_layout == Layout::SparseBsr || target_layout == Layout::SparseBsc,
+                "invalid layout template parameter for _compressed_to_block_compressed_cpu");
+
   TORCH_CHECK(
       self.size(0) % blocksize[0] == 0 && self.size(1) % blocksize[1] == 0,
       "Block sparse CSR Tensors must have a size that is an ",
@@ -1535,68 +1579,72 @@ Tensor _csr_to_block_csr_cpu(const Tensor& self, IntArrayRef blocksize) {
       ", ",
       blocksize[1],
       ") instead.");
-  Tensor input_values = self.values().contiguous();
-  Tensor input_crow_indices = self.crow_indices().contiguous();
-  Tensor input_col_indices = self.col_indices().contiguous();
 
-  // First we determine the number of blocks needed. For each given block, if it
-  // contains a non-zero element we will allocate values and indices for it.
+  auto input_values = self.values().contiguous();
+  Tensor input_compressed_indices;
+  Tensor input_plain_indices;
+  std::tie(input_compressed_indices, input_plain_indices) = sparse_csr::getCompressedPlainIndices(self);
+  input_compressed_indices = input_compressed_indices.contiguous();
+  input_plain_indices = input_plain_indices.contiguous();
+
+  // First we determine the number of blocks needed. For each given
+  // block, if it contains a non-zero element we will allocate values
+  // and indices for it.
   int64_t num_blocks;
-  int64_t n_row = self.size(0);
-  int64_t n_col = self.size(1);
+  auto compressed_dim = (target_layout == Layout::SparseBsr) ? self.size(0) : self.size(1);
+  auto plain_dim = (target_layout == Layout::SparseBsr) ? self.size(1) : self.size(0);
+  auto compressed_blocksize = (target_layout == Layout::SparseBsr) ? blocksize[0] : blocksize[1];
+  auto plain_blocksize = (target_layout == Layout::SparseBsr) ? blocksize[1] : blocksize[0];
+
   AT_DISPATCH_INDEX_TYPES(
-      input_crow_indices.scalar_type(), "_csr_to_block_csr_cpu", [&] {
-        num_blocks = csr_count_blocks<index_t>(
-            n_row,
-            n_col,
-            blocksize[0],
-            blocksize[1],
-            input_crow_indices.data_ptr<index_t>(),
-            input_col_indices.data_ptr<index_t>());
+      input_compressed_indices.scalar_type(), "_compressed_to_block_compressed_cpu", [&] {
+        num_blocks =
+          compressed_count_blocks<index_t>(
+              compressed_dim,
+              plain_dim,
+              compressed_blocksize,
+              plain_blocksize,
+              input_compressed_indices.data_ptr<index_t>(),
+              input_plain_indices.data_ptr<index_t>());
       });
-  DimVector values_size{num_blocks, blocksize[0], blocksize[1]};
+  DimVector dense_shape{input_values.sizes().slice(1, input_values.dim() - 1)};
+  DimVector values_shape{num_blocks, blocksize[0], blocksize[1]};
+  values_shape.append(dense_shape);
 
-  // While we don't support conversion of hybrid csr-to-bsr yet, we'll
-  // compute hybrid compatible values sizes to meet the invariants of
-  // the BSR tensor when the support will be implemented.
-  int64_t numel_dense = 1;
-  for (int i=0; i<self.dense_dim(); i++) {
-    values_size.push_back(self.size(2 + i));
-    numel_dense *= self.size(2 + i);
-  }
-  TORCH_CHECK(numel_dense == 1, "conversion from hybrid csr to block csr is not supported yet.");
-
-  Tensor result_values =
-      input_values.new_zeros(values_size);
-  Tensor result_crow_indices =
-      input_crow_indices.new_empty({(n_row / blocksize[0]) + 1});
-  Tensor result_col_indices = input_col_indices.new_empty({num_blocks});
+  Tensor result_values = input_values.new_zeros(values_shape);
+  Tensor result_compressed_indices =
+      input_compressed_indices.new_empty({compressed_dim /compressed_blocksize + 1});
+  Tensor result_plain_indices = input_plain_indices.new_empty({num_blocks});
 
   // Next we copy over non-zero elements into the allocated blocks.
+  auto n_dense = std::accumulate(
+      dense_shape.begin(), dense_shape.end(), 1, std::multiplies<int64_t>());
   AT_DISPATCH_INDEX_TYPES(
-      input_crow_indices.scalar_type(), "_csr_to_block_csr_cpu", [&] {
+      input_compressed_indices.scalar_type(), "_compressed_to_block_compressed_cpu", [&] {
         AT_DISPATCH_SPARSE_VALUE_TYPES(
-            input_values.scalar_type(), "_csr_to_block_csr_cpu", [&] {
-              _csr_to_block_csr_cpu_kernel<index_t, scalar_t>(
-                  n_row,
-                  n_col,
-                  blocksize[0],
-                  blocksize[1],
-                  input_crow_indices.data_ptr<index_t>(),
-                  input_col_indices.data_ptr<index_t>(),
+            input_values.scalar_type(), "_compressed_to_block_compressed_cpu", [&] {
+              _compressed_to_block_compressed_cpu_kernel<index_t, scalar_t, target_layout == Layout::SparseBsr>(
+                  compressed_dim,
+                  plain_dim,
+                  compressed_blocksize,
+                  plain_blocksize,
+                  n_dense,
+                  input_compressed_indices.data_ptr<index_t>(),
+                  input_plain_indices.data_ptr<index_t>(),
                   input_values.data_ptr<scalar_t>(),
-                  result_crow_indices.data_ptr<index_t>(),
-                  result_col_indices.data_ptr<index_t>(),
+                  result_compressed_indices.data_ptr<index_t>(),
+                  result_plain_indices.data_ptr<index_t>(),
                   result_values.data_ptr<scalar_t>());
             });
       });
-  return at::native::_sparse_bsr_tensor_unsafe(
-      result_crow_indices,
-      result_col_indices,
+
+  return at::native::_sparse_compressed_tensor_unsafe(
+      result_compressed_indices,
+      result_plain_indices,
       result_values,
       self.sizes(),
       result_values.scalar_type(),
-      c10::kSparseBsr,
+      target_layout,
       result_values.device());
 }
 
@@ -1619,39 +1667,19 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
     return sparse_compressed_clone(self, blocksize, "to_sparse_bsr");
   }
   if (self.layout() == kSparseCsr) {
-    TORCH_CHECK(self.dim() == 2,
-        "to_sparse_bsr(): conversion from Csr to Bsr is only possible for 2d inputs, ",
-        "but got input of dimension ", self.dim(), " instead.");
-    Tensor self_values = self.values();
-    Tensor self_crow_indices = self.crow_indices();
-    Tensor self_col_indices = self.col_indices();
-    Tensor cpu_result = _csr_to_block_csr_cpu(
-        _sparse_csr_tensor_unsafe(
-            self_crow_indices.cpu(),
-            self_col_indices.cpu(),
-            self_values.cpu(),
-            self.sizes(),
-            self_values.scalar_type(),
-            self.layout(),
-            at::kCPU),
-        blocksize);
-    Tensor result_values = cpu_result.values().to(self_values.options());
-    Tensor result_crow_indices =
-        cpu_result.crow_indices().to(self_crow_indices.options());
-    Tensor result_col_indices =
-        cpu_result.col_indices().to(self_col_indices.options());
-    return at::native::_sparse_bsr_tensor_unsafe(
-        result_crow_indices,
-        result_col_indices,
-        result_values,
-        self.sizes(),
-        result_values.scalar_type(),
-        c10::kSparseBsr,
-        result_values.device());
+    TORCH_CHECK(self.dim() == 2 + self.dense_dim(),
+                "to_sparse_bsr: conversion from Csr to Bsr for batched inputs is not implemented.");
+
+    if (self.device() != kCPU) {
+      TORCH_WARN("sparse_compressed_to_sparse_bsr executing on the CPU device, the performance may be sub-optimal");
+    }
+    return _compressed_to_block_compressed_cpu<kSparseBsr>(self.cpu(), blocksize).to(self.device());
   }
-  AT_ERROR(
-      "sparse_compressed_to_sparse_bsr expected SparseCsr, SparseBsr or SparseBsc layout but got ",
-      self.layout());
+  if (self.layout() == kSparseCsc) {
+    return self.to_sparse_csr(dense_dim_opt).to_sparse_bsr(blocksize);
+  }
+
+  AT_ERROR("sparse_compressed_to_sparse_bsr: expected SparseCsr, SparseCsc, SparseBsr or SparseBsc layout but got ", self.layout());
   return self;
 }
 
@@ -1673,25 +1701,20 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
                 "[blocksize=", blocksize,"] is not implemented.");
     return sparse_compressed_clone(self, blocksize, "to_sparse_bsc");
   }
-  AT_ERROR(
-      "sparse_compressed_to_sparse_bsc expected SparseBsr or SparseBsc layout but got ",
-      self.layout());
-  return self;
-}
+  if (self.layout() == kSparseCsc) {
+    TORCH_CHECK(self.dim() == 2 + self.dense_dim(),
+                "to_sparse_bsc: conversion from Csc to Bsc for batched inputs is not implemented.");
 
-Tensor sparse_compressed_to_sparse_csc(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("sparse_compressed_to_sparse_csc conversion does not support specifying number of dense dimensions");
+    if (self.device() != kCPU) {
+      TORCH_WARN("sparse_compressed_to_sparse_bsc executing on the CPU device, the performance may be sub-optimal");
+    }
+    return _compressed_to_block_compressed_cpu<kSparseBsc>(self.cpu(), blocksize).to(self.device());
   }
   if (self.layout() == kSparseCsr) {
-    return sparse_compressed_to_flipped(self, c10::nullopt, "to_sparse_csc");
+    return self.to_sparse_csc(dense_dim_opt).to_sparse_bsc(blocksize);
   }
-  if (self.layout() == kSparseCsc) {
-    return sparse_compressed_clone(self, c10::nullopt, "to_sparse_csc");
-  }
-  AT_ERROR(
-      "sparse_compressed_to_sparse_csc expected SparseCsr or SparseCsc layout but got ",
-      self.layout());
+
+  AT_ERROR("sparse_compressed_to_sparse_bsc: expected SparseCsr, SparseCsc, SparseBsr or SparseBsc layout but got ", self.layout());
   return self;
 }
 
@@ -1763,7 +1786,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
   }
   switch (layout_) {
   case kStrided:
-    return sparse_compressed_to_dense(self);
+    return sparse_compressed_to_dense(self, /*dtype=*/c10::nullopt, /*masked_grad=*/c10::nullopt);
   case kSparse:
     return sparse_compressed_to_sparse(self, 2);
   case kSparseCsr:
@@ -1808,7 +1831,7 @@ Tensor sparse_coo_to_sparse(const Tensor& self, c10::optional<c10::Layout> layou
   }
   switch (layout_) {
   case kStrided:
-    return self.to_dense();
+    return self.to_dense(c10::nullopt, c10::nullopt);
   case kSparse:
     return self;
   case kSparseCsr:

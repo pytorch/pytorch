@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: jit"]
 
 from collections import namedtuple
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
@@ -50,9 +50,6 @@ class TestTypesAndAnnotation(JitTestCase):
         GG = namedtuple('GG', ['f', 'g'])
 
         class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             @torch.jit.ignore
             def foo(self, x: torch.Tensor, z: torch.Tensor) -> Tuple[GG, GG]:
                 return GG(x, z), GG(x, z)
@@ -64,9 +61,6 @@ class TestTypesAndAnnotation(JitTestCase):
         y = foo(torch.randn(2, 2), torch.randn(2, 2))
 
         class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             @torch.jit.ignore
             def foo(self, x, z) -> Tuple[GG, GG]:
                 return GG(x, z)
@@ -83,9 +77,6 @@ class TestTypesAndAnnotation(JitTestCase):
             return x + 10
 
         class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
             def forward(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> torch.Tensor:
                 self.dropout_modality(in_batch)
                 fn(in_batch)
@@ -99,7 +90,7 @@ class TestTypesAndAnnotation(JitTestCase):
         FileCheck().check("dropout_modality").check("in_batch").run(str(sm.graph))
 
     def test_python_callable(self):
-        class MyPythonClass(object):
+        class MyPythonClass:
             @torch.jit.ignore
             def __call__(self, *args) -> str:
                 return str(type(args[0]))
@@ -200,9 +191,6 @@ class TestTypesAndAnnotation(JitTestCase):
         Test that module attributes can be ignored.
         """
         class Sub(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, a: int) -> int:
                 return sum([a])
 
@@ -244,6 +232,32 @@ class TestTypesAndAnnotation(JitTestCase):
         with self.assertRaisesRegexWithHighlight(RuntimeError, r"attribute was ignored during compilation", "self.sub"):
             scripted_mod = torch.jit.script(mod)
 
+
+    def test_ignoring_fn_with_nonscriptable_types(self):
+        class CFX:
+            def __init__(self, a: List[torch.Tensor]) -> None:
+                self.a = a
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return torch.sin(x)
+
+            @torch.jit._drop
+            def __iter__(self) -> Iterator[torch.Tensor]:
+                return iter(self.a)
+
+            @torch.jit._drop
+            def __fx_create_arg__(self, tracer: torch.fx.Tracer) -> torch.fx.node.Argument:
+                # torch.fx classes are not scriptable
+                return tracer.create_node(
+                    "call_function",
+                    CFX,
+                    args=(tracer.create_arg(self.features),),
+                    kwargs={},
+                )
+
+        torch.jit.script(CFX)
+
+
     def test_unimported_type_resolution(self):
         # verify fallback from the python resolver to the c++ resolver
 
@@ -280,7 +294,7 @@ class TestTypesAndAnnotation(JitTestCase):
         # Simple case
         with self.assertRaisesRegexWithHighlight(ValueError, msg, highlight):
             @torch.jit.script
-            class BadModule(object):
+            class BadModule:
                 def __init__(self, x: int):
                     self.x = x
 
@@ -290,7 +304,7 @@ class TestTypesAndAnnotation(JitTestCase):
         # Type annotation in a loop
         with self.assertRaisesRegexWithHighlight(ValueError, msg, highlight):
             @torch.jit.script
-            class BadModuleLoop(object):
+            class BadModuleLoop:
                 def __init__(self, x: int):
                     self.x = x
 
@@ -300,7 +314,7 @@ class TestTypesAndAnnotation(JitTestCase):
 
         # Type annotation in __init__, should not fail
         @torch.jit.script
-        class GoodModule(object):
+        class GoodModule:
             def __init__(self, x: int):
                 self.x: int = x
 

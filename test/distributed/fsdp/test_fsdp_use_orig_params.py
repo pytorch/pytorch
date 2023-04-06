@@ -3,8 +3,10 @@
 import copy
 import functools
 import itertools
+import os
 import sys
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+import unittest
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
 import torch.nn as nn
@@ -17,9 +19,12 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
+from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
+from torch.distributed.fsdp.flat_param import _FSDP_SKIP_WRITEBACK_CHECK
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -32,6 +37,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
 )
 
 if not dist.is_available():
@@ -189,7 +195,8 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             for (n1, p1), (n2, p2) in zip(
                 ddp_model.module.named_parameters(), fsdp_model.named_parameters()
             ):
-                self.assertEqual(n1, n2)
+                # Allow for FSDP prefixes
+                self.assertEqual(n1, clean_tensor_name(n2))
                 torch.testing.assert_close(p1, p2)
 
     def _get_sharding_strategy_from_str(
@@ -204,6 +211,58 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         else:
             raise ValueError(f"Invalid string: {sharding_strategy_str}")
         return sharding_strategy
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_compile(self):
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ],
+                "skip_fsdp_guards": [True, False],
+            },
+            self._test_fsdp_compile,
+        )
+
+    def _test_fsdp_compile(
+        self, sharding_strategy: ShardingStrategy, skip_fsdp_guards: bool
+    ):
+        torch._dynamo.config.skip_fsdp_guards = skip_fsdp_guards
+        fsdp_kwargs = {
+            "auto_wrap_policy": ModuleWrapPolicy(
+                {
+                    TransformerEncoderLayer,
+                    TransformerDecoderLayer,
+                }
+            ),
+            "use_orig_params": True,
+            "sharding_strategy": sharding_strategy,
+            "backward_prefetch": BackwardPrefetch.BACKWARD_PRE,
+            "cpu_offload": CPUOffload(False),
+        }
+        base_model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+        )
+        ref_model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
+        model = torch.compile(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        for i in range(10):
+            losses = []
+            inp = ref_model.get_input(torch.device("cuda"))
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.zero_grad()
+                loss = _model(*inp).sum()
+                losses.append(loss)
+                loss.backward()
+                _optim.step()
+            self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -231,6 +290,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                     BackwardPrefetch.BACKWARD_PRE,
                     BackwardPrefetch.BACKWARD_POST,
                 ],
+                "skip_writeback_check": [False, True],
             },
             self._test_diff_hyperparams,
             cpu_offload=CPUOffload(offload_params=False),
@@ -251,16 +311,18 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         with ``offload_params=False`` followed by ``True`` but not vice versa).
         """
         sharding_strategy = self._get_sharding_strategy_from_str(sharding_strategy_str)
-        self._test_diff_hyperparams(
-            cuda_init_mode=CUDAInitMode.CUDA_BEFORE,
-            init_optim_before_wrap=False,
-            optim_class=torch.optim.Adam,
-            multi_tensor=False,
-            set_to_none=False,
-            backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-            cpu_offload=CPUOffload(offload_params=True),
-            sharding_strategy=sharding_strategy,
-        )
+        for skip_writeback_check in (False, True):
+            self._test_diff_hyperparams(
+                cuda_init_mode=CUDAInitMode.CUDA_BEFORE,
+                init_optim_before_wrap=False,
+                optim_class=torch.optim.Adam,
+                multi_tensor=False,
+                set_to_none=False,
+                backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+                cpu_offload=CPUOffload(offload_params=True),
+                sharding_strategy=sharding_strategy,
+                skip_writeback_check=skip_writeback_check,
+            )
 
     def _test_diff_hyperparams(
         self,
@@ -272,6 +334,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         backward_prefetch: Optional[BackwardPrefetch],
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy,
+        skip_writeback_check: bool,
     ):
         """
         Args:
@@ -283,6 +346,8 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         """
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER and cpu_offload.offload_params:
             return  # not supported
+        if skip_writeback_check:
+            os.environ[_FSDP_SKIP_WRITEBACK_CHECK] = "1"
         ddp_model = self._get_ddp_transformer(find_unused_params=False)
         ddp_optim = self._get_optim(ddp_model, optim_class, multi_tensor)
         fsdp_model, fsdp_optim = self._get_fsdp_transformer_and_optim(
@@ -444,11 +509,15 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
 
         # Check that FSDP correctly exposes gradients even after forward
         # (namely, `None` for weights and non-`None` for biases)
+        if sharding_strategy in NO_RESHARD_AFTER_FORWARD_STRATEGIES:
+            # Skip the check since we do not expose the gradients after forward
+            # for these strategies
+            return
         for (ddp_n, ddp_p), (fsdp_n, fsdp_p) in zip(
             ddp_model.module.named_parameters(),
             fsdp_model.named_parameters(),
         ):
-            self.assertEqual(ddp_n, fsdp_n)
+            self.assertEqual(ddp_n, clean_tensor_name(fsdp_n))
             if fsdp_p.numel() == 0:
                 # Not in this rank's shard
                 self.assertTrue(fsdp_p.grad is None)
@@ -503,7 +572,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             fsdp_kwargs=fsdp_kwargs,
             deterministic=True,
         )
-        optim = torch.optim.Adam(fsdp_model.parameters(), lr=LR)
+        optim = torch.optim.Adam(fsdp_model.parameters(), foreach=False, lr=LR)
         fsdp_kwargs["use_orig_params"] = True
         fsdp_model_orig_params = TransformerWithSharedParams.init(
             self.process_group,
@@ -512,7 +581,9 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             fsdp_kwargs=fsdp_kwargs,
             deterministic=True,
         )
-        optim_orig_params = torch.optim.Adam(fsdp_model_orig_params.parameters(), lr=LR)
+        optim_orig_params = torch.optim.Adam(
+            fsdp_model_orig_params.parameters(), foreach=False, lr=LR
+        )
         return fsdp_model, optim, fsdp_model_orig_params, optim_orig_params
 
     def _check_fsdp_parameter_parity(self, fsdp1: FSDP, fsdp2: FSDP) -> None:
@@ -683,8 +754,10 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
                 torch.manual_seed(42)
                 # 5 * 5 = 25 numel -> pad to 26 -> 13 on each rank
                 self.lin1 = nn.Linear(5, 5, bias=False)
-                # 5 * 7 + 7 = 42 numel -> no pad -> 21 on each rank
-                # 21 of weight on rank 0; 14 of weight and 7 of bias on rank 1
+                # 5 * 7 + (1) + 7 = 43 numel -> pad to 44 -> 22 on each rank,
+                # where the (1) is from intra-`FlatParameter` alignment padding
+                # 22 of weight on rank 0; 13 of weight, 1 alignment padding,
+                # and 7 of bias on rank 1
                 self.lin2 = nn.Linear(5, 7)
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -699,7 +772,9 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
             def get_loss(self, inp, out):
                 return out.sum()
 
-        def check_parameter_parity(ddp_model, fsdp_model):
+        def check_parameter_parity(
+            ddp_model: DDP, fsdp_model: FSDP, between_fwd_and_bwd: bool
+        ):
             assert self.rank in (
                 0,
                 1,
@@ -713,6 +788,13 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
                     # For `NO_SHARD`, do nothing since the original parameters
                     # are unflattened
                     pass
+                elif (
+                    between_fwd_and_bwd
+                    and sharding_strategy in NO_RESHARD_AFTER_FORWARD_STRATEGIES
+                ):
+                    # For no reshard after forward strategies, do nothing since
+                    # FSDP did not use sharded views after forward
+                    pass
                 # Otherwise, case on the parameter (see the model definition)
                 elif n1 == "lin1.weight":
                     if self.rank == 0:
@@ -721,9 +803,9 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
                         p1 = p1.flatten()[13:]
                 elif n1 == "lin2.weight":
                     if self.rank == 0:
-                        p1 = p1.flatten()[:21]
+                        p1 = p1.flatten()[:22]
                     elif self.rank == 1:
-                        p1 = p1.flatten()[21:]
+                        p1 = p1.flatten()[22:]
                 elif n1 == "lin2.bias":
                     if self.rank == 0:
                         p1 = torch.empty(0, device=p1.device)
@@ -746,7 +828,7 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         inp = fsdp_model.get_input(device)
         ddp_out = ddp_model(*inp)
         fsdp_out = fsdp_model(*inp)
-        check_parameter_parity(ddp_model, fsdp_model)
+        check_parameter_parity(ddp_model, fsdp_model, True)
 
         ddp_loss = ddp_model.module.get_loss(inp, ddp_out)
         fsdp_loss = fsdp_model.get_loss(inp, fsdp_out)
@@ -754,23 +836,23 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         fsdp_loss.backward()
         ddp_optim.step()
         fsdp_optim.step()
-        check_parameter_parity(ddp_model, fsdp_model)
+        check_parameter_parity(ddp_model, fsdp_model, False)
 
         inp = fsdp_model.get_input(device)
         ddp_out = ddp_model(*inp)
         fsdp_out = fsdp_model(*inp)
-        check_parameter_parity(ddp_model, fsdp_model)
+        check_parameter_parity(ddp_model, fsdp_model, True)
 
 
 class TestFSDPUseOrigParamsWriteback(FSDPTest):
     """Tests parameter and gradient writeback."""
 
     class Model(nn.Module):
-        def __init__(self):
+        def __init__(self, device: torch.device):
             super().__init__()
             torch.manual_seed(42)
-            self.lin1 = nn.Linear(5, 5, bias=True)
-            self.lin2 = nn.Linear(5, 7, bias=True)
+            self.lin1 = nn.Linear(5, 5, bias=True, device=device)
+            self.lin2 = nn.Linear(5, 7, bias=True, device=device)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             z = self.lin1(x)
@@ -816,10 +898,12 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
 
         # Check that the writeback propagates
         ddp_model = DDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), device_ids=[self.rank]
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")),
+            device_ids=[self.rank],
         )
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), use_orig_params=True
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")),
+            use_orig_params=True,
         )
         ddp = ddp_model.module  # for brevity
         fsdp = fsdp_model.module
@@ -867,10 +951,12 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
             return None if set_to_none else torch.ones_like(param) * 2
 
         ddp_model = DDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), device_ids=[self.rank]
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")),
+            device_ids=[self.rank],
         )
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), use_orig_params=True
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")),
+            use_orig_params=True,
         )
         LR = 1e-2
         # TODO: If we add `summon_full_params(with_grads=True)`, then replace
@@ -922,7 +1008,8 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_writeback_shape_mismatch(self):
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), use_orig_params=True
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")),
+            use_orig_params=True,
         )
         # Check that writing back with mismatched shape errors
         fsdp = fsdp_model.module  # for brevity
@@ -959,55 +1046,43 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
             with FSDP.summon_full_params(fsdp_model):  # triggers a writeback
                 ...
 
+    @skip_if_lt_x_gpu(2)
+    def test_writeback_between_fwd_and_bwd_for_no_reshard_raises(self):
+        fsdp_kwargs = {
+            "sharding_strategy": ShardingStrategy.SHARD_GRAD_OP,
+            "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
+            "use_orig_params": True,
+        }
+        fsdp_wrapper = functools.partial(FSDP, **fsdp_kwargs)
+
+        # Test changing the parameter storage to no longer be a view into the
+        # flat parameter
+        fsdp_model = fsdp_wrapper(
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda"))
+        )
+        inp = fsdp_model.get_input(torch.device("cuda"))
+        loss = fsdp_model(*inp).sum()
+        fsdp_model.lin1.weight.data = fsdp_model.lin1.weight.clone()
+        assert_msg = (
+            "FSDP does not support changing the parameters between forward and backward"
+        )
+        with self.assertRaisesRegex(AssertionError, assert_msg):
+            loss.backward()
+
+        # Test changing the parameter variable itself
+        fsdp_model = fsdp_wrapper(
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda"))
+        )
+        inp = fsdp_model.get_input(torch.device("cuda"))
+        loss = fsdp_model(*inp).sum()
+        fsdp_model.lin1._fsdp_wrapped_module.weight = nn.Parameter(
+            fsdp_model.lin1.weight.clone()
+        )
+        with self.assertRaisesRegex(AssertionError, assert_msg):
+            loss.backward()
+
 
 class TestFSDPUseOrigParamsFQNs(FSDPTest):
-    @skip_if_lt_x_gpu(2)
-    def test_param_and_buffer_names(self):
-        """
-        Tests that, for ``use_orig_params=True``, the parameter and buffer
-        names match those of a local model even when sharded, meaning that they
-        do not include FSDP-specific prefixes.
-        """
-        self.run_subtests(
-            {"auto_wrap_policy": [None, always_wrap_policy]},
-            self._test_param_and_buffer_names,
-        )
-
-    def _test_param_and_buffer_names(self, auto_wrap_policy: Optional[Callable]):
-        class Container(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = nn.Parameter(torch.randn((5, 5)))
-                self.register_buffer("buf", torch.randn((5, 5)))
-
-            def forward(self, x):
-                return x @ self.param + self.buf
-
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = nn.Parameter(torch.randn((5, 5)))
-                self.lin = nn.Linear(5, 5)
-                self.container = Container()
-                self.register_buffer("buf", torch.randn((5, 5)))
-
-            def forward(self, x):
-                z = self.container(x)
-                z = z @ self.param + self.buf
-                z = self.lin(z)
-                return z
-
-        model = Model()
-        fsdp_model = FSDP(
-            Model(), auto_wrap_policy=auto_wrap_policy, use_orig_params=True
-        )
-        param_names = [n for n, _ in model.named_parameters()]
-        fsdp_param_names = [n for n, _ in fsdp_model.named_parameters()]
-        self.assertEqual(param_names, fsdp_param_names)
-        buffer_names = [n for n, _ in model.named_buffers()]
-        fsdp_buffer_names = [n for n, _ in fsdp_model.named_buffers()]
-        self.assertEqual(buffer_names, fsdp_buffer_names)
-
     @skip_if_lt_x_gpu(2)
     def test_named_parameters_in_forward(self):
         """
@@ -1024,7 +1099,10 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 nonlocal param_shapes
-                param_names = [tup[0] for tup in self.named_parameters()]
+                # Allow for FSDP prefixes
+                param_names = [
+                    clean_tensor_name(tup[0]) for tup in self.named_parameters()
+                ]
                 params = [tup[1] for tup in self.named_parameters()]
                 assert (
                     param_shapes[0] is not None and param_shapes[1] is not None
@@ -1073,7 +1151,7 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
         )
 
     def _test_no_sync_correctness(self, sharding_strategy: ShardingStrategy):
-        model = nn.Linear(3, 3, device="cuda")
+        model = nn.Linear(7, 1, bias=False, device="cuda")
         fsdp_kwargs = {
             "sharding_strategy": sharding_strategy,
         }
@@ -1093,11 +1171,13 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
             _test_model: nn.Module,
         ):
             """
-            This assumes that the model is ``nn.Linear(3, 3, bias=False)``
-            (i.e. with a single weight parameter) to be able to directly
+            This assumes that the model is ``nn.Linear(7, 1, bias=False)``
+            (i.e. with a single 1D weight parameter) to be able to directly
             compare the baseline and test models. On rank 1, the baseline
             includes 1 element of padding.
             """
+            self.assertEqual(len(list(_baseline_model.parameters())), 1)
+            self.assertEqual(len(list(_test_model.parameters())), 1)
             for flat_param, orig_param in zip(
                 _baseline_model.parameters(), _test_model.parameters()
             ):
@@ -1121,8 +1201,8 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
                     orig_param.grad,
                 )
 
-        inp = torch.randn((2, 3), device="cuda")
-        grad = torch.rand_like(inp)
+        inp = torch.randn((2, 7), device="cuda")
+        grad = torch.randn((2, 1), device="cuda")
 
         # Compute some reference gradients using one forward/backward
         out_use_flat_params = model_use_flat_params(inp)
@@ -1217,6 +1297,43 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
         for param in fsdp_model.parameters():
             if param.grad is not None:
                 self.assertEqual(param.grad.dtype, torch.float32)
+
+
+class TestFSDPUseOrigParamsInit(FSDPTest):
+    @skip_if_lt_x_gpu(2)
+    def test_non_uniform_requires_grad(self):
+        model = nn.Sequential(
+            nn.Linear(3, 3, device="cuda"),
+            nn.Linear(3, 3, device="cuda"),
+        )
+        # Freeze biases only and flatten both weights and biases into the same
+        # `FlatParameter` to exercise non-uniform `requires_grad`
+        model[0].bias.requires_grad = False
+        model[1].bias.requires_grad = False
+        fsdp_model = FSDP(model, use_orig_params=True)
+        self.assertTrue(fsdp_model[0].weight.requires_grad)
+        self.assertFalse(fsdp_model[0].bias.requires_grad)
+        self.assertTrue(fsdp_model[1].weight.requires_grad)
+        self.assertFalse(fsdp_model[1].bias.requires_grad)
+
+
+# Define this to be large enough to trigger stack corruption
+NUM_SIZE0_TENSORS = 1000
+
+
+class TestMultiTensorApply(TestCase):
+    def test_multi_tensor_apply_size0_tensors_cpu(self):
+        size0_tensors = [torch.empty(0, device="cpu") for _ in range(NUM_SIZE0_TENSORS)]
+        # Check that this does not segfault
+        torch._foreach_mul_(size0_tensors, 0.1)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_multi_tensor_apply_size0_tensors_cuda(self):
+        size0_tensors = [
+            torch.empty(0, device="cuda") for _ in range(NUM_SIZE0_TENSORS)
+        ]
+        # Check that this does not segfault
+        torch._foreach_mul_(size0_tensors, 0.1)
 
 
 instantiate_parametrized_tests(TestFSDPUseOrigParamsMultipleParamGroups)

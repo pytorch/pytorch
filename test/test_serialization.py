@@ -5,6 +5,7 @@ import unittest
 import io
 import tempfile
 import os
+import gc
 import sys
 import zipfile
 import warnings
@@ -45,7 +46,7 @@ with warnings.catch_warnings(record=True) as warns:
                 break
 
 
-class FilelikeMock(object):
+class FilelikeMock:
     def __init__(self, data, has_fileno=True, has_readinto=False):
         if has_readinto:
             self.readinto = self.readinto_opt
@@ -78,7 +79,7 @@ class FilelikeMock(object):
         return name in self.calls
 
 
-class SerializationMixin(object):
+class SerializationMixin:
     def _test_serialization_data(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]  # 0-3
@@ -250,6 +251,25 @@ class SerializationMixin(object):
             with self.assertRaisesRegex(ValueError, 'supports dill >='):
                 x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
 
+    def test_pickle_module(self):
+        class ThrowingUnpickler(pickle.Unpickler):
+            def load(self, *args, **kwargs):
+                raise RuntimeError("rumpelstiltskin")
+
+        class ThrowingModule:
+            Unpickler = ThrowingUnpickler
+            load = ThrowingUnpickler.load
+
+        x = torch.eye(3)
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f)
+            f.seek(0)
+            with self.assertRaisesRegex(RuntimeError, "rumpelstiltskin"):
+                torch.load(f, pickle_module=ThrowingModule)
+            f.seek(0)
+            z = torch.load(f)
+        self.assertEqual(x, z)
+
     @unittest.skipIf(
         not TEST_DILL or not HAS_DILL_AT_LEAST_0_3_1,
         '"dill" not found or not correct version'
@@ -312,7 +332,7 @@ class SerializationMixin(object):
         x[1][1] = 1
         x = x.to_sparse()
 
-        class TensorSerializationSpoofer(object):
+        class TensorSerializationSpoofer:
             def __init__(self, tensor):
                 self.tensor = tensor
 
@@ -344,7 +364,7 @@ class SerializationMixin(object):
         x[1][1] = 1
         x = conversion(x)
 
-        class TensorSerializationSpoofer(object):
+        class TensorSerializationSpoofer:
             def __init__(self, tensor):
                 self.tensor = tensor
 
@@ -418,7 +438,7 @@ class SerializationMixin(object):
         self.assertEqual(c[1], c[3], atol=0, rtol=0)
 
         # test some old tensor serialization mechanism
-        class OldTensorBase(object):
+        class OldTensorBase:
             def __init__(self, new_tensor):
                 self.new_tensor = new_tensor
 
@@ -735,7 +755,16 @@ class SerializationMixin(object):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 torch.save([a.storage(), s_bytes], f)
 
-class serialization_method(object):
+    def test_safe_load_basic_types(self):
+        with tempfile.NamedTemporaryFile() as f:
+            data = {"int": 123, "str": "world", "float": 3.14, "bool": False}
+            torch.save(data, f)
+            f.seek(0)
+            loaded_data = torch.load(f, weights_only=True)
+            self.assertEqual(data, loaded_data)
+
+
+class serialization_method:
     def __init__(self, use_zip):
         self.use_zip = use_zip
         self.torch_save = torch.save
@@ -872,7 +901,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=False):
-            return super(TestOldSerialization, self).run(*args, **kwargs)
+            return super().run(*args, **kwargs)
 
 
 class TestSerialization(TestCase, SerializationMixin):
@@ -905,6 +934,8 @@ class TestSerialization(TestCase, SerializationMixin):
 
     # Ensure large zip64 serialization works properly
     def test_serialization_2gb_file(self):
+        # Run GC to clear up as much memory as possible before running this test
+        gc.collect()
         big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
 
         with BytesIOContext() as f:
@@ -1009,7 +1040,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
-            return super(TestSerialization, self).run(*args, **kwargs)
+            return super().run(*args, **kwargs)
 
 
 class TestWrapperSubclass(torch.Tensor):

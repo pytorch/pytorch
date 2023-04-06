@@ -20,8 +20,8 @@ void confirmPendingUser(
     auto msgPtr = jitFuture.constValue().toCustomClass<Message>();
     auto msgType = msgPtr->type();
     auto rpc = deserializeResponse(*msgPtr, msgType);
-    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
-    TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
+    auto& rr = dynamic_cast<RemoteRet&>(*rpc);
+    TORCH_INTERNAL_ASSERT(rr.forkId() == expectedForkId);
   } else {
     // Handle errors, such as timeouts, by invoking the error handler on the
     // rref.
@@ -62,12 +62,12 @@ c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
     auto msgPtr = jitFuture.constValue().toCustomClass<Message>();
     auto msgType = msgPtr->type();
     auto rpc = deserializeResponse(*msgPtr, msgType);
-    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
+    auto& rr = dynamic_cast<RemoteRet&>(*rpc);
     TORCH_INTERNAL_ASSERT(
-        rr->rrefId() == rr->forkId(),
+        rr.rrefId() == rr.forkId(),
         "Expecting an OwnerRRef as RemoteRet but got a fork.");
     auto& ctx = RRefContext::getInstance();
-    auto deletedRRef = ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+    auto deletedRRef = ctx.delForkOfOwner(rr.rrefId(), rr.rrefId());
     return deletedRRef;
   }
 }

@@ -2,8 +2,7 @@ import warnings
 from typing import Union, Iterable, List, Dict, Tuple, Optional
 
 import torch
-from torch import Tensor
-from torch._six import inf
+from torch import Tensor, inf
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype, _has_foreach_support
 
 _tensor_or_tensors = Union[torch.Tensor, Iterable[torch.Tensor]]

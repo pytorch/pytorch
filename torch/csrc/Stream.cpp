@@ -16,13 +16,14 @@ static PyObject* THPStream_pynew(
   int64_t stream_id = 0;
   int64_t device_index = 0;
   int64_t device_type = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  static char* kwlist[] = {"stream_id", "device_index", "device_type", nullptr};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  constexpr const char* kwlist[] = {
+      "stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|KKK",
-          kwlist,
+          "|LLL",
+          const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
           &device_type)) {
@@ -48,10 +49,11 @@ static void THPStream_dealloc(THPStream* self) {
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(
-      c10::Stream::unpack3(
-          self->stream_id, self->device_index, self->device_type)
-          .device());
+  return THPDevice_New(c10::Stream::unpack3(
+                           self->stream_id,
+                           self->device_index,
+                           static_cast<c10::DeviceType>(self->device_type))
+                           .device());
   END_HANDLE_TH_ERRORS
 }
 
