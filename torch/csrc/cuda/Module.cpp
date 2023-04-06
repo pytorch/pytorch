@@ -4,7 +4,6 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
-#include <c10/util/Optional.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -892,19 +891,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
       });
 }
 
-inline at::ScalarType scalartype(PyObject* obj) {
-  if (obj == (PyObject*)&PyFloat_Type) {
-    return at::ScalarType::Double;
-  }
-  if (obj == (PyObject*)&PyBool_Type) {
-    return at::ScalarType::Bool;
-  }
-  if (obj == (PyObject*)&PyLong_Type) {
-    return at::ScalarType::Long;
-  }
-  return reinterpret_cast<THPDtype*>(obj)->scalar_type;
-}
-
 // We choose to ignore certain blocks that are currently allocated
 // when we set the pool to its checkpoint. For those blocks, we need
 // to swap out the deleter function of their corresponding blocks
@@ -1138,7 +1124,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           }
 
           auto dtype_arg = metadata["dtype"].ptr();
-          auto meta = scalarTypeToTypeMeta(scalartype(dtype_arg));
+          auto meta = scalarTypeToTypeMeta(toScalarType(dtype_arg));
 
           constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
           at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(

@@ -762,9 +762,6 @@ class CUDAGraphNode:
 
         if output_storage_alias is False:
             return None
-            # return torch._C._construct_storage_from_data_pointer(
-            #     metadata["data_ptr"], metadata["device"], metadata["nbytes"]
-            # )
 
         if output_storage_alias is True:
             return self.output_persistent_storage[index]
@@ -926,6 +923,7 @@ class CUDAGraphNode:
             check_memory_pool(self.cuda_graphs_pool, list(self.path_live_weakrefs()))
 
     def _add_replayed_outputs(self, outputs):
+        self.outputs_weakrefs.clear()
         output_weak_ref_cdatas = []
         output_data_ptrs = []
         torch._C._map_Storage_Refs(
@@ -936,30 +934,15 @@ class CUDAGraphNode:
         )
         assert len(output_weak_ref_cdatas) == len(output_data_ptrs)
 
-        if len(self.outputs_weakrefs) == 0:
-            for ref, data_ptr in zip(output_weak_ref_cdatas, output_data_ptrs):
-                if ref is None:
-                    assert data_ptr is None
-                    self.outputs_weakrefs.append(None)
-                    continue
+        for ref, data_ptr in zip(output_weak_ref_cdatas, output_data_ptrs):
+            if ref is None:
+                assert data_ptr is None
+                self.outputs_weakrefs.append(None)
+                continue
 
-                self.outputs_weakrefs.append(
-                    StorageWeakRefWrapper.from_weakref_and_data_ptr(ref, data_ptr)
-                )
-        else:
-            assert len(self.outputs_weakrefs) == len(outputs)
-            for i, (cdata, data_ptr) in enumerate(
-                zip(output_weak_ref_cdatas, output_data_ptrs)
-            ):
-                if cdata is None:
-                    assert data_ptr is None
-                    assert self.outputs_weakrefs[i] is None
-                    continue
-
-                assert isinstance(self.outputs_weakrefs[i], StorageWeakRefWrapper)
-                assert self.outputs_weakrefs[i].data_ptr() == data_ptr
-
-                self.outputs_weakrefs[i].ref.cdata = cdata
+            self.outputs_weakrefs.append(
+                StorageWeakRefWrapper.from_weakref_and_data_ptr(ref, data_ptr)
+            )
 
     @property
     def parent(self):
@@ -1001,10 +984,7 @@ class CUDAGraphNode:
             for output_index, storage_ref in enumerate(output_refs):
                 if not is_live(storage_ref):
                     continue
-                if (
-                    storage_ref()
-                    and storage_ref.data_ptr() == t.untyped_storage().data_ptr()
-                ):
+                if storage_ref.data_ptr() == t.untyped_storage().data_ptr():
                     return (depth, output_index)
 
         return None
@@ -1135,11 +1115,8 @@ class CUDAGraphNode:
 
     def clear_path_state(self):
         "Clear the output lists of all nodes in the path and the storage cache"
-        # for i, j in self.live_indices_after_graph:
-        #     self.path_weakrefs[i][j].ref = None
-
-        # for li in self.path_weakrefs:
-        #     li.clear()
+        for li in self.path_weakrefs:
+            li.clear()
 
     @staticmethod
     def _tensor_metadata(x, ignore_storage_offset=True):
