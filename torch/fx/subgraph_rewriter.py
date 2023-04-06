@@ -235,11 +235,15 @@ def _replace_pattern(
 
     if isinstance(pattern, GraphModule):
         pattern_graph = pattern.graph
+    elif isinstance(pattern, Graph):
+        pattern_graph = pattern
     else:
         pattern_graph = symbolic_trace(pattern).graph
 
     if isinstance(replacement, GraphModule):
         replacement_graph = replacement.graph
+    elif isinstance(replacement, Graph):
+        replacement_graph = replacement
     else:
         replacement_graph = symbolic_trace(replacement).graph
 
