@@ -860,12 +860,13 @@ def _maybe_insert_observers_before_graph_output(
         if isinstance(maybe_node, Node):
             # check dtype of this node
             arg_as_output_target_dtype = _get_arg_target_dtype_as_output(maybe_node, named_modules)
+            observer_mod = None
+            arg_as_input_target_dtype = torch.float
             if "target_dtype_info" in maybe_node.meta:
-                observer_mod = maybe_node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"]()
-                arg_as_input_target_dtype = observer_mod.dtype
-            else:
-                observer_mod = None
-                arg_as_input_target_dtype = torch.float
+                observer_cls = maybe_node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr", None)
+                if observer_cls is not None:
+                    observer_mod = observer_cls()
+                    arg_as_input_target_dtype = observer_mod.dtype
             # TODO: this does not handle dynamic quantization yet
             need_obs = (
                 arg_as_output_target_dtype != arg_as_input_target_dtype and
