@@ -122,13 +122,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
-        if istype(fn, types.MethodType):
-            # when we record the original fn, it may be a bound method such as .forward
-            # however, NNModuleVariable.call_function special-cases .forward to be called
-            # as a function with [self] added to args.  Need to mirror that here.
-            # TODO: see if NNModuleVariable.call_function can just use UserMethodVariable instead
-            fn = fn.__func__
-
         # unpack torch.jit.script_if_tracing
         if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
             fn = inspect.getattr_static(fn, "__original_fn", fn)
