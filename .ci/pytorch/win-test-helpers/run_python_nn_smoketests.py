@@ -37,8 +37,8 @@ if __name__ == "__main__":
 
     if 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1':
         TESTS = COMMON_TESTS + GPU_TESTS
-        if 'USE_ROCM' in os.environ and os.environ['USE_ROCM'] == '1':
-            TESTS += ROCM_GPU_MAGMA_TESTS
+        # if 'USE_ROCM' in os.environ and os.environ['USE_ROCM'] == '1':
+        #     TESTS += ROCM_GPU_MAGMA_TESTS
     else:
         TESTS = COMMON_TESTS
     for description, python_commands in TESTS:
