@@ -50,7 +50,7 @@ def clip_grad_norm_(
         total_norm = norms[0] if len(norms) == 1 else torch.max(torch.stack(norms))
     else:
         norms = []
-        for ((device, _), [grads]) in grouped_grads.items():
+        for ((device, _), ([grads], _)) in grouped_grads.items():
             if (foreach is None or foreach) and _has_foreach_support(grads, device=device):
                 norms.extend(torch._foreach_norm(grads, norm_type))
             elif foreach:
@@ -71,7 +71,7 @@ def clip_grad_norm_(
     # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-    for ((device, _), [grads]) in grouped_grads.items():
+    for ((device, _), ([grads], _)) in grouped_grads.items():
         if (foreach is None or foreach) and _has_foreach_support(grads, device=device):
             torch._foreach_mul_(grads, clip_coef_clamped.to(device))  # type: ignore[call-overload]
         elif foreach:

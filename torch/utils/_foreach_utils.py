@@ -18,7 +18,7 @@ from torch.autograd.grad_mode import no_grad
 #   original input tensorlists, changing up Nones/literals WILL NOT propagate, and manual propagation
 #   may be necessary. Check out torch/optim/sgd.py for an example.
 @no_grad()
-def _group_tensors_by_device_and_dtype(
+def _group_tensors_by_device_and_dtype_(
     tensorlistlist: List[List[Tensor]],
     with_indices: Optional[bool] = False,
 ) -> Dict[Tuple[torch.device, torch.dtype], List[List[Union[Tensor, int]]]]:
@@ -37,6 +37,7 @@ def _group_tensors_by_device_and_dtype(
             per_device_and_dtype_tensors[key][j + 1].append(i)
     return per_device_and_dtype_tensors
 
+
 def _has_foreach_support(tensors: List[Tensor], device: torch.device) -> bool:
     if device.type not in ['cpu', 'cuda'] or torch.jit.is_scripting():
         return False
@@ -44,8 +45,8 @@ def _has_foreach_support(tensors: List[Tensor], device: torch.device) -> bool:
 
 
 @no_grad()
-def _faster_group_tensors_by_device_and_dtype(
-    tensorlistlist: List[List[Tensor]],
+def _group_tensors_by_device_and_dtype(
+    tensorlistlist: List[List[Optional[Tensor]]],
     with_indices: bool = False,
 ) -> Dict[Tuple[torch.device, torch.dtype], Tuple[List[Tensor], List[int]]]:
     return torch._C._group_tensors_by_device_and_dtype(tensorlistlist, with_indices)

@@ -416,8 +416,8 @@ def _multi_tensor_adam(params: List[Tensor],
     assert not differentiable, "_foreach ops don't support autograd"
 
     grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
-    for (device_params, device_grads, device_exp_avgs, device_exp_avg_sqs,
-         device_max_exp_avg_sqs, device_state_steps) in grouped_tensors.values():
+    for ((device_params, device_grads, device_exp_avgs, device_exp_avg_sqs,
+         device_max_exp_avg_sqs, device_state_steps), _) in grouped_tensors.values():
 
         if maximize:
             device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
