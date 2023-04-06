@@ -72,6 +72,8 @@ build_lite_interpreter() {
     "${CPP_BUILD}/caffe2/build/bin/test_lite_interpreter_runtime"
 }
 
+print_cmake_info
+
 if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
   if [[ $(uname -m) == "arm64" ]]; then
     compile_arm64
