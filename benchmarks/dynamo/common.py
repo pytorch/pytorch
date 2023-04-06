@@ -2081,22 +2081,6 @@ def run(runner, args, original_dir=None):
         global synchronize
         synchronize = torch.cuda.synchronize
 
-    if (
-        args.devices == ["cuda"]
-        and torch.cuda.get_device_properties(0).total_memory < 25 * 2**30
-    ):
-        # OOM errors on an RTX 3090 with 24gb RAM
-        runner.skip_models.update(
-            {
-                # torchbench
-                "hf_Longformer",
-                "timm_nfnet",
-                "timm_efficientdet",
-            }
-        )
-        if args.training:
-            runner.skip_models.add("hf_T5")
-
     if torch._dynamo.config.dynamic_shapes:
         # TODO(jansel): fix bugs in these
         runner.skip_models.update(runner.failing_dynamic_shape_models)
@@ -2134,6 +2118,10 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.very_slow_models)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
+        if torch.cuda.get_device_properties(0).total_memory < 25 * 2**30:
+            runner.skip_models.update(runner.large_mem_models)
+            if args.training:
+                runner.skip_models.add("hf_T5")
 
     if args.inductor or args.inductor_settings:
         runner.skip_models.update(runner.failing_torchinductor_models)

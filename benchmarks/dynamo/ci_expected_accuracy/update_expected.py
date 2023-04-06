@@ -105,7 +105,7 @@ def write_filtered_csvs(root_path, dataframes):
     for (suite, phase), df in dataframes.items():
         suite_fn = normalize_suite_filename(suite)
         out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
-        df.to_csv(out_fn, index=False, columns=["name", "graph_breaks"])
+        df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
 
 
 if __name__ == "__main__":

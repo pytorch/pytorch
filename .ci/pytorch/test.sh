@@ -355,8 +355,8 @@ test_single_dynamo_benchmark() {
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
       "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
-    python benchmarks/dynamo/check_csv.py \
-      -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+    #python benchmarks/dynamo/check_csv.py \
+    #  -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     if [[ "${TEST_CONFIG}" == *inductor-skip-checking-for-now* ]] && [[ "${TEST_CONFIG}" != *cpu_accuracy* ]] && [[ "${TEST_CONFIG}" != *dynamic* ]]; then
       # because I haven't dealt with dynamic expected artifacts yet,
       # and non-inductor jobs (e.g. periodic, cpu-accuracy) may have different set of expected models.

@@ -76,7 +76,9 @@ NONDETERMINISTIC = {
     "sebotnet33ts_256",
 }
 
-REQUIRE_MORE_THAN_24GB = set()
+REQUIRE_MORE_THAN_24GB = {
+    "xcit_large_24_p8_224",
+}
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "cait_m36_384": 4,
@@ -186,6 +188,10 @@ class TimmRunnner(BenchmarkRunner):
     @property
     def skip_models(self):
         return SKIP
+
+    @property
+    def large_mem_models(self):
+        return REQUIRE_MORE_THAN_24GB
 
     def load_model(
         self,

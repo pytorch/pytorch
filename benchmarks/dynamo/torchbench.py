@@ -95,6 +95,15 @@ SKIP_TRAIN = {
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
+REQUIRE_MORE_THAN_24GB = {
+    "hf_Longformer",
+    "hf_T5",
+    "hf_T5_base",
+    "hf_T5_large",
+    "timm_nfnet",
+    "timm_efficientdet",
+}
+
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
 ONLY_TRAINING_MODE = {
@@ -229,6 +238,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def non_deterministic_models(self):
         return NONDETERMINISTIC
+
+    @property
+    def large_mem_models(self):
+        return REQUIRE_MORE_THAN_24GB
 
     @property
     def skip_not_suitable_for_training_models(self):
