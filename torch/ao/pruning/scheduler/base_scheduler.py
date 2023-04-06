@@ -1,5 +1,5 @@
 
-from torch.ao.pruning import BaseSparsifier
+from torch.ao.pruning import BasePruner
 
 from functools import wraps
 import warnings
@@ -9,28 +9,28 @@ __all__ = ["BaseScheduler"]
 
 class BaseScheduler:
 
-    def __init__(self, sparsifier, last_epoch=-1, verbose=False):
+    def __init__(self, pruner, last_epoch=-1, verbose=False):
 
-        # Attach sparsifier
-        if not isinstance(sparsifier, BaseSparsifier):
-            raise TypeError('{} is not an instance of torch.ao.pruning.BaseSparsifier'.format(
-                type(sparsifier).__name__))
-        self.sparsifier = sparsifier
+        # Attach pruner
+        if not isinstance(pruner, BasePruner):
+            raise TypeError('{} is not an instance of torch.ao.pruning.BasePruner'.format(
+                type(pruner).__name__))
+        self.pruner = pruner
 
         # Initialize epoch and base sparsity levels
 
-        self.base_sl = [group['sparsity_level'] for group in sparsifier.groups]
+        self.base_sl = [group['sparsity_level'] for group in pruner.groups]
         self.last_epoch = last_epoch
 
         # Following https://github.com/pytorch/pytorch/issues/20124
         # We would like to ensure that `scheduler.step()` is called after
-        # `sparsifier.step()`
+        # `pruner.step()`
         def with_counter(method):
             if getattr(method, '_with_counter', False):
-                # `sparsifier.step()` has already been replaced, return.
+                # `pruner.step()` has already been replaced, return.
                 return method
 
-            # Keep a weak reference to the sparsifier instance to prevent
+            # Keep a weak reference to the pruner instance to prevent
             # cyclic references.
             instance_ref = weakref.ref(method.__self__)
             # Get the unbound method for the same purpose.
@@ -50,8 +50,8 @@ class BaseScheduler:
             wrapper._with_counter = True  # type: ignore[attr-defined]
             return wrapper
 
-        self.sparsifier.step = with_counter(self.sparsifier.step)  # type: ignore[assignment]
-        self.sparsifier._step_count = 0  # type: ignore[attr-defined]
+        self.pruner.step = with_counter(self.pruner.step)  # type: ignore[assignment]
+        self.pruner._step_count = 0  # type: ignore[attr-defined]
         self._step_count: int = 0
         self.verbose = verbose
 
@@ -64,9 +64,9 @@ class BaseScheduler:
         """Returns the state of the scheduler as a :class:`dict`.
 
         It contains an entry for every variable in self.__dict__ which
-        is not the sparsifier.
+        is not the pruner.
         """
-        return {key: value for key, value in self.__dict__.items() if key != 'sparsifier'}
+        return {key: value for key, value in self.__dict__.items() if key != 'pruner'}
 
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
@@ -106,24 +106,24 @@ class BaseScheduler:
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
         format_string += '\n'
-        format_string += 'Sparsifier {0}\n'.format(self.sparsifier)
+        format_string += 'Pruner {0}\n'.format(self.pruner)
         format_string += '    {0}: {1}\n'.format('base_sl', self.base_sl)
         format_string += ')'
         return format_string
 
     def step(self, epoch=None):
-        # Raise warning if trying to call scheduler step before the sparsifier.
+        # Raise warning if trying to call scheduler step before the pruner.
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
-            if not hasattr(self.sparsifier.step, "_with_counter"):
-                warnings.warn("Seems like `sparsifier.step()` has been overridden after sparsity scheduler "
-                              "initialization. Please, make sure to call `sparsifier.step()` before "
+            if not hasattr(self.pruner.step, "_with_counter"):
+                warnings.warn("Seems like `pruner.step()` has been overridden after sparsity scheduler "
+                              "initialization. Please, make sure to call `pruner.step()` before "
                               "`scheduler.step()`.", UserWarning)
 
-            # Just check if there were two first scheduler.step() calls before sparsifier.step()
-            elif self.sparsifier._step_count < 1:  # type: ignore[attr-defined]
-                warnings.warn("Detected call of `scheduler.step()` before `sparsifier.step()`. "
-                              "You have to make sure you run the sparsifier.step() BEFORE any "
+            # Just check if there were two first scheduler.step() calls before pruner.step()
+            elif self.pruner._step_count < 1:  # type: ignore[attr-defined]
+                warnings.warn("Detected call of `scheduler.step()` before `pruner.step()`. "
+                              "You have to make sure you run the pruner.step() BEFORE any "
                               "calls to the scheduer.step().", UserWarning)
         self._step_count += 1
 
@@ -143,17 +143,17 @@ class BaseScheduler:
             self.last_epoch += 1
             values = self.get_sl()
 
-        for i, data in enumerate(zip(self.sparsifier.groups, values)):
+        for i, data in enumerate(zip(self.pruner.groups, values)):
             param_group, sl = data
             param_group['sparsity_level'] = sl
             self.print_sl(self.verbose, i, sl, epoch)
 
-        self._last_sl = [group['sparsity_level'] for group in self.sparsifier.groups]
-        self.sparsifier.enable_mask_update = True
+        self._last_sl = [group['sparsity_level'] for group in self.pruner.groups]
+        self.pruner.enable_mask_update = True
 
     def _make_sure_a_list(self, var):
         r"""Utility that extends it to the same length as the .groups, ensuring it is a list"""
-        n = len(self.sparsifier.groups)
+        n = len(self.pruner.groups)
         if not isinstance(var, (list, tuple)):
             return [var] * n
         else:
