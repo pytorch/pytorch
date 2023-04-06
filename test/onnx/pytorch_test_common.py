@@ -161,10 +161,10 @@ def skip_dynamic_fx_test(reason: str):
     """Skip dynamic exporting test.
 
     Args:
-        reason: The reason for skipping scripting test.
+        reason: The reason for skipping dynamic exporting test.
 
     Returns:
-        A decorator for skipping scripting test.
+        A decorator for skipping dynamic exporting test.
     """
 
     def skip_dec(func):

@@ -28,7 +28,8 @@ def assert_has_diagnostics(
             id_level_pair = (result.rule_id, result.level)
             actual_results.append(id_level_pair)
             if (
-                result.message.text
+                rule_level_pairs == id_level_pair
+                and result.message.text
                 and result.message.markdown
                 and expected_error_node in result.message.text
                 and expected_error_message in result.message.markdown

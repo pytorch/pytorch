@@ -4,8 +4,6 @@ import warnings
 
 from typing import Callable, Dict, List, Sequence, Tuple, Union
 
-import numpy as np
-
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator  # type: ignore[import]
 
@@ -26,7 +24,23 @@ def validate_op_between_ort_torch(
     torch_args: tuple,
     torch_kwargs: dict,
 ):
-    """Validate the op between ONNX Runtime and PyTorch."""
+    """Validate the op between ONNX Runtime and PyTorch.
+
+    The function will run the op in ONNX Runtime and PyTorch and compare the
+    results. It doesn't break the exporting process, but saves each op validated
+    result into SARIF, under the section of `fx_to_onnxscript` pass.
+
+    There are three signs can be found:
+    1. Blue: Pass
+    2. Yellow: Bypass
+    3. Red: Fail
+
+    Args:
+        node (torch.fx.Node): The validated fx.node
+        symbolic_fn (Union[onnxscript.OnnxFunction, Callable]): The corresponded ONNX node
+        torch_args (tuple): torch argument inputs
+        torch_kwargs (dict): torch keyword argument inputs
+    """
     # op-level validation
     # Symbolic_fn should have the same output as node.target (torch ops)
     # trace_only function is regular python function
@@ -81,7 +95,7 @@ def validate_op_between_ort_torch(
         try:
             ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
         except ValueError as value_error:
-            # FIXME(titaiwang): This is caused by wronly split args/kwargs.
+            # FIXME(titaiwang): This is caused by wrongly split args/kwargs.
             # When Opschema is ready, we should follow Opschema to split args/kwargs.
             warnings.warn(
                 f"\nBypass the test of running on ONNX Op {function_name} with "
@@ -118,8 +132,7 @@ def validate_op_between_ort_torch(
             flattened_torch_outputs, flattened_function_outputs
         ):
             try:
-                if not isinstance(function_output, np.ndarray):
-                    # An onnxscript tensor
+                if isinstance(function_output, onnxscript.Tensors):
                     function_output = function_output.value
 
                 # Use torch.testing as opposed to np.testing to ensure dtypes and shapes match
