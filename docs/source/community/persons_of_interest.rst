@@ -63,7 +63,7 @@ Compilers (JIT / TorchScript / FX / TorchDynamo)
 -  Yanan Cao (`gmagogsfm <https://github.com/gmagogsfm>`__)
 -  James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
 -  Jason Ansel (`jansel <https://github.com/jansel>`__)
--  Jiong Gong (`jgong5 <https://github.com/jgong5>`  )
+-  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
 -  (emeritus) Zach Devito (`zdevito <https://github.com/zdevito>`__)
 
 
@@ -144,8 +144,8 @@ CPU Performance (Torch Inductor / MKLDNN)
 ~~~~~~~~~~~~~~~~~~~~~~
 
 -  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
--  Jiong Gong (_`jgong5 <https://github.com/jgong5>`__)
--  Xiaobing Zhang (__`XiaobingSuper <https://github.com/XiaobingSuper>`__)
+-  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
+-  Xiaobing Zhang (`XiaobingSuper <https://github.com/XiaobingSuper>`__)
 -  (emeritus) Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  (emeritus) Jianhui Li (`Jianhui-Li <https://github.com/Jianhui-Li>`__)
 -  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
