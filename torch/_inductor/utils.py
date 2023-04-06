@@ -224,9 +224,9 @@ def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
-def pad_list(x):
+def pad_listlike(x, size):
     if len(x) == 1:
-        return [x[0], x[0]]
+        return type(x)([x[0]]) * size
     else:
         return x
 
@@ -371,7 +371,20 @@ def has_incompatible_cudagraph_ops(gm):
         "fbgemm.jagged_to_padded_dense.default",
     }
     if torch.are_deterministic_algorithms_enabled():
-        forbidden_set.update({"aten.index_put.default", "aten.index_put_.default"})
+        forbidden_set.update(
+            {
+                "aten.index_put.default",
+                "aten.index_put_.default",
+                "aten.scatter.src",
+                "aten.scatter.reduce",
+                "aten.scatter.value_reduce",
+                "aten.scatter_add_",
+                "aten.scatter_add.default",
+                "aten.scatter_reduce.two",
+                "aten.scatter_reduce_.two",
+                "aten.scatter_reduce.two_out",
+            }
+        )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return True
