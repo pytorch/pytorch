@@ -287,35 +287,19 @@ test_perf_for_dashboard() {
 
   dtype=amp
   backend=inductor
-  for mode in inference training; do
-    # All the accuracy tests can be skipped once the CI accuracy checking is stable enough
-    # Run accuracy test for inductor with different configs
-    # --disable-cudagraphs is the default inductor behavior
-    # TODO: update here once cudagraphs is turned on as default
+  for mode in training; do
     python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+        --performance --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_${suite}_${dtype}_${mode}_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+        --performance --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --disable-divisible-by-16 "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_no_divisible_by_16_${suite}_${dtype}_${mode}_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-
-    # Run performance test
-    # Skip dynamo-eager and aot-eager for performance test
-    # Run performance test for inductor with different configs
-    # TODO: add more configs here, e.g. max-autotune, etc.
+        --performance --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --disable-split-reductions "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_no_split_reductions_${suite}_${dtype}_${mode}_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
-    python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
-    python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-        --dynamic-batch-only --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
+        --performance --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --disable-persistent-reductions "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_no_persistent_reductions_${suite}_${dtype}_${mode}_cuda_performance.csv"
   done
 }
 

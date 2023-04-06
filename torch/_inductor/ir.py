@@ -815,7 +815,7 @@ class Reduction(Loops):
         split_reduction = is_triton(device) and reduction_type not in {
             "argmax",
             "argmin",
-        }
+        } and config.split_reductions
         if split_reduction and not dynamo_config.dynamic_shapes:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
