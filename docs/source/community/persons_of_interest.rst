@@ -155,7 +155,7 @@ CPU Performance (Torch Inductor / MKLDNN)
 -  (emeritus) Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  (emeritus) Jianhui Li (`Jianhui-Li <https://github.com/Jianhui-Li>`__)
 
-NVIDIA / CUDA
+GPU Performance (Torch Inductor / Triton / NVIDIA / CUDA )
 ~~~~~~~~~~~~~
 
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
