@@ -19,7 +19,7 @@ Hooks that are orchestrated via nn.Module.__call__ implementation include `_forw
 `forward_hooks`, `_backward_pre_hooks`, and `_backward_hooks`, and will be referred to as 'call hooks'.
 These hooks are partially supported by `torch.compile` with limitations described below.
 
-Another category of hooks includes `_state_dict_hooks` and its 'pre' and 'load_' variants, and are still
+Another category of hooks includes `_state_dict_hooks` and its `pre` and `load_` variants, and are still
 unsupported by `torch.compile`.
 
 `nn.Module.__call__` Hooks Usage and limitations
