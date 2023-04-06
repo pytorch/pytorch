@@ -1814,7 +1814,9 @@ def _as_strided_scatter_meta(
     utils.validate_shape(size)
     utils.validate_strides(stride)
 
-    input_length = utils.compute_required_storage_length(input.size(), input.stride(), input.storage_offset())
+    input_length = utils.compute_required_storage_length(
+        input.size(), input.stride(), input.storage_offset()
+    )
     output_length = utils.compute_required_storage_length(size, stride, storage_offset)
     utils.check(
         input_length >= output_length,

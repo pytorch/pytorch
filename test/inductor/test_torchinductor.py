@@ -4514,7 +4514,8 @@ class CommonTemplate:
                 stride=input.stride(),
                 storage_offset=1,
             )
-        inp = torch.randn(4,1)
+
+        inp = torch.randn(4, 1)
         # as_strided_scatter in inductor is only making a clone of input
         # and doesn't copy from src, clone src to itself for testing
         src = inp[1].clone()
