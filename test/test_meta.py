@@ -680,8 +680,6 @@ meta_function_skips = {
     torch.take_along_dim : {bf16, i8, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.vstack : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.aminmax : {i8, i64, u8, f64, b8, f32, i32, i16},
-    torch.cummax : {bf16, i8, i64, u8, f64, b8, f32, i32, i16},
-    torch.cummin : {bf16, i8, i64, u8, f64, b8, f32, i32, i16},
     torch.diff : {b8},
     torch.equal : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.cdist : {f64, f32},
@@ -746,8 +744,6 @@ meta_function_device_skips['cpu'] = {
 }
 
 meta_function_device_skips['cuda'] = {
-    torch.cummax: {f16},
-    torch.cummin: {f16},
     torch.functional.tensordot: {f16},
     torch.inner: {f16},
     torch.linalg.matrix_power: {f32, f64},
@@ -978,8 +974,6 @@ meta_dispatch_device_skips['cuda'] = {
     aten.softmax.int : {c32, c64},
     aten.softmax.int : {c32, c64},
 
-    aten.cummax.default: {f16},
-    aten.cummin.default: {f16},
     # ROCm stuff; technically this should be expected failure but it's
     # not worth it; these should get unified anyway
     aten.miopen_batch_norm.default: {f32},
