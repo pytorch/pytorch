@@ -793,8 +793,10 @@ static PyObject* _custom_eval_frame(
 
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // that gets re-interpreted as a PyObject (which it is NOT!)
+  Py_XINCREF(code_part);
   PyObject* result =
       call_callback(callback, frame, cache_size(extra), code_part);
+  Py_XDECREF(code_part);
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of

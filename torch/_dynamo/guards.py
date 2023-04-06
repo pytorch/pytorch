@@ -718,7 +718,7 @@ class CheckFunctionManager:
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
 
-        validation_code_part = CodePart(None, "___guarded_code.valid", None)
+        validation_code_part = CodePart(None, "___guarded_code.valid", "")
         code_parts = []
         code_parts.append(validation_code_part)
         code_parts += local_builder.code + global_builder.code
@@ -813,6 +813,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}, part_map):
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {"G": global_builder.scope["G"]}
         guard_fn.guard_fail_fn = guard_fail_fn
+        guard_fn.part_map = part_map
         return guard_fn
 
     def invalidate(self, ref):
@@ -845,6 +846,7 @@ def guard_fail_hook(
     # it's more useful to see the 'first' failure (if we never got a hit) since it's
     # likely not yet been logged as a failure reason in a case of repeating failures.
     if "__check_tensors" in reason:
+        assert code_part.tensor_check_names is not None
         reason = eval(
             f"___check_tensors_verbose({', '.join(code_part.tensor_check_names)}, tensor_check_names={code_part.tensor_check_names})",  # noqa: B950
             code_part.scope,
