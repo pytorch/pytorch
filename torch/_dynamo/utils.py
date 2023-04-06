@@ -1187,6 +1187,12 @@ def get_fake_value(node, tx):
     args = tree_map(fake_wrapper, args)
     kwargs = tree_map(fake_wrapper, kwargs)
 
+    if op == "call_method" and node.target == "backward":
+        # We don't want to run .backward() during dynamo tracing even if under a fake mode, since
+        # it may affect the state of the autograd system and we must preserve it for later tracing.
+        # The actual return type here is None anyway (from .backward()) so no need to run it to find out.
+        return None
+
     nnmodule = None
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]

@@ -19,9 +19,9 @@ class Seq(torch.nn.Module):
             torch.nn.Sigmoid(),
         )
 
+
     def forward(self, x):
         return self.layers(x)
-
 
 def init_weights(m):
     if isinstance(m, torch.nn.Linear):
@@ -82,6 +82,8 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(correct_loss, opt_loss))
 
     def test_smoke(self):
+        assert torch.is_grad_enabled(), "grad isn't enabled at beginning of test"
+
         # currently test_sgd and smoke both fail with the same error:
         # RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
         # paste: https://www.internalfb.com/phabricator/paste/view/P682652292
@@ -97,6 +99,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_model.apply(init_weights)
         opt_optimizer = torch.optim.SGD(opt_model.parameters(), lr=0.01, momentum=0.9)
         inputs = [torch.randn((128, 10))]
+        assert torch.is_grad_enabled(), "grad isn't enabled before calling .compile()"
         opt_train_step = torch.compile(train_step, backend="train_step_eager")
         opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
 

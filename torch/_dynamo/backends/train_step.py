@@ -34,30 +34,18 @@ def train_step_compiler(backend_compile_fn):
         Step 1: Assert inputs (from user) are already Fake, and user their FakeTensorMode
                 (created by dynamo) to fakeify the module's parameters
         """
+        torch.set_grad_enabled(True)
         torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
         assert len(fake_inputs) > 0, "Expected at least one input"
         fake_mode = fake_inputs[0].fake_mode
-        shape_env = fake_mode.shape_env
         assert isinstance(
             fake_mode, FakeTensorMode
         ), "Expected a valid FakeTensorMode on dynamo inputs"
 
         def fakeify_inputs(flat_args):
             def convert(idx, x):
-                if shape_env is not None:
-                    from torch._dynamo.source import ConstantSource
-
-                    if isinstance(x, int):
-                        return shape_env.create_symintnode(
-                            shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
-                            hint=x,
-                        )
-                if not isinstance(x, torch.Tensor):
-                    return x
-                if isinstance(x, FakeTensor):
-                    assert x.fake_mode is fake_mode
-                    return x
-
+                # todo: do we expect symint inputs?
+                assert isinstance(x, torch.Tensor)
                 return fake_mode.from_tensor(x, static_shapes=False)
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
@@ -80,27 +68,19 @@ def train_step_compiler(backend_compile_fn):
             with stateless._reparametrize_module(
                 mod, pytree.tree_unflatten(args[:params_len], params_spec)
             ):
-                if isinstance(mod, torch.fx.GraphModule):
-                    with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
-                        warnings.filterwarnings(
-                            "ignore", "Anomaly Detection has been enabled."
-                        )
-                        with torch.autograd.detect_anomaly(check_nan=False):
-                            out = Interpreter(mod).run(*args[params_len:], **kwargs)
-                else:
-                    out = mod(*args[params_len:], **kwargs)
+                out = mod(*args[params_len:], **kwargs)
 
             if not isinstance(out, (tuple, list)):
                 raise RuntimeError(
-                    "Graph output must be a tuple(). This is so that we can avoid "
-                    "pytree processing of the ouputs. Please change the module to "
-                    "have tuple outputs or use aot_module instead."
+                    "Graph output must be a tuple() to avoid pytree processing of the ouputs."
                 )
             return out
 
         # This fx_g contains expanded backward ops, but also accepts flat params as inputs to forward, so we can't
         # directly return it
+        assert torch.is_grad_enabled(), "grad isn't enabled before calling make_fx"
         fx_g = make_fx(functional_call)(*full_fake_args)
+        torch.set_grad_enabled(False)
 
         """
         Step 3: Functionalize the resulting flattend graph, producing code with copy_ ops
