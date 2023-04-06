@@ -21,21 +21,16 @@ from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
-from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics, overrides, pattern_matcher
+from .codegen.wrapper import KernelParamCache
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
 from .mkldnn import convert_outplace_to_inplace
-from .utils import (
-    developer_warning,
-    get_dtype_size,
-    has_incompatible_cudagraph_ops,
-    is_cpu_device,
-)
+from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -156,7 +151,6 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
     graph_id=None,
-    cpp_wrapper=False,
     aot_mode=False,
     is_inference=False,
     boxed_forward_device_index=None,
@@ -206,8 +200,8 @@ def compile_fx_inner(
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
-            cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
+            cpp_wrapper=config.cpp_wrapper,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
@@ -498,93 +492,74 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-def compile_fx_with_cpp_wrapper(
+def compile_fx_aot(
     module: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
-    inner_compile,
-    decompositions: Optional[Dict[OpOverload, Callable]] = None,
-):
-    """
-    Compile into cpp wrapper:
-    For CPU, this is currently done in one pass.
-    For GPU, this is done in two passes: JIT-compile the model with python wrapper code
-    and run it to generate autotuned kernel binaries in the first pass; and then generate
-    cpp wrapper code and compile it to a dynamic library in the second pass.
-    """
-    from torch.ao.quantization.fx.utils import assert_and_get_unique_device
-
-    # Turns off cpp_wrapper before calling back into compile_fx
-    config_patches = {"cpp_wrapper": False}
-    device = assert_and_get_unique_device(module)
-
-    if is_cpu_device(example_inputs):
-        assert device is None or device.type == "cpu"
-        with config.patch(config_patches):
-            return compile_fx(
-                module,
-                example_inputs,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
-                decompositions=decompositions,
-            )
-    else:
-        assert device is None or device.type == "cuda"
-
-        config_patches.update(
-            {
-                "triton.cudagraphs": False,
-                "triton.store_cubin": True,
-            }
-        )
-        with config.patch(config_patches):
-            # first pass
-            module_copy = deepcopy(module)
-            fake_mode = fake_mode_from_tensors(example_inputs)
-
-            if fake_mode:
-                with no_dispatch():
-
-                    def to_real_tensor(e):
-                        if isinstance(e, FakeTensor):
-                            out = torch.zeros_like(e, device=e.fake_device)
-                            return out
-                        return e
-
-                    inputs_copy = [to_real_tensor(t) for t in example_inputs]
-            else:
-                inputs_copy = deepcopy(example_inputs)
-
-            compiled = compile_fx(
-                module_copy,
-                inputs_copy,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=False),
-                decompositions=decompositions,
-            )
-            compiled(*inputs_copy)
-            del module_copy, inputs_copy
-
-            # second pass
-            return compile_fx(
-                module,
-                example_inputs,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
-                decompositions=decompositions,
-            )
-
-
-def compile_fx_aot(
-    model_: torch.fx.GraphModule,
-    example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
 ):
-    return compile_fx(
-        model_,
-        example_inputs_,
-        inner_compile=functools.partial(inner_compile, aot_mode=True),
-        config_patches=config_patches,
-        decompositions=decompositions,
-    )
+    """
+    JIT-compile the model and run it to generate kernel binaries in the first pass;
+    Generate cpp wrapper code and compile it to a dynamic library in the second pass
+    """
+    from torch.ao.quantization.fx.utils import assert_and_get_unique_device
+
+    # Do we need to check inputs device as well?
+    device = assert_and_get_unique_device(module)
+    new_config_patches = config_patches.copy() if config_patches is not None else dict()
+
+    if device.type == "cuda":
+        # So far, we only need to do this for the Triton backend
+        with KernelParamCache():
+            new_config_patches.update(
+                {
+                    "cpp_wrapper": False,
+                    "triton.cudagraphs": False,
+                    "triton.unique_kernel_names": True,
+                    "triton.store_cubin": True,
+                }
+            )
+            with config.patch(new_config_patches):
+                module_copy = deepcopy(module)
+                inputs_copy = deepcopy(example_inputs)
+                compiled = compile_fx(
+                    module_copy,
+                    inputs_copy,
+                    inner_compile,
+                    new_config_patches,
+                    decompositions,
+                )
+                compiled(inputs_copy)
+                del module_copy, inputs_copy
+
+            new_config_patches.update(
+                {
+                    "cpp_wrapper": True,
+                    "triton.store_cubin": False,
+                }
+            )
+            return compile_fx(
+                module,
+                example_inputs,
+                inner_compile=functools.partial(inner_compile, aot_mode=True),
+                config_patches=new_config_patches,
+                decompositions=decompositions,
+            )
+    else:
+        assert device.type == "cpu"
+        new_config_patches.update(
+            {
+                "cpp_wrapper": True,
+            }
+        )
+        return compile_fx(
+            module,
+            example_inputs,
+            inner_compile=functools.partial(inner_compile, aot_mode=True),
+            config_patches=new_config_patches,
+            decompositions=decompositions,
+        )
 
 
 _graph_counter = itertools.count(0)
@@ -607,14 +582,6 @@ def compile_fx(
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
             )
-
-    if config.cpp_wrapper:
-        return compile_fx_with_cpp_wrapper(
-            model_,
-            example_inputs_,
-            inner_compile=inner_compile,
-            decompositions=decompositions,
-        )
 
     recursive_compile_fx = functools.partial(
         compile_fx,
