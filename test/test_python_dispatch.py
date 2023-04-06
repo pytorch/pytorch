@@ -228,6 +228,31 @@ class TestPythonRegistration(TestCase):
         self.assertEqual(torch.sum(x), x)
         del my_lib1
 
+    def test_AAA(self) -> None:
+        my_lib1 = Library("foo", "DEF")
+        my_lib1.define("sum(Tensor self) -> Tensor")
+
+        @torch.library.impl(my_lib1, "sum", "CPU")
+        def my_sum(*args, **kwargs):
+            return args[0]
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.ops.foo.sum(x), x)
+
+        import sys
+        assert sys.getrefcount(my_lib1) == 2
+        del my_lib1
+
+        my_lib1 = Library("foo", "DEF")
+        my_lib1.define("sum(Tensor self) -> Tensor")
+
+        @torch.library.impl(my_lib1, "sum", "CPU")
+        def my_sum(*args, **kwargs):
+            return args[0]
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.ops.foo.sum(x), x)
+
     def test_create_new_library(self) -> None:
         my_lib1 = Library("foo", "DEF")
 
