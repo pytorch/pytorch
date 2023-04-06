@@ -122,7 +122,7 @@ def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach:
     grouped_grads: Dict[Tuple[torch.device, torch.dtype], List[List[Tensor]]] \
         = _group_tensors_by_device_and_dtype([grads])  # type: ignore[assignment]
 
-    for ((device, _), [grads]) in grouped_grads.items():
+    for ((device, _), ([grads], _)) in grouped_grads.items():
         if (foreach is None or foreach) and _has_foreach_support(grads, device=device):
             torch._foreach_clamp_min_(grads, -clip_value)
             torch._foreach_clamp_max_(grads, clip_value)
