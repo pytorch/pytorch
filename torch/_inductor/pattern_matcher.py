@@ -981,6 +981,8 @@ if torch._C.has_mkldnn:
             for n in binary_nodes
         ):
             return False
+        if any(n.args[0] == n.args[1] for n in binary_nodes):
+            return False
         if any(
             n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
             for n in binary_nodes
