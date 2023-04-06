@@ -31,7 +31,8 @@ class FXGraphModuleExporter(torch.onnx._internal.exporter.Exporter, abc.ABC):
             enable_dynamic_axes=self.options.dynamic_shapes,
         ).run(*fx_module_args)
 
-        # Resolve mutations.
+        # ONNX does not support views and mutations.
+        # Functionalize to get a semantically equivalent graph without mutations.
         module = passes.Functionalize(
             module, enable_dynamic_axes=self.options.dynamic_shapes
         ).run(*fx_module_args)

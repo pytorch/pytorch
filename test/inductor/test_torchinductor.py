@@ -2397,6 +2397,21 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_convolution3(self):
+        # Test stride or padding or dilation is 1 element list.
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(5, 6, [3, 3], stride=[1], padding=[0], dilation=[1]),
+            torch.nn.ReLU(),
+            ToTuple(),
+        )
+
+        self.common(
+            m,
+            (torch.randn([2, 5, 16, 16]),),
+            atol=6e-5,
+            rtol=0.001,
+        )
+
     def test_conv2d_channels_last(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv2d channels_last")
@@ -5529,6 +5544,20 @@ class CommonTemplate:
 
                 with TestRefMode():
                     fn_compiled(inps)
+
+                # do an extra run to make sure we are deallocating on warmup and record
+                if self.device == "cuda":
+                    inps.extend(
+                        [
+                            torch.rand([5, 5]).to(self.device),
+                            torch.rand([5, 5]).to(self.device),
+                        ]
+                    )
+                    inp_refs.extend([weakref.ref(inp) for inp in inps])
+                    matmul_seen = False
+
+                    with TestRefMode():
+                        fn_compiled(inps)
 
                 # for some reason, TorchDispatch doesnt capture the
                 # cuda mm call (even without cudagraphs)

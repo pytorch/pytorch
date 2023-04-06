@@ -6,7 +6,13 @@ import torch
 
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
-from torch.distributed._tensor.op_schema import ArgsType, KwargsType, OutputSpecType
+from torch.distributed._tensor.op_schema import (
+    ArgsType,
+    KwargsType,
+    OpSchema,
+    OutputSharding,
+    OutputSpecType,
+)
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
@@ -99,6 +105,16 @@ def operator_dispatch(
     kwargs: Dict[str, object],
     sharding_propagator: ShardingPropagator,
 ) -> object:
+    out, _, _ = _operator_dispatch(op_call, args, kwargs, sharding_propagator)
+    return out
+
+
+def _operator_dispatch(
+    op_call: torch._ops.OpOverload,
+    args: Tuple[object, ...],
+    kwargs: Dict[str, object],
+    sharding_propagator: ShardingPropagator,
+) -> Tuple[object, OpSchema, OutputSharding]:
     # check that we are not getting mixed vanilla and Distributed tensors
     arg_list, _ = tree_flatten(args)
     mesh = None
@@ -118,14 +134,18 @@ def operator_dispatch(
             else:
                 mesh = arg.device_mesh
 
-    # first we need to lift some private aten aliases to public calls
-    if op_call in _CURRENT_DECOMPOSITION_TABLE:
-        return _CURRENT_DECOMPOSITION_TABLE[op_call](*args, **kwargs)
-
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
 
     output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
+
+    # first we need to lift some private aten aliases to public calls
+    if op_call in _CURRENT_DECOMPOSITION_TABLE:
+        return (
+            _CURRENT_DECOMPOSITION_TABLE[op_call](*args, **kwargs),
+            op_schema,
+            output_sharding,
+        )
 
     # if the schema suggestion from sharding prop is not the same instance as the
     # input op_schema, it indicates a reshard, we need to redistribute the input
@@ -228,7 +248,7 @@ def operator_dispatch(
         # inplace op should return self instead of re-wrapping
         self = cast(dtensor.DTensor, args[0])
         self._spec = cast(DTensorSpec, output_sharding.output_spec)
-        return self
+        return self, op_schema, output_sharding
     elif suggested_input_schema.is_out_variant:
         # out variant could possibly have multiple out args (i.e. lu_unpack.out)
         output_specs = (
@@ -246,6 +266,14 @@ def operator_dispatch(
                 spec_idx += 1
 
         assert len(out_dts) >= 1, "out variant should have at least one out arg"
-        return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
+        return (
+            tuple(out_dts) if len(out_dts) > 1 else out_dts[0],
+            op_schema,
+            output_sharding,
+        )
     else:
-        return wrap(local_results, output_sharding.output_spec)
+        return (
+            wrap(local_results, output_sharding.output_spec),
+            op_schema,
+            output_sharding,
+        )
