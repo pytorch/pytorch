@@ -38,7 +38,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, pad_list, sympy_product
+from .utils import ceildiv, developer_warning, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -1041,6 +1041,8 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 
 
 def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
+    if t.dtype in (torch.complex32, torch.complex64, torch.complex128):
+        return True
     return t.is_cpu and config.disable_cpp_codegen
 
 
@@ -2707,9 +2709,9 @@ def max_pool2d_with_indices(
         padding = [0, 0]
     if not stride:
         stride = kernel_size
-    kernel_size = pad_list(kernel_size)
-    stride = pad_list(stride)
-    padding = pad_list(padding)
+    kernel_size = pad_listlike(kernel_size, 2)
+    stride = pad_listlike(stride, 2)
+    padding = pad_listlike(padding, 2)
 
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
@@ -3120,9 +3122,9 @@ def avg_pool2d(
         stride = kernel_size
     if not padding:
         padding = [0, 0]
-    kernel_size = pad_list(kernel_size)
-    stride = pad_list(stride)
-    padding = pad_list(padding)
+    kernel_size = pad_listlike(kernel_size, 2)
+    stride = pad_listlike(stride, 2)
+    padding = pad_listlike(padding, 2)
 
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
