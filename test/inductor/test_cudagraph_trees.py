@@ -155,6 +155,32 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.run_twc(foo_opt, zeros)
             self.assertEqual(self.get_root_children(), [0, 0])
 
+        def check_rng(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo():
+                return torch.rand([20])
+
+            torch.manual_seed(0)
+
+            out = foo()
+            out2 = foo()
+            out3 = foo()
+
+            torch.manual_seed(0)
+
+            self.assertEqual(out, foo())
+            self.assertEqual(out2, foo())
+            self.assertEqual(out3, foo())
+
+        @torch._inductor.config.patch("fallback_random", True)
+        def test_rng_trees(self):
+            self.check_rng()
+
+        @torch._inductor.config.patch("triton.cudagraph_trees", False)
+        @torch._inductor.config.patch("fallback_random", True)
+        def test_rng_non_trees(self):
+            self.check_rng()
+
         def test_function_compiled_multiple_times(self):
             def foo(x):
                 y = foo2(x)
@@ -363,8 +389,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return x + 1, x + 2
 
             inp = torch.rand([4], device="cuda")
-            foo_cg = self.cudagraphify_impl(foo, [inp], ())
-            foo_cg([inp])
+            inp_list = [inp]
+            foo_cg = self.cudagraphify_impl(foo, inp_list, ())
+            foo_cg(inp_list)
             foo_cg([inp])
 
             out1, out2 = foo_cg([inp])
@@ -389,6 +416,36 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(all_live_block_count(), 1)
             del x
             self.assertEqual(all_live_block_count(), 0)
+
+        def test_aliased_storage_single_weakref(self):
+            @torch.compile
+            def foo(x):
+                x = x * 20
+                x_alias = x[0]
+                y = x * 10
+                y_alias = y[0]
+                torch._dynamo.graph_break()
+                ind = torch.tensor(4, device="cuda")
+                x_alias2 = x[ind:]
+                y_alias2 = y[ind:]
+                return x, x_alias, x_alias2, y_alias, y_alias2
+
+            for _ in range(4):
+                outs = foo(torch.rand([20, 20], device="cuda"))
+
+                ptr_to_ref = {
+                    out.untyped_storage().data_ptr(): out.untyped_storage()._cdata
+                    for out in outs
+                }
+
+                self.assertEqual(len(ptr_to_ref), 2)
+                for out in outs:
+                    self.assertEqual(
+                        ptr_to_ref[out.untyped_storage().data_ptr()],
+                        out.untyped_storage()._cdata,
+                    )
+
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
@@ -434,16 +491,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return x + 1, x + 2
 
             inp = torch.rand([4], device="cuda")
-            foo_cg = self.cudagraphify_impl(foo, [inp], ())
-            x1, x2 = foo_cg([inp])
+            inp_list = [inp]
+            foo_cg = self.cudagraphify_impl(foo, inp_list, ())
+            x1, x2 = foo_cg(inp_list)
 
             def foo2(args):
                 x = args[0]
                 args.clear()
                 return [x * x * x]
 
-            foo2_cg = self.cudagraphify_impl(foo2, [x1], ())
-            foo2_cg([x1])
+            inp_list = [x1]
+            foo2_cg = self.cudagraphify_impl(foo2, inp_list, ())
+            foo2_cg(inp_list)
 
             del x1, x2
             # TODO make configurable
@@ -466,8 +525,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return x[0], x[1]
 
             inp = torch.rand([2, 2], device="cuda")
-            foo_cg = self.cudagraphify_impl(foo, [inp], ())
-            foo_cg([inp])
+            inp_list = [inp]
+            foo_cg = self.cudagraphify_impl(foo, inp_list, ())
+            foo_cg(inp_list)
             foo_cg([inp])
 
             x1, x2 = foo_cg([inp])
@@ -613,8 +673,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 inp = torch.rand([20, 20], device="cuda:1")
 
+                inp_list = [inp]
                 foo_cg = tree_cudagraphify_impl(
-                    foo, [inp], (), device_index=1, is_backward=False, is_inference=True
+                    foo,
+                    inp_list,
+                    (),
+                    device_index=1,
+                    is_backward=False,
+                    is_inference=True,
                 )
                 for _ in range(3):
                     self.assertEqual(foo_cg([inp]), foo([inp]))
