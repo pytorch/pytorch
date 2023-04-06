@@ -321,7 +321,7 @@ def is_live(weak_ref):
 
 class StorageWeakRefWrapper:
     """
-    Wrapper around a storage weak ref. Will deallocate it upon expiration if invoked.
+    Wrapper around a storage weak ref.
     """
 
     __slots__ = ["ref", "_data_ptr"]
@@ -345,10 +345,7 @@ class StorageWeakRefWrapper:
         return instance
 
     def __call__(self) -> Optional[StorageWeakRefPointer]:
-        # if self.ref is None:
-        #     return None
         if self.ref.expired():
-            # self.ref = None
             return None
 
         return self.ref.cdata
@@ -518,21 +515,6 @@ class CUDAWarmupNode:
 InputList = List  # input indexes
 OutputList = List  # output indexes
 LevelList = List  # levels (distance from root of tree)
-
-from contextlib import contextmanager
-from time import perf_counter
-
-
-@contextmanager
-def catchtime() -> float:
-    start = perf_counter()
-    yield lambda: perf_counter() - start
-
-
-with catchtime() as t:
-    import time
-
-    time.sleep(1)
 
 
 class CUDAGraphNode:
@@ -723,9 +705,6 @@ class CUDAGraphNode:
                 assert out is None
                 self.outputs_metadata.append(None)
 
-        self.aliased_storage_count = 0
-        self.un_aliased_storage_count = 0
-
         self.graph.replay()
 
     def _copy_input(self, idx, dst, src):
@@ -752,7 +731,6 @@ class CUDAGraphNode:
 
         assert len(self.static_input_data_ptrs) == len(new_inputs)
         # NB: this ranges over non-static inputs too
-        inputs_reconstructed = 0
         for idx, data_ptr in enumerate(self.static_input_data_ptrs):
             if idx in self.cudagraph_managed_idxs:
                 continue
@@ -761,10 +739,7 @@ class CUDAGraphNode:
                 assert data_ptr == new_inputs[idx].data_ptr()
             else:
                 # non-static input, need to copy it into CUDA graph
-                inputs_reconstructed += 1
-                dst = self._reconstruct_from_tensor_metadata(
-                    self.inputs_metadata[idx], use_cache=False
-                )
+                dst = self._reconstruct_from_tensor_metadata(self.inputs_metadata[idx])
                 src = new_inputs[idx]
                 self._copy_input(idx, dst, src)
 
@@ -823,7 +798,6 @@ class CUDAGraphNode:
                 output_storages, i, output_storage_alias, metadata
             )
             output_storages.append(stor)
-            # assert (stor is None) == (metadata is None)
 
         return output_storages
 
@@ -1182,9 +1156,7 @@ class CUDAGraphNode:
             "storage_offset": x.storage_offset() if not ignore_storage_offset else 0,
         }
 
-    def _reconstruct_from_tensor_metadata(
-        self, metadata: Dict[str, Any], use_cache=True
-    ) -> Tensor:
+    def _reconstruct_from_tensor_metadata(self, metadata: Dict[str, Any]) -> Tensor:
         s = self.create_storage(metadata)
         t = torch.empty([0], device=metadata["device"], dtype=metadata["dtype"])
         t.set_(
@@ -1259,7 +1231,6 @@ class CUDAGraphNode:
             lambda: "TODO: graph recording observed an input tensor deallocate during graph "
             " recording that did not occur during replay. Please file an issue.",
         )
-
         return True
 
     def num_descendants(self) -> int:
@@ -1448,7 +1419,6 @@ class CUDAGraphTreeManager:
         self.running_forwards_with_pending_backwards = False
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
-        # print(f"Running {function_id}")
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
@@ -1527,7 +1497,6 @@ class CUDAGraphTreeManager:
         return self.record_function(new_inputs, function_id)
 
     def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
-        # print(f"Recording {function_id}")
         torch.cuda.synchronize()
         node = CUDAGraphNode(
             self.ids_to_funcs[function_id],
@@ -1550,14 +1519,12 @@ class CUDAGraphTreeManager:
         return node.run_first_inputs(new_inputs)
 
     def execute_node(self, node: CUDAGraphNode, new_inputs) -> List[Optional[Tensor]]:
-        # print(f"Executiong {node.wrapped_function.id}")
         self.current_node = node
         self.path_state = ExecutionState.EXECUTION
         self.update_generation()
         return node.run(new_inputs)
 
     def run_eager(self, new_inputs, function_id: FunctionID):
-        # print(f"Warming up {function_id}")
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
         node = CUDAWarmupNode(

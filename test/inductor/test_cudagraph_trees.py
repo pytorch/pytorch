@@ -658,7 +658,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return torch.sin(y) * torch.nn.functional.dropout(x, p=0.4)
 
             inp = torch.rand([4, 4], requires_grad=True, device="cuda")
-            # print("Input ID", id(inp))
             out = foo(inp)
             out.sum().backward()
 
