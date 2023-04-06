@@ -2261,16 +2261,19 @@ class ShapeEnv:
         self.guards.append(guard)
 
     @lru_cache(256)
-    def evaluate_expr(self, expr: "sympy.Expr", hint=None):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        if len(expr.free_symbols) == 0:
-            return expr
-        expr = self.simplify(expr)
+        if len(orig_expr.free_symbols) == 0:
+            log.debug("evaluate_expr %s [trivial]", orig_expr)
+            return orig_expr
+
+        expr = orig_expr
 
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
+            log.debug("evaluate_expr %s == %s [statically known]", orig_expr, static_expr)
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
@@ -2302,13 +2305,18 @@ class ShapeEnv:
             # maybe_guard_eq in those cases.
             self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
+        if concrete_val is sympy.true:
+            g = expr
+        elif concrete_val is sympy.false:
+            g = sympy.Not(expr)
+        else:
+            g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
         if not self._suppress_guards_tls():
-            if concrete_val is sympy.true:
-                self._add_guard(expr)
-            elif concrete_val is sympy.false:
-                self._add_guard(sympy.Not(expr))
-            else:
-                self._add_guard(sympy.Eq(expr, concrete_val))  # type: ignore[arg-type]
+            self._add_guard(g)
+            log.debug("evaluate_expr %s [guard added]", g)
+        else:
+            log.debug("evaluate_expr %s [guard suppressed]", g)
+
         return concrete_val
 
 def _is_int(expr):
