@@ -900,6 +900,10 @@ def export(
 
     new_graph.recompile()
 
+    # TODO remove this once Executorch uses proper functionalization
+    new_graph._example_fake_inputs = example_fake_inputs
+    new_graph._matched_input_elements_positions = matched_input_elements_positions
+
     return (new_graph, out_guards)
 
 
