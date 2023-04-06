@@ -49,6 +49,8 @@ from torch.utils._pytree import tree_map
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
+nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn_module.html"
+nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 
 log = logging.getLogger(__name__)
 
@@ -1441,20 +1443,32 @@ def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
-def nnmodule_has_hooks(mod, check_call_hooks=True, check_state_dict_hooks=True):
+def nnmodule_has_hooks(
+    mod,
+    check_forward_hooks=False,
+    check_backward_hooks=False,
+    check_state_dict_hooks=False,
+):
     """
-    Sometimes its useful to differentiate between 'call hooks' which are the forward/backward/pre
+    Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.
     """
-    assert (
-        check_call_hooks or check_state_dict_hooks
-    ), "Checking neither hook type is a no-op"
     hook_dicts_to_check = []
-    if check_call_hooks:
+    check_all_hooks = (
+        not check_forward_hooks
+        and not check_backward_hooks
+        and not check_state_dict_hooks
+    )
+    if check_forward_hooks or check_all_hooks:
         hook_dicts_to_check.extend(
             [
                 "_forward_pre_hooks",
                 "_forward_hooks",
+            ]
+        )
+    if check_backward_hooks or check_all_hooks:
+        hook_dicts_to_check.extend(
+            [
                 "_backward_pre_hooks",
                 "_backward_hooks",
             ]
