@@ -812,10 +812,15 @@ class Reduction(Loops):
                 ranges,
             )
 
-        split_reduction = is_triton(device) and reduction_type not in {
-            "argmax",
-            "argmin",
-        }
+        split_reduction = (
+            is_triton(device)
+            and reduction_type
+            not in {
+                "argmax",
+                "argmin",
+            }
+            and config.split_reductions
+        )
         if split_reduction and not dynamo_config.dynamic_shapes:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
@@ -2022,9 +2027,6 @@ class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
 
-    def cpp_wrapper_codegen_reference(self):
-        return "at::Tensor()"
-
 
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
@@ -2034,11 +2036,12 @@ class ShapeAsConstantBuffer(IRNode):
     def codegen_reference(self):
         from torch._inductor.codegen.wrapper import pexpr
 
-        return pexpr(V.graph.sizevars.simplify(self.shape))
-
-    # wrap scalar to 0-d tensor for cpp wrapper
-    def cpp_wrapper_codegen_reference(self):
-        return f"torch::tensor({self.codegen_reference()})"
+        expr = pexpr(V.graph.sizevars.simplify(self.shape))
+        if V.graph.cpp_wrapper:
+            # wrap scalar to 0-d tensor for cpp wrapper
+            return f"torch::tensor({expr})"
+        else:
+            return expr
 
 
 @dataclasses.dataclass
@@ -2665,18 +2668,15 @@ class ExternKernel(InputsKernel):
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
-            kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
-        return kwargs
-
-    def cpp_wrapper_codegen_kwargs(self):
-        kwargs = []
-        if self.kwargs:
-            for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                assert arg_name in self.kwargs, (
-                    "arg %s not found in self.kwargs" % arg_name
-                )
-                v = self.kwargs.get(arg_name)
-                kwargs.append(repr(v))
+            if V.graph.cpp_wrapper:
+                for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                    assert arg_name in self.kwargs, (
+                        "arg %s not found in self.kwargs" % arg_name
+                    )
+                    v = self.kwargs.get(arg_name)
+                    kwargs.append(repr(v))
+            else:
+                kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
@@ -2740,13 +2740,7 @@ class ExternKernelOut(ExternKernel):
 
     def codegen(self, wrapper):
         args = self.codegen_args()
-
-        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
-
-        if isinstance(wrapper, CppWrapperCodeGen):
-            kwargs = self.cpp_wrapper_codegen_kwargs()
-        else:
-            kwargs = self.codegen_kwargs()
+        kwargs = self.codegen_kwargs()
         if kwargs:
             args.extend(kwargs)
 
