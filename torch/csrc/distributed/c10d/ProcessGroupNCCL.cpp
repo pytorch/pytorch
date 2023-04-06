@@ -896,15 +896,17 @@ void ProcessGroupNCCL::workCleanupLoop() {
             auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
             LOG(ERROR) << desyncMsg;
           } catch (const std::exception& e) {
-            LOG(ERROR) << "NCCL_DESYNC_DEBUG failed to retrieve report "
-                       << ", please file an issue. Error: " << e.what();
+            LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
+                       << " Please file an issue. Error: " << e.what();
           } catch (...) {
-            LOG(ERROR) << "NCCL_DESYNC_DEBUG failed to retrieve report "
-                       << " with unknown error, please file an issue.";
+            LOG(ERROR)
+                << "Failed to rerieve NCCL_DESYNC_DEBUG report with unknown error."
+                << " Please file an issue.";
           }
-          // Throw exception
-          work.handleException(asyncErrorHandling_);
         }
+        // Throw exception
+        work.handleException(asyncErrorHandling_);
+      }
 
       // Work status logging for desync debug
       if (desyncDebug_) {
