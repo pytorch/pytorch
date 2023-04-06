@@ -1398,12 +1398,12 @@ class View(BaseView):
 
         while stack_old:
             size_old = stack_old.pop()
-            assert size_old == 1
+            V.graph.sizevars.guard_equals(size_old, 1)
             view_expr.append(sympy.Integer(0))
 
         while stack_new:
             var, size_new = stack_new.pop()
-            assert size_new == 1
+            V.graph.sizevars.guard_equals(size_new, 1)
 
         view_expr = list(reversed(view_expr))
         assert len(view_expr) == len(old_size)
@@ -2509,8 +2509,14 @@ class ExternKernel(InputsKernel):
         # TODO(jansel): replace this with dynamic shape formulas
         example_args = []
 
+        # We need to retain the constant values of fake tensors that we originally
+        # propagated the graph with, because for some operators running without a
+        # constant would trigger an error / DataDependentException
         for x in tensor_args:
-            example_args.append(ir_node_to_tensor(x, guard_shape=True))
+            if x.get_name() in V.graph.constants:
+                example_args.append(V.graph.constants[x.get_name()])
+            else:
+                example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
@@ -2645,6 +2651,11 @@ class ExternKernel(InputsKernel):
     def codegen_args(self):
         args = [x.codegen_reference() for x in self.inputs]
         args.extend(map(repr, self.constant_args))
+        return args
+
+    def cpp_wrapper_codegen_args(self):
+        args = [x.codegen_reference() for x in self.inputs]
+        args.extend(self.cpp_constant_args)
         return args
 
     def codegen_kwargs(self):
@@ -2788,11 +2799,11 @@ class ExternKernelAlloc(ExternKernel):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
+        self.cpp_kernel = cpp_kernel
+        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.name = V.graph.register_buffer(self)
         if kernel is not None:
             self.kernel = kernel
-        self.cpp_kernel = cpp_kernel
-        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
     def should_allocate(self):
         return False
@@ -3351,14 +3362,36 @@ class MKLPackedLinear(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
+        cpp_constant_args=(),
         kernel="torch.ops.mkl._mkl_linear",
+        cpp_kernel="mkl::_mkl_linear",
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
+        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
+        self.cpp_kernel_key = "mkl_linear"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& self,
+                const at::Tensor& mkl_weight_t,
+                const at::Tensor& origin_weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                const int64_t prepack_batch_size)"""
+        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            args = self.cpp_wrapper_codegen_args()
+        else:
+            args = self.codegen_args()
+
+        wrapper.generate_fusion_ops_code(
+            self.get_name(),
+            self.kernel,
+            self.cpp_kernel,
+            args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
         )
 
     @classmethod
@@ -3373,7 +3406,9 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
         bias = None
+        cpp_bias = "at::Tensor()"
         constant_args = [bias, batch_size]
+        cpp_constant_args = [cpp_bias, str(batch_size)]
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -3381,6 +3416,7 @@ class MKLPackedLinear(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
+            cpp_constant_args=cpp_constant_args,
             kernel=kernel,
         )
 
@@ -3679,18 +3715,20 @@ class StorageBox(MutableBox):
 
 
 class InterpreterShim(torch.fx.Interpreter):
+    @staticmethod
+    @functools.lru_cache(None)
+    def _dummy_gm():
+        return torch.fx.symbolic_trace(identity)
+
     def __init__(self, graph, submodules):
-        """
-        We don't call super() here to avoid constructing a
-        GraphModule which is very expensive (it does codegen).
-        """
+        # call super() with a placeholder to avoid constructing a
+        # GraphModule which is very expensive (it does codegen).
+        super().__init__(self._dummy_gm(), garbage_collect_values=False)
         self.module = self
         self.graph = graph
         self.submodules = submodules
-        self.garbage_collect_values = False
-        self.env = {}
+        self.extra_traceback = False
         self.fetch_attr = submodules.__getitem__
-        self.name = "InterpreterShim"
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
