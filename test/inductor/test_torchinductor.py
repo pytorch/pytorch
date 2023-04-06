@@ -2397,6 +2397,21 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_convolution3(self):
+        # Test stride or padding or dilation is 1 element list.
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(5, 6, [3, 3], stride=[1], padding=[0], dilation=[1]),
+            torch.nn.ReLU(),
+            ToTuple(),
+        )
+
+        self.common(
+            m,
+            (torch.randn([2, 5, 16, 16]),),
+            atol=6e-5,
+            rtol=0.001,
+        )
+
     def test_conv2d_channels_last(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv2d channels_last")
