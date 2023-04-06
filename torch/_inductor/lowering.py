@@ -29,6 +29,7 @@ from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
+    ForeachPointwise,
     IndexingConstant,
     PermuteView,
     Pointwise,
@@ -400,42 +401,40 @@ def make_foreach_pointwise(
         dtype = override_return_dtype or inputs[0][0].get_dtype()
         is_cuda = decode_device(inputs[0][0].get_device()).type == "cuda"
 
-        for ind, other, dims in zip(itertools.count(), inputs[1], ranges, strict=False):
+        for ind, other, dims in zip(itertools.count(), inputs[1], ranges):
             assert len(dims) == len(
                 other.get_size()
             ), f"ndim mismatch {fn} {dims} {other.get_size()} at arg list ind {ind}"
 
-        def inner_fn(indices):
-            assert len(indices) == len(ranges), f"mismatched lengths {indices} {ranges}"
-            for ind, index, range in zip(itertools.count(), indices, ranges):
-                assert len(index) == len(
-                    range
-                ), f"wrong ndim {index} {ranges} at ind {ind}"
+        def inner_fn(input_ind, index):
+            assert len(index) == len(
+                ranges[input_ind]
+            ), f"mismatched lengths {index} {ranges[input_ind]} at index {input_ind}"
 
-            # TODO mlazos: handle these
-            if dtype == torch.bool and override_fn_when_input_bool is not None:
-                return override_fn_when_input_bool(*[load(index) for load in loaders])
-            elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
-                return override_fn_when_cuda_float64(*[load(index) for load in loaders])
-            else:
-                return fn(*[load(index) for load in loaders])
+            return fn(loaders[0][input_ind](index), loaders[1][input_ind](index))
 
         if not override_device:
             device = None
-            for i in inputs:
+            for i in inputs[0]:
                 if i.get_device().type == "cuda":
                     device = i.get_device()
                     break
             if not device:
-                device = inputs[0].get_device()
+                device = inputs[0][0].get_device()
 
         device = override_device or device
 
-        return Pointwise.create(
-            device=device,
-            dtype=dtype,
-            inner_fn=inner_fn,
-            ranges=ranges,
+        def new_layout(old_layout):
+            return ir.FixedLayout(
+                old_layout.device,
+                old_layout.dtype,
+                list(old_layout.size),
+                old_layout.stride,
+                old_layout.offset,
+            )
+
+        return ForeachPointwise.create(
+            layouts=[new_layout(input.get_layout()) for input in inputs[0]],
         )
 
     return inner

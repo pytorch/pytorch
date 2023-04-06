@@ -93,6 +93,7 @@ def validate_ir(node_or_nodes):
             (
                 DynamicScalar,
                 TensorBox,
+                BufferList,
                 RandSeedBuffer,
                 sympy.Symbol,
                 sympy.core.relational.Relational,
@@ -1991,6 +1992,105 @@ class Buffer(IRNode):
         pass
 
 
+class BufferList(IRNode):
+    def __init__(self, data):
+        super().__init__()
+        self.name = V.graph.register_buffer(self)
+        self.layouts = data.layouts
+        self.buffers = [
+            ForeachOutputBuffer(self.name + f"_{i}", layout)
+            for i, layout in enumerate(self.layouts)
+        ]
+        self.data = data
+
+    def __getitem__(self, ind):
+        return TensorBox.create(self.buffers[ind])
+
+    def make_indexer(self, ind):
+        return self.layouts[ind].make_indexer()
+
+    def get_name(self):
+        assert self.name
+        return self.name
+
+    def get_device(self, ind):
+        return self.layouts[ind].device
+
+    def get_dtype(self, ind):
+        return getattr(self.layouts[ind], "dtype", None)
+
+    def get_size(self, ind):
+        return list(self.layouts[ind].size)
+
+    def get_stride(self, ind):
+        return list(self.layouts[ind].stride)
+
+    def get_layout(self, ind):
+        return self.layouts[ind]
+
+    def get_storage_numel(self):
+        return self.get_numel()
+
+    def is_extern(self):
+        return False
+
+    def freeze_layout(self):
+        if not isinstance(self.layout, (MultiOutputLayout, AliasedLayout)):
+            self.layout = self.layout.as_fixed()
+
+    def freeze_layout_with_stride_order(self, order):
+        assert isinstance(self.layout, FlexibleLayout)
+        self.layout = self.layout.as_stride_order(order)
+
+    def freeze_layout_with_fill_order(self, order):
+        assert isinstance(self.layout, FlexibleLayout)
+        self.layout = self.layout.as_fill_order(order)
+
+    def freeze_layout_with_same_order(self, stride):
+        assert isinstance(self.layout, FlexibleLayout)
+        self.layout = self.layout.as_same_order(stride)
+
+    def make_loader(self, ind):
+        def loader(index):
+            indexer = self.layouts[ind].make_indexer()
+            return ops.load(self.name, indexer(index))
+
+        return loader
+
+    def is_no_op(self):
+        return False
+
+    def codegen_reference(self):
+        return self.get_name()
+
+    def decide_layout(self):
+        pass
+
+    def get_alias_names(self):
+        return ()
+
+    def get_mutation_names(self):
+        return ()
+
+    @cache_on_self
+    def get_read_writes(self):
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            return extract_read_writes(
+                self.make_loader(),
+                self.get_size(),
+            )
+
+    def get_reads(self):
+        return self.get_read_writes().reads
+
+    def realize(self):
+        pass
+
+
+class ForeachOutputBuffer(Buffer):
+    pass
+
+
 class InputBuffer(Buffer):
     pass
 
@@ -3608,6 +3708,7 @@ class StorageBox(MutableBox):
                 InputBuffer,
                 ReinterpretView,
                 TemplateBuffer,
+                ForeachOutputBuffer,
             ),
         ):
             return self.data.get_name()
@@ -3682,6 +3783,17 @@ class StorageBox(MutableBox):
                 data=data,
             ).get_read_writes()
         return len(read_writes.reads)
+
+
+# This will have some other metadata and stuffs
+class ForeachPointwise(IRNode):
+    def __init__(self, layouts):
+        super().__init__()
+        self.layouts = layouts
+
+    @classmethod
+    def create(cls, *args, **kwargs):
+        return BufferList(cls(*args, **kwargs))
 
 
 class InterpreterShim(torch.fx.Interpreter):
