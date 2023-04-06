@@ -115,7 +115,7 @@ public:
     xyzw_clamped_v = _mm256_permutevar8x32_epi32(xyzw_clamped_v, permute_mask_v);
 
     // Store to dst
-    _mm_storeu_si64(dst_data, _mm256_castsi256_si128(xyzw_clamped_v));
+    _mm_storel_epi64(reinterpret_cast<__m128i*>(dst_data), _mm256_castsi256_si128(xyzw_clamped_v));
   }
   void store_to_uint8_v2(uint8_t* dst_data) {
     solution2_satuate(dst_data);
