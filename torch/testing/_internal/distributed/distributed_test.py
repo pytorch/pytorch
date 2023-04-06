@@ -8471,7 +8471,7 @@ class DistributedTest:
                 group_gloo,
             )
 
-        def _test_output_unused_in_loss(self, module_cls, static_graph):
+        def _test_output_unused_in_loss(self, module_cls, static_graph, gradient_as_bucket_view):
             model = module_cls()
             local_net = copy.deepcopy(model)
             net = torch.nn.parallel.DistributedDataParallel(
@@ -8479,6 +8479,7 @@ class DistributedTest:
                 device_ids=[self.rank],
                 find_unused_parameters=True,
                 static_graph=static_graph,
+                gradient_as_bucket_view=gradient_as_bucket_view,
             )
 
             # Tests that certain parameters not getting gradient since the
@@ -8575,8 +8576,10 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         def test_output_unused_in_loss_tuple_module(self):
             module_cls = UnusedParamTwoLinLayerNet
-            for static_graph in [True, False]:
-                self._test_output_unused_in_loss(module_cls, static_graph)
+            for static_graph, gradient_as_bucket_view in itertools.product(
+                [True, False], [True, False]
+            ):
+                self._test_output_unused_in_loss(module_cls, static_graph, gradient_as_bucket_view)
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -8585,8 +8588,10 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         def test_output_unused_in_loss_dict_module(self):
             module_cls = DictOutputModule
-            for static_graph in [True, False]:
-                self._test_output_unused_in_loss(module_cls, static_graph)
+            for static_graph, gradient_as_bucket_view in itertools.product(
+                [True, False], [True, False]
+            ):
+                self._test_output_unused_in_loss(module_cls, static_graph, gradient_as_bucket_view)
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
