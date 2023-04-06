@@ -433,7 +433,7 @@ class Module:
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
     call_super_init: bool = False
-    __compiled_call_impl : Optional[Callable] = None
+    _compiled_call_impl : Optional[Callable] = None
 
 
 
