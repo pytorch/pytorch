@@ -67,14 +67,16 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256")
+REQUIRE_HIGHER_TOLERANCE = {"botnet26t_256"}
 
-SKIP = {}
+SKIP = set()
 
 NONDETERMINISTIC = {
     # https://github.com/pytorch/pytorch/issues/94066
     "sebotnet33ts_256",
 }
+
+REQUIRE_MORE_THAN_24GB = set()
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "cait_m36_384": 4,
