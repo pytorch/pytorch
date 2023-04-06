@@ -1607,8 +1607,8 @@ class TestSparse(TestSparseBase):
             self.assertEqual(torch.sparse.mm(S, D), torch.mm(S_dense, D))
 
             def fn(S, D):
-                return torch.sparse.mm(S, D)
-            gradcheck(fn, (S, D), masked=True)
+                return torch.sparse.mm(S.sparse_mask(S), D)
+            gradcheck(fn, (S, D))
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
