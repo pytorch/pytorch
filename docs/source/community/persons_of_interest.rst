@@ -63,7 +63,7 @@ Compilers (JIT / TorchScript / FX / TorchDynamo)
 -  Yanan Cao (`gmagogsfm <https://github.com/gmagogsfm>`__)
 -  James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
 -  Jason Ansel (`jansel <https://github.com/jansel>`__)
--  Jiong Gong (_`jgong5 <https://github.com/jgong5>`__)
+-  Jiong Gong (`jgong5 <https://github.com/jgong5>`  )
 -  (emeritus) Zach Devito (`zdevito <https://github.com/zdevito>`__)
 
 
