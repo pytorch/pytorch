@@ -590,25 +590,6 @@ def bmm(g: jit_utils.GraphContext, self, other):
 @_onnx_symbolic("aten::matmul")
 @_beartype.beartype
 def matmul(g: jit_utils.GraphContext, self, other):
-    # TODO: The cast-to-lower-input pattern can be a helper function on the new ONNX Script aten lib
-    if not symbolic_helper.args_have_same_dtype([self, other]):
-        if torch.is_autocast_enabled():
-            self_dtype = _type_utils.JitScalarType.from_value(
-                self, _type_utils.JitScalarType.UNDEFINED
-            )
-            other_dtype = _type_utils.JitScalarType.from_value(
-                other, _type_utils.JitScalarType.UNDEFINED
-            )
-            cast_to = _type_utils.JitScalarType.lowest_dtype(self_dtype, other_dtype)
-            if cast_to == self_dtype:
-                lowest_cast = g.op("Cast", other, to_i=self_dtype.onnx_type())
-                return g.op("MatMul", self, lowest_cast)
-            else:
-                lowest_cast = g.op("Cast", self, to_i=other_dtype.onnx_type())
-                return g.op("MatMul", lowest_cast, other)
-        return symbolic_helper._unimplemented(
-            "MatMul", "Input dtype mismatch outside Autocast region"
-        )
     return g.op("MatMul", self, other)
 
 
