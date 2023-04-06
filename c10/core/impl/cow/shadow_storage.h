@@ -37,7 +37,7 @@ namespace c10::impl::cow {
 class C10_API ShadowStorage final : private intrusive_ptr_target {
  public:
   /** The type of the generation number. */
-  using Generation = std::int64_t;
+  using Generation = std::int32_t;
 
   // Creates an instance from an existing storage generation.
   explicit ShadowStorage(Generation generation) noexcept;

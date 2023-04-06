@@ -2,6 +2,7 @@
 
 #include <c10/core/impl/cow/shadow_storage.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 
 #include <cstdint>
@@ -34,14 +35,9 @@ class C10_API StateMachine {
   // Constructs an instance in the "initial" state.
   StateMachine();
 
-  // Responsible for cleaning up any implementation details.
-  ~StateMachine();
-
-  // Gets the current generation of the physical storage.
-  //
-  // Reminder: no tracking occurs until simulate_lazy_copy() is
-  // called.
-  auto physical_generation() -> Generation;
+  // Gets the current generation of the physical storage if
+  // initialized.
+  auto physical_generation() -> c10::optional<Generation>;
 
   // Bumps the physical generation and updates the appropriate shadow
   // storage to the new value, warning if there is an unexpected gap.
@@ -78,15 +74,17 @@ class C10_API StateMachine {
       -> intrusive_ptr<cow::ShadowStorage>;
 
  private:
-  class Impl;
-
-  /** Gets the underlying Impl, returning null if uninitialized. */
-  auto maybe_get_impl() -> Impl*;
-  /** Gets the underlying Impl, initializing if uninitialized. */
-  auto ensure_initialized() -> Impl&;
-
-  // The current representation of the storage instance.
-  std::atomic<Impl*> impl_;
+  // How many writes have been applied to the storage.
+  //
+  // -1 is used as a sentinel to indicate that this has not been
+  // initialized. We do this so that in the common path where there
+  // are no outstanding lazy copies, we only need to pay the cost of
+  // an uncontested atomic read.
+  std::atomic<Generation> physical_generation_;
+  // The shadow storage to use for any tensors that don't have
+  // one. This situation is common, and will be true for tensors and
+  // views thereof created before any copy on writes.
+  cow::ShadowStorage default_shadow_storage_;
 };
 
 } // namespace c10::impl::cow

@@ -74,7 +74,7 @@ TEST_F(CopyOnWriteTest, ShadowStorage) {
 TEST_F(CopyOnWriteTest, StateMachineWithoutShadowStorage) {
   cow::StateMachine state;
   state.maybe_bump(nullptr);
-  ASSERT_THAT(state.physical_generation(), testing::Eq(0));
+  ASSERT_THAT(state.physical_generation(), testing::Eq(c10::nullopt));
 }
 
 // Implement a matcher that verifies a warning has a message as a

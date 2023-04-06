@@ -8,7 +8,7 @@
 namespace c10::impl {
 
 /* static */ auto cow::Spy::get_generation(Storage const& storage)
-    -> std::uint64_t {
+    -> c10::optional<cow::ShadowStorage::Generation> {
   TORCH_INTERNAL_ASSERT(storage);
   return storage.unsafeGetStorageImpl()
       ->copy_on_write_state_.physical_generation();
