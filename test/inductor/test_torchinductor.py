@@ -4505,6 +4505,22 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(10, 1024), torch.randn(10, 512)])
 
+    def test_as_strided_scatter_on_input_tensor_with_storage_offset(self):
+        def fn(input, src):
+            return aten.as_strided_scatter(
+                input,
+                src,
+                size=input.size(),
+                stride=input.stride(),
+                storage_offset=1,
+            )
+        inp = torch.randn(4,1)
+        # as_strided_scatter in inductor is only making a clone of input
+        # and doesn't copy from src, clone src to itself for testing
+        src = inp[1].clone()
+        # should not have any error with storage_offset
+        self.common(fn, [inp[1], src])
+
     def test_select_scatter(self):
         def fn(x, a, b):
             return (
