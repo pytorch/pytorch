@@ -21,9 +21,9 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, floating_and_complex_types,
-    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes
+    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
+    float_to_corresponding_complex_type_map
 )
-from torch.testing._creation import float_to_corresponding_complex_type_map
 
 from torch.utils.dlpack import to_dlpack
 
@@ -3948,6 +3948,13 @@ class TestAsArray(TestCase):
         self.assertEqual(tensor.dim(), 0)
         self.assertEqual(tensor.item(), scalar.item())
         self.assertEqual(tensor.dtype, torch.float64)
+        # Regression test for https://github.com/pytorch/pytorch/issues/97021
+        zerodim_arr = np.array(1.)
+        tensor = torch.asarray(zerodim_arr, dtype=torch.int32)
+        self.assertEqual(tensor.dim(), 0)
+        self.assertEqual(tensor.item(), zerodim_arr.item())
+        self.assertEqual(tensor.dtype, torch.int32)
+
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())

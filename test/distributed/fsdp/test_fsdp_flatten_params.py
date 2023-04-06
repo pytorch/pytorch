@@ -38,7 +38,16 @@ class TestFlattenParams(FSDPTest):
         return 1
 
     def _get_default_config(self):
-        return (HandleShardingStrategy.FULL_SHARD, False, None, None, False)
+        return {
+            "device": torch.device("cuda"),
+            "sharding_strategy": HandleShardingStrategy.FULL_SHARD,
+            "offload_params": False,
+            "mp_param_dtype": None,
+            "mp_reduce_dtype": None,
+            "keep_low_precision_grads": False,
+            "process_group": self.process_group,
+            "use_orig_params": False,
+        }
 
     def _get_transformer(self, seed=0):
         torch.manual_seed(seed)  # keep everything deterministic
@@ -141,15 +150,12 @@ class TestFlattenParams(FSDPTest):
             module = module.half()
         with self.assertRaisesRegex(
             ValueError,
-            "Cannot initialize a `FlatParameter` from an empty parameter list",
+            "Cannot construct a FlatParamHandle with an empty parameter list",
         ):
             FlatParamHandle(
                 [],
                 module,
-                torch.device("cuda"),
-                *self._get_default_config(),
-                self.process_group,
-                False,
+                **self._get_default_config(),
             )
 
     @skip_if_lt_x_gpu(1)
@@ -218,10 +224,7 @@ class TestFlattenParams(FSDPTest):
         flat_param_handle = FlatParamHandle(
             params_to_flatten,
             module,
-            torch.device("cuda"),
-            *self._get_default_config(),
-            self.process_group,
-            False,
+            **self._get_default_config(),
         )
         self.assertEqual(ref_numel, flat_param_handle.flat_param.numel())
 
@@ -303,53 +306,30 @@ class TestFlattenParams(FSDPTest):
         optim.step()
         return torch.norm(torch.stack([p.detach().norm() for p in module.parameters()]))
 
-    def test_flat_param_shard_metadata(self):
+    def test_flat_param_shard_metadata_unaligned(self):
         """
-        Tests that ``FlatParameter`` shard metadata are computed as expected.
+        Tests that ``FlatParameter`` shard metadata are computed as expected
+        without any explicit alignment padding.
         """
         module = torch.nn.Sequential(
             torch.nn.Linear(10, 10, bias=False),
-            torch.nn.ReLU(),
+            nn.ReLU(),
             torch.nn.Linear(10, 10, bias=False),
-            torch.nn.ReLU(),
+            nn.ReLU(),
             torch.nn.Linear(10, 10, bias=False),
-            torch.nn.ReLU(),
+            nn.ReLU(),
         )
         params_to_flatten = list(module.parameters())
-        flat_param_handle = FlatParamHandle(
+        handle = FlatParamHandle(
             params_to_flatten,
             module,
-            torch.device("cuda"),
-            *self._get_default_config(),
-            self.process_group,
-            False,
+            **self._get_default_config(),
         )
 
-        def _test(kwargs, expected):
-            """
-            Tests the subroutine ``_get_shard_metadata()`` that computes shard
-            metadata based on start and end indices in the unsharded flattened
-            parameter.
-
-            We manually set the relevant attributes on the flattened parameter
-            to be able to check the effect of ``_get_shard_metadata()`` via
-            ``shard_metadata()`` since normally the attributes are set in
-            ``init_shard_info()`` with the start and end indices fixed based on
-            rank and world size.
-            """
-            flat_param = flat_param_handle.flat_param
-            (
-                flat_param._shard_param_offsets,
-                flat_param._shard_indices,
-            ) = flat_param_handle._get_shard_metadata(kwargs["start"], kwargs["end"])
-            self.assertEqual(
-                flat_param_handle.shard_metadata(),
-                expected,
-                msg=f"{flat_param_handle.shard_metadata()}, {expected}",
-            )
-
-        _test(
-            kwargs={"start": 0, "end": 0},
+        self._test_flat_param_shard_metadata(
+            handle,
+            start=0,
+            end=0,
             expected=FlatParamShardMetadata(
                 param_names=["0.weight"],
                 param_shapes=[(10, 10)],
@@ -357,8 +337,10 @@ class TestFlattenParams(FSDPTest):
                 param_offsets=[(0, 0)],
             ),
         )
-        _test(
-            kwargs={"start": 0, "end": 50},
+        self._test_flat_param_shard_metadata(
+            handle,
+            start=0,
+            end=50,
             expected=FlatParamShardMetadata(
                 param_names=["0.weight"],
                 param_shapes=[(10, 10)],
@@ -366,8 +348,10 @@ class TestFlattenParams(FSDPTest):
                 param_offsets=[(0, 50)],
             ),
         )
-        _test(
-            kwargs={"start": 0, "end": 99},
+        self._test_flat_param_shard_metadata(
+            handle,
+            start=0,
+            end=99,
             expected=FlatParamShardMetadata(
                 param_names=["0.weight"],
                 param_shapes=[(10, 10)],
@@ -375,8 +359,10 @@ class TestFlattenParams(FSDPTest):
                 param_offsets=[(0, 99)],
             ),
         )
-        _test(
-            kwargs={"start": 50, "end": 149},
+        self._test_flat_param_shard_metadata(
+            handle,
+            start=50,
+            end=149,
             expected=FlatParamShardMetadata(
                 param_names=["0.weight", "2.weight"],
                 param_shapes=[(10, 10), (10, 10)],
@@ -384,8 +370,10 @@ class TestFlattenParams(FSDPTest):
                 param_offsets=[(50, 99), (0, 49)],
             ),
         )
-        _test(
-            kwargs={"start": 50, "end": 199},
+        self._test_flat_param_shard_metadata(
+            handle,
+            start=50,
+            end=199,
             expected=FlatParamShardMetadata(
                 param_names=["0.weight", "2.weight"],
                 param_shapes=[(10, 10), (10, 10)],
@@ -393,8 +381,10 @@ class TestFlattenParams(FSDPTest):
                 param_offsets=[(50, 99), (0, 99)],
             ),
         )
-        _test(
-            kwargs={"start": 99, "end": 199},
+        self._test_flat_param_shard_metadata(
+            handle,
+            start=99,
+            end=199,
             expected=FlatParamShardMetadata(
                 param_names=["0.weight", "2.weight"],
                 param_shapes=[(10, 10), (10, 10)],
@@ -402,8 +392,10 @@ class TestFlattenParams(FSDPTest):
                 param_offsets=[(99, 99), (0, 99)],
             ),
         )
-        _test(
-            kwargs={"start": 100, "end": 199},
+        self._test_flat_param_shard_metadata(
+            handle,
+            start=100,
+            end=199,
             expected=FlatParamShardMetadata(
                 param_names=["2.weight"],
                 param_shapes=[(10, 10)],
@@ -411,8 +403,10 @@ class TestFlattenParams(FSDPTest):
                 param_offsets=[(0, 99)],
             ),
         )
-        _test(
-            kwargs={"start": 100, "end": 299},
+        self._test_flat_param_shard_metadata(
+            handle,
+            start=100,
+            end=299,
             expected=FlatParamShardMetadata(
                 param_names=["2.weight", "4.weight"],
                 param_shapes=[(10, 10), (10, 10)],
@@ -420,8 +414,10 @@ class TestFlattenParams(FSDPTest):
                 param_offsets=[(0, 99), (0, 99)],
             ),
         )
-        _test(
-            kwargs={"start": 100, "end": 1000},
+        self._test_flat_param_shard_metadata(
+            handle,
+            start=100,
+            end=1000,
             expected=FlatParamShardMetadata(
                 param_names=["2.weight", "4.weight"],
                 param_shapes=[(10, 10), (10, 10)],
@@ -429,14 +425,142 @@ class TestFlattenParams(FSDPTest):
                 param_offsets=[(0, 99), (0, 99)],
             ),
         )
-        _test(
-            kwargs={"start": 299, "end": 299},
+        self._test_flat_param_shard_metadata(
+            handle,
+            start=299,
+            end=299,
             expected=FlatParamShardMetadata(
                 param_names=["4.weight"],
                 param_shapes=[(10, 10)],
                 param_numels=[100],
                 param_offsets=[(99, 99)],
             ),
+        )
+
+    def test_flat_param_shard_metadata_aligned_full_precision(self):
+        """
+        Tests that ``FlatParameter`` shard metadata are computed as expected
+        with alignment padding and parameter full precision.
+        """
+        module = torch.nn.Sequential(
+            torch.nn.Linear(3, 7, bias=False),  # 0.weight
+            torch.nn.Linear(7, 5, bias=False),  # 1.weight
+            torch.nn.Linear(5, 5, bias=False),  # 2.weight
+        )
+        params_to_flatten = list(module.parameters())
+        handle_kwargs = self._get_default_config()
+        handle_kwargs["use_orig_params"] = True
+        handle = FlatParamHandle(params_to_flatten, module, **handle_kwargs)
+        # For 32-bit full precision, FSDP pads up to 3 numel after each
+        # original parameter to achieve 0 mod 4 numel (i.e. 0 mod 16 bytes).
+        # Thus, the unsharded `FlatParameter` layout looks like:
+        #   21 + (3) + 35 + (1) + 25
+        # where (x) means x numel of padding. This gives a total of 85 numel.
+
+        # The `FlatParamShardMetadata` do not include alignment padding but do
+        # account for them
+        self._test_flat_param_shard_metadata(
+            handle,
+            # Emulate rank 0 of 2 ranks
+            start=0,
+            end=42,
+            expected=FlatParamShardMetadata(
+                param_names=["0.weight", "1.weight"],
+                param_shapes=[(7, 3), (5, 7)],
+                param_numels=[21, 35],
+                # 21 + (3) + 19 = 43
+                param_offsets=[(0, 20), (0, 18)],
+            ),
+        )
+        self._test_flat_param_shard_metadata(
+            handle,
+            # Emulate rank 1 of 2 ranks
+            start=43,
+            end=85,
+            expected=FlatParamShardMetadata(
+                param_names=["1.weight", "2.weight"],
+                param_shapes=[(5, 7), (5, 5)],
+                param_numels=[35, 25],
+                # 16 + (1) + 25 = 42
+                param_offsets=[(19, 34), (0, 24)],
+            ),
+        )
+
+    def test_flat_param_shard_metadata_aligned_mixed_precision(self):
+        """
+        Tests that ``FlatParameter`` shard metadata are computed as expected
+        with alignment padding and parameter mixed precision.
+        """
+        module = torch.nn.Sequential(
+            torch.nn.Linear(2, 5, bias=False),  # 0.weight
+            torch.nn.Linear(5, 5, bias=False),  # 1.weight
+            torch.nn.Linear(5, 3, bias=False),  # 2.weight
+        )
+        params_to_flatten = list(module.parameters())
+        handle_kwargs = self._get_default_config()
+        handle_kwargs["use_orig_params"] = True
+        handle_kwargs["mp_param_dtype"] = torch.float16
+        handle = FlatParamHandle(params_to_flatten, module, **handle_kwargs)
+        # For 16-bit mixed precision, FSDP pads up to 7 numel after each
+        # original parameter to achieve 0 mod 8 numel (i.e. 0 mod 16 bytes).
+        # Thus, the unsharded `FlatParameter` layout looks like:
+        #   10 + (6) + 25 + (7) + 15
+        # where (x) means x numel of padding. This gives a total of 63 numel.
+
+        # The `FlatParamShardMetadata` do not include alignment padding but do
+        # account for them
+        self._test_flat_param_shard_metadata(
+            handle,
+            # Emulate rank 0 of 2 ranks
+            start=0,
+            end=31,
+            expected=FlatParamShardMetadata(
+                param_names=["0.weight", "1.weight"],
+                param_shapes=[(5, 2), (5, 5)],
+                param_numels=[10, 25],
+                # 10 + (6) + 16 = 32
+                param_offsets=[(0, 9), (0, 15)],
+            ),
+        )
+        self._test_flat_param_shard_metadata(
+            handle,
+            # Emulate rank 1 of 2 ranks
+            start=32,
+            end=63,
+            expected=FlatParamShardMetadata(
+                param_names=["1.weight", "2.weight"],
+                param_shapes=[(5, 5), (3, 5)],
+                param_numels=[25, 15],
+                # 9 + (7) + 15 = 31
+                param_offsets=[(16, 24), (0, 14)],
+            ),
+        )
+
+    def _test_flat_param_shard_metadata(
+        self,
+        handle: FlatParamHandle,
+        start: int,
+        end: int,
+        expected: FlatParamShardMetadata,
+    ):
+        """
+        Tests the subroutine ``_get_shard_metadata()`` that computes shard
+        metadata based on start and end indices in the unsharded flat
+        parameter, where both indices are inclusive.
+
+        We manually set the relevant attributes on the flat parameter to be
+        able to check the effect of ``_get_shard_metadata()`` via
+        ``shard_metadata()`` since normally the attributes are set in
+        ``_init_shard_metadata()`` with the start and end indices fixed based
+        on rank and world size.
+        """
+        flat_param = handle.flat_param
+        flat_param._shard_param_infos = handle._get_shard_metadata(start, end)
+        shard_metadata = handle.shard_metadata()
+        self.assertEqual(
+            shard_metadata,
+            expected,
+            msg=f"{handle.shard_metadata()}, {expected}",
         )
 
 
