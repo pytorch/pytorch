@@ -3883,28 +3883,28 @@ def _realize(x):
 try:
     import torch.distributed._functional_collectives
 
-    c10d_functional = torch.ops.c10d_functional
-
-    @register_lowering(c10d_functional.wait_tensor)
+    @register_lowering(aten.wait_tensor)
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
 
-    @register_lowering(c10d_functional.all_reduce)
+    @register_lowering(aten.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
         )
 
-    @register_lowering(c10d_functional.all_gather_into_tensor)
+    @register_lowering(aten.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
         )
 
-    @register_lowering(c10d_functional.reduce_scatter_tensor)
-    def reduce_scatter_tensor(input, reduce_op, tag, ranks, group_size):
+    @register_lowering(aten.reduce_scatter_tensor)
+    def reduce_scatter_tensor(input, reduce_op, scatter_dim, tag, ranks, group_size):
         return TensorBox.create(
-            ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
+            ir.ReduceScatterTensor.create(
+                input, reduce_op, scatter_dim, tag, ranks, group_size
+            )
         )
 
 except ImportError:
