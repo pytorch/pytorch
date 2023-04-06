@@ -333,6 +333,21 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 1
         assert same(out, correct)
 
+    def test_dynamo_trace_allgather_coalesced(self):
+        def func(inp, *, tag, ranks, group_size):
+            ar = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(inp, tag, ranks, group_size)
+            return ar
+
+        inputs = [torch.ones(4, 4, device="cuda"), torch.ones(6, 6, device="cuda")]
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter)
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert counter.frame_count == 1
+        assert counter.op_count == 3  # It generates 2 getattr to unpack the array
+        assert same(out, correct)
+
+
     def test_backwards(self):
         """
         It's probably not that common to need backwards support for collectives.
