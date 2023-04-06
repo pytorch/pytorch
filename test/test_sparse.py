@@ -4833,7 +4833,6 @@ class TestSparseAny(TestCase):
                 if "\"cpublas_axpy_impl\" not implemented for 'ComplexHalf'" in str(msg):
                     continue
                 raise
-
             self.assertEqual(result, dense)
 
 
