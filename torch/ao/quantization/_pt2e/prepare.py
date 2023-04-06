@@ -80,7 +80,6 @@ def _maybe_insert_input_and_output_observers_for_node(
     # TODO: target_dtype_info rename
     input_output_share_observers = node.meta["target_dtype_info"].get("input_output_share_observers", False)
     reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
-    print("input output share obs:", input_output_share_observers, " node:", node.format_node())
     if (input_output_share_observers and _is_observer_in_same_graph_) or \
        reuse_input_obs_or_fq:
         if not _maybe_make_input_output_share_observers(node, model, named_modules):

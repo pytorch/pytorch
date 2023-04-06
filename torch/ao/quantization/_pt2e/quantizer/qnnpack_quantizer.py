@@ -222,7 +222,7 @@ class QNNPackQuantizer(Quantizer):
     @classmethod
     def get_supported_operator_specs(cls) -> List[OperatorSpec]:
         op_specs: Set[OperatorSpec] = set({})
-        for spec, operator in cls.supported_spec_and_operators:
+        for spec, _ in cls.supported_spec_and_operators:
             op_specs.add(spec)
         return list(op_specs)
 

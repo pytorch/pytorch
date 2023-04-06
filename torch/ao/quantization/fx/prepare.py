@@ -982,7 +982,6 @@ def _maybe_make_input_output_share_observers(
     and ob2 point to observer0.
     Returns: whether the operation succeeded or not
     """
-    print("_maybe_make_input_output_share_observers ", node.format_node())
     first_arg = None
     # find the first non-Tensor arg
     for i in range(len(node.args)):
@@ -1005,9 +1004,7 @@ def _maybe_make_input_output_share_observers(
     #   observed_node -> non_observed_node -> cat
     # we need to navigate up to the first observer
     iteration_guard = 0
-    print("first arg arg:", first_arg_arg)
     while not _is_activation_post_process_node(first_arg_arg, named_modules):
-        print("first arg arg:", first_arg_arg)
         if not isinstance(first_arg_arg, Node):
             return False
         # did not find an activation_post_process for the op
@@ -1031,7 +1028,6 @@ def _maybe_make_input_output_share_observers(
     target_to_use = first_arg_arg.target
     assert isinstance(target_to_use, str)
     obs_mod_to_use = named_modules[target_to_use]
-    print("get obs mod to use:", target_to_use, " node:", first_arg_arg)
 
     if isinstance(first_arg, (list, tuple)):
         # set all other input observer nodes to use that module
