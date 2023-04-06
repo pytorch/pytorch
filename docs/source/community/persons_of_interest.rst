@@ -63,6 +63,7 @@ Compilers (JIT / TorchScript / FX / TorchDynamo)
 -  Yanan Cao (`gmagogsfm <https://github.com/gmagogsfm>`__)
 -  James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
 -  Jason Ansel (`jansel <https://github.com/jansel>`__)
+-  Jiong Gong (_`jgong5 <https://github.com/jgong5>`__)
 -  (emeritus) Zach Devito (`zdevito <https://github.com/zdevito>`__)
 
 
@@ -139,17 +140,22 @@ Fast Fourier Transform (torch.fft)
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
 -  Peter Bell (`peterbell10 <https://github.com/peterbell10>`__)
 
-CPU Performance / SIMD
+CPU Performance (Torch Inductor / MKLDNN)
 ~~~~~~~~~~~~~~~~~~~~~~
 
--  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
+-  Jiong Gong (_`jgong5 <https://github.com/jgong5>`__)
+-  Xiaobing Zhang (__`XiaobingSuper <https://github.com/XiaobingSuper>`__)
+-  (emeritus) Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
+-  (emeritus) Jianhui Li (`Jianhui-Li <https://github.com/Jianhui-Li>`__)
+-  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
+-  (emeritus) Yinghai Lu (`yinghai <https://github.com/yinghai>`__)
 -  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 -  (emeritus) Sam Gross (`colesbury <https://github.com/colesbury>`__)
 -  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  (emeritus) Ilia Cherniavskii (`ilia-cher <https://github.com/ilia-cher>`__)
 
-NVIDIA / CUDA
+GPU Performance (Torch Inductor / NVIDIA / CUDA / Triton)
 ~~~~~~~~~~~~~
 
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
@@ -166,15 +172,6 @@ NVFuser
 -  Alex Jann (`jjsjann123 <https://github.com/jjsjann123>`__)
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
-
-Intel / MKLDNN
-~~~~~~~~~~~~~~
-
--  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
--  Jianhui Li (`Jianhui-Li <https://github.com/Jianhui-Li>`__)
--  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
--  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
--  (emeritus) Yinghai Lu (`yinghai <https://github.com/yinghai>`__)
 
 AMD/ROCm/HIP
 ~~~~~~~~~~~~
