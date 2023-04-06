@@ -1,4 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import math
+
 import torch
 import torch.distributed as dist
 
@@ -145,6 +147,10 @@ def _set_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
             )
 
 
+def _increase_offset(increment: int, device_mesh: DeviceMesh) -> None:
+
+
+
 def _calc_start_offset(spec: DTensorSpec) -> int:
     """Find out the starting RNG offset for current device's local shard.
 
@@ -193,23 +199,45 @@ def _calc_start_offset(spec: DTensorSpec) -> int:
     dtensor_shape = spec.shape
     mesh = spec.mesh
     dim_map = spec.dim_map
+
+    # check if DTensor can be evenly sharded. If so, compute local tensor size
+    local_tensor_size = []
     for tensor_dim, mesh_dim in enumerate(dim_map):
         if mesh_dim >= 0:  # tensor_dim is sharded over mesh_dim
+            local_tensor_size.append(dtensor_shape[tensor_dim] // mesh.size(mesh_dim))
+
             if dtensor_shape[tensor_dim] % mesh.size(mesh_dim) != 0:
                 raise RuntimeError(
                     "DTensor is expected to be evenly sharded but cannot evenly shard",
                     f"tensor dim {tensor_dim} on mesh dim {mesh_dim}\n",
                     f"DTensor shape = {dtensor_shape}\nMesh shape = {mesh.mesh.size()}",
                 )
-            
+        else:
+            local_tensor_size.append(dtensor_shape[tensor_dim])
+
     # get rank coordinate
     rank_coord = mesh.get_coordinate()
     if rank_coord is None:
         raise RuntimeError(
             "Do not support calculating starting offset for DTensor over sub-mesh"
         )
-    # compute shard coordinate
-    shard_coord = [rank_coord[mesh_dim] if mesh_dim >= 0 else 0 for mesh_dim in dim_map]
+
+    # Compute shard coordinate:
+    # The coordinate on each tensor dim is a tuple (idx, range)
+    # If a DTensor is partitioned on its dim i into n shards, and the current rank
+    # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
+    shard_coord = [
+        (rank_coord[mesh_dim], mesh.size(mesh_dim)) if mesh_dim >= 0 else (0, 1)
+        for mesh_dim in dim_map
+    ]
+
     # compute shard linear index
+    shard_linear_idx = 0
+    shard_coord_stride = 1
+    for idx, size in shard_coord:
+        shard_linear_idx += idx * shard_coord_stride
+        shard_coord_stride *= size
 
     # compute starting offset
+    local_size = math.prod(local_tensor_size)
+    return local_size

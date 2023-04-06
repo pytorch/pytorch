@@ -76,10 +76,7 @@ CI_SKIP = collections.defaultdict(list)
 CI_SKIP[CI("eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    "gat",  # only works on CPU
-    "gcn",  # only works on CPU
     "llama",  # does not support complex32
-    "sage",  # only works on CPU
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
@@ -251,30 +248,17 @@ CI_SKIP[CI("inductor", training=True)] = [
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
-    # torchbench
-    "vision_maskrcnn",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
-    # timm_models
-    "botnet26t_256",  # sympy RecursionError
-    "eca_botnext26ts_256",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
-    # torchbench
-    "functorch_dp_cifar10",  # timeout
-    "opacus_cifar10",  # timeout
-    "PegasusForCausalLM",  # TypeError: Cannot convert symbols to int
-    "PegasusForConditionalGeneration",  # TypeError: Cannot convert symbols to int
-    # timm_models
-    "convit_base",  # TypeError: Cannot convert symbols to int
-    "pnasnet5large",  # CompilationError: math.ceil
-    "tf_efficientnet_b0",  # CompilationError: math.ceil
+    "convit_base",  # _print_Pow: assert exp.is_integer
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -282,10 +266,7 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    # timm_models
-    "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
-
 
 CI_SKIP_OPTIMIZER = {
     # TIMM
@@ -1099,6 +1080,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_cuda(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -1435,11 +1420,11 @@ class BenchmarkRunner:
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
-            # print(
-            #     f"memory: eager: {eager_peak_mem:.2f} GB, "
-            #     f"dynamo: {dynamo_peak_mem:.2f} GB, "
-            #     f"ratio: {compression_ratio:.2f}"
-            # )
+            print(
+                f"memory: eager: {eager_peak_mem:.2f} GB, "
+                f"dynamo: {dynamo_peak_mem:.2f} GB, "
+                f"ratio: {compression_ratio:.2f}"
+            )
 
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
@@ -1671,11 +1656,6 @@ def parse_args(args=None):
                 return (torch.randn(2, 10),)
         ```
     """,
-    )
-    parser.add_argument(
-        "--training",
-        action="store_true",
-        help="Performs training",
     )
     parser.add_argument(
         "--ddp",
@@ -1928,6 +1908,17 @@ def parse_args(args=None):
     mode_group.add_argument(
         "--performance", action="store_true", help="Measures performance speedup"
     )
+
+    run_mode_group = parser.add_mutually_exclusive_group(required=True)
+    run_mode_group.add_argument(
+        "--training",
+        action="store_true",
+        help="Performs training",
+    )
+    run_mode_group.add_argument(
+        "--inference", action="store_true", help="Performs inference"
+    )
+
     return parser.parse_args(args)
 
 
@@ -1976,7 +1967,6 @@ def run(runner, args, original_dir=None):
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
-        torch._dynamo.config.allow_ignore_mark_dynamic = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
     if args.specialize_int:
@@ -2144,6 +2134,8 @@ def run(runner, args, original_dir=None):
 
     if args.devices == ["cpu"]:
         runner.skip_models.update(runner.very_slow_models)
+    elif args.devices == ["cuda"]:
+        runner.skip_models.update(runner.skip_models_for_cuda)
 
     if args.inductor or args.inductor_settings:
         runner.skip_models.update(runner.failing_torchinductor_models)
