@@ -500,7 +500,7 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -527,7 +527,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=2):
+def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     """
     Construct a tile reduction triton config with some adjustment
     heuristics based on size_hints. Size_hints is a tuple of numels in
@@ -654,7 +654,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
         contiguous_config = triton_config_reduction(
-            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), num_stages=1
+            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
         )
         outer_config = triton_config_reduction(size_hints, 128, 8)
         tiny_config = triton_config_reduction(
@@ -699,25 +699,25 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 Config({"XBLOCK": 2, "RBLOCK": 512}, num_warps=8, num_stages=1),
                 # improve 1.067x for https://gist.github.com/shunting314/0bafa894f1735f255a379c2107f5e979 
                 #         1.080x for https://gist.github.com/shunting314/c7c56a558d2043f260cb00ba266aa910 
-                Config({"XBLOCK": 64, "RBLOCK": 128}, num_warps=16, num_stages=2),
+                Config({"XBLOCK": 64, "RBLOCK": 128}, num_warps=16, num_stages=1),
                 # improve 1.143x for https://gist.github.com/shunting314/ac92b583c52c46e2f2e65540d0e75c2c
-                Config({"XBLOCK": 64, "RBLOCK": 8}, num_warps=8, num_stages=2),
+                Config({"XBLOCK": 64, "RBLOCK": 8}, num_warps=8, num_stages=1),
                 # improve 1.152x for https://gist.github.com/shunting314/10c52fc9bf7ba5044b75a3d7b2ecb6a7 
                 Config({"XBLOCK": 1, "RBLOCK": 256}, num_warps=8, num_stages=1),
                 # improve 1.396x for https://gist.github.com/shunting314/9bf9ee7c0200966d5858d5efca0adc9c
                 Config({"XBLOCK": 1, "RBLOCK": 1024}, num_warps=32, num_stages=1),
                 # improve 1.031x for https://gist.github.com/shunting314/f3fac6407e4d379e0aa111484aae0ad1
-                Config({"XBLOCK": 1, "RBLOCK": 1024}, num_warps=16, num_stages=2),
+                Config({"XBLOCK": 1, "RBLOCK": 1024}, num_warps=16, num_stages=1),
                 # improve 1.043x for https://gist.github.com/shunting314/9bae27a5c41e9a6995b9bbe37dbb39a5
-                Config({"XBLOCK": 1, "RBLOCK": 128}, num_warps=4, num_stages=2),
+                Config({"XBLOCK": 1, "RBLOCK": 128}, num_warps=4, num_stages=1),
                 # improve 1.031x for https://gist.github.com/shunting314/7fe0b75ef88c251f1611ba74f3c0b87a
                 Config({"XBLOCK": 2, "RBLOCK": 128}, num_warps=4, num_stages=1),
                 # improve 1.031x for https://gist.github.com/shunting314/d48e9470416b6ea507e48be119b7ed34
                 Config({"XBLOCK": 4, "RBLOCK": 256}, num_warps=8, num_stages=1),
                 # improve 1.198x for https://gist.github.com/shunting314/87858731b5dc210caf566a2a40da1326
-                Config({"XBLOCK": 32, "RBLOCK": 64}, num_warps=16, num_stages=2),
+                Config({"XBLOCK": 32, "RBLOCK": 64}, num_warps=16, num_stages=1),
                 # improve 1.033x for https://gist.github.com/shunting314/71397bbd0e2514cb164dcc1147071cbd
-                Config({"XBLOCK": 8, "RBLOCK": 128}, num_warps=8, num_stages=2),
+                Config({"XBLOCK": 8, "RBLOCK": 128}, num_warps=8, num_stages=1),
                 # improve 1.120x for https://gist.github.com/shunting314/e9506fce9d7273a9ffe4fbfce445e635
                 Config({"XBLOCK": 4, "RBLOCK": 256}, num_warps=8, num_stages=1),
                 # improve 1.01x for https://gist.github.com/shunting314/62a5af3f87296d0913be98d9b2c402da
@@ -725,21 +725,21 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 # improve 1.008x for https://gist.github.com/shunting314/c9f06f1c815afcb003a81c0fcb1d23ae
                 Config({"XBLOCK": 2, "RBLOCK": 256}, num_warps=1, num_stages=1),
                 # improve 1.215x for https://gist.github.com/shunting314/ca9a43df53085100a3bedd496edfa5f2
-                Config({"XBLOCK": 16, "RBLOCK": 512}, num_warps=4, num_stages=2),
+                Config({"XBLOCK": 16, "RBLOCK": 512}, num_warps=4, num_stages=1),
                 # improve 1.009x for https://gist.github.com/shunting314/c6523b799a43058dd163f4a59f04cc25
                 Config({"XBLOCK": 16, "RBLOCK": 128}, num_warps=4, num_stages=1),
                 # improve 1.222x for https://gist.github.com/shunting314/b3fa8e0c48d4d9517811b1b42c339291
                 Config({"XBLOCK": 2, "RBLOCK": 512}, num_warps=4, num_stages=1),
                 # improve 1.178x for https://gist.github.com/shunting314/73b0e86287b994a313d889eb75d7e8b8
-                Config({"XBLOCK": 64, "RBLOCK": 8}, num_warps=4, num_stages=2),
+                Config({"XBLOCK": 64, "RBLOCK": 8}, num_warps=4, num_stages=1),
                 # improve 1.051x for https://gist.github.com/shunting314/2720a4c58e2feb7abec58d461025c3ee
-                Config({"XBLOCK": 32, "RBLOCK": 8}, num_warps=8, num_stages=2),
+                Config({"XBLOCK": 32, "RBLOCK": 8}, num_warps=8, num_stages=1),
                 # improve 1.038x for https://gist.github.com/shunting314/4eff23aa5f1b45a865cd9cc9fc732056
-                Config({"XBLOCK": 256, "RBLOCK": 8}, num_warps=8, num_stages=2),
+                Config({"XBLOCK": 256, "RBLOCK": 8}, num_warps=8, num_stages=1),
                 # improve 1.111x for https://gist.github.com/shunting314/99b46948de675a4e367b91c0c2341583
                 Config({"XBLOCK": 8, "RBLOCK": 128}, num_warps=8, num_stages=1),
                 # improve 1.111x for https://gist.github.com/shunting314/dac96e99060c2ba463b2ed0ba396eaee
-                Config({"XBLOCK": 8, "RBLOCK": 128}, num_warps=4, num_stages=2),
+                Config({"XBLOCK": 8, "RBLOCK": 128}, num_warps=4, num_stages=1),
             ],
             meta=meta,
             filename=filename,
@@ -771,12 +771,12 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
     if config.max_autotune:
         configs.extend([
             # improve by 1.043x for https://gist.github.com/shunting314/f5f5beb553f139be7ea3c122173a2288
-            Config({"XBLOCK": 2, "RBLOCK": rnumel}, num_warps=2, num_stages=2),
+            Config({"XBLOCK": 2, "RBLOCK": rnumel}, num_warps=2, num_stages=1),
             # improve by 1.147x for https://gist.github.com/shunting314/552ee9d73d0bec3426c5886d992b1654
             #            1.133x for https://gist.github.com/shunting314/014112d71f9f692249eaed9d6325884d
-            Config({"XBLOCK": 4, "RBLOCK": rnumel}, num_warps=4, num_stages=2),
+            Config({"XBLOCK": 4, "RBLOCK": rnumel}, num_warps=4, num_stages=1),
             # improve 1.017x for https://gist.github.com/shunting314/f9fa8a0fd58ba8031be7903cea57b535
-            Config({"XBLOCK": 2, "RBLOCK": rnumel}, num_warps=4, num_stages=2),
+            Config({"XBLOCK": 2, "RBLOCK": rnumel}, num_warps=4, num_stages=1),
         ])
 
     return cached_autotune(
