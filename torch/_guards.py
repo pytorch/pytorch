@@ -119,7 +119,7 @@ class Guard:
     name: str
     source: GuardSource
     create_fn: Callable[[GuardBuilderBase, "Guard"], None]
-    origin: "Source" = None
+    origin: Optional["Source"] = None
     is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.

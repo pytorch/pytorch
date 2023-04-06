@@ -1,6 +1,7 @@
 import builtins
 import collections
 import dataclasses
+import importlib
 import itertools
 import logging
 import math
@@ -37,7 +38,6 @@ from .utils import (
     istype,
     np,
     tensor_always_has_static_shape,
-    tensor_static_reason_to_message,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -64,6 +64,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
+        ("__load_module", lambda name: importlib.import_module(name)),
     ]
 )
 
@@ -111,7 +112,7 @@ class CodePart:
 
     # tensor check only
     check_tensor_verbose = None
-    check_tensor_names: str = None
+    tensor_check_names: Optional[str] = None
 
     def __hash__(self):
         return hash(self.code)
@@ -150,12 +151,12 @@ class GuardBuilder(GuardBuilderBase):
 
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
-        self.code: List[str] = []
+        self.code: List[CodePart] = []
         # shape_env_code is only used by local_builder and is used for
         # shape env code.  This exists only because we need to make sure
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
-        self.shape_env_code: List[str] = []
+        self.shape_env_code: List[CodePart] = []
 
         # [Note - On Eager Tensor Guards]
         # Most of the time, we generate Python code in a guard to directly
@@ -197,9 +198,10 @@ class GuardBuilder(GuardBuilderBase):
             name = guard.name
         base = strip_getattr_getitem(strip_function_call(name))
         if base not in self.argnames:
-            if re.match(r"^\d+$", base):
-                log.warning(f"invalid var name: {guard}")
-            self.argnames.append(base)
+            if re.match(r"[a-zA-Z0-9_]+", base):
+                if re.match(r"^\d+$", base):
+                    log.warning(f"invalid var name: {guard}")
+                self.argnames.append(base)
 
         return name
 
@@ -575,11 +577,6 @@ class GuardBuilder(GuardBuilderBase):
                     code.append(
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
-            else:
-                if not config.allow_ignore_mark_dynamic:
-                    assert not hasattr(
-                        value, "_dynamo_dynamic_indices"
-                    ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
 
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
@@ -849,7 +846,7 @@ def guard_fail_hook(
     # likely not yet been logged as a failure reason in a case of repeating failures.
     if "__check_tensors" in reason:
         reason = eval(
-            f"___check_tensors_verbose({', '.join(code_part.tensor_check_names)}, tensor_check_names={code_part.tensor_check_names})",
+            f"___check_tensors_verbose({', '.join(code_part.tensor_check_names)}, tensor_check_names={code_part.tensor_check_names})",  # noqa: B950
             code_part.scope,
         )
     guard_failures[code].append(reason)

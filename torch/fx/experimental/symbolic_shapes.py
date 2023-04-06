@@ -47,7 +47,7 @@ from sympy.core.logic import fuzzy_and, fuzzy_or
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
-    "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
+    "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP",
 ]
@@ -127,6 +127,24 @@ def has_hint(a):
     if isinstance(a, SymTypes):
         return a.node.has_hint()
     return True
+
+def is_concrete_int(a: Union[int, SymInt]):
+    r""" Utility to check if underlying object
+    in SymInt is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymInt or int): Object to test if it int
+    """
+    assert isinstance(a, (SymInt, int))
+
+    if isinstance(a, int):
+        return True
+
+    if isinstance(a.node.expr, sympy.core.numbers.Integer):
+        return True
+
+    return False
 
 # Returns True if every size dim on the tensor has a hint
 # TODO: Should this include strides too?  For now it doesn't matter,
@@ -744,7 +762,7 @@ class FloorDiv(sympy.Function):
     def _sympystr(self, printer):
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
-        return f"{base}//{divisor}"
+        return f"({base}//{divisor})"
 
     # SymPy assumptions based on argument types.
     def _eval_is_real(self):
@@ -2243,16 +2261,19 @@ class ShapeEnv:
         self.guards.append(guard)
 
     @lru_cache(256)
-    def evaluate_expr(self, expr: "sympy.Expr", hint=None):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        if len(expr.free_symbols) == 0:
-            return expr
-        expr = self.simplify(expr)
+        if len(orig_expr.free_symbols) == 0:
+            log.debug("evaluate_expr %s [trivial]", orig_expr)
+            return orig_expr
+
+        expr = orig_expr
 
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
+            log.debug("evaluate_expr %s == %s [statically known]", orig_expr, static_expr)
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
@@ -2284,13 +2305,18 @@ class ShapeEnv:
             # maybe_guard_eq in those cases.
             self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
+        if concrete_val is sympy.true:
+            g = expr
+        elif concrete_val is sympy.false:
+            g = sympy.Not(expr)
+        else:
+            g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
         if not self._suppress_guards_tls():
-            if concrete_val is sympy.true:
-                self._add_guard(expr)
-            elif concrete_val is sympy.false:
-                self._add_guard(sympy.Not(expr))
-            else:
-                self._add_guard(sympy.Eq(expr, concrete_val))  # type: ignore[arg-type]
+            self._add_guard(g)
+            log.debug("evaluate_expr %s [guard added]", g)
+        else:
+            log.debug("evaluate_expr %s [guard suppressed]", g)
+
         return concrete_val
 
 def _is_int(expr):
