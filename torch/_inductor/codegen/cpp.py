@@ -39,6 +39,11 @@ from .common import (
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
+log = logging.getLogger(__name__)
+def data_type_logger(msg):
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug(f"Data type propagation: {msg}")
+
 DTYPE_TO_CPP = {
     torch.float32: "float",
     torch.float64: "double",
@@ -76,6 +81,77 @@ RTYPE_TO_CPP = {
     "any": "||",
 }
 
+
+def _dtype_propagation(sub_graph: torch.fx.Graph):
+
+    def propogate_node(node: torch.fx.Node):
+        _node: torch.fx.Node = node
+        print(node.target)
+        if _node.target == 'ops':
+            return False
+        ops_to_bool = ['is_inf', 'is_nan','bitwise_xor', 'logical_not', 'signbit', 'le', 'lt', 'ge', 'gt', 'eq', 'ne',
+                    'bitwise_not', 'bitwise_or', 'bitwise_left_shift', 'bitwise_right_shift']
+        ops_with_dtype_arg = ['constant', 'to_dtype', 'rand', 'randn']
+        reduction_to_bool = ['any']
+        reduction_to_int64 = ['argmin', 'argmax']
+        ops_without_dtype = ['ops', 'get_index']
+        if OptimizationContext.key in _node.meta:
+            opt_ctx = _node.meta[OptimizationContext.key]
+        else:
+            opt_ctx = OptimizationContext()
+        if opt_ctx.dtype != None:
+            return False
+        if _node.target in ops_to_bool:
+            opt_ctx.dtype = torch.bool
+        elif _node.target in ops_with_dtype_arg:
+            opt_ctx.dtype = _node.args[-1]
+        elif _node.target == 'reduction':
+            reduction_type = _node.args[4]
+            if reduction_type in reduction_to_bool:
+                opt_ctx.dtype = torch.bool
+            elif reduction_type in reduction_to_int64:
+                opt_ctx.dtype = torch.int64
+        elif _node.target == 'load':
+            opt_ctx.dtype = V.graph.get_dtype(_node.args[1])
+        if opt_ctx.dtype != None:
+            data_type_logger(f'for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}' )
+            _node.meta[OptimizationContext.key] = opt_ctx
+            return True
+
+        # node.target not belong to any ops which can directly get the dtype
+        # need propogate dtype with it's input node
+        dtype = None
+        inputs = node.all_input_nodes
+        input_nodes = [n for n in inputs if isinstance(n, torch.fx.node.Node) and n.target not in ops_without_dtype]
+        if len(input_nodes) == 0:
+            return False
+        all_input_nodes_propogated = all(OptimizationContext.key in n.meta and n.meta[OptimizationContext.key].dtype != None for n in input_nodes)
+        if not all_input_nodes_propogated:
+            return False
+        # all input nodes have propogated dtype, we will promot to dtype with highest precision
+        dtype = functools.reduce(
+            torch.promote_types, [n.meta[OptimizationContext.key].dtype for n in input_nodes]
+        )
+        opt_ctx.dtype = dtype
+        msg = f'for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}, '
+        input_msg = 'inputs dtypes: '
+        for n in input_nodes:
+            input_msg += f'input {n.name}.dtype = {n.meta[OptimizationContext.key].dtype}'
+        data_type_logger(msg + input_msg)
+        _node.meta[OptimizationContext.key] = opt_ctx
+        opt_ctx.dtype_propogated = True
+        return True
+
+    new_node_propogated = False
+    for node in sub_graph.nodes:
+        new_node_propogated = propogate_node(node) or new_node_propogated
+
+    return new_node_propogated
+
+def dtype_propagation(sub_graph: torch.fx.Graph):
+    changed = _dtype_propagation(sub_graph)
+    while changed:
+        changed = _dtype_propagation(sub_graph)
 
 def reduction_init(reduction_type, dtype):
     if dtype in (torch.float16, torch.bfloat16):
@@ -233,8 +309,7 @@ class OptimizationContext:
     # for mem copy only node bf16 load -> bf16 store,
     is_bf16_mem_copy: bool = False
 
-    dtype: torch.dtype = torch.float
-    dtype_propogated = False
+    dtype: torch.dtype = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False
 
@@ -2032,66 +2107,11 @@ class CppKernelProxy(CppKernel):
 
     def data_type_propagation(self, nodes):
 
-        def propogate_node(node: torch.fx.Node):
-            _node: torch.fx.Node = node
-            if _node.target == 'ops':
-                return False
-            ops_to_bool = ['is_inf', 'is_nan','bitwise_xor', 'logical_not', 'signbit', 'le', 'lt', 'ge', 'gt', 'eq', 'ne',
-                       'bitwise_not', 'bitwise_or', 'bitwise_left_shift', 'bitwise_right_shift']
-            ops_with_dtype_arg = ['constant', 'to_dtype', 'rand', 'randn']
-            reduction_to_bool = ['any']
-            reduction_to_int64 = ['argmin', 'argmax']
-            if OptimizationContext.key in _node.meta:
-                opt_ctx = _node.meta[OptimizationContext.key]
-            else:
-                opt_ctx = OptimizationContext()
-            if opt_ctx.dtype_propogated:
-                return False
-            if _node.target in ops_to_bool:
-                opt_ctx.dtype = torch.bool
-            elif _node.target in ops_with_dtype_arg:
-                opt_ctx.dtype = _node.args[-1]
-            elif _node.target == 'reduction':
-                reduction_type = _node.args[4]
-                if reduction_type in reduction_to_bool:
-                    opt_ctx.dtype = torch.bool
-                elif reduction_type in reduction_to_int64:
-                    opt_ctx.dtype = torch.int64
-            elif _node.target == 'load':
-                opt_ctx.dtype = V.graph.get_dtype(_node.args[1])
-
-            # node.target not belong to any ops which can directly get the dtype
-            # need propogate dtype with it's input node
-            dtype = None
-            inputs = node.all_input_nodes
-            input_nodes = [n for n in inputs if isinstance(n, torch.fx.node.Node) and n.target != 'ops']
-            if len(input_nodes) == 0:
-                return False
-            all_input_nodes_propogated = all(OptimizationContext.key in n.meta and n.meta[OptimizationContext.key].dtype_propogated for n in input_nodes)
-            if not all_input_nodes_propogated:
-                return False
-            # all input nodes have propogated dtype, we will promot to dtype with highest precision
-            dtype = functools.reduce(
-                torch.promote_types, [n.meta[OptimizationContext.key].dtype for n in itertools.chain(*input_nodes)]
-            )
-            opt_ctx.dtype = dtype
-            _node.meta[OptimizationContext.key] = opt_ctx
-            return True
-
-        def propagation(sub_graph: torch.fx.Graph):
-            new_node_propogated = False
-            for node in sub_graph.nodes:
-                new_node_propogated = propogate_node(node) or new_node_propogated
-
-            return new_node_propogated
-
         def _data_type_propagation(loop_body: ir.LoopBody):
             sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
             for sub_block in sub_blocks:
                 _sub_graph: torch.fx.Graph = sub_block.graph
-                changed = propagation(_sub_graph)
-                while changed:
-                    changed = propagation(_sub_graph)
+                dtype_propagation(_sub_graph)
 
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)

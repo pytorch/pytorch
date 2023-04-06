@@ -17,6 +17,8 @@ from torch._inductor.codegen.cpp import (
     CppOverrides,
     CppVecKernelChecker,
     CppVecOverrides,
+    OptimizationContext,
+    dtype_propagation,
 )
 from torch._inductor.compile_fx import compile_fx_inner, complex_memory_overlap
 from torch._inductor.graph import GraphLowering
@@ -1234,6 +1236,92 @@ class CPUReproTests(TestCase):
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         self.assertTrue(same(fn(x, y), opt_fn(x, y)))
         assert metrics.generated_cpp_vec_kernel_count == 2
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_cpp_data_type_propogation(self):
+        _graph: torch.fx.Graph = torch.fx.Graph()
+        ops: torch.fx.Node = _graph.create_node("placeholder", "ops")
+        get_index: torch.fx.Node = _graph.create_node("call_module", "get_index", args=("index0", ))
+        c1: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "constant",
+            args=(
+                ops,
+                get_index,
+                torch.bfloat16,
+            ),
+        )
+        c2: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "constant",
+            args=(
+                ops,
+                get_index,
+                torch.float,
+            ),
+        )
+        add: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "add",
+            args=(
+                ops,
+                c1,
+                c2,
+            ),
+        )
+        eq: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "eq",
+            args=(
+                ops,
+                add,
+                add,
+            ),
+        )
+        argmin: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "reduction",
+            args=(
+                ops,
+                'buf',
+                torch.float,
+                torch.int64,
+                'argmin',
+                get_index,
+                add,
+            ),
+        )
+        any: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "reduction",
+            args=(
+                ops,
+                'buf',
+                torch.float,
+                torch.bool,
+                'any',
+                get_index,
+                add,
+            ),
+        )
+        dtype_propagation(_graph)
+        def get_data_type(node: torch.fx.Node):
+            if OptimizationContext.key in node.meta:
+                return node.meta[OptimizationContext.key].dtype
+            else:
+                return None
+
+        self.assertEqual(get_data_type(ops), None)
+        self.assertEqual(get_data_type(c1), torch.bfloat16)
+        self.assertEqual(get_data_type(c2), torch.float)
+        self.assertEqual(get_data_type(add), torch.float)
+        self.assertEqual(get_data_type(eq), torch.bool)
+        self.assertEqual(get_data_type(argmin), torch.int64)
+        self.assertEqual(get_data_type(any), torch.bool)
+        pass
 
 
 if __name__ == "__main__":
