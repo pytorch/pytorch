@@ -264,6 +264,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fill_",
     "exp",
     "exp2",
+    "expm1",
     "nonzero",
     "mean",
     "std_mean",
@@ -554,6 +555,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # Functional collectives keep an internal ref through the Work object
     "all_reduce",
     "all_gather_into_tensor",
+    "reduce_scatter_tensor",
     "wait_tensor",
 }
 
@@ -1012,7 +1014,7 @@ def emit_body(
             f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
         )
 
-    if requires_derivative and not len(fw_derivatives) == 0:
+    if requires_derivative and len(fw_derivatives) > 0:
         assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(
             differentiable_outputs
         ), (

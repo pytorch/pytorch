@@ -1,7 +1,7 @@
 #pragma once
 #include <c10/macros/Macros.h>
 
-// Utility to guaruntee complete unrolling of a loop where the bounds are known
+// Utility to guarantee complete unrolling of a loop where the bounds are known
 // at compile time. Various pragmas achieve similar effects, but are not as
 // portable across compilers.
 
