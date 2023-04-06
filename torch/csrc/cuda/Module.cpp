@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/EmptyTensor.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/core/Device.h>

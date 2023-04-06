@@ -694,9 +694,6 @@ class CUDAGraphNode:
         )
         self.outputs_metadata: OutputList[Optional[Dict[str, Any]]] = []
 
-        # # self.output_persistent_storage : OutputList[Optional[UntypedStorage]] = []
-        # self.output_persistent_storage = []
-
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
         # their memory being reclaimed in subsequent cuda graph recordings. We record the tensor metadata
         # needed to reconstruct instead.
