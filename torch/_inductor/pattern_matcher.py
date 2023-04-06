@@ -1100,7 +1100,7 @@ if torch._C.has_mkldnn:
         Arg(),
         Arg(),
     )
-    # conv+binary+relu fusion,. TDOD: add more binary+unray fusion.
+    # conv+binary+relu fusion, TDOD: add more binary+unary fusion.
     register_mkldnn_conv_binary_unary_pattern(
         UnaryAttr("relu"),
         relu_fusion(
