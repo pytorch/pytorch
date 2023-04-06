@@ -464,7 +464,7 @@ def _init_param_handles_from_module(
     # reverse topological sort order. This avoids increasing peak GPU memory
     # usage when the unsharded model exists on CPU or meta device.
     # NOTE: This order differs from that followed by the wrapper path when
-    # using auto wrapping, which also represents a valid reverse toplogical
+    # using auto wrapping, which also represents a valid reverse topological
     # sort order, but the difference does not matter.
     materialized_module = False
     for fully_sharded_module, (params, buffers) in reversed(
