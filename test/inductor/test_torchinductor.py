@@ -7154,43 +7154,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 foo(m, inp)[0].is_contiguous(memory_format=torch.channels_last)
             )
 
-        # So far these 2 tests just assert that nothing broke
-        # But ideally I'd like a a test that checks for whether a string is present in the IR
-        # I wonder if there's a better way to do this
-        @requires_cuda()
-        def test_shape_padding_via_compile(self):
-            import torch._inductor.config as inductorconfig
 
-            inductorconfig.fx_shape_padding = True
-
-            inp_tensor = torch.randn(3, 3)
-
-            m = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3, 3))
-
-            a = m(inp_tensor)
-            m = torch.compile(m)
-            b = m(inp_tensor)
-
-            assert torch.equal(a, b)
-
-        @requires_cuda
-        def test_shape_padding_pass_standalone(self):
-            def toy_backend(gm, sample_inputs):
-                def my_compiler(gm, sample_inputs):
-                    from torch._inductor.padding import pad_mm
-
-                    gm2 = pad_mm(gm)
-                    return gm2
-
-                # Invoke AOTAutograd
-                return aot_module_simplified(gm, sample_inputs, fw_compiler=my_compiler)
-
-            m = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3, 3))
-            torch._dynamo.reset()
-            fn = torch.compile(backend=toy_backend)(m)
-
-            # triggers compilation of forward graph on the first run
-            out = fn(input)
 
         # https://github.com/pytorch/torchdynamo/issues/1681#issuecomment-1283433527
         @requires_cuda()
@@ -7761,6 +7725,54 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     inps = torch.randn([5, 5])
                     fn_opt(inps)
 
+class ShapePaddingTests(TestCase):
+            # So far these 2 tests just assert that nothing broke
+        # But ideally I'd like a a test that checks for whether a string is present in the IR
+        # I wonder if there's a better way to do this
+        # @requires_cuda()
+        def test_shape_padding_via_compile(self):
+            import torch._inductor.config as inductorconfig
+
+            inductorconfig.fx_shape_padding = True
+
+            inp_tensor = torch.randn(3, 3)
+
+            m = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3, 3))
+
+            a = m(inp_tensor)
+            m = torch.compile(m)
+            b = m(inp_tensor)
+
+            assert torch.equal(a, b)
+        
+        def test_pad_in_graph(self):
+            import torch._inductor.config as inductorconfig
+
+            x = torch.randn(3,3)
+            inductorconfig.fx_shape_padding = True
+            inp_tensor = torch.randn(3, 3)
+            m = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3, 3))
+            m = torch.compile(m)
+            b = m(inp_tensor)
+
+        # @requires_cuda()
+        def test_shape_padding_pass_standalone(self):
+            def toy_backend(gm, sample_inputs):
+                def my_compiler(gm, sample_inputs):
+                    from torch._inductor.padding import pad_mm
+
+                    gm2 = pad_mm(gm)
+                    return gm2
+
+                # Invoke AOTAutograd
+                return aot_module_simplified(gm, sample_inputs, fw_compiler=my_compiler)
+
+            m = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3, 3))
+            torch._dynamo.reset()
+            fn = torch.compile(backend=toy_backend)(m)
+
+            # triggers compilation of forward graph on the first run
+            out = fn(input)
 
 class ExprPrinterTests(TestCase):
     def test_print_pow(self):

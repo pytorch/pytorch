@@ -41,28 +41,33 @@ def get_alignment_size(dtype):
 
 def pad_and_slice_matrices(new_graph, a, b, pad_amount, batched=False):
     # Pad the first input matrix with zeroes
+    if not hasattr(b, "meta") and not hasattr(a, "meta"):
+        return new_graph
+    
+    # breakpoint()
     new_a_pad = new_graph.call_function(
         torch.ops.aten.cat,
         (
             a,
             torch.ops.aten.zeros(
-                (a.shape[0], a.shape[1], pad_amount)
+                (a.shape[0], a.meta["val"].shape[1], pad_amount)
                 if batched
-                else (a.shape[0], pad_amount)
+                else (a.meta["val"].shape[0], pad_amount)
             ),
             2 if batched else 1,
         ),
     )
 
     # Pad the second input matrix with zeroes
+    breakpoint()
     new_b_pad = new_graph.call_function(
         torch.ops.aten.cat,
         (
             b,
             torch.ops.aten.zeros(
-                (b.shape[0], pad_amount, b.shape[2])
+                (b.meta["val"].shape[0], pad_amount, b.meta["val"].shape[2])
                 if batched
-                else (pad_amount, b.shape[1])
+                else (pad_amount, b.meta["val"].shape[1])
             ),
             1 if batched else 0,
         ),
@@ -75,7 +80,7 @@ def pad_and_slice_matrices(new_graph, a, b, pad_amount, batched=False):
 
     # Slice the result to get the desired shape and not modify user code semantics
     new_mm = new_graph.call_function(
-        torch.ops.aten.slice, (new_mm_pad, 2 if batched else 1, 0, a.shape[-1], 1)
+        torch.ops.aten.slice, (new_mm_pad, 2 if batched else 1, 0, a.meta["val"].shape[-1], 1)
     )
 
     return new_mm
@@ -90,7 +95,7 @@ def pad_mm(fx_g: torch.fx.GraphModule):
             # Currently this is a heuristic that decides if we should pad
             # Decided to only pad for medium size matrices and if alignment is off
             if needs_padding(node.args):
-                size = int(tuple(env[node.args[0]].meta["tensor_meta"].shape)[0])
+                size = int(tuple(env[node.args[0]].meta["val"].shape)[0])
                 alignment = get_alignment_size(
                     env[node.args[0]].meta["tensor_meta"].dtype
                 )
