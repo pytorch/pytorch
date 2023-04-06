@@ -4820,12 +4820,14 @@ class TestSparseAny(TestCase):
     @ops(binary_ufuncs_with_sparse_support)
     @all_sparse_layouts('layout', include_strided=False)
     def test_binary_operation(self, layout, device, dtype, op):
-        count = 0
+        if not op.supports_sparse_layout(layout):
+            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
+
         for sample in op.sample_inputs_sparse(layout, device, dtype):
-            count += 1
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
             batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
-            # TODO: eliminate the if-blocks below
+
+            # TODO: eliminate the if-blocks of unimplemented features below
             if op.name == 'mul' and layout is torch.sparse_csr and batch_dim > 0 and t_args[0].ndim > 0:
                 with self.assertRaisesRegex(
                         RuntimeError,
@@ -4878,10 +4880,6 @@ class TestSparseAny(TestCase):
                         continue
                     raise
                 self.assertEqual(result, dense)
-
-        if count == 0:
-            # we count samples to avoid false-positive test reports
-            self.skipTest('no sample inputs')
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
