@@ -1,8 +1,9 @@
 import torch
 from torch._C import _rename_privateuse1_backend, _get_privateuse1_backend_name
-from typing import Union, Optional
+from typing import List, Optional, Union
 
 __all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend"]
+
 
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
@@ -82,20 +83,139 @@ def _check_register_once(module, attr):
         raise RuntimeError(f"The custom device module of {module} has already been registered with {attr}")
 
 
-def generate_methods_for_privateuse1_backend() -> None:
+def _normalization_device(custom_backend_name: str, device: Optional[Union[int, torch.device]] = None) -> int:
+    if device is None:
+        if hasattr(torch, custom_backend_name) and \
+                hasattr(f'torch.{custom_backend_name}', 'get_current_device_index'):
+            device_idx = getattr(f'torch.{custom_backend_name}',
+                                 'get_current_device_index')()
+        else:
+            # The default scene device index is 0.
+            device_idx = 0
+    elif isinstance(device, torch.device):
+        if device.type != custom_backend_name:
+            raise RuntimeError(f"Invalid device, must be {custom_backend_name} device")
+        else:
+            device_idx = device.index
+    return device_idx
+
+
+def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -> None:
+    @property  # type: ignore[misc]
+    def wrap_tensor_backend(self: torch.Tensor) -> bool:
+        return self.device.type == custom_backend_name
+
+    _check_register_once(torch.Tensor, f'is_{custom_backend_name}')
+    setattr(torch.Tensor, f'is_{custom_backend_name}', wrap_tensor_backend)
+
+    def wrap_tensor_to(self: torch.Tensor, device: Optional[Union[int, torch.device]] = None, non_blocking=False,
+                       **kwargs) -> torch.Tensor:
+        device_idx = _normalization_device(custom_backend_name, device)
+        return self.to(torch.device(f'{custom_backend_name}:{device_idx}'), non_blocking, **kwargs)
+
+    _check_register_once(torch.Tensor, custom_backend_name)
+    setattr(torch.Tensor, custom_backend_name, wrap_tensor_to)
+
+
+def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -> None:
+    # Generate Module attributes and methods depends on Tensor methods,
+    # so we need to check whether Tensor methods is already registered.
+    if not hasattr(torch.Tensor, custom_backend_name):
+        raise RuntimeError(
+            f"Can not automatically generate {custom_backend_name}() method for torch.nn.Module."
+            f"Because torch.Tensor doesn't has the method {custom_backend_name}()")
+
+    def wrap_module_to(self: torch.nn.modules.module.T,
+                       device: Optional[Union[int, torch.device]] = None) -> torch.nn.modules.module.T:
+        return self._apply(lambda t: getattr(t, custom_backend_name)(device))
+
+    _check_register_once(torch.nn.Module, custom_backend_name)
+    setattr(torch.nn.Module, custom_backend_name, wrap_module_to)
+
+
+def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
+                                                      unsupported_dtype: List[torch.dtype] = None) -> None:
+    # Attribute is registered in the _StorageBase class
+    # and UntypedStorage obtains through inheritance.
+    @property  # type: ignore[misc]
+    def wrap_storage_backend(self: torch.storage._StorageBase) -> bool:
+        return self.device.type == custom_backend_name
+
+    _check_register_once(torch.storage._StorageBase, f'is_{custom_backend_name}')
+    setattr(torch.storage._StorageBase, f'is_{custom_backend_name}', wrap_storage_backend)
+
+    def wrap_storage_to(self, device=None, non_blocking=False, **kwargs):
+        # There should be a judgment related to storage device and a judgment related to storage type,
+        # but it depends on the extended function, so this part is temporarily omitted in the automatic generation.
+        # Don't parse kwargs.
+        device_idx = _normalization_device(custom_backend_name, device)
+
+        if getattr(self, f'is_{custom_backend_name}'):
+            # storage has already on expected device.
+            if self.get_device() == device_idx:
+                return self
+        # For sparse storage, custom need to extend the implementation by themselves.
+        if self.is_sparse:
+            raise RuntimeError(f"Can not support a sparse storage move to {custom_backend_name} backend")
+        # create untyped_storage and copy data
+        untyped_storage = torch.UntypedStorage(
+            self.size(), device=torch.device(f'{custom_backend_name}:{device_idx}')
+        )
+        untyped_storage.copy_(self, non_blocking)
+        return untyped_storage
+
+    _check_register_once(torch.storage._StorageBase, custom_backend_name)
+    setattr(torch.storage._StorageBase, custom_backend_name, wrap_storage_to)
+
+    # Register the corresponding attribute for the TypedStorage class.
+    # When the TypedStorage class is deprecated, the registration is also deprecated.
+
+    @property  # type: ignore[misc]
+    def wrap_typed_storage_backend(self: torch.storage.TypedStorage) -> bool:
+        torch.storage._warn_typed_storage_removal()
+        return self._untyped_storage.device.type == custom_backend_name
+
+    _check_register_once(torch.TypedStorage, f'is_{custom_backend_name}')
+    setattr(torch.storage.TypedStorage, f'is_{custom_backend_name}', wrap_typed_storage_backend)
+
+    def wrap_typed_storage_to(self: torch.storage.TypedStorage,
+                              device=None, non_blocking=False, **kwargs) -> torch.storage.TypedStorage:
+        torch.storage._warn_typed_storage_removal()
+        if unsupported_dtype and self.dtype in unsupported_dtype:
+            raise RuntimeError(f"Cannot create {custom_backend_name} storage with {self.dtype} dtype")
+        custom_backend_storage: torch.UntypedStorage = getattr(
+            self._untyped_storage, custom_backend_name)(device, non_blocking, **kwargs)
+        return self._new_wrapped_storage(custom_backend_storage)
+
+    _check_register_once(torch.TypedStorage, custom_backend_name)
+    setattr(torch.TypedStorage, custom_backend_name, wrap_typed_storage_to)
+
+
+def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module: bool = True,
+                                             for_storage: bool = False,
+                                             unsupported_dtype: List[torch.dtype] = None) -> None:
     r"""
-    generate_methods_for_privateuse1_backend() -> None
+    generate_methods_for_privateuse1_backend(for_tensor, for_module, for_storage, unsupported_dtype) -> None
+
+    Args:
+        for_tensor (bool): whether register related methods for torch.Tensor class.
+        for_module (bool): whether register related methods for torch.nn.Module class.
+        for_storage (bool): whether register related methods for torch.Storage class.
+        unsupported_dtype(List[torch.dtype]): takes effect only when the storage method needs to be generated,
+            indicating that the storage does not support the torch.dtype type.
 
     Automatically generate attributes and methods for the custom backend after rename privateuse1 backend.
+    In the default scenario, storage-related methods will not be generated automatically.
 
     When you implement kernels for various torch operations, and register them to the PrivateUse1 dispatch key.
     And call the function torch.rename_privateuse1_backend("foo") to rename your backend name.
     At this point, you can easily register specific methods and attributes by calling this function.
-    Just like torch.Tensor.foo(), torch.Tensor.is_foo.
+    Just like torch.Tensor.foo(), torch.Tensor.is_foo, torch.Storage.foo(), torch.Storage.is_foo.
 
     Note: We recommend you use generic functions (check devices are equal or to(device=)).
     We provide these methods for convenience only and they will be "monkey patched" onto the objects
-    and so will not be properly typed.
+    and so will not be properly typed. For Storage methods generate, if you need to support sparse data storage,
+    you need to extend the implementation yourself, don't use automatically generate.
 
     Example::
 
@@ -109,27 +229,11 @@ def generate_methods_for_privateuse1_backend() -> None:
         """
     custom_backend_name = _get_privateuse1_backend_name()
 
-    @property  # type: ignore[misc]
-    def wrap_tensor_backend(self: torch.Tensor) -> bool:
-        return self.device.type == custom_backend_name
+    if for_tensor:
+        _generate_tensor_methods_for_privateuse1_backend(custom_backend_name)
 
-    _check_register_once(torch.Tensor, f'is_{custom_backend_name}')
-    setattr(torch.Tensor, f'is_{custom_backend_name}', wrap_tensor_backend)
+    if for_module:
+        _generate_module_methods_for_privateuse1_backend(custom_backend_name)
 
-    def wrap_tensor_to(self: torch.Tensor, device: Optional[Union[int, torch.device]] = 0) -> torch.Tensor:
-        if isinstance(device, torch.device):
-            if device.type == custom_backend_name:
-                return self.to(f'{custom_backend_name}:{device.index}')
-            else:
-                raise RuntimeError(f"Invalid device, must be {custom_backend_name} device")
-        return self.to(f'{custom_backend_name}:{device}')
-
-    _check_register_once(torch.Tensor, f'{custom_backend_name}')
-    setattr(torch.Tensor, f'{custom_backend_name}', wrap_tensor_to)
-
-    def wrap_module_to(self: torch.nn.modules.module.T,
-                       device: Optional[Union[int, torch.device]] = None) -> torch.nn.modules.module.T:
-        return self._apply(lambda t: getattr(t, f'{custom_backend_name}')(device))
-
-    _check_register_once(torch.nn.Module, f'{custom_backend_name}')
-    setattr(torch.nn.Module, f'{custom_backend_name}', wrap_module_to)
+    if for_storage:
+        _generate_storage_methods_for_privateuse1_backend(custom_backend_name, unsupported_dtype)
