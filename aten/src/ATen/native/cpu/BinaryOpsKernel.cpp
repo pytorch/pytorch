@@ -372,6 +372,14 @@ void bitwise_xor_kernel(TensorIteratorBase& iter) {
 }
 
 void lshift_kernel(TensorIteratorBase& iter) {
+#if defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
+  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lshift_cpu", [&]() {
+    cpu_kernel(iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return static_cast<std::make_unsigned_t<scalar_t>>(a) << b;
+    });
+  });
+#else
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lshift_cpu", [&]() {
     cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -385,6 +393,7 @@ void lshift_kernel(TensorIteratorBase& iter) {
             return a << b;
         });
   });
+#endif
 }
 
 void logical_and_kernel(TensorIterator& iter) {
@@ -445,6 +454,14 @@ void logical_xor_kernel(TensorIterator& iter) {
 }
 
 void rshift_kernel(TensorIteratorBase& iter) {
+#if defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
+  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cpu", [&]() {
+    cpu_kernel(iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return a >> b;
+      });
+  });
+#else
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cpu", [&]() {
     cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -459,6 +476,7 @@ void rshift_kernel(TensorIteratorBase& iter) {
           return a >> b;
         });
   });
+#endif
 }
 
 void lt_kernel(TensorIteratorBase& iter) {
