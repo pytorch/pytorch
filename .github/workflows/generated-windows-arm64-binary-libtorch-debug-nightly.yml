@@ -47,8 +47,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -157,8 +157,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -262,8 +262,8 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -287,8 +287,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -397,8 +397,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -502,8 +502,8 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -527,8 +527,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -637,8 +637,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -742,8 +742,8 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -767,8 +767,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -877,8 +877,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
@@ -982,8 +982,8 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: debug
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
