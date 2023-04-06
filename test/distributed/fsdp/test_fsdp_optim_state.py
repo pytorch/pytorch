@@ -358,7 +358,7 @@ class TestFSDPOptimState(FSDPTest):
             # Keep these as arguments for parity with `_init_nested_model()`;
             # these settings are not implemented since the transformer is
             # wrapped with FSDP at the top-level, which means that there is
-            # only a single flattened parameter, making these booleans vacuous
+            # only a single flat parameter, making these booleans vacuous
             raise NotImplementedError()
         if group is None:
             group = dist.distributed_c10d._get_default_group()
@@ -454,7 +454,7 @@ class TestFSDPOptimState(FSDPTest):
             fsdp_osd_param_ids = set(fsdp_osd_state.keys())
             self.assertTrue(
                 ref_osd_param_ids == fsdp_osd_param_ids,
-                (ref_osd_param_ids, fsdp_osd_param_ids),
+                f"Rank {self.rank}: {(ref_osd_param_ids, fsdp_osd_param_ids)}",
             )
             # Check state values are the same
             for param_id, param_state in fsdp_osd_state.items():
@@ -1146,8 +1146,8 @@ class TestFSDPOptimState(FSDPTest):
           - If ``add_to_fsdp_module=True``, then the unmanaged parameters are
           added to a module to be wrapped with FSDP, in which case there should
           be an error since we require that all unflattened parameter
-          comprising a flattened parameter have the same scalar state (e.g.
-          Adam "step") but the added parameter is missing its entry.
+          comprising a flat parameter have the same scalar state (e.g. Adam
+          "step") but the added parameter is missing its entry.
           - If ``add_to_fsdp_module=False``, then the unmanaged parameters are
           added to a module not to be wrapped with FSDP, in which case there
           should be no error (emulating model parallel use cases where some
@@ -1199,13 +1199,13 @@ class TestFSDPOptimState(FSDPTest):
         optim = torch.optim.Adam(optim_input, lr=1e-3)
         if add_to_fsdp_module:
             # If we add the unmanaged parameters to a module wrapped with FSDP,
-            # then the flattened parameter will be comprised of some
-            # unflattened parameters with zero-dimensional tensor state (i.e.
-            # Adam "step") and others without (i.e. the unmanaged parameters),
-            # which triggers an error that we have to ensure correctness
+            # then the flat parameter will be comprised of some unflattened
+            # parameters with zero-dimensional tensor state (i.e. Adam "step")
+            # and others without (i.e. the unmanaged parameters), which
+            # triggers an error that we have to ensure correctness
             error_prefix = (
                 "^(All unflattened parameters comprising a "
-                "single flattened parameter must have scalar state with the "
+                "single flat parameter must have scalar state with the "
                 "same value and dtype)"
             )
             with self.assertRaisesRegex(ValueError, error_prefix):

@@ -71,7 +71,8 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def test_multiple_outputs_op_with_evaluator(self):
         class TopKModel(torch.nn.Module):
             def forward(self, x):
-                return torch.topk(x, 3)
+                values, _ = torch.topk(x, 3)
+                return torch.sum(values)
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
         _ = fx_onnx.export(TopKModel(), x, opset_version=self.opset_version)

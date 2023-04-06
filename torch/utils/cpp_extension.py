@@ -200,7 +200,6 @@ CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH
 environment variable or add NVCC to your system PATH. The extension compilation will fail.
 '''
 ROCM_HOME = _find_rocm_home()
-MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
 ROCM_VERSION = None
@@ -299,7 +298,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     env['LC_ALL'] = 'C'  # Don't localize output
     version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
     if IS_LINUX:
-        # Check for 'gcc' or 'g++' for sccache warpper
+        # Check for 'gcc' or 'g++' for sccache wrapper
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
         results = re.findall(pattern, version_string)
         if len(results) != 1:
@@ -382,8 +381,10 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     cuda_ver = packaging.version.parse(cuda_str_version)
     torch_cuda_version = packaging.version.parse(torch.version.cuda)
     if cuda_ver != torch_cuda_version:
-        # major/minor attributes are only available in setuptools>=49.6.0
-        if getattr(cuda_ver, "major", float("nan")) != getattr(torch_cuda_version, "major", float("nan")):
+        # major/minor attributes are only available in setuptools>=49.4.0
+        if getattr(cuda_ver, "major", None) is None:
+            raise ValueError("setuptools>=49.4.0 is required")
+        if cuda_ver.major != torch_cuda_version.major:
             raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(cuda_str_version, torch.version.cuda))
         warnings.warn(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda))
 
@@ -718,7 +719,7 @@ class BuildExtension(build_ext):
                         else:
                             cflags = []
 
-                        cflags = win_cuda_flags(cflags) + ['--use-local-env']
+                        cflags = win_cuda_flags(cflags) + ['-std=c++17', '--use-local-env']
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
                         for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
@@ -726,9 +727,11 @@ class BuildExtension(build_ext):
                         cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
                     elif isinstance(self.cflags, dict):
                         cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
+                        append_std17_if_no_std_present(cflags)
                         cmd += cflags
                     elif isinstance(self.cflags, list):
                         cflags = COMMON_MSVC_FLAGS + self.cflags
+                        append_std17_if_no_std_present(cflags)
                         cmd += cflags
 
                 return original_spawn(cmd)
@@ -788,7 +791,7 @@ class BuildExtension(build_ext):
             cuda_post_cflags = None
             cuda_cflags = None
             if with_cuda:
-                cuda_cflags = ['--use-local-env']
+                cuda_cflags = ['-std=c++17', '--use-local-env']
                 for common_cflag in common_cflags:
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
@@ -1138,10 +1141,6 @@ def include_paths(cuda: bool = False) -> List[str]:
     if cuda and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
         paths.append(_join_rocm_home('include'))
-        if MIOPEN_HOME is not None:
-            paths.append(os.path.join(MIOPEN_HOME, 'include'))
-        if HIP_HOME is not None:
-            paths.append(os.path.join(HIP_HOME, 'include'))
     elif cuda:
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
@@ -1800,7 +1799,7 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     # (from `extra_compile_args`)
     if cflags is not None:
         for flag in cflags:
-            if 'amdgpu-target' in flag:
+            if 'amdgpu-target' in flag or 'offload-arch' in flag:
                 return ['-fno-gpu-rdc']
     # Use same defaults as used for building PyTorch
     # Allow env var to override, just like during initial cmake build.
@@ -1813,7 +1812,7 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             archs = []
     else:
         archs = _archs.replace(' ', ';').split(';')
-    flags = ['--amdgpu-target=%s' % arch for arch in archs]
+    flags = ['--offload-arch=%s' % arch for arch in archs]
     flags += ['-fno-gpu-rdc']
     return flags
 
@@ -1904,7 +1903,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.
         message = error_prefix
-        # `error` is a CalledProcessError (which has an `ouput`) attribute, but
+        # `error` is a CalledProcessError (which has an `output`) attribute, but
         # mypy thinks it's Optional[BaseException] and doesn't narrow
         if hasattr(error, 'output') and error.output:  # type: ignore[union-attr]
             message += f": {error.output.decode(*SUBPROCESS_DECODE_ARGS)}"  # type: ignore[union-attr]
@@ -1996,7 +1995,7 @@ def _write_ninja_file_to_build_library(path,
     common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
 
     if IS_WINDOWS:
-        cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
+        cflags = common_cflags + COMMON_MSVC_FLAGS + ['/std:c++17'] + extra_cflags
         cflags = _nt_quote_args(cflags)
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags

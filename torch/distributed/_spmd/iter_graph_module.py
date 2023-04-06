@@ -8,8 +8,8 @@ import torch.nn as nn
 from torch import fx
 from torch.fx.graph import PythonCode
 from torch.fx.node import Argument
-from torch.utils._pytree import tree_flatten, tree_map
 from torch.profiler import record_function
+from torch.utils._pytree import tree_flatten, tree_map
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -416,7 +416,9 @@ class IterGraph(fx.Graph):
             actual_replace_with = self._lookup_node(replace_with, graph)
             assert actual_node is not None
             ret = actual_node.replace_all_uses_with(
-                actual_replace_with, delete_user_cb, propagate_meta=propagate_meta
+                actual_replace_with,
+                delete_user_cb,
+                propagate_meta=propagate_meta,
             )
         return ret
 
@@ -454,9 +456,13 @@ class IterGraph(fx.Graph):
         for node in reversed(self.nodes):
             if node.name.startswith("output"):
                 output_node = node
-            elif node.name.startswith("_fused_adam_",):
+            elif node.name.startswith(
+                "_fused_adam_",
+            ):
                 optim_node = node
-            elif node.name.startswith("_foreach_add_",):
+            elif node.name.startswith(
+                "_foreach_add_",
+            ):
                 step_node = node
                 self.node_add_user(optim_node, output_node)
                 self.node_add_user(step_node, optim_node)
@@ -465,9 +471,13 @@ class IterGraph(fx.Graph):
         for i, node in enumerate(reversed(self.nodes)):
             if node.name.startswith("output"):
                 output_node = node
-            elif node.name.startswith("_fused_adam_",):
+            elif node.name.startswith(
+                "_fused_adam_",
+            ):
                 optim_node = node
-            elif node.name.startswith("_foreach_add_",):
+            elif node.name.startswith(
+                "_foreach_add_",
+            ):
                 step_node = node
                 self.node_add_user(step_node, optim_node)
                 self.node_remove_user(optim_node, output_node)
