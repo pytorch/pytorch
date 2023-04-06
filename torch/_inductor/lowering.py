@@ -38,7 +38,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, pad_list, sympy_product
+from .utils import ceildiv, developer_warning, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -2709,9 +2709,9 @@ def max_pool2d_with_indices(
         padding = [0, 0]
     if not stride:
         stride = kernel_size
-    kernel_size = pad_list(kernel_size)
-    stride = pad_list(stride)
-    padding = pad_list(padding)
+    kernel_size = pad_listlike(kernel_size, 2)
+    stride = pad_listlike(stride, 2)
+    padding = pad_listlike(padding, 2)
 
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
@@ -3122,9 +3122,9 @@ def avg_pool2d(
         stride = kernel_size
     if not padding:
         padding = [0, 0]
-    kernel_size = pad_list(kernel_size)
-    stride = pad_list(stride)
-    padding = pad_list(padding)
+    kernel_size = pad_listlike(kernel_size, 2)
+    stride = pad_listlike(stride, 2)
+    padding = pad_listlike(padding, 2)
 
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
@@ -3883,28 +3883,28 @@ def _realize(x):
 try:
     import torch.distributed._functional_collectives
 
-    @register_lowering(aten.wait_tensor)
+    c10d_functional = torch.ops.c10d_functional
+
+    @register_lowering(c10d_functional.wait_tensor)
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
 
-    @register_lowering(aten.all_reduce)
+    @register_lowering(c10d_functional.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
         )
 
-    @register_lowering(aten.all_gather_into_tensor)
+    @register_lowering(c10d_functional.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
         )
 
-    @register_lowering(aten.reduce_scatter_tensor)
-    def reduce_scatter_tensor(input, reduce_op, scatter_dim, tag, ranks, group_size):
+    @register_lowering(c10d_functional.reduce_scatter_tensor)
+    def reduce_scatter_tensor(input, reduce_op, tag, ranks, group_size):
         return TensorBox.create(
-            ir.ReduceScatterTensor.create(
-                input, reduce_op, scatter_dim, tag, ranks, group_size
-            )
+            ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
         )
 
 except ImportError:

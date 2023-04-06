@@ -3,7 +3,19 @@ from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Any, Callable, cast, Dict, Optional, Sequence, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 
 from functorch import make_fx
 
@@ -19,6 +31,7 @@ from torch.distributed._spmd.distribute import (
 )
 from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._tensor import DeviceMesh, Placement, Replicate, Shard
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils import stateless
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
@@ -99,7 +112,12 @@ class Override(ABC):
         pass
 
     @abstractmethod
-    def transform(self, gm: fx.GraphModule, schema_map: Dict[str, Schema]) -> fx.Graph:
+    def transform(
+        self,
+        gm: fx.GraphModule,
+        schema_map: Dict[str, Schema],
+        flat_state: List[torch.Tensor],
+    ) -> fx.GraphModule:
         r"""
         Given a DTensor-expanded graph and sharding schema for every node,
         conduct additional transformation for the sub-graph from the :class:`nn.Module`
@@ -110,11 +128,61 @@ class Override(ABC):
             gm (:class:`fx.Graph`): a DTensor-expanded graph.
             schema_map (Dict[str, :class:`Schema`]): a dictionary maps from node
                 name to DTensor schema.
+            flat_state (List[str, :class:`Tensor`]): a reference to the list of
+                flattened state. The elements in ``flat_state`` map to the first
+                ``len(flat_state)`` placeholders in the graph. The transformation
+                can add state to or remove state from ``flat_state`` as long as
+                it keeps ``flat_state`` and the placeholders consistent.
 
         Returns:
             The :class:`fx.Graph` after transformation.
         """
         pass
+
+
+class _PyTreeCodeGenOutputsOnly(_PyTreeCodeGen):
+    # pyre-ignore[3]
+    def process_inputs(self, *args: Any) -> Any:
+        return args
+
+    # pyre-ignore[2, 3]
+    def gen_fn_def(self, free_vars, maybe_return_annotation):
+        return CodeGen.gen_fn_def(self, free_vars, maybe_return_annotation)
+
+
+def _to_caller_flattened_graph_module(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    """Move the responsibility of flattening the input arguments from the
+    graph module to the caller.
+
+    Example:
+
+        output = gm(my_struct)
+
+        gm = gm(to_caller_flattened_graph_module)
+
+        output = gm(*pytree.flatten(my_struct)[0])
+    """
+    # pyre-ignore[16]
+    gm._graph._codegen = _PyTreeCodeGenOutputsOnly(
+        pytree_info=_PyTreeInfo(
+            # pyre-ignore[6]
+            orig_args=None,  # type: ignore[arg-type]
+            # pyre-ignore[6]
+            in_spec=None,  # type: ignore[arg-type]
+            # pyre-ignore[16]
+            out_spec=gm._graph._codegen.pytree_info.out_spec,
+        )
+    )
+    gm.recompile()
+    return gm
+
+
+_placements_override: Dict[int, List[Placement]] = {}
+
+
+def _override_placements(t: torch.Tensor, placements: List[Placement]):
+    global _placements_override
+    _placements_override[id(t)] = placements
 
 
 def _dtensor_expand(
@@ -132,15 +200,6 @@ def _dtensor_expand(
     replicate_schema: Schema = Schema(mesh=mesh, placements=[Replicate()])
 
     inps, schemas = [], []
-    for a in flat_args:
-        if isinstance(a, torch.Tensor):
-            inps.append(a)
-            schemas.append(shard_schema)
-        elif isinstance(a, (nn.Module, torch.optim.Optimizer)):
-            # nn.Module or optimizer placeholder is captured by make_fx but
-            # never used in the graph
-            inps.append(torch.empty(0))
-            schemas.append(shard_schema)
 
     for o in pytree.tree_flatten(named_states)[0]:
         if isinstance(o, torch.Tensor):
@@ -154,6 +213,24 @@ def _dtensor_expand(
         assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
         inps.append(p)
         schemas.append(replicate_schema)
+
+    for a in flat_args:
+        if isinstance(a, torch.Tensor):
+            inps.append(a)
+            if id(a) in _placements_override:
+                schemas.append(
+                    Schema(mesh=mesh, placements=_placements_override[id(a)])
+                )
+            else:
+                schemas.append(shard_schema)
+        else:
+            # Create dummy tensor and schema for non-tensor inputs for
+            # the purpose of dtensor expansion. Non-tensor inputs are
+            # guaranteed unused in dispatcher graphs produced by make_fx.
+            # However, we still need to respect them so that tensor inputs
+            # match wtih their placeholders.
+            inps.append(torch.empty(0))
+            schemas.append(shard_schema)
 
     return _convert_to_distributed(gm, inps, schemas, _allow_partial=False)
 
@@ -306,13 +383,41 @@ FOREACH_DECOMP_TABLE = {
 }
 
 
+DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
+    aten.all_reduce.default,
+    aten.wait_tensor.default,
+}
+
+
+def _dedup_collectives(gm: fx.GraphModule) -> fx.GraphModule:
+    args_to_node: Dict[Tuple[Any, ...], fx.Node] = {}
+
+    for node in gm.graph.nodes:
+        # replace all args with the results from the first unique comm op
+        args, _ = pytree.tree_flatten(node.args)
+
+        if node.target in DEDUP_TARGETS:
+            args_key = (node.target, *args)
+            unique_node = args_to_node.get(args_key, None)
+            if unique_node is None:
+                # first time seeing this combination, remember it
+                args_to_node[args_key] = node
+            else:
+                # the current node is a duplicate, replace it
+                node.replace_all_uses_with(unique_node)
+                gm.graph.erase_node(node)
+
+    gm.recompile()
+
+    return gm
+
+
 @dataclass
 class _CompiledResult:
     gm: fx.GraphModule
     mod: nn.Module
     opt: Optional[torch.optim.Optimizer]
-    named_states: Dict[str, torch.Tensor]
-    params_and_buffers: Dict[str, torch.Tensor]
+    flat_state: List[torch.Tensor]
 
 
 def _compile(
@@ -366,7 +471,7 @@ def _compile(
 
     # Lift states and parameters as function arguments so that make_fx
     # can trace operations applied to them.
-    def stateless_func(func, args, kwargs, named_states, params_and_buffers):
+    def stateless_func(func, named_states, params_and_buffers, args, kwargs):
         with stateless._reparametrize_module(
             cast(nn.Module, mod), params_and_buffers
         ), _rematerialize_optimizer(
@@ -390,19 +495,41 @@ def _compile(
             tracing_mode="symbolic",
             decomposition_table=FOREACH_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
-        )(args, kwargs, named_states, params_and_buffers)
+        )(named_states, params_and_buffers, args, kwargs)
 
     # 4. Use DTensor to insert collectives
     gm, name_to_spec = _dtensor_expand(
         gm, args, kwargs, named_states, params_and_buffers
     )
 
-    # 5. Replace previously inserted dummy ones with real graphs.
+    # 5. Move the responsibility of flattening the input arguments from the
+    # graph module to the caller. This serves two purposes:
+    #   - Transformations that add/remove state need to manipulate a state
+    #   container that maintains the state tensors in the same order as they
+    #   appear in graph placeholders.
+    #   - Reduced runtime cost. The state container is only flattened once upfront.
+    flat_state, _ = pytree.tree_flatten([named_states, params_and_buffers])
+    gm = _to_caller_flattened_graph_module(gm)
+
+    # 6. dedup comm operators.
+    # The duplication could come from DTensor args and kwargs redistribution.
+    # Suppose one operator produces a Partial gradient tensor and model
+    # parameters are replicated. In this case, every optimizer operation using
+    # that Partial gradient tensor would trigger an allreduce. This is becuase
+    # DTensor only has local information on individual tensor/operator, which is
+    # not sufficient to detect duplications in the graph. This situation can
+    # also happen when inserting FSDP allgather if a parameter is used multiple
+    # times in the forward method.
+    # TODO(@mrshenli): @yifuwang has a suggestion of conducting expansion and
+    # dedup at tracer-level to avoid multiple graph passes.
+    gm = _dedup_collectives(gm)
+
+    # 7. Replace previously inserted dummy ones with real graphs.
     if module_override:
         for _, override in module_override.items():
-            gm = override.transform(gm, name_to_spec)
+            gm = override.transform(gm, name_to_spec, flat_state)
 
-    return _CompiledResult(gm, mod, opt, named_states, params_and_buffers)
+    return _CompiledResult(gm, mod, opt, flat_state)
 
 
 # Note that the Python convention of __dict__ requires the key to be str.
@@ -444,15 +571,12 @@ def compile(
                 compiled_obj = _compile(func, module_override, *args, **kwargs)
                 wrapper.__dict__[COMPILED_OBJECT_KEY] = compiled_obj
 
+            flat_inps = compiled_obj.flat_state + pytree.tree_flatten([args, kwargs])[0]
+
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been
                 # captured in the graph.
-                output = compiled_obj.gm(
-                    args,
-                    kwargs,
-                    compiled_obj.named_states,
-                    compiled_obj.params_and_buffers,
-                )[0]
+                output = compiled_obj.gm(*flat_inps)[0]
                 if first_iter and gm_transformation:
                     # TODO: SPMD should provid a default and configurable
                     # transformation.
