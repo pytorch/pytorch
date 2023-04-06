@@ -1471,9 +1471,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 15)
         self.assertEqual(cc.frame_count, 1)
 
-
     def test_hooks_allowed_modules(self):
-        # this test shouldn't care whether hook guards are enabled or not 
+        # this test shouldn't care whether hook guards are enabled or not
         class ToyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()

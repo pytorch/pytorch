@@ -26,7 +26,7 @@ from ..utils import (
     is_safe_constant,
     istensor,
     istype,
-    module_has_hooks,
+    nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
 )
@@ -232,9 +232,12 @@ class NNModuleVariable(VariableTracker):
                     arg = tx.pop()
                 return arg
             elif is_allowed(mod.__class__):
-                if module_has_hooks(mod):
+                if nnmodule_has_hooks(
+                    mod, check_forward_hooks=True, check_backward_hooks=True
+                ):
                     unimplemented(
-                        f"Can't support hooks on 'allowed' modules ({mod.__class__}), which don't get traced through."
+                        f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
+                        "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."
                     )
                 # The module type will change after it is called
                 if is_lazy:

@@ -49,7 +49,7 @@ from torch.utils._pytree import tree_map
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
-nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn_module.html"
+nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 
 log = logging.getLogger(__name__)
@@ -1483,4 +1483,3 @@ def nnmodule_has_hooks(
             ]
         )
     return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
-
