@@ -160,31 +160,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
-        if not type(value) is self.value_type:
-            """
-            Why is this happening?
-
-
-  File "/scratch/whc/work/pytorch/torch/_dynamo/symbolic_convert.py", line 1977, in RETURN_VALUE       
-    self.output.compile_subgraph(                                                                      
-  File "/scratch/whc/work/pytorch/torch/_dynamo/output_graph.py", line 554, in compile_subgraph        
-    tx.prune_dead_locals()                                                                             
-  File "/scratch/whc/work/pytorch/torch/_dynamo/symbolic_convert.py", line 473, in prune_dead_locals   
-    self.output.side_effects.prune_dead_object_new(self)                                               
-  File "/scratch/whc/work/pytorch/torch/_dynamo/side_effects.py", line 275, in prune_dead_object_new   
-    VariableTracker.apply(visit, var)                                                                  
-  File "/scratch/whc/work/pytorch/torch/_dynamo/variables/base.py", line 99, in apply                  
-    result = fn(value.clone(**updated_dict))                                                           
-  File "/scratch/whc/work/pytorch/torch/_dynamo/variables/base.py", line 65, in clone                  
-    return self.__class__(**args)                                                                      
-  File "/scratch/whc/work/pytorch/torch/_dynamo/variables/base.py", line 27, in __call__               
-    obj = type.__call__(cls, *args, **kwargs)                                                          
-  File "/scratch/whc/work/pytorch/torch/_dynamo/variables/nn_module.py", line 624, in __init__         
-    super().__init__(value=value, **kwargs)                                                            
-  File "/scratch/whc/work/pytorch/torch/_dynamo/variables/user_defined.py", line 167, in __init__              
-            
-            """
-            breakpoint()
         assert type(value) is self.value_type
 
     def __str__(self):

@@ -26,7 +26,6 @@ from ..utils import (
     is_safe_constant,
     istensor,
     istype,
-    nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
 )
@@ -34,6 +33,7 @@ from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
+
 
 def initialize_lazy_module(tx, mod, args, kwargs):
     """
@@ -45,11 +45,9 @@ def initialize_lazy_module(tx, mod, args, kwargs):
     """
     assert len(kwargs) == 0
     if hasattr(mod, "_initialize_hook"):
-        input = [
-            get_fake_value(x.node, tx)
-            for x in proxy_args_kwargs(args, {})[0]
-        ]
+        input = [get_fake_value(x.node, tx) for x in proxy_args_kwargs(args, {})[0]]
         mod._infer_parameters(mod, input)
+
 
 class NNModuleVariable(VariableTracker):
     _nonvar_fields = ["module_type", "module_key"]
@@ -230,7 +228,9 @@ class NNModuleVariable(VariableTracker):
                 and mod.__class__.forward is torch.nn.Sequential.forward
             ):
                 # unroll Sequential()
-                assert not is_lazy, "Expected lazy sequential isn't a valid combination?"
+                assert (
+                    not is_lazy
+                ), "Expected lazy sequential isn't a valid combination?"
                 assert not kwargs
                 (arg,) = args
                 for child_name, submod in mod.named_children():
@@ -258,13 +258,6 @@ class NNModuleVariable(VariableTracker):
                 initialize_lazy_module(tx, mod, args, kwargs)
 
             if is_allowed(mod.__class__):
-                if nnmodule_has_hooks(
-                    mod, check_forward_hooks=True, check_backward_hooks=True
-                ):
-                    unimplemented(
-                        f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
-                        "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."
-                    )
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
@@ -276,6 +269,7 @@ class NNModuleVariable(VariableTracker):
                     ),
                     **options,
                 )
+
             else:
                 assert self.source, (
                     "Must provide a valid source in order to inline, "
@@ -621,10 +615,20 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
+        if "value_type" in kwargs:
+            lazy_value_to_become = getattr(kwargs["value_type"], "cls_to_become", None)
+            if type(value) is lazy_value_to_become:
+                # We may have cloned a variabletracker for a LazyModule earlier (e.g. tracking side-effects)
+                # and then later we called and mutated the LazyModule into a MaterializedModule.
+                # We do not do the mutation upon first seeing a LazyModule since we preserve eager semantics to only
+                # mutate upon first call, but this requires we update multiple copies of the VariableTracker post-mutation.
+                kwargs["value_type"] = type(value)
+
         super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
             # force guard checks even when `not config.guard_nn_modules``
             self.source = NotNNModuleSource(self.source)
+
     @staticmethod
     @functools.lru_cache(None)
     def _nn_module_method_ids():
@@ -667,6 +671,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if is_lazy_module(mod):
             self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
+
         name = "__call__"
         fn = getattr(self.value_type, name)
         if self.source:
