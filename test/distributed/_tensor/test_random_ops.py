@@ -21,12 +21,19 @@ class DistTensorRandomOpTest(DTensorTestBase):
     @with_comms
     def test_device_mesh_init(self):
         # device mesh init should sync seed and store it as an attribute
+        # However, we have not figured out how we want to use the seed, so
+        # temporarily device_mesh._seed will just equal to each rank's
+        # `initial_seed()`.
+        torch.cuda.manual_seed(self.rank)
         object_list = [torch.cuda.initial_seed()]
         broadcast_object_list(object_list)
         seed_from_rank_0 = int(object_list[0])
 
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        self.assertEqual(seed_from_rank_0, device_mesh._seed)
+        # TODO: sync seed once we figure out how we want to use the seed
+        if self.rank != 0:
+            with self.assertRaises(AssertionError):
+                self.assertEqual(seed_from_rank_0, device_mesh._seed)
 
     @with_comms
     @skip_unless_torch_gpu
@@ -71,18 +78,15 @@ class DistTensorRandomOpTest(DTensorTestBase):
         check_rng_state(1234, global_size, device_mesh)
 
         # allgather the local tensors
+        dtensor = dtensor.redistribute(device_mesh, [Replicate()])
         local_tensor = dtensor.to_local()
-        local_tensor_list = [
-            torch.empty_like(local_tensor) for i in range(self.world_size)
-        ]
-        device_mesh.all_gather(local_tensor_list, local_tensor)
 
         # compare with local tensors from other ranks
         for other_rank in range(self.world_size):
             if self.rank != other_rank:
-                # other rank should have an identical local tensor
+                # other rank should have a different local tensor
                 self.assertNotEqual(
-                    local_tensor_list[self.rank], local_tensor_list[other_rank]
+                    local_tensor[:, self.rank], local_tensor[:, other_rank]
                 )
 
     @with_comms
@@ -108,18 +112,18 @@ class DistTensorRandomOpTest(DTensorTestBase):
             dtensor = dropout(dtensor)
 
             # allgather the local tensors
+            dtensor = DTensor.from_local(dtensor.to_local(), device_mesh, [Shard(0)])
+            dtensor = dtensor.redistribute(device_mesh, [Replicate()])
             local_tensor = dtensor.to_local()
-            local_tensor_list = [
-                torch.empty_like(local_tensor) for i in range(self.world_size)
-            ]
-            device_mesh.all_gather(local_tensor_list, local_tensor)
 
             # compare with local tensors from other ranks
+            self_slice = slice(4 * self.rank, 4 * self.rank + 4)
             for other_rank in range(self.world_size):
                 if self.rank != other_rank:
                     # other rank should have an identical local tensor
+                    other_slice = slice(4 * other_rank, 4 * other_rank + 4)
                     self.assertEqual(
-                        local_tensor_list[self.rank], local_tensor_list[other_rank]
+                        local_tensor[self_slice, :], local_tensor[other_slice, :]
                     )
 
 
