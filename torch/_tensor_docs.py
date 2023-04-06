@@ -6590,7 +6590,7 @@ Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
 add_docstr_all(
     "is_sparse",
     r"""
-Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
+Is ``True`` if the Tensor uses sparse COO storage layout, ``False`` otherwise.
 """,
 )
 

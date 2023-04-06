@@ -12,26 +12,6 @@ from torch.onnx._internal.fx import _pass
 from torch.onnx._internal.fx.passes import _utils
 
 
-@_beartype.beartype
-def _rename_placeholder_targets(
-    module: "torch.fx.GraphModule", reference_module: "torch.fx.GraphModule"
-):
-    """Align the argument names in module with those in reference_module.
-    After calling this function, the two forward(...) in module and reference_module should have
-    the same signature.
-    """
-    placeholders = [node for node in module.graph.nodes if node.op == "placeholder"]
-    reference_placeholders = [
-        node for node in reference_module.graph.nodes if node.op == "placeholder"
-    ]
-
-    for placeholder, reference_placeholder in zip(placeholders, reference_placeholders):
-        placeholder.target = reference_placeholder.target
-        placeholder.name = reference_placeholder.name
-
-    module.recompile()
-
-
 class Decompose(_pass.Transform):
     def __init__(
         self,
