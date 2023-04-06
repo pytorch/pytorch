@@ -56,6 +56,8 @@ from .utils import (
     dynamo_timed,
     format_graph_code,
     format_graph_tabular,
+    nnmodule_doc_url_msg,
+    nnmodule_has_hooks,
     same,
 )
 from .variables.base import VariableTracker
@@ -382,26 +384,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
 
-    @staticmethod
-    def module_has_hooks(mod, only_check_unsupported=False):
-        supported_hooks = [
-            "_forward_pre_hooks",
-            "_forward_hooks",
-        ]
-        unsupported_hooks = [
-            "_backward_pre_hooks",
-            "_backward_hooks",
-            "_state_dict_pre_hooks",
-            "_state_dict_hooks",
-            "_load_state_dict_pre_hooks",
-            "_load_state_dict_post_hooks",
-        ]
-        check_hooks = unsupported_hooks
-        if not only_check_unsupported:
-            check_hooks += supported_hooks
-
-        return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
-
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
@@ -433,10 +415,24 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if self.module_has_hooks(target, only_check_unsupported=True):
+            if nnmodule_has_hooks(target, check_forward_hooks=True):
                 torch._logging.warning_once(
-                    log, "nn.Module hooks are not fully supported, they may be ignored"
+                    log,
+                    "nn.Module forward/_pre hooks are only partially supported, and were detected in your model. "
+                    "In particular, if you do not change/remove hooks after calling .compile(), you can disregard this "
+                    "warning, and otherwise you may need to set torch._dynamo.config.skip_nnmodule_hook_guards=False "
+                    "to ensure recompiling after changing hooks."
+                    f"{nnmodule_doc_url_msg} ",
                 )
+            if nnmodule_has_hooks(
+                target, check_backward_hooks=True, check_state_dict_hooks=True
+            ):
+                torch._logging.warning_once(
+                    log,
+                    "nn.Module state_dict and backward hooks are not yet supported by torch.compile, "
+                    f"but were detected in your model and will be silently ignored. {nnmodule_doc_url_msg}",
+                )
+
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
