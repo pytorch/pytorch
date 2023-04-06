@@ -171,7 +171,7 @@ def _sfdp_init():
             pattern,
             replacement,
             args,
-            inference_graph,
+            training_graph,
             patterns,
             scalar_workaround=workaround,
         )
@@ -179,7 +179,7 @@ def _sfdp_init():
             pattern,
             replacement,
             args,
-            training_graph,
+            inference_graph,
             patterns,
             scalar_workaround=workaround,
         )
