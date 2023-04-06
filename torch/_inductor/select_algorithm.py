@@ -90,7 +90,7 @@ class TritonTemplateKernel(TritonKernel):
         }
         triton_meta["configs"] = [config_of(signature)]
         return (
-            f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
+            f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r},filename=__file__)\n"
             + "@triton.jit"
         )
 
@@ -701,6 +701,9 @@ class AlgorithmSelectorCache(PersistentCache):
         if make_benchmark_fn.cache_info().currsize:
             counters["inductor"]["select_algorithm_autotune"] += 1
             self.log_results(choices[0].name, input_nodes, timings, autotune_elapse)
+        else:
+            self.log_results(choices[0].name, input_nodes, timings, autotune_elapse)
+
         return builtins.min(timings, key=timings.__getitem__).output_node()
 
     @classmethod
@@ -802,6 +805,7 @@ class AlgorithmSelectorCache(PersistentCache):
         top_k = sorted(timings, key=timings.__getitem__)[:10]
         best = top_k[0]
         best_time = timings[best]
+        print(f"Best bmreq {getattr(best, 'bmreq', None)}\n")
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]

@@ -17,6 +17,9 @@ from .mm_common import (
     mm_options,
 )
 
+from ..coordinate_descent_tuner import CoordescTuner
+from ..select_algorithm import AlgorithmSelectorCache
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
@@ -115,7 +118,23 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 )
             )
 
-    return autotune_select_algorithm(choices, [mat1, mat2], layout)
+    def func(config):
+        choice = mm_template.generate(
+            (mat1, mat2),
+            layout,
+            **mm_options(config, k, layout),
+        )
+        benchmark_fn = AlgorithmSelectorCache.make_benchmark_fn(
+            [choice], [mat1, mat2], layout
+        )
+        timing = benchmark_fn(choice)
+        return timing
+
+    out = autotune_select_algorithm(choices, [mat1, mat2], layout)
+
+    tuner = CoordescTuner(is_mm=True)
+    tuner.autotune(func, list(mm_configs(m, n, k))[0])
+    return out
 
 
 @register_lowering(aten._int_mm)
@@ -168,4 +187,22 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             )
         )
 
-    return autotune_select_algorithm(choices, [inp_expanded, mat1, mat2], layout)
+    def func(config):
+        choice = mm_template.generate(
+            (inp_expanded, mat1, mat2),
+            layout,
+            **mm_options(config, k, layout),
+            prefix_args=1,
+            epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+        )
+        benchmark_fn = AlgorithmSelectorCache.make_benchmark_fn(
+            [choice], [inp_expanded, mat1, mat2], layout
+        )
+        timing = benchmark_fn(choice)
+        return timing
+
+
+    out = autotune_select_algorithm(choices, [inp_expanded, mat1, mat2], layout)
+    tuner = CoordescTuner(is_mm=True)
+    tuner.autotune(func, list(mm_configs(m, n, k))[0])
+    return out
