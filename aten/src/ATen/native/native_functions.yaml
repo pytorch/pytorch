@@ -8799,15 +8799,6 @@
   device_guard: False
   tags: inplace_view
 
-- func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: cholesky_out
-
-- func: cholesky(Tensor self, bool upper=False) -> Tensor
-  variants: method, function
-  dispatch:
-    CPU, CUDA: cholesky
-
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: cholesky_solve_out

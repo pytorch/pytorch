@@ -1466,6 +1466,7 @@ from . import masked
 
 # Import removed ops with error message about removal
 from ._linalg_utils import (  # type: ignore[misc]
+    cholesky,
     matrix_rank,
     eig,
     solve,

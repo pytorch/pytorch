@@ -1361,7 +1361,6 @@ class TestOperators(TestCase):
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
         xfail('normal', ''),
         xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
-        xfail('cholesky', ''),  # NYI: forward-AD for cholesky
         xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
@@ -1482,7 +1481,6 @@ class TestOperators(TestCase):
         xfail('cdouble'),  # required rank 4 tensor to use channels_last format
         xfail('cfloat'),  # required rank 4 tensor to use channels_last format
         xfail('chalf'),  # required rank 4 tensor to use channels_last format
-        xfail('cholesky'),  # Forward AD not implemented and no decomposition
         xfail('ormqr'),  # Forward AD not implemented and no decomposition
         xfail('double'),  # required rank 4 tensor to use channels_last format
         xfail('float'),  # required rank 4 tensor to use channels_last format

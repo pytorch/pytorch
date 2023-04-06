@@ -642,8 +642,6 @@ aten::ccol_indices_copy
 aten::ccol_indices_copy.out
 aten::channel_shuffle
 aten::channel_shuffle.out
-aten::cholesky
-aten::cholesky.out
 aten::cholesky_inverse
 aten::cholesky_inverse.out
 aten::cholesky_solve

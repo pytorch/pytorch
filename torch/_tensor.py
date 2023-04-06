@@ -647,6 +647,11 @@ class Tensor(torch._C._TensorBase):
             )
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def cholesky(self, upper=False):
+        from ._linalg_utils import cholesky
+
+        return cholesky(self, upper=upper)
+
     def solve(self, other):
         from ._linalg_utils import solve
 

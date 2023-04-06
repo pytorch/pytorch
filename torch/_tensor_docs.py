@@ -1108,15 +1108,6 @@ In-place version of :meth:`~Tensor.ceil`
 )
 
 add_docstr_all(
-    "cholesky",
-    r"""
-cholesky(upper=False) -> Tensor
-
-See :func:`torch.cholesky`
-""",
-)
-
-add_docstr_all(
     "cholesky_solve",
     r"""
 cholesky_solve(input2, upper=False) -> Tensor

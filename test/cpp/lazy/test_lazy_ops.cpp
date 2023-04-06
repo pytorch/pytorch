@@ -1028,27 +1028,6 @@ TEST_F(LazyOpsTest, TestQR) {
   }
 }
 
-TEST_F(LazyOpsTest, TestCholesky) {
-  static const int dims[] = {4, 7};
-  for (auto m : dims) {
-    for (bool upper : {true, false}) {
-      torch::Tensor a = torch::rand(
-          {3, m, m},
-          torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-      torch::Tensor pd_a =
-          torch::matmul(a, torch::transpose(a, 1, 2)) +
-          torch::eye(
-              m, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-      auto b = torch::cholesky(pd_a, upper);
-      ForEachDevice([&](const torch::Device& device) {
-        torch::Tensor lazy_a = CopyToDevice(pd_a, device);
-        auto lazy_b = torch::cholesky(lazy_a, upper);
-        AllClose(b, lazy_b, /*rtol=*/1e-3, /*atol=*/1e-4);
-      });
-    }
-  }
-}
-
 TEST_F(LazyOpsTest, TestLogDet) {
   static const int dims[] = {4, 7};
   for (auto m : dims) {

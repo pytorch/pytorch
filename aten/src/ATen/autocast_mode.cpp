@@ -551,7 +551,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(grid_sampler_3d, fp32)
   KERNEL_CPU(trace, fp32)
   KERNEL_CPU(view_as_complex, fp32)
-  KERNEL_CPU(cholesky, fp32)
   KERNEL_CPU(cholesky_inverse, fp32)
   KERNEL_CPU(cholesky_solve, fp32)
   KERNEL_CPU(inverse, fp32)

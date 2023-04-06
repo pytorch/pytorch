@@ -278,7 +278,6 @@ Tensor class reference
     Tensor.ceil
     Tensor.ceil_
     Tensor.char
-    Tensor.cholesky
     Tensor.cholesky_inverse
     Tensor.cholesky_solve
     Tensor.chunk

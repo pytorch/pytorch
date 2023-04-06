@@ -235,7 +235,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "split_with_sizes_backward",
     "dot",
     "vdot",
-    "cholesky",
     "triangular_solve",
     "mm",
     "_unsafe_view",
