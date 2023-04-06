@@ -134,7 +134,7 @@ from torch.testing._internal.opinfo.definitions._masked import (
     sample_inputs_softmax_variant,
 )
 from torch.testing._internal.opinfo.definitions.sparse import (
-    sample_inputs_elementwise_binary_operation_sparse,
+    sample_inputs_mul_sparse,
 )
 
 
@@ -3165,6 +3165,7 @@ def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
 
 
 def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs):
+    xfail_mode = kwargs.pop('xfail_mode', False)
     layout_name = str(layout).split('.', 1)[-1].rsplit('_coo', 1)[0]
     op_supports_layout = getattr(op_info, 'supports_' + layout_name)
     if not op_supports_layout:
@@ -3209,6 +3210,37 @@ def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout
                                                       dense_dim=sample_input.input.ndim - 2).requires_grad_(requires_grad),
                 args=sample_input.args,
                 kwargs=sample_input.kwargs)
+
+
+def sample_inputs_reduction_sparse_sum(op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs):
+    xfail_mode = kwargs.get('xfail_mode', False)
+    for sample in sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout, blocksize=blocksize, **kwargs):
+        t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+        if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+            if ((isinstance(t_kwargs.get('dim'), int) and (t_inp.dim() != 2 or t_kwargs.get('keepdim')))
+                or (isinstance(t_kwargs.get('dim'), (list, tuple)) and (
+                    ((t_inp.dim() != 2 and len(t_kwargs.get('dim')) != t_inp.dim()) or t_kwargs.get('keepdim'))))):
+                if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                    if xfail_mode:
+                        yield (sample, RuntimeError,
+                               "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
+                               " layout but got Sparse(Bsr|Bsc)")
+                    continue
+                else:
+                    if xfail_mode:
+                        yield (sample, RuntimeError,
+                               "Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend")
+                    continue
+            elif t_kwargs and not t_kwargs.get('keepdim'):
+                # reductions on sparse compressed tensors require
+                # keepdim==True when reduction is over sparse dimensions
+                if xfail_mode:
+                    yield (sample, RuntimeError,
+                           # FIXME: raise a better exception message
+                           "torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported")
+                continue
+        if not xfail_mode:
+            yield sample
 
 
 class _TestParamsMaxPoolBase:
@@ -9259,16 +9291,11 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
                     # Specifying sample input function for sparse layout implies the sparse layout support:
-                    sample_inputs_sparse_coo_func=partial(sample_inputs_elementwise_binary_operation_sparse,
-                                                          layout=torch.sparse_coo),
-                    sample_inputs_sparse_csr_func=partial(sample_inputs_elementwise_binary_operation_sparse,
-                                                          layout=torch.sparse_csr),
-                    sample_inputs_sparse_csc_func=partial(sample_inputs_elementwise_binary_operation_sparse,
-                                                          layout=torch.sparse_csc),
-                    sample_inputs_sparse_bsr_func=partial(sample_inputs_elementwise_binary_operation_sparse,
-                                                          layout=torch.sparse_bsr),
-                    sample_inputs_sparse_bsc_func=partial(sample_inputs_elementwise_binary_operation_sparse,
-                                                          layout=torch.sparse_bsc),
+                    sample_inputs_sparse_coo_func=partial(sample_inputs_mul_sparse, layout=torch.sparse_coo),
+                    sample_inputs_sparse_csr_func=partial(sample_inputs_mul_sparse, layout=torch.sparse_csr),
+                    sample_inputs_sparse_csc_func=partial(sample_inputs_mul_sparse, layout=torch.sparse_csc),
+                    sample_inputs_sparse_bsr_func=partial(sample_inputs_mul_sparse, layout=torch.sparse_bsr),
+                    sample_inputs_sparse_bsc_func=partial(sample_inputs_mul_sparse, layout=torch.sparse_bsc),
                     ),
     BinaryUfuncInfo('sub',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
@@ -17651,11 +17678,11 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         ref=reference_reduction_numpy(np.sum),
-        sample_inputs_sparse_coo_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_coo),
-        sample_inputs_sparse_csr_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_csr),
-        sample_inputs_sparse_csc_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_csc),
-        sample_inputs_sparse_bsr_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_bsr),
-        sample_inputs_sparse_bsc_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_bsc),
+        sample_inputs_sparse_coo_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_coo),
+        sample_inputs_sparse_csr_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_csr),
+        sample_inputs_sparse_csc_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_csc),
+        sample_inputs_sparse_bsr_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_bsr),
+        sample_inputs_sparse_bsc_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_bsc),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
