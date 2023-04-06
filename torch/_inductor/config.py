@@ -126,13 +126,11 @@ def decide_compile_threads():
 
 compile_threads = decide_compile_threads()
 
-# autotuning global cache path
+# gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil
-
-    global_cache_path = parutil.get_file_path("fb/global_cache", pkg=__package__)
+    global_cache_dir = "fb/cache"
 else:
-    global_cache_path = None
+    global_cache_dir = None
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this
