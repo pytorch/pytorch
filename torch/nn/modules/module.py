@@ -1499,7 +1499,7 @@ class Module:
         if self._compiled_call_impl:
             return self._compiled_call_impl(*args, **kwargs)
         else:
-            return self._call_impl
+            return self._call_impl(*args, **kwargs)
 
     def _call_impl(self, *args, **kwargs):
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
