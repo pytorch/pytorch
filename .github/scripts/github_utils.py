@@ -48,10 +48,6 @@ def gh_fetch_url(
                 Remaining: {err.headers['X-RateLimit-Remaining']}
                 Resets at: {err.headers['x-RateLimit-Reset']}"""
             )
-        elif err.code == 404:
-            # if we don't find anything just return nothing
-            print(f"404: error Nothing found at {url}")
-            return None
         raise
 
 
