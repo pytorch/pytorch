@@ -427,9 +427,9 @@ def run_test(
         unittest_args.extend(extra_unittest_args)
 
     # If using pytest, replace -f with equivalent -x
-    if options.pytest:
-        unittest_args.extend(get_pytest_args(options))
-        unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
+    # if options.pytest:
+    #     unittest_args.extend(get_pytest_args(options))
+    #     unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
     if IS_CI:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
         if RERUN_DISABLED_TESTS:
