@@ -1044,7 +1044,7 @@ class GitHubPR:
         gh_add_labels(self.org, self.project, self.pr_num, [label])
 
     def remove_label(self, label: str) -> None:
-        if label in self.get_labels():
+        if label in (self.get_labels() if self.get_labels() is not None else []):
             gh_remove_label(self.org, self.project, self.pr_num, label)
 
     def merge_into(
