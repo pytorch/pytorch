@@ -86,7 +86,12 @@ class PersistentCache:
         if not torch.cuda.is_available():
             return
 
-        import triton
+        try:
+            import triton
+
+            triton_version = triton.__version__
+        except ModuleNotFoundError:
+            triton_version = None
 
         self.system = {
             "device": torch.cuda.get_device_properties(
@@ -94,7 +99,7 @@ class PersistentCache:
             ).name,
             "version": {
                 "cuda": torch.version.cuda,
-                "triton": triton.__version__,
+                "triton": triton_version,
             },
         }
         self.system["hash"] = hashlib.sha256(
