@@ -87,14 +87,6 @@ else:
             return -1
         raise RuntimeError("PyTorch was compiled without CUDA support")
 
-if hasattr(torch._C, '_cuda_maybeExchangeDevice'):
-    _maybe_exchange_device = torch._C._cuda_maybeExchangeDevice
-else:
-    def _maybe_exchange_device(device: int) -> int:
-        if device < 0:
-            return -1
-        raise RuntimeError("PyTorch was compiled without CUDA support")
-
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
@@ -313,7 +305,7 @@ class _DeviceGuard:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
+        self.idx = torch.cuda._exchange_device(self.prev_idx)
         return False
 
 
@@ -333,7 +325,7 @@ class device:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
+        self.idx = torch.cuda._exchange_device(self.prev_idx)
         return False
 
 
