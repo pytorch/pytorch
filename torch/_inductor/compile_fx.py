@@ -16,7 +16,7 @@ import torch._dynamo.config as dynamo_config
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
-from torch._dynamo.utils import fake_mode_from_tensors
+from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
@@ -178,7 +178,7 @@ def compile_fx_inner(
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
-    fake_mode = fake_mode_from_tensors(example_inputs)
+    fake_mode = detect_fake_mode(example_inputs)
     if not fake_mode:
         fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
         FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
@@ -219,7 +219,9 @@ def compile_fx_inner(
         ]
 
         complex_memory_overlap_inputs = any(
-            complex_memory_overlap(t) for t in example_inputs
+            complex_memory_overlap(t)
+            for t in example_inputs
+            if isinstance(t, torch.Tensor)
         )
 
         if (
@@ -227,6 +229,7 @@ def compile_fx_inner(
             and not graph.mutated_inputs
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
+            and all(isinstance(t, torch.Tensor) for t in example_inputs)
             and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
             if (
@@ -685,7 +688,7 @@ def compile_fx(
 
 def _shape_env_from_inputs(inputs):
     shape_env = None
-    fake_mode = fake_mode_from_tensors(inputs)
+    fake_mode = detect_fake_mode(inputs)
 
     # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
     # pass in real inputs for now.
