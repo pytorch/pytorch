@@ -7,6 +7,7 @@ from itertools import product
 from typing import Any, Dict, List
 
 import torch
+import itertools
 import torch.cuda.nccl as nccl
 import torch.nn as nn
 import torch.nn.functional as F
@@ -738,11 +739,12 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
     @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval(self):
-        for use_composable in [True, False]:
+        for use_composable, cast_forward_inputs in itertools.product([True, False], [True, False]):
             mp_config = MixedPrecision(
                 param_dtype=torch.float16,
                 reduce_dtype=torch.float16,
-                buffer_dtype=torch.float16
+                buffer_dtype=torch.float16,
+                cast_forward_inputs=cast_forward_inputs,
             )
             model = TransformerWithSharedParams.init(
                 self.process_group,
@@ -779,12 +781,13 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                     self.assertEqual(torch.float32, p.grad.dtype)
 
     @skip_if_lt_x_gpu(2)
-    def test_buffers_full_precision_in_eval(self):
-        for use_composable in [True, False]:
+    def test_full_precision_in_eval_buffers(self):
+        for use_composable, cast_forward_inputs in itertools.product([True, False], [True, False]):
             mp_config = MixedPrecision(
                 param_dtype=torch.float16,
                 reduce_dtype=torch.float16,
-                buffer_dtype=torch.float16
+                buffer_dtype=torch.float16,
+                cast_forward_inputs=cast_forward_inputs,
             )
             model_getter = (
                 self._get_simple_nested_model_composable if use_composable else self._get_simple_nested_model
@@ -814,12 +817,13 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 self.assertEqual(torch.float16, buf.dtype)
 
     @skip_if_lt_x_gpu(2)
-    def test_comm_in_full_precision_in_eval(self):
-        for use_composable in [True, False]:
+    def test_full_precision_in_eval_comm(self):
+        for use_composable, cast_forward_inputs in itertools.product([True, False], [True, False]):
             mp_config = MixedPrecision(
                 param_dtype=torch.float32,
                 reduce_dtype=torch.float16,
-                buffer_dtype=torch.float32
+                buffer_dtype=torch.float32,
+                cast_forward_inputs=cast_forward_inputs,
             )
             model = TransformerWithSharedParams.init(
                     self.process_group,

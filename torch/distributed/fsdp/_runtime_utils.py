@@ -413,13 +413,11 @@ def _pre_forward(
     # the `grad_fn` is mutated.
     _register_post_backward_hooks(state, handles)
 
-    should_cast_forward = True
-    for handle in state._handles:
-        if handle._force_full_precision:
-            should_cast_forward = False
-            break
+    should_cast_forward_inputs = all(
+        not handle._force_full_precision for handle in state._handles
+    )
 
-    if should_cast_forward and state.mixed_precision.cast_forward_inputs:
+    if should_cast_forward_inputs and state.mixed_precision.cast_forward_inputs:
         # Recursively convert args and kwargs to specified precision.
         input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
         args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
@@ -524,40 +522,43 @@ def _root_pre_forward(
     if not state._is_root:
         return args, kwargs
 
-    # We cast buffers back to fp32 if we're forcing full precision. In addition, we check if buffers
+    # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
     # are in full precision and if we should cast them back to lower precision, which happens when
     # exiting eval() mode.
+    should_cast_buffers_to_full_prec = any(
+        handle._force_full_precision for handle in state._handles
+    )
 
-    cast_buffers_to_full_prec = False
-    for handle in state._handles:
-        if handle._force_full_precision:
-            cast_buffers_to_full_prec = True
-            break
-
-    if cast_buffers_to_full_prec:
+    if should_cast_buffers_to_full_prec:
         _cast_buffers_to_dtype_and_device(
             buffers=dict(module.named_buffers()).values(),
             buffer_dtypes=list(state._buffer_name_to_orig_dtype.values()),
-            device=state.compute_device
+            device=state.compute_device,
         )
         # This flag is only set when we cast buffers to full precision, to avoid the
         # CPU overhead that can stem from retrieving all buffers and their types in the
         # following else branch.
-        state._needs_restore_check = True
-    elif hasattr(state, '_needs_restore_check') and state._needs_restore_check:
+        state._needs_buffer_dtype_restore_check = True
+    elif getattr(state, "_needs_buffer_dtype_restore_check", False):
         # Check if buffers are in full precision and we need to cast them
         # back down.
-        buffers, buffer_dtypes_for_computation = _get_buffers_and_dtypes_for_computation(state, module)
-        # buffers, buffer_dtypes_for_computation = list(buffers), list(buffer_dtypes_for_computation)
+        (
+            buffers,
+            buffer_dtypes_for_computation,
+        ) = _get_buffers_and_dtypes_for_computation(state, module)
         if len(buffers) > 0 and len(buffer_dtypes_for_computation) > 0:
-            buffer, buffer_dtype_for_computation = buffers[0], buffer_dtypes_for_computation[0]
-            if buffer.dtype != buffer_dtype_for_computation:
+            if any(
+                buffer.dtype != buffer_dtype_for_computation
+                for buffer, buffer_dtype_for_computation in zip(
+                    buffers, buffer_dtypes_for_computation
+                )
+            ):
                 # Assume we have to cast everything if there is one mismatch
                 _cast_buffers_to_dtype_and_device(
                     buffers, buffer_dtypes_for_computation, state.compute_device
                 )
         # We don't have to check this again until we cast buffers to full precision again.
-        state._needs_restore_check = False
+        state._needs_buffer_dtype_restore_check = False
 
     if state.forward_prefetch:
         handles_keys = []
@@ -584,15 +585,11 @@ def _root_pre_forward(
     args = args_tuple[0]
     kwargs = kwargs_tuple[0]
 
-    # TODO: can replace this with next(state._handles).should_cast_forward to reduce
-    # iterating through all handles if we assume model.eval() is always uniformly set.
-    should_cast_forward = True
-    for handle in state._handles:
-        if handle._force_full_precision:
-            should_cast_forward = False
-            break
+    should_cast_forward_inputs = all(
+        not handle._force_full_precision for handle in state._handles
+    )
 
-    if should_cast_forward and state.mixed_precision.cast_root_forward_inputs:
+    if should_cast_forward_inputs and state.mixed_precision.cast_root_forward_inputs:
         input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
         args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
     return args, kwargs
@@ -1399,7 +1396,6 @@ def _get_orig_buffer_dtypes(
     """
     Returns the original buffer types of the given buffer names.
     """
-
     buffer_dtypes: List[torch.dtype] = []
     for buffer_name in buffer_names:
         _p_assert(
