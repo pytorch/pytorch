@@ -986,9 +986,8 @@ class TritonKernel(Kernel):
 
         self._load_mask = mask
         try:
-            with self.swap_buffers(self.compute, self.compute):
-                # TODO(jansel): do we need a reshape here?
-                yield mask
+            # TODO(jansel): do we need a reshape here?
+            yield mask
         finally:
             self._load_mask = prior
 
@@ -1026,24 +1025,27 @@ class TritonKernel(Kernel):
             if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
 
-        if (
+        if "tmp" in mask:
+            # Masked loads must come after the mask is computed
+            load_buffer = self.compute
+        elif (
             self.inside_reduction
             and not self.persistent_reduction
             and "rmask" not in mask
-            and "tmp" not in mask
             and not indirect_indexing
         ):
             # can lift a common load outside of reduction loop
             # One exception is when this is an indirect_load.
-            result_var = self.cse.generate(
-                self.body, line, append_broadcast=append_broadcast
-            )
+            load_buffer = self.body
         else:
-            result_var = self.cse.generate(
-                self.loads, line, append_broadcast=append_broadcast
-            )
+            load_buffer = self.loads
 
+        result_var = self.cse.generate(load_buffer, line)
         result_var.mask_vars = mask_vars
+
+        if append_broadcast:
+            line = f"tl.broadcast_to({result_var}, {append_broadcast})"
+            result_var = self.cse.generate(load_buffer, line)
 
         if not self.inside_reduction or "rmask" not in mask:
             self.outside_loop_vars.add(result_var)
