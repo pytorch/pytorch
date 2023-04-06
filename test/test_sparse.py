@@ -4685,29 +4685,101 @@ class TestSparseAny(TestCase):
     @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-3})
     @all_sparse_layouts('layout', include_strided=False)
     def test_reductions(self, layout, device, dtype, op):
+        if not op.supports_sparse_layout(layout):
+            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
+
+        if (
+                layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
+                and dtype in {torch.bool, torch.uint8}):
+            self.skipTest('Requires fix to gh-98495. Skipping!')
+
         count = 0
         for sample in op.sample_inputs_sparse(layout, device, dtype):
-            count += 1
-
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+
+            if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+
+                if op.name == 'sum':
+                    # TODO: eliminate this if-block by fixing failures below
+                    if ((isinstance(t_kwargs.get('dim'), int) and (t_inp.dim() != 2 or t_kwargs.get('keepdim')))
+                        or (isinstance(t_kwargs.get('dim'), (list, tuple)) and (
+                            ((t_inp.dim() != 2 and len(t_kwargs.get('dim')) != t_inp.dim()) or t_kwargs.get('keepdim'))))):
+                        if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                            with self.assertRaisesRegex(
+                                    RuntimeError,
+                                    "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
+                                    " layout but got Sparse(Bsr|Bsc)"):
+                                result = op.op(t_inp, *t_args, **t_kwargs)
+                            continue
+                        with self.assertRaisesRegex(
+                                RuntimeError,
+                                "Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend"):
+                            result = op.op(t_inp, *t_args, **t_kwargs)
+                        continue
+
+                if t_kwargs and not t_kwargs.get('keepdim'):
+                    # reductions on sparse compressed tensors require
+                    # keepdim==True when reduction is over sparse dimensions
+                    with self.assertRaisesRegex(
+                            RuntimeError,
+                            # FIXME: raise a better exception message
+                            "torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported"):
+                        result = op.op(t_inp, *t_args, **t_kwargs)
+                    continue
+
             result = op.op(t_inp, *t_args, **t_kwargs)
+            count += 1
 
             #  Checking invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
             dense = op.op(t_inp.to_dense(), *t_args, **t_kwargs)
             self.assertEqual(result, dense)
 
-        if count == 0:
-            # we count samples to avoid false-positive test reports
-            self.skipTest('no sample inputs')
+        self.assertNotEqual(count, 0)
 
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(reduction_ops_with_sparse_support, allowed_dtypes=(torch.float32, torch.float64, torch.complex64, torch.complex128))
     @all_sparse_layouts('layout', include_strided=False)
     def test_reductions_backward(self, layout, device, dtype, op):
+        # TODO: Once gradcheck supports sparse outputs, use gradcheck
+        # for testing the reductions backward and merge this test to
+        # test_reductions.
+        if not op.supports_sparse_layout(layout):
+            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
         count = 0
         for sample in op.sample_inputs_sparse(layout, device, dtype, requires_grad=True):
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+
+            if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+
+                if op.name == 'sum':
+                    # TODO: eliminate this if-block by fixing failures below
+                    if ((isinstance(t_kwargs.get('dim'), int) and (t_inp.dim() != 2 or t_kwargs.get('keepdim')))
+                        or (isinstance(t_kwargs.get('dim'), (list, tuple)) and (
+                            ((t_inp.dim() != 2 and len(t_kwargs.get('dim')) != t_inp.dim()) or t_kwargs.get('keepdim'))))):
+                        if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                            with self.assertRaisesRegex(
+                                    RuntimeError,
+                                    "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
+                                    " layout but got Sparse(Bsr|Bsc)"):
+                                result = op.op(t_inp, *t_args, **t_kwargs)
+                            continue
+                        with self.assertRaisesRegex(
+                                RuntimeError,
+                                "Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend"):
+                            result = op.op(t_inp, *t_args, **t_kwargs)
+                        continue
+
+                if t_kwargs and not t_kwargs.get('keepdim'):
+                    # reductions on sparse compressed tensors require
+                    # keepdim==True when reduction is over sparse dimensions
+                    with self.assertRaisesRegex(
+                            RuntimeError,
+                            # FIXME: raise a better exception message
+                            "torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported"):
+                        result = op.op(t_inp, *t_args, **t_kwargs)
+                    continue
+
             r = op.op(t_inp, *t_args, **t_kwargs)
             if r.numel() != 0:
                 r = r.sum()
