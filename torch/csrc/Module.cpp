@@ -1690,7 +1690,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_group_tensors_by_device_and_dtype",
-      [](const std::vector<std::vector<at::Tensor>>& nested_tensorlist,
+      [](const std::vector<std::vector<c10::optional<at::Tensor>>>& nested_tensorlist,
          const bool with_indices) {
         // TODO(crcrpar): Need to map at::ScalarType to THPDtype so that repr
         // works

@@ -188,10 +188,11 @@ using scalartype_nested_tensorvec_map_t = std::unordered_map<at::ScalarType, nes
 using device_scalartype_nested_tensorvec_map_t = std::unordered_map<at::Device, scalartype_nested_tensorvec_map_t>;
 using DeviceDtypeKey = std::pair<at::Device, at::ScalarType>;
 using IndicesT = std::vector<int>;
-using TensorsAndIndicesT = std::pair<nested_tensorvec_t, IndicesT>;
+using nested_optional_tensorvec_t = std::vector<std::vector<c10::optional<at::Tensor>>>;
+using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;
 using FlatMap = std::unordered_map<DeviceDtypeKey, TensorsAndIndicesT, ParamsHash<DeviceDtypeKey>>;
 
-FlatMap group_tensors_by_first_tensors_device_and_dtype(const std::vector<std::vector<Tensor>>& nested_tensorlist, const bool with_indices) {
+FlatMap group_tensors_by_first_tensors_device_and_dtype(const std::vector<std::vector<c10::optional<Tensor>>>& nested_tensorlist, const bool with_indices) {
   FlatMap grouped_tensors_with_indices;
 
   TORCH_CHECK_GT(nested_tensorlist.size(), 0);
@@ -208,14 +209,15 @@ FlatMap group_tensors_by_first_tensors_device_and_dtype(const std::vector<std::v
 
   for (const auto& tensor_index : c10::irange(num_tensors)) {
     const auto t = nested_tensorlist[0][tensor_index];
-    const DeviceDtypeKey key = {t.device(), t.scalar_type()};
+    TORCH_CHECK(t.has_value());
+    const DeviceDtypeKey key = {t->device(), t->scalar_type()};
     if (!grouped_tensors_with_indices.count(key)) {
       grouped_tensors_with_indices.insert(
         {
           key,
           TensorsAndIndicesT{
-            [&]() -> nested_tensorvec_t {
-              nested_tensorvec_t nested_tensorvec;
+            [&]() -> nested_optional_tensorvec_t {
+              nested_optional_tensorvec_t nested_tensorvec;
               nested_tensorvec.reserve(num_lists);
              for (const auto& i : c10::irange(num_lists)) {
                 std::vector<Tensor> tensors;
