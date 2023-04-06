@@ -944,7 +944,8 @@ if _enabled:
         return fail
 
     for name, method in _get_methods(torch.nn.Module):
-        if name.startswith("__"):
+        print(name)
+        if name.startswith("__") or name.endswith("_call_impl"):
             continue
         if (
             name not in RecursiveScriptModule.__dict__
