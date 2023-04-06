@@ -300,6 +300,9 @@ test_perf_for_dashboard() {
     python "benchmarks/dynamo/$suite.py" \
         --performance --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --disable-persistent-reductions "$@" \
         --output "$TEST_REPORTS_DIR/${backend}_no_persistent_reductions_${suite}_${dtype}_${mode}_cuda_performance.csv"
+    python "benchmarks/dynamo/$suite.py" \
+        --performance --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --disable-divisible-by-16 --disable-split-reductions --disable-persistent-reductions "$@" \
+        --output "$TEST_REPORTS_DIR/${backend}_no_all_${suite}_${dtype}_${mode}_cuda_performance.csv"
   done
 }
 
