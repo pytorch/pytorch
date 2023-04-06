@@ -799,12 +799,30 @@ class CUDAGraphNode:
         # - if a Storage is contained, that will be used
         # - if None is contained, a new Storage will be constructed
         # - if an int is contained, the storage from the output list at that int will be used
-        storages: List[
+        storages_info: List[
             Union[UntypedStorage, None, int]
         ] = self.prepare_storages_for_construction()
         outputs_new = []
+
+        # # We recreate the below logic in cpp to reduce overhead, since this is on the hot path
+        """
+        for storage_info, metadata in zip(storages_info, self.outputs_metadata):
+            if metadata is None:
+                outputs_new.append(None)
+                continue
+
+            if isinstance(storage_info, UntypedStorage):
+                s = storage_info
+            if storage_info is None:
+                s = self.create_storage(metadata)
+            else:
+                assert isinstance(storage_info, int)
+                s = outputs_new[storage_info].untyped_storage()
+            outputs_new.append(self._reconstruct_from_tensor_metadata(metadata, storage=s))
+        """
+
         torch._C._construct_Tensors_From_Storage_and_Metadata(
-            storages, self.outputs_metadata, outputs_new
+            storages_info, self.outputs_metadata, outputs_new
         )
 
         return outputs_new
@@ -972,6 +990,8 @@ class CUDAGraphNode:
         self.outputs_weakrefs.clear()
         output_weak_ref_cdatas = []
         output_data_ptrs = []
+
+        # For output, gets the storage weakref and data_ptr if it is not a static persistent storage alias
         torch._C._map_Storage_Refs(
             outputs,
             self.output_persistent_storage,
@@ -1179,8 +1199,10 @@ class CUDAGraphNode:
             "storage_offset": x.storage_offset() if not ignore_storage_offset else 0,
         }
 
-    def _reconstruct_from_tensor_metadata(self, metadata: Dict[str, Any]) -> Tensor:
-        s = self.create_storage(metadata)
+    def _reconstruct_from_tensor_metadata(
+        self, metadata: Dict[str, Any], storage=None
+    ) -> Tensor:
+        s = self.create_storage(metadata) if storage is None else storage
         t = torch.empty([0], device=metadata["device"], dtype=metadata["dtype"])
         t.set_(
             source=s,
