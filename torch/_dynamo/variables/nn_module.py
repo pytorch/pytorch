@@ -35,6 +35,20 @@ from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
 
 
+def initialize_lazy_module(tx, mod, args, kwargs):
+    """
+    Fairly coupled helper used by NNModuleVariable and UnspecializedNNModuleVariable.
+
+    Used to cause lazy module to be initialized (and delete its init hook) before tracing. Especially
+    useful now that 'allowed' modules graph-break on hooks, calling this first ensures there is no hook
+    by the time we trace __call__ and thus no graph-break for lazy allowed modules.
+    """
+    assert len(kwargs) == 0
+    if hasattr(mod, "_initialize_hook"):
+        input = [get_fake_value(x.node, tx) for x in proxy_args_kwargs(args, {})[0]]
+        mod._infer_parameters(mod, input)
+
+
 class NNModuleVariable(VariableTracker):
     _nonvar_fields = ["module_type", "module_key"]
 
@@ -214,6 +228,9 @@ class NNModuleVariable(VariableTracker):
                 and mod.__class__.forward is torch.nn.Sequential.forward
             ):
                 # unroll Sequential()
+                assert (
+                    not is_lazy
+                ), "Expected lazy sequential isn't a valid combination?"
                 assert not kwargs
                 (arg,) = args
                 for child_name, submod in mod.named_children():
@@ -230,10 +247,17 @@ class NNModuleVariable(VariableTracker):
                     )
                     arg = tx.pop()
                 return arg
-            elif is_allowed(mod.__class__):
+
+            if is_lazy:
                 # The module type will change after it is called
-                if is_lazy:
-                    self.module_type = mod.cls_to_become
+                self.module_type = mod.cls_to_become
+
+                # The pre-hook runs to initialize the module shapes, then deletes itself.  After this,
+                # the module is more or less not lazy and can be treated as a normal module regardless of
+                # is_allowed or other variations.
+                initialize_lazy_module(tx, mod, args, kwargs)
+
+            if is_allowed(mod.__class__):
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
@@ -256,19 +280,6 @@ class NNModuleVariable(VariableTracker):
                     # If so at least some changes are needed, we don't allow inlining
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
-                elif is_lazy:
-                    # In the case of a lazy module, we want to run
-                    # the pre-hooks which initialize it.
-                    # Afterwards, lazy module deletes its pre-hooks
-                    # to avoid treating it as lazy on subsequent recompile.
-                    assert len(kwargs) == 0
-                    if hasattr(mod, "_initialize_hook"):
-                        input = [
-                            get_fake_value(x.node, tx)
-                            for x in proxy_args_kwargs(args, {})[0]
-                        ]
-                        mod._infer_parameters(mod, input)
-                    fn = mod.__call__
                 else:
                     fn = mod.__call__
                 fn_source = AttrSource(self.source, "__call__")
@@ -593,6 +604,8 @@ class NNModuleVariable(VariableTracker):
 
 
 class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
+    _nonvar_fields = ["value_type"]
+
     """
     The above class will specialize on the id() of a module and place
     parameters on the torch.fx.GraphModule.  Giving one graph per
@@ -602,6 +615,15 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
+        if "value_type" in kwargs:
+            lazy_value_to_become = getattr(kwargs["value_type"], "cls_to_become", None)
+            if type(value) is lazy_value_to_become:
+                # We may have cloned a variabletracker for a LazyModule earlier (e.g. tracking side-effects)
+                # and then later we called and mutated the LazyModule into a MaterializedModule.
+                # We do not do the mutation upon first seeing a LazyModule since we preserve eager semantics to only
+                # mutate upon first call, but this requires we update multiple copies of the VariableTracker post-mutation.
+                kwargs["value_type"] = type(value)
+
         super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
             # force guard checks even when `not config.guard_nn_modules``
@@ -643,14 +665,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
+        mod = self.value
 
-        # TODO mlazos: only support __call__ for lazy modules
-        # until we can support a larger swath of python
-        if is_lazy_module(self.value) and self.source:
-            name = "__call__"
-        else:
-            name = "forward"
+        # see comment on lazy module handling in NNModuleVariable.call_function for context
+        if is_lazy_module(mod):
+            self.value_type = mod.cls_to_become
+            initialize_lazy_module(tx, mod, args, kwargs)
 
+        name = "__call__"
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
