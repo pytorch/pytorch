@@ -521,6 +521,43 @@ OutputList = List  # output indexes
 LevelList = List  # levels (distance from root of tree)
 
 
+class OutputAliasInfo:
+    pass
+
+
+class UnaliasedStorage(OutputAliasInfo):
+    "Singleton to mark that the graph output constructs a new alias or is None"
+    pass
+
+
+class PersistentStaticStorage(OutputAliasInfo):
+    "Singleton to mark that the graph output storage will be in output_persistent_storage array"
+    pass
+
+
+class AliasesPriorGraphOutput(OutputAliasInfo):
+    "Marks that the graph output aliases an output of a prior graph"
+    __slots__ = ["index"]
+
+    index: PathOutputIndex
+
+    def __init__(self, index):
+        assert isinstance(index, tuple)
+        self.index = index
+
+
+class AliasesNewOutput(OutputAliasInfo):
+    "Marks that the graph output aliases an index in the new, returned outputs"
+
+    __slots__ = ["index"]
+
+    index: PathOutputIndex
+
+    def __init__(self, index):
+        assert isinstance(index, int)
+        self.index = index
+
+
 class CUDAGraphNode:
     """
     A single recording of a function into a CUDA Graph. Recordings of CUDA Graphs share a single memory pool
@@ -677,16 +714,16 @@ class CUDAGraphNode:
 
         self.checkpointed_caching_state: Optional[AllocatorState] = None
 
-        # Output Storage Alias information:
-        # - False if it creats a new, unaliased storage, or the output is None
-        # - True if it is an alias of a persistent static input
-        # - Tuple of path_depth, output_index indexing into path_weakrefs if it aliases a prior output
-        # -  int
-        # - A Tuple of False, index if it takes a storage from an output already created in the reconstructed outputs
-        # self.output_storage_alias : OutputList[Union[bool, PathOutputIndex, int]] = []
-        self.output_storage_alias: OutputList[
-            Optional[Union[PathOutputIndex, int]]
-        ] = []
+        # Output Storage Alias information, can be:
+        # - A new, unaliased storage, or the output is None
+        # - An alias of a persistent static input, in which case a storage will be set in the corresponding index
+        # of output_persistent_storage
+        # - An alias of an output of a prior graph
+        # - An alias of an output already created in the reconstructed outputs
+        self.output_storage_alias: OutputList[OutputAliasInfo] = []
+
+        # if an output aliases a static, persistent input then the Storage of the
+        # persistent output will be set here
         self.output_persistent_storage: OutputList[Optional[UntypedStorage]] = []
 
         self.recording_outputs: OutputList[Optional[torch.Tensor]] = self._record(
@@ -747,39 +784,24 @@ class CUDAGraphNode:
         new_inputs.clear()
         self.run_graph()
 
-        storages = self.reconstruct_output_storages()
-        outputs = self.reconstruct_outputs_from_storages(storages)
+        outputs = self.reconstruct_outputs()
 
         self._add_replayed_outputs(outputs)
         self.debug_check_invariants_after_invocation()
 
         return outputs
 
-    def get_output_storage(
-        self, output_storages, index, output_storage_alias, metadata
-    ):
-        if metadata is None:
-            return None
+    def reconstruct_outputs(self):
+        "Reconstruct output tensors according to their saved metadata and alias information"
 
-        if output_storage_alias is False:
-            return None
-
-        if output_storage_alias is True:
-            return self.output_persistent_storage[index]
-
-        if isinstance(output_storage_alias, tuple):
-            depth, output_index = output_storage_alias
-            ref = self.path_weakrefs[depth][output_index]
-            assert ref()
-            return torch.UntypedStorage._new_with_weak_ptr(ref())
-
-        return output_storage_alias
-        assert isinstance(output_storage_alias, int)
-        return output_storages[output_storage_alias]
-
-    def reconstruct_outputs_from_storages(
-        self, storages: List[Optional[UntypedStorage]]
-    ):
+        # The cpp function is constructing a new Tensor according to the saved output metadata
+        # For each element in the corresponding storage list:
+        # - if a Storage is contained, that will be used
+        # - if None is contained, a new Storage will be constructed
+        # - if an int is contained, the storage from the output list at that int will be used
+        storages: List[
+            Union[UntypedStorage, None, int]
+        ] = self.prepare_storages_for_construction()
         outputs_new = []
         torch._C._construct_Tensors_From_Storage_and_Metadata(
             storages, self.outputs_metadata, outputs_new
@@ -787,15 +809,36 @@ class CUDAGraphNode:
 
         return outputs_new
 
-    def reconstruct_output_storages(self):
+    def prepare_alias_info_for_tensor_construction(
+        self, out_index: int, out_alias_info: OutputAliasInfo, metadata: Dict[str, Any]
+    ) -> List[Union[UntypedStorage, None, int]]:
+        if metadata is None or out_alias_info is UnaliasedStorage:
+            return None
+
+        if out_alias_info is PersistentStaticStorage:
+            return self.output_persistent_storage[out_index]
+
+        if isinstance(out_alias_info, AliasesPriorGraphOutput):
+            depth, existing_output_index = out_alias_info.index
+            ref = self.path_weakrefs[depth][existing_output_index]
+            assert ref()
+            return torch.UntypedStorage._new_with_weak_ptr(ref())
+
+        assert isinstance(out_alias_info, AliasesNewOutput)
+        return out_alias_info.index
+
+    def prepare_storages_for_construction(
+        self,
+    ) -> List[Union[UntypedStorage, None, int]]:
         output_storages = []
         for i, (output_storage_alias, metadata) in enumerate(
             zip(self.output_storage_alias, self.outputs_metadata)
         ):
-            stor = self.get_output_storage(
-                output_storages, i, output_storage_alias, metadata
+            output_storages.append(
+                self.prepare_alias_info_for_tensor_construction(
+                    i, output_storage_alias, metadata
+                )
             )
-            output_storages.append(stor)
 
         return output_storages
 
@@ -869,7 +912,7 @@ class CUDAGraphNode:
 
         for i, o in enumerate(outputs):
             if o is None:
-                self.output_storage_alias.append(False)
+                self.output_storage_alias.append(UnaliasedStorage)
                 self.output_persistent_storage.append(None)
                 continue
 
@@ -877,7 +920,7 @@ class CUDAGraphNode:
                 o.untyped_storage().data_ptr(), None
             )
             if ref and ref() is not None:
-                self.output_storage_alias.append(True)
+                self.output_storage_alias.append(PersistentStaticStorage)
                 self.output_persistent_storage.append(
                     torch.UntypedStorage._new_with_weak_ptr(ref())
                 )
@@ -887,17 +930,19 @@ class CUDAGraphNode:
 
             path_ref = self._is_alias_of_live_recorded_tensor(o)
             if path_ref is not None:
-                self.output_storage_alias.append(path_ref)
+                self.output_storage_alias.append(AliasesPriorGraphOutput(path_ref))
                 continue
 
             if o.untyped_storage().data_ptr() in output_new_storages_index:
                 self.output_storage_alias.append(
-                    output_new_storages_index[o.untyped_storage().data_ptr()]
+                    AliasesNewOutput(
+                        output_new_storages_index[o.untyped_storage().data_ptr()]
+                    )
                 )
                 continue
 
             output_new_storages_index[o.untyped_storage().data_ptr()] = i
-            self.output_storage_alias.append(False)
+            self.output_storage_alias.append(UnaliasedStorage)
 
         if self.stack_traces is None:
             self.stack_traces = [None for _ in range(len(outputs))]
