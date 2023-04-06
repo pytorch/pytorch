@@ -23,6 +23,7 @@ Core Maintainers
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
+-  Nikita Shulga (`malfet <https://github.com/malfet>`__)
 
 Module-level maintainers
 ------------------------
