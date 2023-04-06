@@ -108,6 +108,8 @@ static PyObject* THPStorage_pynew(
 #endif
     } else if (device.type() == at::DeviceType::XPU) {
       allocator = c10::GetAllocator(device.type());
+    } else if (device.type() == at::DeviceType::HPU) {
+      allocator = c10::GetAllocator(device.type());
     } else if (device.type() == at::DeviceType::Meta) {
       allocator = c10::GetAllocator(device.type());
     } else {

@@ -25,12 +25,7 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import (
-    CppAotWrapperCodeGen,
-    CppWrapperCodeGen,
-    CudaAotWrapperCodeGen,
-    WrapperCodeGen,
-)
+from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -74,6 +69,18 @@ def supported_dtype_of_cpp_wrapper(dtype):
         # torch.float16, # TODO: implement this
     }
     return dtype in supported_dtype
+
+
+def may_get_constant_buffer_dtype(constant_buffer):
+    assert isinstance(
+        constant_buffer, sympy.Symbol
+    ), "get_constant_buffer_dtype only supports input of sympy.Symbol"
+    if constant_buffer.is_integer:
+        return torch.int64
+    elif constant_buffer.is_float:
+        return torch.float32
+    else:
+        return None
 
 
 def is_magic_method(op):
@@ -581,7 +588,13 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
-            if not supported_dtype_of_cpp_wrapper(value.get_dtype()):
+            dtype = None
+            if isinstance(value, TensorBox):
+                dtype = value.get_dtype()
+            elif isinstance(value, sympy.Symbol):
+                dtype = may_get_constant_buffer_dtype(value)
+
+            if not supported_dtype_of_cpp_wrapper(dtype):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):
@@ -600,10 +613,10 @@ class GraphLowering(torch.fx.Interpreter):
             device = self.get_single_device()
             self.check_cpp_wrapper()
             if device == "cpu":
-                self.wrapper_code = CppAotWrapperCodeGen()
+                self.wrapper_code = CppWrapperCodeGen()
             else:
                 assert device == "cuda", "Non-supported device for AOT compilation"
-                self.wrapper_code = CudaAotWrapperCodeGen()
+                self.wrapper_code = CudaWrapperCodeGen()
         elif self.cpp_wrapper:
             self.check_cpp_wrapper()
             if self.cpp_wrapper:
@@ -671,6 +684,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         code, linemap = self.codegen()
         mod = PyCodeCache.load(code, linemap=linemap)
+
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
