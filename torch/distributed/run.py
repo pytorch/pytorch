@@ -651,7 +651,7 @@ def determine_local_world_size(nproc_per_node: str):
 
         log.info(
             f"Using nproc_per_node={nproc_per_node},"
-            f" seting to {num_proc} since the instance "
+            f" setting to {num_proc} since the instance "
             f"has {os.cpu_count()} {device_type}"
         )
         return num_proc
