@@ -220,7 +220,7 @@ is_non_overlapping_and_dense
 
 /**
  * This structure is intended to hold additional metadata of the specific device
- *backend
+ * backend.
  **/
 struct C10_API BackendMeta : intrusive_ptr_target {
   virtual ~BackendMeta(){};
@@ -230,7 +230,7 @@ struct C10_API BackendMeta : intrusive_ptr_target {
   }
 };
 
-struct C10_API ExtraMeta {
+struct C10_API SymbolicShapeMeta {
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
   SymInt numel_ = 1;
@@ -241,52 +241,37 @@ struct C10_API ExtraMeta {
   SymBool is_channels_last_{false};
   SymBool is_channels_last_3d_{false};
   SymBool is_non_overlapping_and_dense_{true};
+};
+
+struct C10_API ExtraMeta {
+  std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
-  intrusive_ptr<c10::BackendMeta> backend_meta_;
+  intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
 
   ExtraMeta() = default;
+  ExtraMeta(const ExtraMeta& other) {
+    if (other.symbolic_shape_meta_) {
+      symbolic_shape_meta_ =
+          std::make_unique<c10::SymbolicShapeMeta>(*other.symbolic_shape_meta_);
+    }
+    if (other.named_tensor_meta_) {
+      named_tensor_meta_ = other.named_tensor_meta_->clone();
+    }
+    if (other.backend_meta_) {
+      backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
+    }
+  }
 
   ExtraMeta(
-      SymDimVector sizes,
-      SymDimVector strides,
-      SymInt numel,
-      SymInt storage_offset,
-      SymBool is_contiguous,
-      SymBool is_channels_last_contiguous,
-      SymBool is_channels_last_3d_contiguous,
-      SymBool is_channels_last,
-      SymBool is_channels_last_3d,
-      SymBool is_non_overlapping_and_dense,
+      std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
       intrusive_ptr<c10::BackendMeta> backend_meta)
-      : sizes_(std::move(sizes)),
-        strides_(std::move(strides)),
-        numel_(std::move(numel)),
-        storage_offset_(std::move(storage_offset)),
-        is_contiguous_(std::move(is_contiguous)),
-        is_channels_last_contiguous_(std::move(is_channels_last_contiguous)),
-        is_channels_last_3d_contiguous_(
-            std::move(is_channels_last_3d_contiguous)),
-        is_channels_last_(std::move(is_channels_last)),
-        is_channels_last_3d_(std::move(is_channels_last_3d)),
-        is_non_overlapping_and_dense_(std::move(is_non_overlapping_and_dense)),
+      : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
         backend_meta_(backend_meta) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
-    return std::make_unique<ExtraMeta>(
-        sizes_,
-        strides_,
-        numel_,
-        storage_offset_,
-        is_contiguous_,
-        is_channels_last_contiguous_,
-        is_channels_last_3d_contiguous_,
-        is_channels_last_,
-        is_channels_last_3d_,
-        is_non_overlapping_and_dense_,
-        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr,
-        backend_meta_ ? backend_meta_->clone(backend_meta_) : nullptr);
+    return std::make_unique<ExtraMeta>(*this);
   }
 };
 
@@ -655,7 +640,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   SymIntArrayRef sym_sizes_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->sizes_;
+      return symbolic_shape_meta().sizes_;
     } else {
       // Sizes guaranteed to be non-negative, so unchecked cast is OK
       return c10::fromIntArrayRefKnownNonNegative(sizes_default());
@@ -736,7 +721,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::SymInt sym_numel_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->numel_;
+      return symbolic_shape_meta().numel_;
     } else {
       return c10::SymInt(SymInt::UNCHECKED, numel_);
     }
@@ -755,7 +740,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   int64_t dim_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->sizes_.size();
+      return symbolic_shape_meta().sizes_.size();
     } else {
       return sizes_and_strides_.size();
     }
@@ -792,7 +777,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::SymInt sym_storage_offset_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->storage_offset_;
+      return symbolic_shape_meta().storage_offset_;
     } else {
       return c10::SymInt(SymInt::UNCHECKED, storage_offset_);
     }
@@ -825,7 +810,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::SymIntArrayRef sym_strides_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->strides_;
+      return symbolic_shape_meta().strides_;
     } else {
       return c10::fromIntArrayRefKnownNonNegative(strides_default());
     }
@@ -851,13 +836,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return extra_meta_->is_channels_last_contiguous_.guard_bool(
+        return symbolic_shape_meta().is_channels_last_contiguous_.guard_bool(
             __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
+        return symbolic_shape_meta().is_channels_last_3d_contiguous_.guard_bool(
             __FILE__, __LINE__);
       }
-      return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__);
+      return symbolic_shape_meta().is_contiguous_.guard_bool(
+          __FILE__, __LINE__);
     }
 
     if (memory_format == at::MemoryFormat::ChannelsLast) {
@@ -871,9 +857,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_strides_like_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return extra_meta_->is_channels_last_.guard_bool(__FILE__, __LINE__);
+        return symbolic_shape_meta().is_channels_last_.guard_bool(
+            __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return extra_meta_->is_channels_last_3d_.guard_bool(__FILE__, __LINE__);
+        return symbolic_shape_meta().is_channels_last_3d_.guard_bool(
+            __FILE__, __LINE__);
       } else {
         return false;
       }
@@ -890,7 +878,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_non_overlapping_and_dense_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->is_non_overlapping_and_dense_.guard_bool(
+      return symbolic_shape_meta().is_non_overlapping_and_dense_.guard_bool(
           __FILE__, __LINE__);
     } else {
       return is_non_overlapping_and_dense_;
@@ -1534,7 +1522,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
-    return static_cast<T*>(storage_.data()) + storage_offset_;
+    return storage_.unsafe_data<T>() + storage_offset_;
   }
 
   /**
@@ -1571,7 +1559,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* unsafe_data() const {
-    return static_cast<T*>(storage_.data()) + storage_offset_;
+    return storage_.unsafe_data<T>() + storage_offset_;
   }
 
   /**
@@ -1594,10 +1582,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_backend_meta(intrusive_ptr<c10::BackendMeta> backend_meta) {
-    if (!extra_meta_) {
-      extra_meta_ = std::make_unique<ExtraMeta>();
-    }
-    extra_meta_->backend_meta_ = std::move(backend_meta);
+    get_extra_meta().backend_meta_ = std::move(backend_meta);
   }
 
   c10::BackendMeta* get_backend_meta() {
@@ -1625,6 +1610,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  private:
   [[noreturn]] void throw_storage_access_error() const;
+
+  ExtraMeta& get_extra_meta() {
+    if (!extra_meta_) {
+      extra_meta_ = std::make_unique<ExtraMeta>();
+    }
+    return *extra_meta_;
+  }
+
+  c10::SymbolicShapeMeta& symbolic_shape_meta() {
+    TORCH_INTERNAL_ASSERT(extra_meta_ && extra_meta_->symbolic_shape_meta_);
+    return *extra_meta_->symbolic_shape_meta_;
+  }
+
+  const c10::SymbolicShapeMeta& symbolic_shape_meta() const {
+    TORCH_INTERNAL_ASSERT(extra_meta_ && extra_meta_->symbolic_shape_meta_);
+    return *extra_meta_->symbolic_shape_meta_;
+  }
 
  public:
   /**
@@ -1832,10 +1834,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
 #endif
     if (named_tensor_meta) {
-      if (!extra_meta_) {
-        extra_meta_ = std::make_unique<ExtraMeta>();
-      }
-      extra_meta_->named_tensor_meta_ = std::move(named_tensor_meta);
+      get_extra_meta().named_tensor_meta_ = std::move(named_tensor_meta);
       key_set_ = key_set_.add(DispatchKey::Named);
     } else {
       if (extra_meta_) {
@@ -2443,8 +2442,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   SymInt compute_sym_numel() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(has_symbolic_sizes_strides_);
+    auto& sym_shape_meta{symbolic_shape_meta()};
     SymInt numel = 1;
-    for (const auto& s : extra_meta_->sizes_) {
+    for (const auto& s : sym_shape_meta.sizes_) {
       numel *= s;
     }
     return numel;
@@ -2496,7 +2496,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void refresh_numel() {
     if (has_symbolic_sizes_strides_) {
-      extra_meta_->numel_ = compute_sym_numel();
+      symbolic_shape_meta().numel_ = compute_sym_numel();
     } else {
       numel_ = compute_numel();
     }
@@ -2512,7 +2512,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (has_symbolic_sizes_strides_) {
       // NB: sym numel is done with symbolic integers, which handle overflow
       // checking
-      extra_meta_->numel_ = compute_sym_numel();
+      symbolic_shape_meta().numel_ = compute_sym_numel();
     } else {
       numel_ = safe_compute_numel();
     }
@@ -2527,7 +2527,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_contiguous(identity<SymBool>, SymBool b) {
-    extra_meta_->is_contiguous_ = std::move(b);
+    symbolic_shape_meta().is_contiguous_ = std::move(b);
   }
 
   void _set_is_channels_last_contiguous(identity<bool>, bool b) {
@@ -2535,7 +2535,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_channels_last_contiguous(identity<SymBool>, SymBool b) {
-    extra_meta_->is_channels_last_contiguous_ = std::move(b);
+    symbolic_shape_meta().is_channels_last_contiguous_ = std::move(b);
   }
 
   void _set_is_channels_last_3d_contiguous(identity<bool>, bool b) {
@@ -2543,7 +2543,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_channels_last_3d_contiguous(identity<SymBool>, SymBool b) {
-    extra_meta_->is_channels_last_3d_contiguous_ = std::move(b);
+    symbolic_shape_meta().is_channels_last_3d_contiguous_ = std::move(b);
   }
 
   void _set_is_channels_last(identity<bool>, bool b) {
@@ -2551,7 +2551,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_channels_last(identity<SymBool>, SymBool b) {
-    extra_meta_->is_channels_last_ = std::move(b);
+    symbolic_shape_meta().is_channels_last_ = std::move(b);
   }
 
   void _set_is_channels_last_3d(identity<bool>, bool b) {
@@ -2559,7 +2559,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_channels_last_3d(identity<SymBool>, SymBool b) {
-    extra_meta_->is_channels_last_3d_ = std::move(b);
+    symbolic_shape_meta().is_channels_last_3d_ = std::move(b);
   }
 
   void _set_is_non_overlapping_and_dense(identity<bool>, bool b) {
@@ -2567,7 +2567,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_non_overlapping_and_dense(identity<SymBool>, SymBool b) {
-    extra_meta_->is_non_overlapping_and_dense_ = std::move(b);
+    symbolic_shape_meta().is_non_overlapping_and_dense_ = std::move(b);
   }
 
   // These are little wrappers over the real compute_ functions that
