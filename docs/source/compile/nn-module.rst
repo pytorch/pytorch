@@ -28,12 +28,6 @@ By default, `torch.compile` will trace the contents of `nn.Module.__call__` whic
 and run forward/pre-forward hooks.  If you install hooks before calling `torch.compile` and then do not remove
 or alter the hooks later, your use case should be supported by default.
 
-**hooks on 'allowed modules'**
-`torch.compile` treats common modules such as torch.conv, as well as modules that are difficult to trace, specially
-by allowing them to be called opaquely in the dynamo graph instead of traced into by dynamo.  For such modules, hooks
-currently trigger a graph-break so that the affected modules run outside of dynamo.  Depending on the model, this could
-introduce a significant performance regression, and additional work is required to improve this support.
-
 **skip_nnmodule_hook_guards**
 By default, `torch._dynamo.config.skip_nnmodule_hook_guards` is set to True, meaning no guards will be installed
 on each nn.Module hook dictionary, improving runtime by reducing guard execution time, at the cost of not noticing

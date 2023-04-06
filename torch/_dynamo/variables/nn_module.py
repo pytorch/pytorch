@@ -26,7 +26,6 @@ from ..utils import (
     is_safe_constant,
     istensor,
     istype,
-    nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
 )
@@ -232,13 +231,6 @@ class NNModuleVariable(VariableTracker):
                     arg = tx.pop()
                 return arg
             elif is_allowed(mod.__class__):
-                if nnmodule_has_hooks(
-                    mod, check_forward_hooks=True, check_backward_hooks=True
-                ):
-                    unimplemented(
-                        f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
-                        "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."
-                    )
                 # The module type will change after it is called
                 if is_lazy:
                     self.module_type = mod.cls_to_become
@@ -253,6 +245,7 @@ class NNModuleVariable(VariableTracker):
                     ),
                     **options,
                 )
+
             else:
                 assert self.source, (
                     "Must provide a valid source in order to inline, "
@@ -651,13 +644,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        # TODO mlazos: only support __call__ for lazy modules
-        # until we can support a larger swath of python
-        if is_lazy_module(self.value) and self.source:
-            name = "__call__"
-        else:
-            name = "forward"
-
+        name = "__call__"
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
