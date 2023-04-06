@@ -28,6 +28,46 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
 
 
 @dataclass
+class PlacementStrategy(object):
+    """
+    A placement strategy describes an acceptable sharding placements of the output
+    and the tensor arguments of an operation.
+    """
+
+    output_spec: DTensorSpec
+    input_specs: Optional[Sequence[DTensorSpec]] = None
+
+    def pretty_print_placements(self, placements):
+        return "".join([str(p) for p in placements])
+
+    def __str__(self) -> str:
+        if self.input_specs is None:
+            input_specs_str = ""
+        else:
+            input_specs_str = ", ".join(
+                [
+                    self.pretty_print_placements(spec.placements)
+                    for spec in self.input_specs
+                ]
+            )
+        output_spec_str = self.pretty_print_placements(self.output_spec.placements)
+        return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {tuple(self.output_spec.mesh.mesh.shape)}"
+
+
+@dataclass
+class StrategyList(object):
+    """
+    List of placement strategies associated with an op
+    """
+
+    strategies: List[PlacementStrategy]
+
+    def __str__(self) -> str:
+        strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
+        return f"StrategyList: [{strategy_list_str}]"
+
+
+@dataclass
 class OpSchema:
     """
     OpSchema is a data class that describes an operator input schemas, it
