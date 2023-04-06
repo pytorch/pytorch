@@ -500,7 +500,7 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -527,7 +527,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=2):
+def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     """
     Construct a tile reduction triton config with some adjustment
     heuristics based on size_hints. Size_hints is a tuple of numels in
@@ -608,7 +608,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
         contiguous_config = triton_config_reduction(
-            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), num_stages=1
+            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
         )
         outer_config = triton_config_reduction(size_hints, 128, 8)
         tiny_config = triton_config_reduction(
