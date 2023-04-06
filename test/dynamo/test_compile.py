@@ -27,9 +27,9 @@ class InPlaceCompilationTests(unittest.TestCase):
 
     def test_overwrite_call_impl(self):
         model = ToyModel()
-        self.assertTrue(model.__compiled_call_impl is None)
+        self.assertTrue(model._compiled_call_impl is None)
         model.compile()
-        self.assertTrue(model.__compiled_call_impl is not None)
+        self.assertTrue(model._compiled_call_impl is not None)
 
     def test_compiled_model_can_be_saved_and_loaded(self):
         model = ToyModel()

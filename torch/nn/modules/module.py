@@ -1496,8 +1496,8 @@ class Module:
         return result
 
     def _wrapped_call_impl(self, *args, **kwargs):
-        if self.__compiled_call_impl:
-            return self.__compiled_call_impl(*args, **kwargs)
+        if self._compiled_call_impl:
+            return self._compiled_call_impl(*args, **kwargs)
         else:
             return self._call_impl
 
@@ -1586,7 +1586,7 @@ class Module:
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        state.pop("__compiled_call_impl", None)
+        state.pop("_compiled_call_impl", None)
         return state
 
     def __setstate__(self, state):
@@ -2448,4 +2448,4 @@ class Module:
        
         See :func:`torch.compile` for details on the arguments for this function.
         """
-        self.__compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
+        self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
