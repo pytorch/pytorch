@@ -17,7 +17,7 @@ from torch.testing import FileCheck
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 if __name__ == '__main__':
@@ -226,7 +226,7 @@ class TestList(JitTestCase):
         self.checkScript(foo2, ())
 
         def foo3():
-            return list(list("abc"))
+            return list(list("abc"))  # noqa: C414
 
         self.checkScript(foo3, ())
         FileCheck().check_count("aten::list", 2, exactly=True).run(torch.jit.script(foo3).graph)
@@ -421,6 +421,7 @@ class TestList(JitTestCase):
 
         self.checkScript(func2, ())
 
+    @skipIfTorchDynamo("TorchDynamo fails to raise on this checkScriptRaisesRegex, because we trace it properly now")
     def test_list_ops(self):
         def test_equality():
             a = [1, 2, 3]
@@ -1515,7 +1516,7 @@ class TestDict(JitTestCase):
             li.append(3)
             return li
 
-        self.assertTrue(set(specialized_list()) == set([1, 2, 3]))
+        self.assertTrue(set(specialized_list()) == {1, 2, 3})
 
     @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_values(self):
@@ -1975,7 +1976,7 @@ class TestNamedTuple(JitTestCase):
 
         class MyModule(types.ModuleType):
             def __init__(self):
-                super(MyModule, self).__init__('MyModule')
+                super().__init__('MyModule')
 
             def __getattr__(self, attr):
                 return TheType
@@ -2082,6 +2083,62 @@ class TestNamedTuple(JitTestCase):
 
         for name in ['a', 'b', 'c']:
             self.assertEqual(getattr(out_loaded, name), getattr(out, name))
+
+    def test_namedtuple_inside_forwardref(self):
+        class FeatureVector(NamedTuple):
+            float_features: 'float'
+            sequence_features: 'List[float]'
+            time_since_first: 'float'
+
+        @torch.jit.script
+        def foo(x) -> float:
+            fv = FeatureVector(3.0, [3.0], 3.0)
+            rv = fv.float_features
+            for val in fv.sequence_features:
+                rv += val
+            rv *= fv.time_since_first
+            return rv
+
+        self.assertEqual(foo(torch.rand(3, 4)), 18.0)
+
+    def test_namedtuple_input_forwardref(self):
+        class MyNamedTuple(NamedTuple):
+            a : 'int'
+            b : 'float'
+            c : 'torch.Tensor'
+
+        make_global(MyNamedTuple)
+
+        nt = MyNamedTuple(4, 2.5, torch.rand((2, 2)))
+
+        def fn(obj: MyNamedTuple):
+            return ((obj.c + obj.b) ** obj.a).sin()
+
+        expected = fn(nt)
+        fn_s = torch.jit.script(fn)
+        actual = fn_s(nt)
+        self.assertEqual(expected, actual)
+
+    # see #95858
+    @unittest.expectedFailure
+    def test_namedtuple_resolution_forwardref(self):
+        class TheType(NamedTuple):
+            t: 'int'
+
+        class MyModule(types.ModuleType):
+            def __init__(self):
+                super().__init__('MyModule')
+
+            def __getattr__(self, attr):
+                return TheType
+
+        some_module = MyModule()
+
+        def fn() -> some_module.Type:
+            return some_module.Type(1)
+
+        self.checkScript(fn, [])
+
 
 class TestScriptDict(JitTestCase):
     """
@@ -2563,7 +2620,7 @@ class TestScriptList(JitTestCase):
         """
         Test extend.
         """
-        class Iterable(object):
+        class Iterable:
             def __init__(self, limit: int):
                 self.limit = limit
                 self.value = 0

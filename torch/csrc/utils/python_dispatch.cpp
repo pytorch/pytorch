@@ -437,7 +437,7 @@ void initDispatchBindings(PyObject* module) {
     std::vector<std::string> states;
     states.reserve(danglingImpls.size());
     for (auto& danglingImpl : danglingImpls) {
-      states.push_back(danglingImpl.dumpState());
+      states.emplace_back(danglingImpl.dumpState());
     }
 
     return states;
@@ -454,7 +454,7 @@ void initDispatchBindings(PyObject* module) {
       if (!op.overload_name.empty()) {
         ss << "." << op.overload_name;
       }
-      names.push_back(ss.str());
+      names.emplace_back(ss.str());
     }
 
     return names;
@@ -489,6 +489,9 @@ void initDispatchBindings(PyObject* module) {
     return c10::toString(k);
   });
   m.def("_dispatch_key_parse", [](c10::DispatchKey k) { return k; });
+  m.def("_to_functionality_key", [](c10::DispatchKey k) {
+    return c10::toFunctionalityKey(k);
+  });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
@@ -508,6 +511,10 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(Python)
       DEF_ONE(FuncTorchDynamicLayerFrontMode)
       DEF_ONE(FuncTorchDynamicLayerBackMode)
+      DEF_ONE(FuncTorchBatchedDecomposition)
+      DEF_ONE(FuncTorchBatched)
+      DEF_ONE(FuncTorchVmapMode)
+      DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
@@ -537,6 +544,16 @@ void initDispatchBindings(PyObject* module) {
       .def("__sub__", &c10::DispatchKeySet::operator-)
       .def("__and__", &c10::DispatchKeySet::operator&)
       .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
+      .def(
+          "remove",
+          [](c10::DispatchKeySet self, c10::DispatchKey k) {
+            return self.remove(k);
+          })
+      .def(
+          "add",
+          [](c10::DispatchKeySet self, c10::DispatchKey k) {
+            return self.add(k);
+          })
       .def("has", &c10::DispatchKeySet::has)
       .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
 
@@ -550,6 +567,12 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_keyset_full_after", [](c10::DispatchKey t) {
     return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
   });
+
+  m.def("_dispatch_keyset_full", []() {
+    return c10::DispatchKeySet(c10::DispatchKeySet::FULL);
+  });
+
+  m.def("_dispatch_is_alias_key", c10::isAliasDispatchKey);
 
   m.def("_dispatch_keyset_to_string", [](c10::DispatchKeySet keyset) {
     return c10::toString(keyset);
@@ -613,7 +636,7 @@ void initDispatchBindings(PyObject* module) {
         std::vector<std::string> names;
         names.reserve(op_names.size());
         for (auto& op : op_names) {
-          names.push_back(
+          names.emplace_back(
               op.name +
               (op.overload_name.empty() ? "" : "." + op.overload_name));
         }

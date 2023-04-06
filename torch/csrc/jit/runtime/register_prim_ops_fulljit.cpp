@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <ATen/core/ivalue.h>
@@ -260,7 +261,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     // NB: backward op might write to every input tensors in the graph and it's
-    // much more expensive to analayze the leaves and sometimes it might retain
+    // much more expensive to analyze the leaves and sometimes it might retain
     // the whole gradients in every tensor of the Autograd graph with
     // create_graph=True so we use aliasAnalysisConservative for these two OPs
     Operator(
@@ -313,6 +314,24 @@ RegisterOperators reg({
         "aten::wait(Future(t) self) -> t",
         [](Stack& stack) {
           TORCH_CHECK(false, "wait is implemented directly in the interpreter");
+        },
+        aliasAnalysisSpecialCase()),
+    Operator(
+        "prim::awaitable_wait(Await(t) self) -> t",
+        [](Stack& stack) {
+          auto aw = stack.back().toAwait();
+          aw->wait();
+          stack.pop_back();
+          stack.emplace_back(aw->value());
+        },
+        aliasAnalysisSpecialCase()),
+    Operator(
+        "prim::awaitable_nowait(t self) -> Await(t)",
+        [](Stack& stack) {
+          auto aw =
+              c10::make_intrusive<c10::ivalue::Await>(stack.back().type());
+          aw->markCompleted(pop(stack));
+          push(stack, std::move(aw));
         },
         aliasAnalysisSpecialCase()),
 });

@@ -1,42 +1,35 @@
 import logging
 import os
 import sys
+import tempfile
 from os.path import abspath, dirname
-from types import ModuleType
 
 import torch
 
 from . import external_utils
 
-try:
-    import torch._prims
-    import torch._refs
 
-    HAS_REFS_PRIMS = True
-except ImportError:
-    HAS_REFS_PRIMS = False
-
-
-# log level (levels print what it says + all levels listed below it)
-# logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
-# logging.WARN print warnings (including graph breaks)
-# logging.ERROR print exceptions (and what user code was being processed when it occurred)
-# NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
-log_level = logging.WARNING
-
-# log compiled function + graphs at level INFO
-output_code = False
-
+# to configure logging for dynamo, aot, and inductor
+# use the following API in the torch._logging module
+# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
+# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
+# see this design doc for more detailed info
+# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 # the name of a file to write the logs to
 log_file_name = None
 
-# Verbose will print full stack traces on warnings and errors
-verbose = False
+# Note (mlazos): This is deprecated and will be removed very soon
+# to configure logging for dynamo, aot, and inductor
+# use the following API in the torch._logging module
+# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
+# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
+# see this design doc for more detailed info
+# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
+log_level = logging.ERROR
+output_code = None
 
-# If true, traced graph outputs will be outputted as Python GraphModule code.
-# If false, traced graph outputs will be outputted in tabular form.
-output_graph_code = False
+# Verbose will print full stack traces on warnings and errors
+verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -50,8 +43,10 @@ dead_code_elimination = True
 # disable (for a function) when cache reaches this size
 cache_size_limit = 64
 
-# specializing int/float by default
-specialize_int_float = True
+# whether or not to specialize on int inputs.  This only has an effect with
+# dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
+# inputs
+specialize_int = False
 
 # Assume these functions return constants
 constant_functions = {
@@ -64,15 +59,24 @@ constant_functions = {
     torch._utils.is_compiling: True,
 }
 
-
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 
+# This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
+# When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
+# NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
+# see [Note - on the state of mark_dynamic]
+assume_static_by_default = False
+
+# Typically, if you mark_dynamic a dimension, we will error if the dimension
+# actually ended up getting specialized.  This knob changes the behavior so
+# that we don't error at all.  This is helpful for our CI where I'm using a
+# heuristic to mark batch dimensions as dynamic and the heuristic may get it
+# wrong.
+allow_ignore_mark_dynamic = False
+
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
-
-# run FX normalization passes in optimizer
-normalize_ir = False
 
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
@@ -108,6 +112,12 @@ rewrite_assert_with_torch_assert = True
 # Show a warning on every graph break
 print_graph_breaks = False
 
+# Print guards
+print_guards = os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1"
+
+# Show a warning for every specialization
+print_specializations = False
+
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
@@ -118,13 +128,11 @@ skipfiles_inline_module_allowlist = {
     torch.distributions,
     torch.testing,
     torch.ao.nn,
+    torch._refs,
+    torch._prims,
+    torch._decomp,
+    torch.utils._contextlib,
 }
-if HAS_REFS_PRIMS:
-    skipfiles_inline_module_allowlist |= {
-        torch._refs,
-        torch._prims,
-        torch._decomp,
-    }
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -146,13 +154,35 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # Compiler compilation debug info
 # 1: Dumps the original graph out to repro.py if compilation fails
 # 2: Dumps a minifier_launcher.py if compilation fails.
-# 3: Always dumps a minifier_laucher.py. Good for segfaults.
+# 3: Always dumps a minifier_launcher.py. Good for segfaults.
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
+# By default, we try to detect accuracy failure by running both forward
+# and backward of a torchdynamo produced graph (if you are using repro_after
+# 'dynamo').  This setting forces us to only test the forward graph and
+# not the backward graph.  This can be helpful if you're trying to debug
+# an inference only problem, but the minifier seems to be choking on the
+# backwards step
+# TODO: Detect this situation automatically so the user doesn't need
+# to manually configure this
+repro_forward_only = os.environ.get("TORCHDYNAMO_REPRO_FORWARD_ONLY") == "1"
+
+# The tolerance we should use when testing if a compiled graph
+# has diverged so that we should treat it as an accuracy failure
+repro_tolerance = 1e-3
+
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
+# This requires dynamic_shapes to be True.
 capture_scalar_outputs = False
+
+# Not all backends support operators that have dynamic output shape (e.g.,
+# nonzero, unique).  When this flag is set to False, we introduce a graph
+# break instead of capturing.  This requires dynamic_shapes to be True.
+# If you set this to True, you probably also want capture_scalar_outputs
+# (these are separated for historical reasons).
+capture_dynamic_output_shape_ops = False
 
 # Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
 # false_fn produces code with identical guards.
@@ -165,17 +195,22 @@ enforce_cond_guards_match = True
 # about optimize_ddp behavior.
 optimize_ddp = True
 
+# Whether to skip guarding on FSDP-managed modules
+skip_fsdp_guards = True
+
+# Make dynamo skip guarding on hooks on nn modules
+# Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
+# dynamo will not notice and will execute whichever version you first compiled.
+skip_nnmodule_hook_guards = False
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# How to import torchdynamo, either torchdynamo or torch._dynamo
-dynamo_import = __name__.replace(".config", "")
-
-# How to import torchinductor, either torchinductor or torch.inductor
-inductor_import = dynamo_import.replace("dynamo", "inductor")
+# Throw an error if backend changes without reset
+raise_on_backend_change = False
 
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
@@ -184,37 +219,43 @@ error_on_nested_fx_trace = True
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
-# root folder of the project
-if "torch." in dynamo_import:
-    base_dir = dirname(dirname(dirname(abspath(__file__))))
-else:
-    base_dir = dirname(dirname(abspath(__file__)))
+# If true, error if we try to compile a function that has
+# been seen before.
+error_on_recompile = False
 
-debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+# root folder of the project
+base_dir = dirname(dirname(dirname(abspath(__file__))))
+
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
+
+DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
+
+if DEBUG_DIR_VAR_NAME in os.environ:
+    debug_dir_root = os.path.join(os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug")
+elif is_fbcode():
+    debug_dir_root = os.path.join(tempfile.gettempdir(), "torch_compile_debug")
+else:
+    debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+
 
 # this is to resolve a import problem in fbcode, we will be deleting
 # this very shortly
 DO_NOT_USE_legacy_non_fake_example_inputs = False
 
 
-class _AccessLimitingConfig(ModuleType):
-    def __setattr__(self, name, value):
-        if name not in _allowed_config_names:
-            raise AttributeError(f"{__name__}.{name} does not exist")
-        # automatically set logger level whenever config.log_level is modified
-        if name == "log_level":
-            from .logging import set_loggers_level
-
-            set_loggers_level(value)
-        return object.__setattr__(self, name, value)
+_save_config_ignore = {
+    "repro_after",
+    "repro_level",
+    # workaround: "cannot pickle PyCapsule"
+    "constant_functions",
+    # workaround: "cannot pickle module"
+    "skipfiles_inline_module_allowlist",
+}
 
 
-_allowed_config_names = {*globals().keys()}
-sys.modules[__name__].__class__ = _AccessLimitingConfig
+from .config_utils import install_config_module
 
-from .config_utils import get_config_serialization_fns
-
-save_config, load_config = get_config_serialization_fns(
-    sys.modules[__name__],
-    ignore_set={"repro_after", "repro_level"},
-)
+install_config_module(sys.modules[__name__])

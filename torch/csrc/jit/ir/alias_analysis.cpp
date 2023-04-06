@@ -123,6 +123,14 @@ class MutableTypePtrHelper {
         }
         return c10::nullopt;
       }
+      case TypeKind::AwaitType: {
+        if (auto maybe_mut_types = mapTypeToAliasTypeSet(
+                type->castRaw<AwaitType>()->getElementType())) {
+          return {
+              AliasTypeSet{AwaitType::create(*toSingleType(*maybe_mut_types))}};
+        }
+        return c10::nullopt;
+      }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
         for (const TypePtr& inner : type->expectRef<TupleType>().elements()) {
@@ -631,6 +639,11 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
+    case prim::awaitable:
+    case prim::awaitable_nowait:
+      return analyzeAwaitable(node);
+    case prim::awaitable_wait:
+      return analyzeAwaitableWait(node);
     case prim::rpc_async:
     case prim::rpc_sync:
     case prim::rpc_remote:
@@ -1047,6 +1060,27 @@ void AliasDb::analyzeWait(Node* node) {
   }
   // the forked subgraph that `wait` is waiting on may write to any of its
   // inputs. We don't have a reliable way of recovering the fork inputs, so
+  // for safety we just register a write to every wildcard.
+  writeRegistry_->registerWriteToAllWildcards(node);
+}
+
+void AliasDb::analyzeAwaitable(Node* node) {
+  for (const auto input : node->inputs()) {
+    setWildcard(input);
+  }
+
+  for (const auto output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+}
+
+void AliasDb::analyzeAwaitableWait(Node* node) {
+  TORCH_INTERNAL_ASSERT(node->kind() == prim::awaitable_wait);
+  for (const auto output : node->outputs()) {
+    setWildcard(output);
+  }
+  // the awaitable subgraph that `wait` is waiting on may write to any of its
+  // inputs. We don't have a reliable way of recovering the awaitable inputs, so
   // for safety we just register a write to every wildcard.
   writeRegistry_->registerWriteToAllWildcards(node);
 }

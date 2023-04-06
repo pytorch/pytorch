@@ -209,7 +209,7 @@ such as ``Future[int]``. Structural types are composable with any ``TSType``.
 ::
 
     TSStructuralType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                        TSOptional | TSUnion | TSFuture | TSRRef
+                        TSOptional | TSUnion | TSFuture | TSRRef | TSAwait
 
     TSTuple          ::= "Tuple" "[" (TSType ",")* TSType "]"
     TSNamedTuple     ::= "namedtuple" "(" (TSType ",")* TSType ")"
@@ -218,6 +218,7 @@ such as ``Future[int]``. Structural types are composable with any ``TSType``.
     TSUnion          ::= "Union" "[" (TSType ",")* TSType "]"
     TSFuture         ::= "Future" "[" TSType "]"
     TSRRef           ::= "RRef" "[" TSType "]"
+    TSAwait          ::= "Await" "[" TSType "]"
     TSDict           ::= "Dict" "[" KeyType "," TSType "]"
     KeyType          ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
 
@@ -226,6 +227,7 @@ Where:
 * ``Tuple``, ``List``, ``Optional``, ``Union``, ``Future``, ``Dict`` represent Python type class names that are defined in the module ``typing``. To use these type names, you must import them from ``typing`` (e.g., ``from typing import Tuple``).
 * ``namedtuple`` represents the Python class ``collections.namedtuple`` or ``typing.NamedTuple``.
 * ``Future`` and ``RRef`` represent the Python classes ``torch.futures`` and ``torch.distributed.rpc``.
+* ``Await`` represent the Python class ``torch._awaits._Await``
 
 **Compared to Python**
 
@@ -828,8 +830,8 @@ TorchScript Type System Definition
     TSMetaType      ::= "Any"
     TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
 
-    TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                         TSOptional | TSUnion | TSFuture | TSRRef
+    TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict | TSOptional |
+                         TSUnion | TSFuture | TSRRef | TSAwait
     TSTuple         ::= "Tuple" "[" (TSType ",")* TSType "]"
     TSNamedTuple    ::= "namedtuple" "(" (TSType ",")* TSType ")"
     TSList          ::= "List" "[" TSType "]"
@@ -837,6 +839,7 @@ TorchScript Type System Definition
     TSUnion         ::= "Union" "[" (TSType ",")* TSType "]"
     TSFuture        ::= "Future" "[" TSType "]"
     TSRRef          ::= "RRef" "[" TSType "]"
+    TSAwait         ::= "Await" "[" TSType "]"
     TSDict          ::= "Dict" "[" KeyType "," TSType "]"
     KeyType         ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
 
@@ -1124,7 +1127,7 @@ user-defined types if they implement the ``__contains__`` method.
 Identity Comparisons
 """"""""""""""""""""
 For all types except ``int``, ``double``, ``bool``, and ``torch.device``, operators ``is`` and ``is not`` test for the object’s identity;
-``x is y`` is ``True`` if and and only if ``x`` and ``y`` are the same object. For all other types, ``is`` is equivalent to
+``x is y`` is ``True`` if and only if ``x`` and ``y`` are the same object. For all other types, ``is`` is equivalent to
 comparing them using ``==``. ``x is not y`` yields the inverse of ``x is y``.
 
 Boolean Operations
@@ -1434,16 +1437,15 @@ For loops on lists: for loops over a ``nn.ModuleList`` will unroll the body of t
 
     class SubModule(torch.nn.Module):
         def __init__(self):
-            super(SubModule, self).__init__()
+            super().__init__()
             self.weight = nn.Parameter(torch.randn(2))
 
         def forward(self, input):
             return self.weight + input
 
     class MyModule(torch.nn.Module):
-
         def __init__(self):
-            super(MyModule, self).init()
+            super().__init__()
             self.mods = torch.nn.ModuleList([SubModule() for i in range(10)])
 
         def forward(self, v):

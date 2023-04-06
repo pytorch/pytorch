@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import os
-import shutil
 import tempfile
 from typing import Dict
 
@@ -76,7 +74,7 @@ def assert_state_dict_equal(
                 value_1.local_shards(), value_2.local_shards()
             ):
                 self.assertTrue(
-                    torch.equal(local_shard_1.tensor, local_shard_1.tensor),
+                    torch.equal(local_shard_1.tensor, local_shard_2.tensor),
                     f"Key {key}'s shard does not match",
                 )
         elif isinstance(value_1, torch.Tensor):
@@ -102,7 +100,7 @@ class MyShardedModel3(torch.nn.Module):
         self,
         spec: ShardingSpec,
     ) -> None:
-        super(MyShardedModel3, self).__init__()
+        super().__init__()
         self.sharded_tensor: ShardedTensor = sharded_tensor.rand(
             spec, 10, 20, init_rrefs=False
         )
@@ -296,9 +294,6 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 if s0 == s1:
                     continue
 
-                if dist.get_rank() == 0:
-                    shutil.rmtree(path, ignore_errors=True)
-                    os.makedirs(path)
                 dist.barrier()
 
                 model_to_save = MyShardedModel3(s0)
@@ -358,10 +353,6 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 "rank:1",
             ],
         )
-
-        if dist.get_rank() == 0:
-            shutil.rmtree(path, ignore_errors=True)
-            os.makedirs(path)
 
         model_to_save = MyShardedModel3(src_spec).cuda(dist.get_rank())
         model_to_save._register_state_dict_hook(state_dict_hook)

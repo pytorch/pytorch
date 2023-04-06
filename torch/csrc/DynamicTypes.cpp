@@ -5,7 +5,6 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
-#include <torch/csrc/PythonTypes.h>
 #include <torch/csrc/Storage.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/cuda_enabled.h>
@@ -41,6 +40,8 @@ at::DeprecatedTypeProperties* get_type_properties(
     backend = at::Backend::CUDA;
   } else if (device_type == at::kXPU) {
     backend = at::Backend::XPU;
+  } else if (device_type == at::kHPU) {
+    backend = at::Backend::HPU;
   } else if (device_type == at::kMPS) {
     backend = at::Backend::MPS;
   } else if (device_type == at::DeviceType::Meta) {
@@ -91,8 +92,8 @@ PyObject* createPyObject(const at::Storage& storage) {
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
   if (!obj)
     throw python_error();
-  ((THPVoidStorage*)obj.get())->cdata =
-      at::Storage(/* copy */ storage).unsafeReleaseStorageImpl();
+  ((THPStorage*)obj.get())->cdata =
+      c10::MaybeOwned<at::Storage>::owned(at::Storage(/* copy */ storage));
   return obj.release();
 }
 
@@ -154,14 +155,11 @@ at::Storage createStorageGetType(
     throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
   }
 
-  c10::StorageImpl* impl = static_cast<c10::StorageImpl*>(
-      ((THPVoidStorage*)untyped_storage_obj)->cdata);
-  c10::DeviceType device_type = impl->device().type();
-
+  const auto& storage = THPStorage_Unpack(untyped_storage_obj);
+  c10::DeviceType device_type = storage.device().type();
   auto type_properties = get_type_properties(device_type, at::kByte);
-
   return type_properties->unsafeStorageFromTH(
-      ((THPVoidStorage*)untyped_storage_obj)->cdata, true);
+      storage.unsafeGetStorageImpl(), true);
 }
 
 at::Storage createStorage(PyObject* obj) {

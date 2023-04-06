@@ -15,12 +15,12 @@ Graph can be saved via save option. Saved in the directory where benchmark is ru
 Example build/run:
 To run PT benchmark:
 buck run @mode/opt <path-to-framework_overhead_benchmark>:framework_overhead_benchmark --
- --add_op --graph_mode --eager_mode (Runs both graph mode and eager mode)
+ --add-op --graph-mode --eager-mode (Runs both graph mode and eager mode)
 buck run @mode/opt <path-to-framework_overhead_benchmark>:framework_overhead_benchmark --
- --add_op --graph_mode (Runs only graph mode)
+ --add-op --graph-mode (Runs only graph mode)
 To run C2 benchmark:
 buck run @mode/opt <path-to-framework_overhead_benchmark>:framework_overhead_benchmark --
- --add_op --benchmark_c2_net
+ --add-op --benchmark-c2-net
 """
 
 SUPPORTED_OPS = {"add_op"}
@@ -64,13 +64,25 @@ def benchmark_simple_fn(args, config, module_config, module_type, result):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--op", default="add_op", dest="op", type=str)
-    parser.add_argument("--benchmark_c2_net", default=False, dest="benchmark_c2_net", action="store_true")
-    parser.add_argument("--use_throughput_benchmark", default=False, dest="use_throughput_benchmark", action="store_true")
+    parser.add_argument(
+        "--benchmark-c2-net",
+        "--benchmark_c2_net",
+        default=False,
+        dest="benchmark_c2_net",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--use-throughput-benchmark",
+        "--use_throughput_benchmark",
+        default=False,
+        dest="use_throughput_benchmark",
+        action="store_true",
+    )
     parser.add_argument("--debug", default=False, dest="debug", action="store_true")
     parser.add_argument("--save", default=False, dest="save", action="store_true")
-    parser.add_argument("--eager_mode", default=False, dest="eager_mode", action="store_true")
-    parser.add_argument("--num_warmup_iters", type=int, default=100)
-    parser.add_argument("--num_iters", type=int, default=1000)
+    parser.add_argument("--eager-mode", "--eager_mode", default=False, dest="eager_mode", action="store_true")
+    parser.add_argument("--num-warmup-iters", "--num_warmup_iters", type=int, default=100)
+    parser.add_argument("--num-iters", "--num_iters", type=int, default=1000)
     args = parser.parse_args()
 
     if args.op not in SUPPORTED_OPS:

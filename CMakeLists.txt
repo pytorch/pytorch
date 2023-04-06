@@ -8,6 +8,12 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
 
+# Enables CMake to set LTO on compilers other than Intel.
+cmake_policy(SET CMP0069 NEW)
+# Enable the policy for CMake subprojects.
+# protobuf currently causes issues
+#set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+
 # Suppress warning flags in default MSVC configuration.  It's not
 # mandatory that we do this (and we don't if cmake is old), but it's
 # nice when it's possible, and it's possible on our Windows configs.
@@ -34,14 +40,19 @@ endif()
 set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are requested to build this target.")
 
-if(DEFINED GLIBCXX_USE_CXX11_ABI)
+# ---[ Utils
+include(cmake/public/utils.cmake)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(cmake/CheckAbi.cmake)
+  string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
-    string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=1")
   else()
     # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
     # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
-    string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
+    include(CheckCXXCompilerFlag)
+    append_cxx_flag_if_supported("-fabi-version=11" CMAKE_CXX_FLAGS)
   endif()
 endif()
 
@@ -81,7 +92,7 @@ if(APPLE)
 
   # Get clang version on macOS
   execute_process( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
-  string(REGEX REPLACE "Apple LLVM version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
+  string(REGEX REPLACE "Apple (.*) version ([0-9]+\\.[0-9]+).*" "\\2" CLANG_VERSION_STRING ${clang_full_version_string})
   message( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
 
 
@@ -186,7 +197,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_NVFUSER "Build NVFUSER" ON
     "USE_CUDA OR USE_ROCM" OFF)
-option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
@@ -468,21 +478,6 @@ if(MSVC)
         string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
       endif(${flag_var} MATCHES "/Z[iI]")
     endif(MSVC_Z7_OVERRIDE)
-    # Turn off warnings on Windows.  In an ideal world we'd be warning
-    # clean on Windows too, but this is too much work for our
-    # non-Windows developers.
-    #
-    # NB: Technically, this is not necessary if CMP0092 was applied
-    # properly, but only cmake >= 3.15 has this policy, so we nail
-    # it one more time just be safe.
-    #
-    # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
-    # moment only CMP0092 is enough to prevent those warnings too.
-    string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
-
-    # Turn off warnings (Windows build is currently is extremely warning
-    # unclean and the warnings aren't telling us anything useful.)
-    string(APPEND ${flag_var} " /w")
 
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
@@ -633,9 +628,6 @@ if(INTERN_BUILD_MOBILE)
   set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
-# ---[ Utils
-include(cmake/public/utils.cmake)
-
 # ---[ Version numbers for generated libraries
 file(READ version.txt TORCH_DEFAULT_VERSION)
 # Strip trailing newline
@@ -721,9 +713,6 @@ cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
   "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
-if(USE_FLASH_ATTENTION)
-    ADD_DEFINITIONS(-DUSE_FLASH_ATTENTION)
-ENDIF()
 
 
 if(USE_FBGEMM)
@@ -809,19 +798,16 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=bool-operation" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnarrowing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wunused-local-typedefs" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-error=deprecated-declarations" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
@@ -866,65 +852,67 @@ if(NOT MSVC)
   endif()
 
   append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-error=redundant-decls" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
-  # These flags are not available in GCC-4.8.5. Set only when using clang.
-  # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
-  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-typedef-redefinition" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-inconsistent-missing-override" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wunused-local-typedef" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
-    if(${USE_COLORIZE_OUTPUT})
-    endif()
-  endif()
+  append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
 
   if(${USE_COLORIZE_OUTPUT})
     append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
   endif()
 
-  if((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
-    OR(CMAKE_COMPILER_IS_GNUCXX
-    AND(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
-    string(APPEND CMAKE_CXX_FLAGS " -faligned-new")
-  endif()
+  append_cxx_flag_if_supported("-faligned-new" CMAKE_CXX_FLAGS)
+
   if(WERROR)
-    check_cxx_compiler_flag("-Werror" COMPILER_SUPPORT_WERROR)
+    append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
     if(NOT COMPILER_SUPPORT_WERROR)
       set(WERROR FALSE)
-    else()
-      string(APPEND CMAKE_CXX_FLAGS " -Werror")
     endif()
-  endif(WERROR)
-  if(NOT APPLE)
-    append_cxx_flag_if_supported("-Wno-unused-but-set-variable" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
   endif()
+  append_cxx_flag_if_supported("-Wno-unused-but-set-variable" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
   string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
+else()
+  # skip unwanted includes from windows.h
+  add_compile_definitions(WIN32_LEAN_AND_MEAN)
+  # Windows SDK broke compatibility since version 25131, but introduced this
+  # define for backward compatibility.
+  add_compile_definitions(_UCRT_LEGACY_INFINITY)
+  # disable min/max macros
+  add_compile_definitions(NOMINMAX)
+  # The source code is in utf-8 encoding
+  append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
+  # Turn off these warnings on Windows.
+  # destructor was implicitly defined as delete
+  append_cxx_flag_if_supported("/wd4624" CMAKE_CXX_FLAGS)
+  # unknown pragma
+  append_cxx_flag_if_supported("/wd4068" CMAKE_CXX_FLAGS)
+  # unexpected tokens following preprocessor directive - expected a newline
+  append_cxx_flag_if_supported("/wd4067" CMAKE_CXX_FLAGS)
+  # conversion from 'size_t' to 'unsigned int', possible loss of data
+  append_cxx_flag_if_supported("/wd4267" CMAKE_CXX_FLAGS)
+  # no suitable definition provided for explicit template instantiation request
+  append_cxx_flag_if_supported("/wd4661" CMAKE_CXX_FLAGS)
+  # recursive on all control paths, function will cause runtime stack overflow
+  append_cxx_flag_if_supported("/wd4717" CMAKE_CXX_FLAGS)
+  # conversion from '_Ty' to '_Ty', possible loss of data
+  append_cxx_flag_if_supported("/wd4244" CMAKE_CXX_FLAGS)
+  # unsafe use of type 'bool' in operation
+  append_cxx_flag_if_supported("/wd4804" CMAKE_CXX_FLAGS)
+  # inconsistent dll linkage
+  append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
 endif()
 
-if(USE_ASAN)
-    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address -fsanitize=undefined")
-    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address -fsanitize=undefined")
-endif()
-
-if(USE_TSAN)
-    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=thread")
-    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=thread")
-endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   include(CheckCSourceCompiles)
@@ -981,7 +969,6 @@ if(APPLE)
     endif()
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
 endif()
 
 if(EMSCRIPTEN)
@@ -1095,15 +1082,10 @@ endif()
 # https://cmake.org/pipermail/cmake/2016-May/063400.html
 if(BUILD_SHARED_LIBS)
   configure_file(
-      ${PROJECT_SOURCE_DIR}/cmake/Caffe2ConfigVersion.cmake.in
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
-      @ONLY)
-  configure_file(
       ${PROJECT_SOURCE_DIR}/cmake/Caffe2Config.cmake.in
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       @ONLY)
   install(FILES
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       DESTINATION share/cmake/Caffe2
       COMPONENT dev)
@@ -1114,13 +1096,16 @@ if(BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
-      ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/LoadHIP.cmake
       DESTINATION share/cmake/Caffe2/public
       COMPONENT dev)
   install(DIRECTORY
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 
@@ -1164,7 +1149,12 @@ if(NOT USE_CUDA AND NOT USE_ROCM)
 endif()
 
 if(BUILD_NVFUSER)
-  add_subdirectory(third_party/nvfuser)
+  if(DEFINED ENV{NVFUSER_SOURCE_DIR})
+    add_subdirectory($ENV{NVFUSER_SOURCE_DIR} nvfuser)
+  else()
+    add_subdirectory(third_party/nvfuser nvfuser)
+  endif()
+  add_compile_definitions(BUILD_NVFUSER)
 endif()
 
 include(cmake/Summary.cmake)

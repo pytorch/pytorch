@@ -18,7 +18,7 @@ class TestMinifier(TestCase):
         failing_f = make_fx(failing_f)(*inps)
 
         def has_mul(fx_g, inps):
-            return (torch.ops.aten.mul.Tensor in set([i.target for i in fx_g.graph.nodes]))
+            return (torch.ops.aten.mul.Tensor in (i.target for i in fx_g.graph.nodes))
 
         min_f, inps = minifier(failing_f, inps, has_mul)
         self.assertEqual(len(min_f.graph.nodes), 4)
@@ -74,7 +74,7 @@ class TestMinifier(TestCase):
         inps = [torch.randn(3), torch.randn(3)]
 
         def has_add(fx_g, inps):
-            return (torch.ops.aten.add.Tensor in set([i.target for i in fx_g.graph.nodes]))
+            return (torch.ops.aten.add.Tensor in (i.target for i in fx_g.graph.nodes))
 
         failing_f = make_fx(f)(*inps)
         min_f, inps = minifier(failing_f, inps, has_add)

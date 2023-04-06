@@ -150,8 +150,7 @@ void PyTorchStreamReader::init() {
                  version,
                  " as Long Long.");
   }
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  if (version_ < kMinSupportedFileFormatVersion) {
+  if (version_ < static_cast<decltype(version_)>(kMinSupportedFileFormatVersion)) {
     CAFFE_THROW(
         "Attempted to read a PyTorch file with version ",
         c10::to_string(version_),
@@ -161,8 +160,7 @@ void PyTorchStreamReader::init() {
         " with latest version of PyTorch to mitigate this issue.");
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  if (version_ > kMaxSupportedFileFormatVersion) {
+  if (version_ > static_cast<decltype(version_)>(kMaxSupportedFileFormatVersion)) {
     CAFFE_THROW(
         "Attempted to read a PyTorch file with version ",
         version_,

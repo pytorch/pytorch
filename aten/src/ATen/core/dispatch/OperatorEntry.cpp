@@ -64,7 +64,7 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
   return kernel;
 }
 
-void OperatorEntry::assertSignatureIsCorrect(const CppSignature call_signature, bool has_symint) const {
+void OperatorEntry::assertSignatureIsCorrect(const CppSignature& call_signature, bool has_symint) const {
   if (has_symint) {
     if (C10_UNLIKELY(sym_cpp_signature_.has_value() && (call_signature != sym_cpp_signature_->signature))) {
       reportSignatureError(call_signature, *sym_cpp_signature_);
@@ -150,7 +150,8 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
     // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
     // for some ops
     if (dispatch_key != DispatchKey::Meta) {
-      TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
+      TORCH_WARN_ONCE("Warning only once for all operators,  other operators may also be overrided.\n",
+            "  Overriding a previously registered kernel for the same operator and the same dispatch key\n",
             "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
             "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
             "  dispatch key: ", toString(dispatch_key), "\n",

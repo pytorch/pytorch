@@ -2,6 +2,7 @@
 
 <!-- toc -->
 
+  - [Release Compatibility Matrix](#release-compatibility-matrix)
   - [General Overview](#general-overview)
   - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
   - [Cutting release branches](#cutting-release-branches)
@@ -20,6 +21,7 @@
 - [Patch Releases](#patch-releases)
   - [Patch Release Criteria](#patch-release-criteria)
   - [Patch Release Process](#patch-release-process)
+    - [Patch Release Process Description](#patch-release-process-description)
     - [Triage](#triage)
     - [Issue Tracker for Patch releases](#issue-tracker-for-patch-releases)
     - [Building a release schedule / cherry picking](#building-a-release-schedule--cherry-picking)
@@ -33,6 +35,16 @@
   - [Updating submodules for a release](#updating-submodules-for-a-release)
 
 <!-- tocstop -->
+
+## Release Compatibility Matrix
+
+Following is the Release Compatibility Matrix for PyTorch releases:
+
+| PyTorch version | Python | Stable CUDA | Experimental CUDA |
+| --- | --- | --- | --- |
+| 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
+| 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
+| 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
 
 ## General Overview
 
@@ -50,7 +62,7 @@ Following Requirements needs to be met prior to final RC Cut:
 * Resolve all outstanding issues in the milestones(for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28))before first RC cut is completed. After RC cut is completed following script should be executed from builder repo in order to validate the presence of the fixes in the release branch :
 ``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream  --branch release/1.11 --milestone-id 26 --missing-in-branch ```
 * Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems(Linux, MacOS, Windows), Python versions as well as CPU architectures(x86 and arm) and accelerator versions(CUDA, ROCm).
-* All the nighly jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
+* All the nightly jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/nightly)
@@ -105,7 +117,7 @@ These are examples of changes that should be made to the *default* branch after 
 ### Making release branch specific changes for domain libraries
 
 Domain library branch cut is done a week after branch cut for the `pytorch/pytorch`. The branch cut is performed by the Domain Library POC.
-After the branch cut is performed, the Pytorch Dev Infra memeber should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
+After the branch cut is performed, the Pytorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
 * torchvision : https://github.com/pytorch/vision/pull/5400
@@ -226,6 +238,21 @@ Patch releases should be considered if a regression meets the following criteria
 
 ## Patch Release Process
 
+### Patch Release Process Description
+
+> Main POC: Patch Release Managers, Triage Reviewers
+
+Patch releases should follow these high-level phases. This process starts immediately after the previous release has completed.
+Minor release process takes around 6-7 weeks to complete.
+
+1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2-3 weeks after the release completion.
+2. Patch Release: Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed and following decisions are made:
+  * Should the new patch Release be created ?
+  * Timeline execution for the patch release
+3. Cherry picking phase starts after the decision is made to create patch release. At this point a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
+4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger new build and produce new release candidate. Announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
+5. General Availability
+
 ### Triage
 
 > Main POC: Triage Reviewers
@@ -238,7 +265,7 @@ Patch releases should be considered if a regression meets the following criteria
 
 ### Issue Tracker for Patch releases
 
-For patch releases issue tracker needs to be created. For patch release, we require all cherry-pick changes to have links to either a high-priority Github issue or a CI failure from previous RC. An example of this would look like:
+For patch releases issue tracker needs to be created. For patch release, we require all cherry-pick changes to have links to either a high-priority GitHub issue or a CI failure from previous RC. An example of this would look like:
 * https://github.com/pytorch/pytorch/issues/51886
 
 Only following issues are accepted:
@@ -255,12 +282,14 @@ Only following issues are accepted:
 1. After regressions / fixes have been triaged Patch Release Managers will work together and build /announce a schedule for the patch release
     * *NOTE*: Ideally this should be ~2-3 weeks after a regression has been identified to allow other regressions to be identified
 2. Patch Release Managers will work with the authors of the regressions / fixes to cherry pick their change into the related release branch (i.e. `release/1.9` for `1.9.1`)
+    * *NOTE*: Patch release managers should notify authors of the regressions to post a cherry picks for their changes. It is up to authors of the regressions to post a cherry pick. if cherry pick is not posted the issue will not be included in the release.
+3. If cherry picking deadline is missed by cherry pick author, patch release managers will not accept any requests after the fact.
 
 ### Building Binaries / Promotion to Stable
 
 > Main POC: Patch Release managers
 
-1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates)
+1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
 2. Patch Release Managers will follow the process of [Promoting RCs to Stable](#promoting-rcs-to-stable)
 
 # Hardware / Software Support in Binary Build Matrix

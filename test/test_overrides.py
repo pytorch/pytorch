@@ -84,7 +84,7 @@ def implements_diagonal(torch_function):
         return func
     return decorator
 
-class DiagonalTensor(object):
+class DiagonalTensor:
     """A class with __torch_function__ and a specific diagonal representation
 
     This class has limited utility and is mostly useful for verifying that the
@@ -358,7 +358,7 @@ def generate_tensor_like_torch_implementations():
 
 generate_tensor_like_torch_implementations()
 
-class TensorLike(object):
+class TensorLike:
     """A class that overrides the full torch API
 
     This class is used to explicitly test that the full torch.tensor API
@@ -906,7 +906,6 @@ class TestGradCheckOverride(TestCase):
                 'numel',
                 'requires_grad',
                 'requires_grad_',
-                'retain_grad',
                 'size',
                 'stride',
             }
@@ -920,7 +919,6 @@ class TestGradCheckOverride(TestCase):
                 torch.Tensor.size,
                 torch.Tensor.is_floating_point,
                 torch.Tensor.numel,
-                torch.Tensor.retain_grad,
                 torch.Tensor.stride,
                 torch.Tensor.requires_grad_,
                 torch.autograd.grad,

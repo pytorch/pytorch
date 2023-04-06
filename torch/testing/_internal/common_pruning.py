@@ -1,10 +1,50 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 
-
+from torch.ao.pruning import BaseSparsifier
 import torch
 import torch.nn.functional as F
 from torch import nn
+
+class ImplementedSparsifier(BaseSparsifier):
+    def __init__(self, **kwargs):
+        super().__init__(defaults=kwargs)
+
+    def update_mask(self, module, **kwargs):
+        module.parametrizations.weight[0].mask[0] = 0
+        linear_state = self.state['linear1.weight']
+        linear_state['step_count'] = linear_state.get('step_count', 0) + 1
+
+
+class MockSparseLinear(nn.Linear):
+    """
+    This class is a MockSparseLinear class to check convert functionality.
+    It is the same as a normal Linear layer, except with a different type, as
+    well as an additional from_dense method.
+    """
+    @classmethod
+    def from_dense(cls, mod):
+        """
+        """
+        linear = cls(mod.in_features,
+                     mod.out_features)
+        return linear
+
+
+def rows_are_subset(subset_tensor, superset_tensor) -> bool:
+    """
+    Checks to see if all rows in subset tensor are present in the superset tensor
+    """
+    i = 0
+    for row in subset_tensor:
+        while i < len(superset_tensor):
+            if not torch.equal(row, superset_tensor[i]):
+                i += 1
+            else:
+                break
+        else:
+            return False
+    return True
 
 
 class SimpleLinear(nn.Module):
@@ -18,8 +58,8 @@ class SimpleLinear(nn.Module):
             nn.Linear(5, 6, bias=False),
             nn.Linear(6, 4, bias=False),
         )
-        self.linear1 = nn.Linear(4, 3, bias=False)
-        self.linear2 = nn.Linear(3, 10, bias=False)
+        self.linear1 = nn.Linear(4, 4, bias=False)
+        self.linear2 = nn.Linear(4, 10, bias=False)
 
     def forward(self, x):
         x = self.seq(x)
@@ -309,3 +349,37 @@ class Conv2dPoolFlatten(nn.Module):
         x = self.flatten(x)
         x = self.fc(x)
         return x
+
+
+class LSTMLinearModel(nn.Module):
+    """Container module with an encoder, a recurrent module, and a linear."""
+
+    def __init__(
+        self, input_dim: int, hidden_dim: int, output_dim: int, num_layers: int
+    ):
+        super().__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers)
+        self.linear = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, input):
+        output, hidden = self.lstm(input)
+        decoded = self.linear(output)
+        return decoded, output
+
+
+class LSTMLayerNormLinearModel(nn.Module):
+    """Container module with an LSTM, a LayerNorm, and a linear."""
+
+    def __init__(
+        self, input_dim: int, hidden_dim: int, output_dim: int, num_layers: int
+    ):
+        super().__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers)
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.linear = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        x, state = self.lstm(x)
+        x = self.norm(x)
+        x = self.linear(x)
+        return x, state

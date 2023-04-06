@@ -20,6 +20,7 @@ if __name__ == '__main__':
 # XXX: still in prototype
 class TestSymbolicShapeAnalysis(JitTestCase):
     def setUp(self):
+        super(JitTestCase, self).setUp()
         self.prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
         torch._C._jit_set_symbolic_shapes_test_mode(True)
 
@@ -162,7 +163,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inputs[1].setType(inputs[1].type().with_sizes(size_2))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
-            break
 
     def test_binary_shape_fns_inplace(self):
         def div_inplace_tensor(x: torch.Tensor, y: torch.Tensor):
@@ -309,7 +309,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             __constants__ = ['dim']
 
             def __init__(self, dim=0):
-                super(CatMod, self).__init__()
+                super().__init__()
                 self.dim = dim
 
             def forward(self, x, y):
@@ -442,7 +442,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
     def test_refinement_through_graph_stitching(self):
         class TwoConvs(torch.nn.Module):
             def __init__(self):
-                super(TwoConvs, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
                 self.conv2 = torch.nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
 

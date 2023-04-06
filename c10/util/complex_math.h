@@ -51,10 +51,10 @@ C10_HOST_DEVICE inline c10::complex<T> log2(const c10::complex<T>& x) {
 #if defined(_LIBCPP_VERSION) || \
     (defined(__GLIBCXX__) && !defined(_GLIBCXX11_USE_C99_COMPLEX))
 namespace _detail {
-TORCH_API c10::complex<float> sqrt(const c10::complex<float>& in);
-TORCH_API c10::complex<double> sqrt(const c10::complex<double>& in);
-TORCH_API c10::complex<float> acos(const c10::complex<float>& in);
-TORCH_API c10::complex<double> acos(const c10::complex<double>& in);
+C10_API c10::complex<float> sqrt(const c10::complex<float>& in);
+C10_API c10::complex<double> sqrt(const c10::complex<double>& in);
+C10_API c10::complex<float> acos(const c10::complex<float>& in);
+C10_API c10::complex<double> acos(const c10::complex<double>& in);
 }; // namespace _detail
 #endif
 
@@ -318,6 +318,23 @@ C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T>& z) {
   }
 }
 
+template <typename T>
+C10_HOST_DEVICE inline c10::complex<T> expm1(const c10::complex<T>& z) {
+  // expm1(z) = exp(z) - 1
+  // Define z = x + i * y
+  // f = e ^ (x + i * y) - 1
+  //   = e ^ x * e ^ (i * y) - 1
+  //   = (e ^ x * cos(y) - 1) + i * (e ^ x * sin(y))
+  //   = (e ^ x - 1) * cos(y) - (1 - cos(y)) + i * e ^ x * sin(y)
+  //   = expm1(x) * cos(y) - 2 * sin(y / 2) ^ 2 + i * e ^ x * sin(y)
+  T x = z.real();
+  T y = z.imag();
+  T a = std::sin(y / 2);
+  T er = std::expm1(x) * std::cos(y) - T(2) * a * a;
+  T ei = std::exp(x) * std::sin(y);
+  return {er, ei};
+}
+
 } // namespace c10_complex_math
 
 using c10_complex_math::acos;
@@ -329,6 +346,7 @@ using c10_complex_math::atanh;
 using c10_complex_math::cos;
 using c10_complex_math::cosh;
 using c10_complex_math::exp;
+using c10_complex_math::expm1;
 using c10_complex_math::log;
 using c10_complex_math::log10;
 using c10_complex_math::log1p;
@@ -351,6 +369,7 @@ using c10_complex_math::atanh;
 using c10_complex_math::cos;
 using c10_complex_math::cosh;
 using c10_complex_math::exp;
+using c10_complex_math::expm1;
 using c10_complex_math::log;
 using c10_complex_math::log10;
 using c10_complex_math::log1p;

@@ -68,6 +68,10 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     e.restore();                                                        \
     retstmnt;                                                           \
   }                                                                     \
+  catch (py::error_already_set & e) {                                   \
+    e.restore();                                                        \
+    retstmnt;                                                           \
+  }                                                                     \
   _CATCH_GENERIC_ERROR(IndexError, PyExc_IndexError, retstmnt)          \
   _CATCH_GENERIC_ERROR(ValueError, PyExc_ValueError, retstmnt)          \
   _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)            \
@@ -301,7 +305,7 @@ struct IndexError : public PyTorchError {
 // Translates to Python TypeError
 struct TypeError : public PyTorchError {
   using PyTorchError::PyTorchError;
-  TORCH_API TypeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  TORCH_PYTHON_API TypeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_TypeError;
   }
@@ -310,7 +314,7 @@ struct TypeError : public PyTorchError {
 // Translates to Python ValueError
 struct ValueError : public PyTorchError {
   using PyTorchError::PyTorchError;
-  ValueError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  TORCH_PYTHON_API ValueError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_ValueError;
   }
@@ -354,9 +358,9 @@ struct PyWarningHandler {
 
  public:
   /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
-  TORCH_API PyWarningHandler() noexcept(true);
+  TORCH_PYTHON_API PyWarningHandler() noexcept(true);
   // NOLINTNEXTLINE(bugprone-exception-escape)
-  TORCH_API ~PyWarningHandler() noexcept(false);
+  TORCH_PYTHON_API ~PyWarningHandler() noexcept(false);
 
   /** Call if an exception has been thrown
 

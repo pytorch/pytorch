@@ -144,6 +144,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
         torch.empty,
+        torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
         torch.eye,
@@ -277,6 +278,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.new_full,
         Tensor._make_subclass,
         Tensor.solve,
+        Tensor.symeig,
         Tensor.stride,
         Tensor.unflatten,
         Tensor.to_sparse_coo,
@@ -970,7 +972,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
-        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
+        torch._segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
         torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
@@ -1009,7 +1011,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.svd_lowrank: lambda input, q=6, niter=2, M=None: -1,
         torch.linalg.svd: lambda input, full_matrices=True, out=None: -1,
         torch.linalg.svdvals: lambda input, out=None: -1,
-        torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,
         torch.swapaxes: lambda input, dim0, dim1: -1,
         torch.swapdims: lambda input, axis0, axis1: -1,
         torch.special.airy_ai: lambda input: -1,
@@ -1214,9 +1215,11 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_sparse.__get__: lambda self: -1,
         Tensor.is_sparse_csr.__get__: lambda self: -1,
         Tensor.is_vulkan.__get__: lambda self: -1,
+        Tensor.itemsize.__get__: lambda self: -1,
         Tensor.layout.__get__: lambda self: -1,
         Tensor.name.__get__: lambda self: -1,
         Tensor.names.__get__: lambda self: -1,
+        Tensor.nbytes.__get__: lambda self: -1,
         Tensor.ndim.__get__: lambda self: -1,
         Tensor.output_nr.__get__: lambda self: -1,
         Tensor.requires_grad.__get__: lambda self: -1,
@@ -1296,6 +1299,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.ndimension: lambda self: -1,
         Tensor.nelement: lambda self: -1,
         Tensor._nested_tensor_size: lambda self: -1,
+        Tensor._nested_tensor_storage_offsets: lambda self: -1,
+        Tensor._nested_tensor_strides: lambda self: -1,
         Tensor.normal_: lambda self: -1,
         Tensor.numpy: lambda self: -1,
         Tensor.permute: lambda self, dim: -1,
@@ -1333,8 +1338,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.sum_to_size: lambda self, size: -1,
         Tensor.tile: lambda self, *reps: -1,
         Tensor.to: lambda self, dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format: -1,
-        Tensor.to_dense: lambda self, dtype=None: -1,
-        Tensor._to_dense: lambda self, dtype=None: -1,
+        Tensor.to_dense: lambda self, dtype=None, *, masked_grad=None: -1,
+        Tensor._to_dense: lambda self, dtype=None, masked_grad=None: -1,
         Tensor.to_sparse: lambda self: -1,
         Tensor.tolist: lambda self: -1,
         Tensor.to_mkldnn: lambda self: -1,
@@ -1614,7 +1619,7 @@ def _get_overridable_functions() -> Tuple[Dict[Any, List[Callable]], Dict[Callab
     overridable_funcs = collections.defaultdict(list)
     index = {}
     tested_namespaces = [
-        ("torch", torch, torch.__all__ + dir(torch._C._VariableFunctions)),
+        ("torch", torch, torch.__all__),
         ("torch.functional", torch.functional, torch.functional.__all__),
         ("torch.nn.functional", torch.nn.functional, dir(torch.nn.functional)),
         ("torch.nn.init", torch.nn.init, dir(torch.nn.init)),
@@ -1711,7 +1716,7 @@ def resolve_name(f):
         Name of the function; if eval'ed it should give back the input
         function.
     """
-    if isinstance(f, torch._ops.OpOverload) or isinstance(f, torch._ops.OpOverloadPacket):
+    if isinstance(f, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
         return str(f)
     return _get_overridable_functions()[1].get(f)
 
