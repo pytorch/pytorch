@@ -224,9 +224,9 @@ def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
-def pad_list(x):
+def pad_listlike(x, size):
     if len(x) == 1:
-        return [x[0], x[0]]
+        return type(x)([x[0]]) * size
     else:
         return x
 

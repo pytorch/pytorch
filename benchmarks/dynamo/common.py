@@ -1274,7 +1274,7 @@ class BenchmarkRunner:
             self.args.cosine = True
             fp64_outputs = None
             if self.args.ci and self.args.training:
-                return record_status("fp64_OOM")
+                return record_status("fp64_OOM", dynamo_start_stats=start_stats)
 
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             self.args.training, current_device, name
@@ -1761,6 +1761,21 @@ def parse_args(args=None):
         help="Disables cudagraphs for Inductor",
     )
     parser.add_argument(
+        "--disable-split-reductions",
+        action="store_true",
+        help="Disables split reductions for Inductor",
+    )
+    parser.add_argument(
+        "--disable-persistent-reductions",
+        action="store_true",
+        help="Disables split reductions for Inductor",
+    )
+    parser.add_argument(
+        "--disable-divisible-by-16",
+        action="store_true",
+        help="Disables divisible by 16 hint to Triton for Inductor",
+    )
+    parser.add_argument(
         "--inductor-compile-mode",
         default=None,
         help="torch.compile mode argument for inductor runs.",
@@ -1958,7 +1973,6 @@ def run(runner, args, original_dir=None):
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
-        torch._dynamo.config.allow_ignore_mark_dynamic = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
     if args.specialize_int:
@@ -2214,6 +2228,11 @@ def run(runner, args, original_dir=None):
 
     if args.inductor or args.backend == "inductor":
         inductor_config.triton.cudagraphs = not args.disable_cudagraphs
+        inductor_config.triton.persistent_reductions = (
+            not args.disable_persistent_reductions
+        )
+        inductor_config.split_reductions = not args.disable_split_reductions
+        inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
 
     runner.setup_amp()
 
