@@ -446,7 +446,7 @@ def _convert_to_distributed(
         if node.op == OP.PLACEHOLDER:
             assert i < len(
                 inps
-            ), f"got more placeholer nodes ({i + 1}) than inputs ({len(inps)})"
+            ), f"got more placeholder nodes ({i + 1}) than inputs ({len(inps)})"
 
             # our example inputs are local shards. Create DTensors from them.
             node_to_obj[node] = DTensor.from_local(
