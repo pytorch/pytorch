@@ -4438,6 +4438,21 @@ def fn():
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
+    def test_mark_static(self):
+        counter = CompileCounter()
+
+        def my_dyn_fn(x):
+            return x.cos()
+
+        y = torch.randn([3])
+        torch._dynamo.mark_static(y, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(y)
+
+        z = torch.randn([4])
+        torch._dynamo.optimize(counter)(my_dyn_fn)(z)
+
+        self.assertEqual(counter.frame_count, 2)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
