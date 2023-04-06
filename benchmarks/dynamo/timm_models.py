@@ -69,10 +69,7 @@ BATCH_SIZE_DIVISORS = {
 
 REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256")
 
-SKIP = {
-    # Unusual training setup
-    "levit_128",
-}
+SKIP = {}
 
 NONDETERMINISTIC = {
     # https://github.com/pytorch/pytorch/issues/94066
