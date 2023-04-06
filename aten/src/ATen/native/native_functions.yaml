@@ -8123,6 +8123,7 @@
   variants: method
   dispatch:
     CPU, CUDA: random_
+    MPS: random_mps_
     Meta: random_meta_
   autogen: random, random.out
 
