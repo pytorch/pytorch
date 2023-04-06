@@ -254,6 +254,7 @@ RUN_PARALLEL_BLOCKLIST = [
 ] + FSDP_TEST
 
 CI_SERIAL_LIST = [
+    "test_python_dispatch",
     "test_nn",
     "test_fake_tensor",
     "test_cpp_api_parity",
