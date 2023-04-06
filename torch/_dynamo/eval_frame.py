@@ -52,6 +52,8 @@ from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
+from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental import proxy_tensor
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
@@ -653,6 +655,7 @@ def export(
     graph = None
     out_guards = None
     graph_captured_input = None
+    example_fake_inputs = []
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
 
     def produce_matching(source_args, candidate_args):
@@ -698,6 +701,9 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
+        nonlocal example_fake_inputs
+        example_fake_inputs = example_inputs
+
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
             nonlocal graph_captured_input
@@ -717,7 +723,10 @@ def export(
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
-            hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
+            hooks=Hooks(
+                guard_export_fn=guard_export_print,
+                guard_fail_fn=None,
+            ),
             export=True,
             export_constraints=constraints,
             dynamic=(tracing_mode == "symbolic"),
@@ -781,12 +790,19 @@ def export(
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(
-            graph_with_interpreter,
-            decomposition_table=decomposition_table,
-            tracing_mode=tracing_mode,
-            _allow_non_fake_inputs=True,
-        )(*graph_captured_input)
+        fake_tensor_mode = null_context()
+        for val in example_fake_inputs:
+            if isinstance(val, FakeTensor):
+                fake_tensor_mode = val.fake_mode
+                break
+
+        with enable_python_dispatcher(), fake_tensor_mode:
+            graph = make_fx(
+                graph_with_interpreter,
+                decomposition_table=decomposition_table,
+                tracing_mode="real",
+                _allow_non_fake_inputs=True,
+            )(*example_fake_inputs)
 
     new_graph = ChangeInputOutputSignature(
         graph,
@@ -883,6 +899,10 @@ def export(
     )
 
     new_graph.recompile()
+
+    # TODO remove this once Executorch uses proper functionalization
+    new_graph._example_fake_inputs = example_fake_inputs
+    new_graph._matched_input_elements_positions = matched_input_elements_positions
 
     return (new_graph, out_guards)
 
