@@ -106,6 +106,8 @@ ExportOptions.__module__ = "torch.onnx"
 ExportOutput.__module__ = "torch.onnx"
 ExportOutputSerializer.__module__ = "torch.onnx"
 dynamo_export.__module__ = "torch.onnx"
+InputFormatter.__module__ = "torch.onnx"
+OutputFormatter.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION

@@ -812,10 +812,15 @@ class Reduction(Loops):
                 ranges,
             )
 
-        split_reduction = is_triton(device) and reduction_type not in {
-            "argmax",
-            "argmin",
-        }
+        split_reduction = (
+            is_triton(device)
+            and reduction_type
+            not in {
+                "argmax",
+                "argmin",
+            }
+            and config.split_reductions
+        )
         if split_reduction and not dynamo_config.dynamic_shapes:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
@@ -2035,6 +2040,10 @@ class ShapeAsConstantBuffer(IRNode):
         from torch._inductor.codegen.wrapper import pexpr
 
         return pexpr(V.graph.sizevars.simplify(self.shape))
+
+    # wrap scalar to 0-d tensor for cpp wrapper
+    def cpp_wrapper_codegen_reference(self):
+        return f"torch::tensor({self.codegen_reference()})"
 
 
 @dataclasses.dataclass

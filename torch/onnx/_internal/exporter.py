@@ -174,17 +174,72 @@ class InputFormatStep(abc.ABC):
 
 
 class InputFormatter:
+    """A class that formats the PyTorch model inputs to exported ONNX model inputs format.
+
+    Due to design differences, input/output format between PyTorch model and exported
+    ONNX model are often not the same. E.g., None is allowed for PyTorch model, but are
+    not supported by ONNX. Nested constructs of tensors are allowed for PyTorch model,
+    but only flattened tensors are supported by ONNX, etc.
+
+    This formatter is designed to be exported with the ONNX model. Providing an
+    interface to automatically convert and validate inputs format.
+
+    Example::
+
+        # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
+        >>> import torch
+        >>> import torch.onnx
+        >>> from typing import Dict, Tuple
+        >>> def func_with_nested_input_structure(
+        ...     x_dict: Dict[str, torch.Tensor],
+        ...     y_tuple: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+        ... ):
+        ...     if "a" in x_dict:
+        ...         x = x_dict["a"]
+        ...     elif "b" in x_dict:
+        ...         x = x_dict["b"]
+        ...     else:
+        ...         x = torch.randn(3)
+        ...
+        ...     y1, (y2, y3) = y_tuple
+        ...
+        ...     return x + y1 + y2 + y3
+        >>> x_dict = {"a": torch.tensor(1.)}
+        >>> y_tuple = (torch.tensor(2.), (torch.tensor(3.), torch.tensor(4.)))
+        >>> export_output = torch.onnx.dynamo_export(func_with_nested_input_structure, x_dict, y_tuple)
+        >>> print(x_dict, y_tuple)
+        {'a': tensor(1.)}
+        (tensor(2.), (tensor(3.), tensor(4.)))
+        >>> print(export_output.input_formatter.to_onnx(x_dict, y_tuple))
+        (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
+
+    """
+
     _input_format_steps: List[InputFormatStep]
 
     def __init__(self, input_format_steps: Optional[List[InputFormatStep]] = None):
         self._input_format_steps = input_format_steps or []
 
     @_beartype.beartype
-    def append_step(self, step: InputFormatStep):
+    def append_step(self, step: InputFormatStep) -> None:
+        """Appends a step to the input format steps.
+
+        Args:
+            step: The step to append.
+        """
         self._input_format_steps.append(step)
 
     @_beartype.beartype
     def to_onnx(self, *model_args, **model_kwargs) -> Sequence[torch.Tensor]:
+        """Converts the PyTorch model inputs to exported ONNX model inputs format.
+
+        Args:
+            model_args: The PyTorch model inputs.
+            model_kwargs: The PyTorch model keyword inputs.
+
+        Returns:
+            A sequence of tensors converted from PyTorch model inputs.
+        """
         args: Sequence[Any] = model_args
         kwargs: Mapping[str, Any] = model_kwargs
         for step in self._input_format_steps:
@@ -200,17 +255,62 @@ class OutputFormatStep(abc.ABC):
 
 
 class OutputFormatter:
+    """A class that formats the PyTorch model outputs to exported ONNX model outputs format.
+
+    Due to design differences, input/output format between PyTorch model and exported
+    ONNX model are often not the same. E.g., None is allowed for PyTorch model, but are
+    not supported by ONNX. Nested constructs of tensors are allowed for PyTorch model,
+    but only flattened tensors are supported by ONNX, etc.
+
+    This formatter is designed to be exported with the ONNX model. Providing an
+    interface to automatically convert and validate outputs format.
+
+    Example::
+
+        # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
+        >>> import torch
+        >>> import torch.onnx
+        >>> def func_returning_tuples(x, y, z):
+        ...     x = x + y
+        ...     y = y + z
+        ...     z = x + y
+        ...     return (x, (y, z))
+        >>> x = torch.tensor(1.)
+        >>> y = torch.tensor(2.)
+        >>> z = torch.tensor(3.)
+        >>> export_output = torch.onnx.dynamo_export(func_returning_tuples, x, y, z)
+        >>> pt_output = func_returning_tuples(x, y, z)
+        >>> print(pt_output)
+        (tensor(3.), (tensor(5.), tensor(8.)))
+        >>> print(export_output.output_formatter.to_onnx(pt_output))
+        [tensor(3.), tensor(5.), tensor(8.)]
+
+    """
+
     _output_format_steps: List[OutputFormatStep]
 
     def __init__(self, output_format_steps: Optional[List[OutputFormatStep]] = None):
         self._output_format_steps = output_format_steps or []
 
     @_beartype.beartype
-    def append_step(self, step: OutputFormatStep):
+    def append_step(self, step: OutputFormatStep) -> None:
+        """Appends a step to the output format steps.
+
+        Args:
+            step: The step to append.
+        """
         self._output_format_steps.append(step)
 
     @_beartype.beartype
     def to_onnx(self, model_outputs: Any) -> Sequence[torch.Tensor]:
+        """Converts the PyTorch model outputs to exported ONNX model outputs format.
+
+        Args:
+            model_outputs: The PyTorch model outputs.
+
+        Returns:
+            PyTorch model outputs in exported ONNX model outputs format.
+        """
         for step in self._output_format_steps:
             model_outputs = step.format(model_outputs)
         return model_outputs
