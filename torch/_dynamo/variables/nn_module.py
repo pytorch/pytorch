@@ -258,7 +258,6 @@ class NNModuleVariable(VariableTracker):
                 # is_allowed or other variations.
                 initialize_lazy_module(tx, mod, args, kwargs)
 
-
             if is_allowed(mod.__class__):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
