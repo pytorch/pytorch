@@ -551,7 +551,7 @@ class AliasesNewOutput(OutputAliasInfo):
 
     __slots__ = ["index"]
 
-    index: PathOutputIndex
+    index: int
 
     def __init__(self, index):
         assert isinstance(index, int)
