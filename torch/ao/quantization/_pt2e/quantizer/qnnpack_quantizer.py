@@ -12,6 +12,7 @@ from torch.ao.quantization.observer import (
 )
 import torch
 import operator
+from torch.fx import Node
 
 __all__ = [
     "QNNPackQuantizer",
@@ -229,7 +230,7 @@ class QNNPackQuantizer(Quantizer):
     @classmethod
     def get_supported_operator_for_operator_spec(cls, operator_spec: Optional[OperatorSpec]) -> List[str]:
         if operator_spec is None:
-            return [op in ops for _, ops in cls.supported_spec_and_operators]
+            return [op for op in ops for _, ops in cls.supported_spec_and_operators]
 
         for spec, ops in cls.supported_spec_and_operators:
             # note: this assumes each entry in cls.supported_spec_and_operators
