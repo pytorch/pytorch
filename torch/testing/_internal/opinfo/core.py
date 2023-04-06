@@ -1198,6 +1198,7 @@ class OpInfo:
         """Returns an iterable of SampleInputs that contain inputs with a
         specified sparse layout.
         """
+        xfail_mode = kwargs.get("xfail_mode", False)
         layout_name = str(layout).split(".")[-1]
         sample_inputs_mth = getattr(self, "sample_inputs_" + layout_name)
 
@@ -1207,9 +1208,10 @@ class OpInfo:
                 found_sample = True
                 yield sample
             if not found_sample:
-                raise RuntimeError(
-                    f"`{op.name}` OpInfo sample_inputs_{layout_name} generated no samples!"
-                )
+                if not xfail_mode:
+                    raise RuntimeError(
+                        f"`{op.name}` OpInfo sample_inputs_{layout_name} generated no samples!"
+                    )
 
         return non_empty_sampler(
             self,

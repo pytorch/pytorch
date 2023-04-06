@@ -74,6 +74,11 @@ def gradcheck_semantics(test_name='gradcheck'):
         subtest(gradcheck_sparse, name='sparse'),
         subtest(gradcheck_masked, name='masked')])
 
+def xfail_mode(test_name='xfail_mode'):
+    return parametrize(test_name, [
+        subtest(False, name='success'),
+        subtest(True, name='xfail')])
+
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
@@ -4637,7 +4642,8 @@ class TestSparseAny(TestCase):
     @ops(reduction_ops_with_sparse_support)
     @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-3})
     @all_sparse_layouts('layout', include_strided=False)
-    def test_reductions(self, layout, device, dtype, op):
+    @xfail_mode()
+    def test_reductions(self, xfail_mode, layout, device, dtype, op):
         if not op.supports_sparse_layout(layout):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
 
@@ -4646,48 +4652,25 @@ class TestSparseAny(TestCase):
                 and dtype in {torch.bool, torch.uint8}):
             self.skipTest('Requires fix to gh-98495. Skipping!')
 
-        count = 0
+        if xfail_mode:
+            have_sample = False
+            for sample, exc_type, exc_msg in op.sample_inputs_sparse(layout, device, dtype, xfail_mode=xfail_mode):
+                t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+                with self.assertRaisesRegex(exc_type, exc_msg):
+                    op.op(t_inp, *t_args, **t_kwargs)  # ######### WHEN SUCCEEDS, UPDATE sample_inputs_reduction_sparse_*
+                have_sample = True
+            if not have_sample:
+                self.skipTest('no failing samples!')
+            return
+
         for sample in op.sample_inputs_sparse(layout, device, dtype):
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
 
-            if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
-
-                if op.name == 'sum':
-                    # TODO: eliminate this if-block by fixing failures below
-                    if ((isinstance(t_kwargs.get('dim'), int) and (t_inp.dim() != 2 or t_kwargs.get('keepdim')))
-                        or (isinstance(t_kwargs.get('dim'), (list, tuple)) and (
-                            ((t_inp.dim() != 2 and len(t_kwargs.get('dim')) != t_inp.dim()) or t_kwargs.get('keepdim'))))):
-                        if layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                            with self.assertRaisesRegex(
-                                    RuntimeError,
-                                    "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
-                                    " layout but got Sparse(Bsr|Bsc)"):
-                                result = op.op(t_inp, *t_args, **t_kwargs)
-                            continue
-                        with self.assertRaisesRegex(
-                                RuntimeError,
-                                "Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend"):
-                            result = op.op(t_inp, *t_args, **t_kwargs)
-                        continue
-
-                if t_kwargs and not t_kwargs.get('keepdim'):
-                    # reductions on sparse compressed tensors require
-                    # keepdim==True when reduction is over sparse dimensions
-                    with self.assertRaisesRegex(
-                            RuntimeError,
-                            # FIXME: raise a better exception message
-                            "torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported"):
-                        result = op.op(t_inp, *t_args, **t_kwargs)
-                    continue
-
             result = op.op(t_inp, *t_args, **t_kwargs)
-            count += 1
 
             #  Checking invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
             dense = op.op(t_inp.to_dense(), *t_args, **t_kwargs)
             self.assertEqual(result, dense)
-
-        self.assertNotEqual(count, 0)
 
     @onlyNativeDeviceTypes
     @suppress_warnings
@@ -4700,38 +4683,8 @@ class TestSparseAny(TestCase):
         if not op.supports_sparse_layout(layout):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
         count = 0
-        for sample in op.sample_inputs_sparse(layout, device, dtype, requires_grad=True):
+        for sample in op.sample_inputs_sparse(layout, device, dtype, requires_grad=True, xfail_mode=False):
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
-
-            if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
-
-                if op.name == 'sum':
-                    # TODO: eliminate this if-block by fixing failures below
-                    if ((isinstance(t_kwargs.get('dim'), int) and (t_inp.dim() != 2 or t_kwargs.get('keepdim')))
-                        or (isinstance(t_kwargs.get('dim'), (list, tuple)) and (
-                            ((t_inp.dim() != 2 and len(t_kwargs.get('dim')) != t_inp.dim()) or t_kwargs.get('keepdim'))))):
-                        if layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                            with self.assertRaisesRegex(
-                                    RuntimeError,
-                                    "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
-                                    " layout but got Sparse(Bsr|Bsc)"):
-                                result = op.op(t_inp, *t_args, **t_kwargs)
-                            continue
-                        with self.assertRaisesRegex(
-                                RuntimeError,
-                                "Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend"):
-                            result = op.op(t_inp, *t_args, **t_kwargs)
-                        continue
-
-                if t_kwargs and not t_kwargs.get('keepdim'):
-                    # reductions on sparse compressed tensors require
-                    # keepdim==True when reduction is over sparse dimensions
-                    with self.assertRaisesRegex(
-                            RuntimeError,
-                            # FIXME: raise a better exception message
-                            "torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported"):
-                        result = op.op(t_inp, *t_args, **t_kwargs)
-                    continue
 
             r = op.op(t_inp, *t_args, **t_kwargs)
             if r.numel() != 0:
@@ -4744,9 +4697,7 @@ class TestSparseAny(TestCase):
             else:
                 self.skipTest('NOT IMPL')
 
-        if count == 0:
-            # we count samples to avoid false-positive test reports
-            self.skipTest('no sample inputs')
+        self.assertNotEqual(count, 0)
 
     @onlyNativeDeviceTypes
     @suppress_warnings
@@ -4844,67 +4795,46 @@ class TestSparseAny(TestCase):
     @suppress_warnings
     @ops(binary_ufuncs_with_sparse_support)
     @all_sparse_layouts('layout', include_strided=False)
-    def test_binary_operation(self, layout, device, dtype, op):
+    @xfail_mode()
+    def test_binary_operation(self, xfail_mode, layout, device, dtype, op):
         if not op.supports_sparse_layout(layout):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
+
+        if xfail_mode:
+            have_sample = False
+            for sample, exc_type, exc_msg in op.sample_inputs_sparse(layout, device, dtype, xfail_mode=xfail_mode):
+                t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+                with self.assertRaisesRegex(exc_type, exc_msg):
+                    op.op(t_inp, *t_args, **t_kwargs)  # ######### WHEN SUCCEEDS, UPDATE opinfo/definitions/sparse.py
+                have_sample = True
+            if not have_sample:
+                self.skipTest('no failing samples!')
+            return
 
         for sample in op.sample_inputs_sparse(layout, device, dtype):
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
             batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
+            result = op.op(t_inp, *t_args, **t_kwargs)
 
-            # TODO: eliminate the if-blocks of unimplemented features below
-            if op.name == 'mul' and layout is torch.sparse_csr and batch_dim > 0 and t_args[0].ndim > 0:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        "crow_indices is supposed to be a vector, but got 2 dimensional tensor"):
-                    result = op.op(t_inp, *t_args, **t_kwargs)
-            elif op.name == 'mul' and layout is torch.sparse_csc and t_args[0].ndim > 0:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        "Expected result Tensor to be of format CSR"):
-                    result = op.op(t_inp, *t_args, **t_kwargs)
-            elif op.name == 'mul' and layout is torch.sparse_bsr and t_args[0].ndim > 0:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor layout but got SparseBsr"):
-                    result = op.op(t_inp, *t_args, **t_kwargs)
-            elif op.name == 'mul' and layout is torch.sparse_bsc and t_args[0].ndim > 0:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor layout but got SparseBsc"):
-                    result = op.op(t_inp, *t_args, **t_kwargs)
-            elif (op.name == 'mul' and dtype == torch.bool and t_args[0].ndim > 0 and t_inp.is_cpu and t_inp.numel() > 0
-                  and t_inp.dense_dim() > 0):
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        "\"addcmul_cpu_out\" not implemented for 'Bool'"):
-                    result = op.op(t_inp, *t_args, **t_kwargs)
-            elif op.name == 'mul' and dtype == torch.bool and t_args[0].ndim > 0 and t_inp.is_cpu and t_inp.numel() > 0:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        "\"mul_out_sparse\" not implemented for 'Bool'"):
-                    result = op.op(t_inp, *t_args, **t_kwargs)
-            else:
-                result = op.op(t_inp, *t_args, **t_kwargs)
+            # Check rop(inp, ...).shape == inp.shape
+            self.assertEqual(result.shape, t_inp.shape)
 
-                # Check rop(inp, ...).shape == inp.shape
-                self.assertEqual(result.shape, t_inp.shape)
+            # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
+            self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
 
-                # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
-                self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+            # Check rop(inp, ...).dense_dim() == inp.dense_dim()
+            self.assertEqual(result.dense_dim(), t_inp.dense_dim())
 
-                # Check rop(inp, ...).dense_dim() == inp.dense_dim()
-                self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+            # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
+            try:
+                dense = op.op(t_inp.to_dense(), *(t_args[0].to_dense(), *t_args[1:]), **t_kwargs)
+            except Exception as msg:
+                # this is strided op issue, so skipping the sample silently here
+                if "\"cpublas_axpy_impl\" not implemented for 'ComplexHalf'" in str(msg):
+                    continue
+                raise
 
-                # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
-                try:
-                    dense = op.op(t_inp.to_dense(), *(t_args[0].to_dense(), *t_args[1:]), **t_kwargs)
-                except Exception as msg:
-                    # this is strided op issue, so skipping the sample silently here
-                    if "\"cpublas_axpy_impl\" not implemented for 'ComplexHalf'" in str(msg):
-                        continue
-                    raise
-                self.assertEqual(result, dense)
+            self.assertEqual(result, dense)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
