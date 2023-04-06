@@ -494,37 +494,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 out = foo_cg([inp])[0]
                 self.assertEqual(cdata(inp), cdata(out))
 
-        def test_alias_of_earlier_graph(self):
-            inp = torch.rand([20, 20], device="cuda")
-
-            def foo(args):
-                x = args[0]
-                args.clear()
-                out = x + x
-                return (out, out[1:])
-
-            foo_cg = foo
-            # foo_cg = self.cudagraphify_impl(foo, [inp], (0,), is_inference=False)
-
-            def foo2(args):
-                x = args[0]
-                args.clear()
-                return x[1:]
-
-            foo2_cg = foo2
-
-            # out = foo([inp])[0]
-
-            # foo2_cg = self.cudagraphify_impl(foo2, [out], is_inference=False)
-
-            for _ in range(1):
-                out1, out2 = foo_cg([inp])
-                self.assertEqual(cdata(out1), cdata(out2))
-
-                out3 = foo2_cg([out1])
-                self.assertEqual(cdata(out3), cdata(out1))
-                del out1, out2, out3
-
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
             def foo(args):
