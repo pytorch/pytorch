@@ -202,13 +202,13 @@ default_collate_fn_map[str] = collate_str_fn
 default_collate_fn_map[bytes] = collate_str_fn
 
 
-def register_default_collate_for(name: str, collate_fn: Optional[Callable] = None) -> Callable:
+def register_default_collate_for(name: Type, collate_fn: Optional[Callable] = None) -> Callable:
     r"""
     Register a new collate_fn.
 
     Args:
+        name: The type of the collate_fn to be applied on.
         collate_fn: The collate_fn to register.
-        name: The name of the collate_fn.
 
     Returns:
         collate_fn: The registered collate_fn.
