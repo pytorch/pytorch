@@ -97,8 +97,8 @@ Distributed
 Multiprocessing and DataLoaders
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  Simon Wang (`SsnL <https://github.com/SsnL>`__)
+-  (emeritus) Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  (emeritus) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 
 Linear Algebra (torch.linalg)
