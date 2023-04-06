@@ -468,7 +468,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 tensor_x = self.fc2(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
                 output = self.fc3(tensor_x)
-                return (output, (output, output))
+                return output
 
         def create_model() -> nn.Module:
             return MLPModel()
