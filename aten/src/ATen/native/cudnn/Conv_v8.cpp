@@ -156,7 +156,7 @@ cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
 void update(const KeyType& key, T& results) {
   std::lock_guard<std::mutex> guard(mutex);
   engine_cache.erase(key);
-  engine_cache.update(key, std::move(results));
+  engine_cache.emplace(key, std::move(results));
 }
 
 };
