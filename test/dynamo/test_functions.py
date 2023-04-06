@@ -358,6 +358,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.add(x, y)
 
     @make_test
+    def test_is_floating_point(x):
+        y = x + 1
+        return torch.is_floating_point(y), torch.is_floating_point(input=y)
+
+    @make_test
     def test_dtype(x):
         if x.dtype == torch.float32:
             return x + 1
