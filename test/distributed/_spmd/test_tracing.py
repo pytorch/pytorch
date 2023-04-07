@@ -732,7 +732,7 @@ class CoverageTest(DTensorTestBase):
         torch.manual_seed(0)
         mod = nn.Sequential(
             nn.Linear(10, 10),
-            nn.Softmax(dim=1),
+            nn.LogSoftmax(dim=1),
         ).cuda(self.rank)
         inp = torch.randn(20, 10).cuda(self.rank)
         self._test_train_step(mod, inp)
