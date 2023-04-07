@@ -307,10 +307,6 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
-        tensor_list = list(torch.chunk(input_tensor, self._world_size))
-        return self.reduce_scatter([output_tensor], [tensor_list], opts)
-
     def __init__(self, rank, world_size):
         super().__init__(rank, world_size)
         self._rank = rank
