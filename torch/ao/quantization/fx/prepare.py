@@ -593,7 +593,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg)
 
-        reuse_input_obs_or_fq = node.meta["target_dtype_info"]["reuse_input_obs_or_fq"]
+        # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
+        # we'll default to False, this makes configuring this field optional for users
+        reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
 
         act_post_process_ctr = node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"] if is_weight else \
             node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"]
@@ -714,12 +716,6 @@ def _maybe_insert_input_observers_for_node(
 
     Note: backend_config only needed for standalone_module node
     """
-    if qconfig is None:
-        # if quantization is turned off for this node, we do not need
-        # to insert input observers
-        return
-    assert qconfig is not None
-
     # Look through every input arg.  If that arg's target dtype does not
     # match the current node's target dtype, insert an observer.
     new_args = []
@@ -860,12 +856,13 @@ def _maybe_insert_observers_before_graph_output(
         if isinstance(maybe_node, Node):
             # check dtype of this node
             arg_as_output_target_dtype = _get_arg_target_dtype_as_output(maybe_node, named_modules)
+            observer_mod = None
+            arg_as_input_target_dtype = torch.float
             if "target_dtype_info" in maybe_node.meta:
-                observer_mod = maybe_node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"]()
-                arg_as_input_target_dtype = observer_mod.dtype
-            else:
-                observer_mod = None
-                arg_as_input_target_dtype = torch.float
+                observer_cls = maybe_node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr", None)
+                if observer_cls is not None:
+                    observer_mod = observer_cls()
+                    arg_as_input_target_dtype = observer_mod.dtype
             # TODO: this does not handle dynamic quantization yet
             need_obs = (
                 arg_as_output_target_dtype != arg_as_input_target_dtype and
@@ -1410,9 +1407,9 @@ def insert_observers_for_model(
                                 _is_observer_in_same_graph_ = _is_observer_in_same_graph(
                                     node, named_modules)
 
-                                # for general tensor value ops, we modify the graph
+                                # for ops whose inputs and outputs share observer/fqs, we modify the graph
                                 # to make all inputs and outputs use the first input's
-                                # observer
+                                # observer/fq
                                 if (input_output_share_observers and _is_observer_in_same_graph_) or \
                                         reuse_input_obs_or_fq:
                                     if not _maybe_make_input_output_share_observers(node, model, named_modules):
