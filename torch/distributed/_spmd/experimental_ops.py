@@ -172,11 +172,9 @@ def _prop__fused_adam(op_schema: OpSchema):
 
 @register_prop_rule(aten.nll_loss_forward.default)  # pyre-ignore
 def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
-    if torch.distributed.get_rank() == 0:
-        print("===== nll args schema: ", op_schema.args_schema)
     self, target = op_schema.args_schema[:2]
     # FIXME: weight is optional
-    if self != target:
+    if self.placements != target.placements:
         return OutputSharding(
             output_spec=None,
             schema_suggestions=[
@@ -194,12 +192,24 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
         #return OutputSharding(output_spec=(target,))
         return OutputSharding(
             output_spec=(
-                target,
+                DTensorSpec(
+                    mesh=self.mesh,
+                    placements=[_Partial()],
+                    tensor_meta=TensorMetadata(
+                        shape=torch.Size([]),
+                        dtype=self.tensor_meta.dtype,
+                        memory_format=self.tensor_meta.memory_format,
+                        requires_grad=True,
+                        stride=(),
+                        is_quantized=False,
+                        qparams={},
+                    ),
+                ),
                 DTensorSpec(
                     mesh=self.mesh,
                     placements=[Replicate()],
                     tensor_meta=TensorMetadata(
-                        shape=self.tensor_meta.shape[1:],
+                        shape=torch.Size([1]),
                         dtype=self.tensor_meta.dtype,
                         memory_format=self.tensor_meta.memory_format,
                         requires_grad=False,
@@ -211,6 +221,11 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
             )
         )
 
+
+@register_prop_rule(aten.nll_loss_backward.default)  # pyre-ignore
+def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
+    grad_output, self = op_schema.args_schema[:2]
+    return OutputSharding(output_spec=self)
 
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
 def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:

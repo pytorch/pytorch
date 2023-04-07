@@ -487,15 +487,23 @@ def _compile(
         # case yet. Use explicit decompositions for foreach ops.
         # Remove this when the following issue is addressed.
         # Issue: https://github.com/pytorch/pytorch/issues/97852
+        decomps = {**FOREACH_DECOMP_TABLE, **torch._decomp.global_decomposition_table}
         gm = make_fx(
             partial(stateless_func, func),
             tracing_mode="symbolic",
-            decomposition_table=FOREACH_DECOMP_TABLE,
+            decomposition_table=decomps,
             _allow_non_fake_inputs=False,
         )(named_states, params_and_buffers, args, kwargs)
 
+
+    if torch.distributed.get_rank() == 0:
+        gm.graph.print_tabular()
+
     # 4. Use DTensor to insert collectives
     gm = _dtensor_expand(gm, args, kwargs, named_states, params_and_buffers)
+
+    if torch.distributed.get_rank() == 0:
+        gm.graph.print_tabular()
 
     # 5. Move the responsibility of flattening the input arguments from the
     # graph module to the caller. This serves two purposes:
