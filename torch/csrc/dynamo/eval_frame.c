@@ -595,6 +595,12 @@ inline static PyObject* eval_custom_code(
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
   Py_XINCREF(frame->f_func->func_closure);
   shadow->f_func->func_closure = frame->f_func->func_closure;
+  // NOTE: in Python 3.11.1+, PyFrame_New changes prev_instr, causing
+  // Python runtime errors, so we revert the change.
+  // See https://github.com/python/cpython/pull/97886.
+  // TODO if there are more shadow frame related bugs in the future,
+  // consider not using PyFrame_New.
+  shadow->prev_instr = _PyCode_CODE(shadow->f_code) - 1;
   #else
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
   #endif

@@ -792,12 +792,13 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensor_verbose),
                 ("tensor_check_names", tensor_check_names),
+                ("part_map", part_map)
             ]
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
-def ___make_guard_fn({','.join(closure_vars.keys())}, part_map):
+def ___make_guard_fn({','.join(closure_vars.keys())}):
     def guard_fn(L):
 {code}
     return guard_fn
@@ -806,7 +807,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}, part_map):
             print("GUARDS", code)
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
-        guard_fn = out["___make_guard_fn"](*closure_vars.values(), part_map)
+        guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
