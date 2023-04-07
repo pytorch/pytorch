@@ -91,7 +91,8 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3-clang7-asan
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.4xlarge" },
         ]}
       sync-tag: asan-build
 
