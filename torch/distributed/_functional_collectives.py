@@ -68,38 +68,46 @@ As a wise man said once: Don't cross the streams (https://www.youtube.com/watch?
 data_ptr_to_work = dict()
 work_version = 0
 
-def _register_tensor_work(tensor, work):
+def _register_tensor_work(tensor, work, count):
     # Note: called directly by inductor codegen currently
     global data_ptr_to_work
     global work_version
-    data_ptr_to_work[tensor.data_ptr()] = (work_version, work)
+    data_ptr_to_work[tensor.data_ptr()] = (work_version, work, count)
     work_version += 1
 
-def _wait_and_clear_tensor(data_ptr, version):
+def _wait_and_clear_tensor(data_ptr, version, ignore_rc):
     global data_ptr_to_work
     version_and_work = data_ptr_to_work.get(data_ptr)
 
     if version_and_work is not None and version_and_work[0] == version:
-        version_and_work[1].wait()
-        del data_ptr_to_work[data_ptr]
+        to_reduce = 1
+        # if we are not RC's finish it
+        if ignore_rc:
+            to_reduce = version_and_work[2]
+
+        if to_reduce < version_and_work[2]:
+            data_ptr_to_work[data_ptr] = (version_and_work[0], version_and_work[1], version_and_work[2] - to_reduce)
+        else:
+            version_and_work[1].wait()
+            del data_ptr_to_work[data_ptr]
 
 def _register_wrapper_tensor(tensor_wrapper, tensor):
     global data_ptr_to_work
-    version, _ = data_ptr_to_work.get(tensor.data_ptr(), (None, None))
+    version, _, _ = data_ptr_to_work.get(tensor.data_ptr(), (None, None, None))
     if version is None:
         warnings.warn(
             "Trying to register finalizers to AsyncCollectiveTensor but the inner tensor is already gone"
         )
     else:
         # We force the collective to be waited in the case this tensor goes away to reduce the change of deadlocks.
-        weakref.finalize(tensor_wrapper, _wait_and_clear_tensor, tensor.data_ptr(), version)
+        weakref.finalize(tensor_wrapper, _wait_and_clear_tensor, tensor.data_ptr(), version, False)
 
 def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     global data_ptr_to_work
     data_ptr = tensor.data_ptr()
     version_and_work = data_ptr_to_work.get(data_ptr)
     if version_and_work is not None:
-        _wait_and_clear_tensor(data_ptr, version_and_work[0])
+        _wait_and_clear_tensor(data_ptr, version_and_work[0], True)
     return tensor
 
 class WaitHolder:
@@ -123,9 +131,7 @@ class AsyncCollectiveTensor(torch.Tensor):
     def functional_collective(self, group, tag):
         tag, rankset, group_size = _expand_group(group, tag)
         tensor = torch.ops.c10d_functional.{collective}(self, tag, rankset, group_size)
-        res = AsyncCollectiveTensor(tensor)
-        _register_wrapper_tensor(res, tensor)
-        return res
+        return _maybe_wrap_tensor(tensor)
     """
     elem: torch.Tensor
     _holder: WaitHolder
@@ -185,7 +191,7 @@ def _all_reduce(self, reduceOp, tag, ranks, group_size):
 
     inplace_tensor = self.clone(memory_format=torch.contiguous_format)
     work = dist.all_reduce(inplace_tensor, op=op, group=group, async_op=True)
-    _register_tensor_work(inplace_tensor, work)
+    _register_tensor_work(inplace_tensor, work, 1)
 
     return inplace_tensor
 
@@ -196,7 +202,7 @@ def _all_reduce_coalesced(self, reduceOp, tag, ranks, group_size):
 
     inplace_tensor_list = [t.clone(memory_format=torch.contiguous_format) for t in self]
     work = dist.all_reduce_coalesced(inplace_tensor_list, op=op, group=group, async_op=True)
-    _register_tensor_work(inplace_tensor_list[0], work)
+    _register_tensor_work(inplace_tensor_list[0], work, len(self))
 
     return inplace_tensor_list
 
@@ -214,7 +220,7 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
         work = dist.all_gather(tensor_list, shard, group=group, async_op=True)
     else:
         work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
-    _register_tensor_work(out_tensor, work)
+    _register_tensor_work(out_tensor, work, 1)
 
     return out_tensor
 
@@ -235,7 +241,7 @@ def _reduce_scatter_tensor(
     work = dist.reduce_scatter_tensor(
         out_tensor, input, op=op, group=group, async_op=True
     )
-    _register_tensor_work(out_tensor, work)
+    _register_tensor_work(out_tensor, work, 1)
 
     return out_tensor
 
@@ -293,12 +299,12 @@ def _are_we_tracing() -> bool:
         return False
     return mode.tracer is not None
 
-def _maybe_wrap_tensor(self):
+def _maybe_wrap_tensor(self) -> torch.Tensor:
     if _are_we_tracing():
         return wait_tensor(self)
     res = AsyncCollectiveTensor(self, WaitHolder(self))
     _register_wrapper_tensor(res, self)
-    return res
+    return cast(torch.Tensor, res)
 
 def wait_tensor(tensor):
     """
@@ -331,7 +337,6 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     return _maybe_wrap_tensor(tensor)
 
 
-
 def all_gather_tensor(
     self: torch.Tensor,
     gather_dim: int,
@@ -357,8 +362,7 @@ def all_gather_tensor(
     assert self.is_contiguous()
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
-    res: torch.Tensor = AsyncCollectiveTensor(tensor)
-    _register_wrapper_tensor(res, tensor)
+    res = _maybe_wrap_tensor(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
@@ -428,9 +432,8 @@ def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TY
     for tensor in tensor_list:
         act = AsyncCollectiveTensor(tensor, wh)
         res.append(cast(torch.Tensor, act))
+        _register_wrapper_tensor(act, lookup_tensor)
 
-    # FIXME we should register all tensors and ref count when to emit the wait
-    _register_wrapper_tensor(res[0], lookup_tensor)
     return res
 
 
