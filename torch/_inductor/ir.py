@@ -2842,6 +2842,61 @@ class InplaceBernoulliFallback(ExternKernel):
         self.name = V.graph.register_buffer(self)
 
 
+class ScatterFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly.
+    This class handles both aten.scatter_ and aten.scatter_reduce_.
+    It also handle the case `src` being a scalar properly.
+    """
+
+    def codegen(self, wrapper):
+        if self.src_is_tensor:
+            (x, index, src) = [t.codegen_reference() for t in self.inputs]
+        else:
+            (x, index) = [t.codegen_reference() for t in self.inputs]
+            src = self.constant_args[1]
+        line = f"{self.kernel}({x}, {self.constant_args[0]}, {index}, {src}"
+        if self.kernel == "aten.scatter_":
+            if self.kwargs["reduce"]:
+                line += f", reduce={repr(self.kwargs['reduce'])}"
+        else:
+            line += ", ".join([""] + self.codegen_kwargs())
+        line += ")"
+        wrapper.writeline(line)
+
+    def should_allocate(self):
+        return False
+
+    def __init__(
+        self,
+        fn,
+        x,
+        dim: int,
+        index,
+        src,
+        *,
+        reduce: str = None,
+        include_self: bool = True,
+    ):
+        assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
+        self.kernel = fn
+        self.src_is_tensor = isinstance(src, TensorBox)
+        if self.src_is_tensor:
+            tensors = [self.realize_input(t) for t in [x, index, src]]
+            constant_args = [dim]
+        else:
+            tensors = [self.realize_input(t) for t in [x, index]]
+            constant_args = [dim, src]
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage(tensors),
+            constant_args,
+            {"reduce": reduce, "include_self": include_self},
+        )
+        self.name = V.graph.register_buffer(self)
+
+
 class IndexPutFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation and indices properly
@@ -3130,6 +3185,8 @@ def _prepare_convolution_fusion_create(
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
     output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
+    x.realize()
+    weight.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)

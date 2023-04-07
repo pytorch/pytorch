@@ -538,8 +538,15 @@ def compile_fx_with_cpp_wrapper(
         with config.patch(config_patches):
             # first pass
             module_copy = deepcopy(module)
-            fake_mode = fake_mode_from_tensors(example_inputs)
 
+            fake_mode = detect_fake_mode(example_inputs)
+            inputs_copy = example_inputs if fake_mode else deepcopy(example_inputs)
+            compiled = compile_fx(
+                module_copy,
+                inputs_copy,
+                inner_compile=functools.partial(inner_compile, cpp_wrapper=False),
+                decompositions=decompositions,
+            )
             if fake_mode:
                 with no_dispatch():
 
@@ -549,18 +556,12 @@ def compile_fx_with_cpp_wrapper(
                             return out
                         return e
 
-                    inputs_copy = [to_real_tensor(t) for t in example_inputs]
+                    inputs_real = [to_real_tensor(t) for t in example_inputs]
             else:
-                inputs_copy = deepcopy(example_inputs)
+                inputs_real = inputs_copy
 
-            compiled = compile_fx(
-                module_copy,
-                inputs_copy,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=False),
-                decompositions=decompositions,
-            )
-            compiled(*inputs_copy)
-            del module_copy, inputs_copy
+            compiled(*inputs_real)
+            del module_copy, inputs_real
 
             # second pass
             return compile_fx(
