@@ -232,6 +232,14 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         res = ft_c.all_reduce_coalesced([tensor], "sum", mesh)
         self.assertEqual(res[0], tensor * 4)
 
+    def test_all_gather_into_tensor_coalesced(self):
+        tensors = [torch.ones([4], device="cpu"), torch.ones([4], device="cpu") + 1]
+        mesh = dt.DeviceMesh("cpu", torch.arange(4))
+
+        res = ft_c.all_gather_into_tensor_coalesced(tensors, mesh)
+        self.assertEqual(2, len(res))
+        self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
+        self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
 
 class TestMetaCollectives(TestCase):
     def test_all_reduce(self):
