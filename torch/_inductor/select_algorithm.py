@@ -362,15 +362,18 @@ class TritonTemplate:
         **kwargs,
     ):
         try:
-            choices.append(self.generate(
-                input_nodes=input_nodes,
-                layout=layout,
-                num_stages=num_stages,
-                num_warps=num_warps,
-                prefix_args=prefix_args,
-                suffix_args=suffix_args,
-                epilogue_fn=epilogue_fn
-            ))
+            choices.append(
+                self.generate(
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                    prefix_args=prefix_args,
+                    suffix_args=suffix_args,
+                    epilogue_fn=epilogue_fn,
+                    **kwargs,
+                )
+            )
         except NotImplementedError:
             pass
 

@@ -94,7 +94,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     if use_triton_template(layout):
         for config in mm_configs(m, n, k):
             bmm_template.maybe_append_choice(
-                choices
+                choices,
                 (mat1, mat2),
                 layout,
                 **mm_options(config, k, layout),
