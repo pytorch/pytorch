@@ -3185,6 +3185,8 @@ def _prepare_convolution_fusion_create(
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
     output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
+    x.realize()
+    weight.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
