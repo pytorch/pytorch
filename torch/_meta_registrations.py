@@ -88,19 +88,11 @@ def meta_take(self, index, *, out=None):
     return result
 
 
-@register_meta([aten.cummax.default, aten.cummax.out])
+@register_meta(
+    [aten.cummax.default, aten.cummax.out, aten.cummin.default, aten.cummin.out]
+)
 @out_wrapper("values", "indices")
-def cummax(self, dim):
-    values, indices = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
-    if self.numel() != 0 and self.ndim != 0:
-        # Checks that dim is within bounds
-        maybe_wrap_dim(dim, self.ndim)
-    return values, indices
-
-
-@register_meta([aten.cummin.default, aten.cummin.out])
-@out_wrapper("values", "indices")
-def cummin(self, dim):
+def cummaxmin(self, dim):
     values, indices = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
     if self.numel() != 0 and self.ndim != 0:
         # Checks that dim is within bounds
