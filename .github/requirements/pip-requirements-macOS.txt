@@ -21,4 +21,3 @@ sympy==1.11.1
 unittest-xml-reporting<=3.2.0,>=2.0.0
 xdoctest==1.1.0
 filelock==3.6.0
-typing_extensions==4.3.0

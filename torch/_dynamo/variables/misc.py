@@ -7,6 +7,7 @@ import types
 from typing import Dict, List
 
 import torch._C
+
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
@@ -14,7 +15,6 @@ from ..source import AttrSource, ODictGetItemSource
 from ..utils import check_constant_args, identity, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
-from .user_defined import UserDefinedObjectVariable
 
 
 class SuperVariable(VariableTracker):
@@ -227,7 +227,7 @@ class AutogradFunctionVariable(VariableTracker):
             # TODO(jansel): handle this in training mode
             unimplemented("autograd.Function with requires_grad")
 
-        args = [AutogradFunctionContextVariable.create_for_inference(tx), *args]
+        args = [BlackHoleVariable()] + list(args)
         options = VariableTracker.propagate(self, args, kwargs.values())
         options["source"] = AttrSource(AttrSource(self.source, "__class__"), "forward")
         fn = self.fn_cls.forward
@@ -249,23 +249,8 @@ class AutogradFunctionVariable(VariableTracker):
         return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
 
 
-class AutogradFunctionContextVariable(UserDefinedObjectVariable):
-    """
-    Tracks an autograd.Function() context using mutation tracking in side_effects.py
-    """
-
-    def __init__(self, value, value_type=None, inference=False, **kwargs):
-        super().__init__(value=value, value_type=value_type, **kwargs)
-        self.inference = inference
-
-    @staticmethod
-    def create_for_inference(tx):
-        return tx.output.side_effects.track_object_new(
-            None,
-            torch.autograd.function.FunctionCtx,
-            functools.partial(AutogradFunctionContextVariable, inference=True),
-            {},
-        )
+class BlackHoleVariable(VariableTracker):
+    """A autograd.function context that just ignores everything (for forward extraction)"""
 
     def call_method(
         self,
@@ -274,23 +259,20 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if name != "save_for_backward":
-            unimplemented(f"autograd.Function context method: {name}")
-
-        if not self.inference:
-            assert self.source and not kwargs
-            tx.output.side_effects.track_save_for_backward(self, args)
-
+        assert name in ("__setattr__", "save_for_backward"), name
         return variables.ConstantVariable(
             None, **VariableTracker.propagate(self, args, kwargs.values())
         )
 
-    def var_getattr(self, tx, name):
-        if name == "save_for_backward":
-            return LambdaVariable(
-                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            ).add_options(self)
-        return super().var_getattr(tx, name)
+
+class AutogradFunctionContextVariable(VariableTracker):
+    """
+    A autograd.function context used after graph break in forward.
+    Any call method on this context object will be graph break.
+    The is different from BlackHoleVariable which is only used in inference mode.
+    """
+
+    pass
 
 
 class LambdaVariable(VariableTracker):
