@@ -477,14 +477,17 @@ class GuardBuilder(GuardBuilderBase):
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
         constraint_inputs = [a.constraint_dims for a in fs]
-        guards = output_graph.shape_env.produce_guards(
+        (guards, guard_sources) = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
             constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
         )
-        for shape_guard in guards:
+        origin = guard.origin
+        for shape_guard, guard_source in zip(guards, guard_sources):
+            guard.origin = guard_source
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
+        guard.origin = origin
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -837,7 +840,7 @@ def guard_fail_hook(
     guard_fail_fn,
     code,
     code_part: CodePart,
-) -> None:
+) -> str:
     """
     called whenever a guard fails.
     """
@@ -856,6 +859,8 @@ def guard_fail_hook(
     guard_failures[code].append(reason)
     if guard_fail_fn:
         guard_fail_fn(GuardFail(reason, code))
+
+    return reason
 
 
 # TODO(voz): Rewrite this API, we don't use most of these,

@@ -1804,6 +1804,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         export_constraints,
         mutated_closure_cell_contents: Set[str],
+        dynamic_plan,
     ):
         super().__init__(
             output=OutputGraph(
@@ -1820,6 +1821,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
             export=export,
         )
+        self.dynamic_plan = dynamic_plan
         self.one_graph: bool = one_graph
         self.export = export
         self.mutated_closure_cell_contents = mutated_closure_cell_contents
