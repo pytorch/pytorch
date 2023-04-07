@@ -220,6 +220,27 @@ std::string getArrayRefString(const IntArrayRef s) {
   return ss.str();
 }
 
+const std::string& getMetalScalarType(const c10::ScalarType& scalar_type) {
+  static std::unordered_map<c10::ScalarType, std::string> scalarToMetalType = {
+      {c10::ScalarType::Float, "float"},
+      {c10::ScalarType::Half, "half"},
+      {c10::ScalarType::Long, "long"},
+      {c10::ScalarType::Int, "int"},
+      {c10::ScalarType::Short, "short"},
+      {c10::ScalarType::Char, "char"},
+      {c10::ScalarType::Byte, "uchar"},
+      {c10::ScalarType::Bool, "bool"},
+  };
+
+  auto it = scalarToMetalType.find(scalar_type);
+  TORCH_CHECK(it != scalarToMetalType.end(), "Unsupported type byte size: ", scalar_type);
+  return it->second;
+}
+
+const std::string& getMetalScalarType(const Tensor& t) {
+  return getMetalScalarType(t.scalar_type());
+}
+
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype) {
   std::string str;
   // The key format per tensor would look like ":Float32[1,1,1,10]:"

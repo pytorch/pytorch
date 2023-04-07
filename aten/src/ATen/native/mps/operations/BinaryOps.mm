@@ -4,6 +4,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/BinaryKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -75,6 +76,9 @@ void binaryOpTensor(const Tensor& self,
 
   // it's possible to receive empty tensors here
   if (self.numel() == 0 || other.numel() == 0) {
+    return;
+  }
+  if (dispatchNativeBinaryKernel(self, other, output_, alpha, op_name)) {
     return;
   }
 

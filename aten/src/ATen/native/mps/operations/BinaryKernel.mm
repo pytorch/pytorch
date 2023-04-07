@@ -1,9 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
+#include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -14,6 +15,448 @@
 
 namespace at::native {
 namespace mps {
+
+enum class BinaryKernelType {
+  Scalar,
+  LHS_Scalar,
+  RHS_Scalar,
+  Tensor,
+  Strided_LHS_Scalar,
+  Strided_RHS_Scalar,
+  Strided_Tensor
+};
+
+static char BINARY_OP_TEMPLATE_TENSOR[] = R"METAL_BINARY(
+kernel void {3}_kernel(uint tid                   [[thread_position_in_grid]],
+                       const device {1} * input   [[buffer(0)]],
+                       const device {2} * other   [[buffer(1)]],
+                       device       {0} * output  [[buffer(2)]]) {{
+  output[tid] = ({5})input[tid] {4} ({5})other[tid];
+}}
+)METAL_BINARY";
+
+static char BINARY_OP_TEMPLATE_STRIDED_TENSOR[] = GET_IDX_TEMPLATE
+    R"METAL_BINARY(
+kernel void {3}_kernel_strided(uint tid [[thread_position_in_grid]],
+                       const device void     * input_           [[buffer(0)]],
+                       const device void     * other_           [[buffer(1)]],
+                       device       void     * output_          [[buffer(2)]],
+                       constant     uint     * iter_shape       [[buffer(3)]],
+                       constant     uint     & num_dimensions   [[buffer(4)]],
+                       constant packed_uint3 * strides          [[buffer(5)]]) {{
+  uint3 offsets = get_idx(tid, iter_shape, num_dimensions, strides);
+
+  device {0}* output  = (device {0}*)((device uint8_t*)output_  + offsets.x);
+  const device {1}* input = (const device {1}*)((const device uint8_t*)input_ + offsets.y);
+  const device {2}* other = (const device {2}*)((const device uint8_t*)other_ + offsets.z);
+
+  *output = ({5})*input {4} ({5})*other;
+}}
+)METAL_BINARY";
+
+static char BINARY_OP_TEMPLATE_LHS_SCALAR[] = R"METAL_BINARY(
+kernel void {3}_kernel_scalar_lhs(uint tid  [[thread_position_in_grid]],
+                              const device {1} & input   [[buffer(0)]],
+                              const device {2} * other   [[buffer(1)]],
+                              device       {0} * output  [[buffer(2)]]) {{
+  output[tid] = ({5})input {4} ({5})other[tid];
+}}
+)METAL_BINARY";
+
+static char BINARY_OP_TEMPLATE_RHS_SCALAR[] = R"METAL_BINARY(
+kernel void {3}_kernel_scalar_rhs(uint tid  [[thread_position_in_grid]],
+                              const device {1} * input   [[buffer(0)]],
+                              const device {2} & other   [[buffer(1)]],
+                              device       {0} * output  [[buffer(2)]]) {{
+  output[tid] = ({5})input[tid] {4} ({5})other;
+}}
+)METAL_BINARY";
+
+static char BINARY_OP_TEMPLATE_SCALAR[] = R"METAL_BINARY(
+kernel void {3}_kernel_scalar(uint tid  [[thread_position_in_grid]],
+                              const device {1}  & input  [[buffer(0)]],
+                              const device {2}  & other  [[buffer(1)]],
+                              device       {0}  & output [[buffer(2)]]) {{
+  output = ({5})input {4} ({5})other;
+}}
+)METAL_BINARY";
+
+static char BINARY_OP_TEMPLATE_STRIDED_RHS_SCALAR[] = GET_IDX_TEMPLATE
+    R"METAL_BINARY(
+kernel void {3}_kernel_scalar_rhs_strided(uint tid               [[thread_position_in_grid]],
+                       const device void     * input_            [[buffer(0)]],
+                       const device {2}      & other             [[buffer(1)]],
+                       device void           * output_           [[buffer(2)]],
+                       constant uint         * iter_shape        [[buffer(3)]],
+                       constant uint         & num_dimensions    [[buffer(4)]],
+                       constant packed_uint3 * strides           [[buffer(5)]]) {{
+  uint3 offsets = get_idx(tid, iter_shape, num_dimensions, strides);
+
+  device {0}* output = (device {0}*)((device uint8_t*)output_ + offsets.x);
+  const device {1}* input = (const device {1}*)((const device uint8_t*)input_ + offsets.y);
+
+  *output = ({5})*input {4} ({5})other;
+}}
+)METAL_BINARY";
+
+static char BINARY_OP_TEMPLATE_STRIDED_LHS_SCALAR[] = GET_IDX_TEMPLATE
+    R"METAL_BINARY(
+kernel void {3}_kernel_scalar_lhs_strided(uint tid               [[thread_position_in_grid]],
+                       const device {1}      & input             [[buffer(0)]],
+                       const device void     * other_            [[buffer(1)]],
+                       device void           * output_           [[buffer(2)]],
+                       constant uint         * iter_shape        [[buffer(3)]],
+                       constant uint         & num_dimensions    [[buffer(4)]],
+                       constant packed_uint3 * strides           [[buffer(5)]]) {{
+  uint3 offsets = get_idx(tid, iter_shape, num_dimensions, strides);
+
+  device {0}* output = (device {0}*)((device uint8_t*)output_ + offsets.x);
+  const device {2}* other = (const device {2}*)((const device uint8_t*)other_ + offsets.z);
+
+  *output = ({5})input {4} ({5})*other;
+}}
+)METAL_BINARY";
+
+static id<MTLLibrary> compileBinaryOpsLibrary(id<MTLDevice> device,
+                                              const std::string& t1,
+                                              const std::string& t2,
+                                              const std::string& t3,
+                                              const std::string& common_dtype,
+                                              const std::string& op,
+                                              const std::string& kernel_operator,
+                                              BinaryKernelType binaryKernelType) {
+  auto key = op + t1 + t2 + t3 + common_dtype + std::to_string(int(binaryKernelType));
+  static std::unordered_map<std::string, id<MTLLibrary>> libMap;
+  auto it = libMap.find(key);
+  if (it != libMap.end()) {
+    return it->second;
+  }
+  NSError* error = nil;
+  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
+  MTLLanguageVersion languageVersion = MTLLanguageVersion2_2;
+#if defined(__MAC_13_0)
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS)) {
+    languageVersion = MTLLanguageVersion3_0;
+  }
+#endif
+
+  [options setLanguageVersion:languageVersion];
+  char* str = nil;
+  switch (binaryKernelType) {
+    case BinaryKernelType::Scalar:
+      str = BINARY_OP_TEMPLATE_SCALAR;
+      break;
+    case BinaryKernelType::LHS_Scalar:
+      str = BINARY_OP_TEMPLATE_LHS_SCALAR;
+      break;
+    case BinaryKernelType::RHS_Scalar:
+      str = BINARY_OP_TEMPLATE_RHS_SCALAR;
+      break;
+    case BinaryKernelType::Tensor:
+      str = BINARY_OP_TEMPLATE_TENSOR;
+      break;
+    case BinaryKernelType::Strided_Tensor:
+      str = BINARY_OP_TEMPLATE_STRIDED_TENSOR;
+      break;
+    case BinaryKernelType::Strided_LHS_Scalar:
+      str = BINARY_OP_TEMPLATE_STRIDED_LHS_SCALAR;
+      break;
+    case BinaryKernelType::Strided_RHS_Scalar:
+      str = BINARY_OP_TEMPLATE_STRIDED_RHS_SCALAR;
+      break;
+    default:
+      TORCH_CHECK(false, "Unknown binary template");
+  }
+
+  auto rc = [device
+      newLibraryWithSource:[NSString
+                               stringWithUTF8String:fmt::format(str, t1, t2, t3, op, kernel_operator, common_dtype)
+                                                        .c_str()]
+                   options:options
+                     error:&error];
+  TORCH_CHECK(rc != nil && error == nil, "Failed to compile library: ", [[error localizedDescription] UTF8String]);
+  libMap[key] = rc;
+  return rc;
+}
+
+static id<MTLComputePipelineState> getBinaryPSO(id<MTLDevice> device,
+                                                const std::string& t1,
+                                                const std::string& t2,
+                                                const std::string& t3,
+                                                const std::string& common_dtype,
+                                                const std::string& fname,
+                                                const std::string& op,
+                                                const std::string& kernel_operator,
+                                                BinaryKernelType binaryKernelType) {
+  auto key = t1 + t2 + t3 + common_dtype + fname;
+  static std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
+  auto it = cplMap.find(key);
+  if (it != cplMap.end()) {
+    return it->second;
+  }
+  NSError* error = nil;
+  auto library = compileBinaryOpsLibrary(device, t1, t2, t3, common_dtype, op, kernel_operator, binaryKernelType);
+  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
+  TORCH_CHECK(func != nil, "Can't get function ", fname);
+  auto rc = [device newComputePipelineStateWithFunction:func error:&error];
+  TORCH_CHECK(
+      rc != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
+  cplMap[key] = rc;
+  return rc;
+}
+
+static void dispatch_binary_kernel_mps_(TensorIteratorBase& iter,
+                                        const std::string& op,
+                                        const std::string& kernel_operator) {
+  Tensor inputTensor;
+  Tensor otherTensor;
+  BinaryKernelType type;
+
+  int scalar_pos = 0;
+  bool all_scalar = false;
+  const Tensor& outputTensor = iter.tensor(0);
+  inputTensor = iter.tensor(1);
+  otherTensor = iter.tensor(2);
+
+  if (inputTensor.scalar_type() == kDouble) {
+    inputTensor = inputTensor.to(iter.common_dtype());
+  }
+  if (otherTensor.scalar_type() == kDouble) {
+    otherTensor = otherTensor.to(iter.common_dtype());
+  }
+
+  auto outputDataType = outputTensor.scalar_type();
+  auto inputDataType = inputTensor.scalar_type();
+  auto otherDataType = otherTensor.scalar_type();
+  ScalarType common_dtype = iter.common_dtype();
+  if (isIntegralType(common_dtype, true)) {
+    // integer inputs must be cast to float, if output is float
+    if (isFloatingType(outputDataType)) {
+      common_dtype = outputDataType;
+      // in boolean comparison ops with signed vs. unsigned integers, we always cast to the unsigned type
+    } else if (outputDataType == ScalarType::Bool &&
+               (inputDataType == ScalarType::Byte || otherDataType == ScalarType::Byte)) {
+      common_dtype = ScalarType::Byte;
+    }
+  }
+
+  // workaround for bool issues (e.g. bool dtype: true + true in Metal would be 0, but the expected result is still 1 in
+  // PyTorch)
+  if (outputDataType == kBool && (inputDataType == kByte || otherDataType == kByte)) {
+    inputDataType = otherDataType = kByte;
+  } else {
+    if (inputDataType == kBool) {
+      inputDataType = kChar;
+    }
+    if (otherDataType == kBool) {
+      otherDataType = kChar;
+    }
+  }
+
+  if (iter.tensor(1).numel() == 1 && iter.tensor(2).numel() == 1) {
+    all_scalar = true;
+  } else if (iter.tensor(1).numel() == 1) {
+    scalar_pos = 1;
+  } else if (iter.tensor(2).numel() == 1) {
+    scalar_pos = 2;
+  }
+
+  if (!scalar_pos && !all_scalar) {
+    std::vector<Tensor> tmp = expand_outplace({inputTensor, otherTensor});
+    inputTensor = tmp[0];
+
+    otherTensor = tmp[1];
+  }
+
+  if (inputTensor.numel() == 0 || otherTensor.numel() == 0) {
+    return;
+  }
+
+  bool allContiguous = false;
+  if (inputTensor.is_contiguous() && otherTensor.is_contiguous() && outputTensor.is_contiguous()) {
+    allContiguous = true;
+  }
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+  id<MTLBuffer> inputBuffer = mps::getMTLBufferStorage(inputTensor);
+  id<MTLBuffer> otherBuffer = mps::getMTLBufferStorage(otherTensor);
+  id<MTLBuffer> outputBuffer = mps::getMTLBufferStorage(outputTensor);
+  uint32_t inputTensorStorage = inputTensor.storage_offset() * inputTensor.element_size();
+  uint32_t otherTensorStorage = otherTensor.storage_offset() * otherTensor.element_size();
+  mps::MPSScalar scalar;
+  if (all_scalar) {
+    type = BinaryKernelType::Scalar;
+    if (iter.is_cpu_scalar(1)) {
+      scalar = mps::getMPSScalar(inputTensor.item(), inputTensor.scalar_type());
+      inputBuffer = (id<MTLBuffer>)getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size).get();
+      inputTensorStorage = 0;
+    }
+    if (iter.is_cpu_scalar(2)) {
+      scalar = mps::getMPSScalar(otherTensor.item(), otherTensor.scalar_type());
+      otherBuffer = (id<MTLBuffer>)getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size).get();
+      otherTensorStorage = 0;
+    }
+  } else if (scalar_pos) {
+    if (allContiguous) {
+      type = scalar_pos == 1 ? BinaryKernelType::LHS_Scalar : BinaryKernelType::RHS_Scalar;
+    } else {
+      type = scalar_pos == 1 ? BinaryKernelType::Strided_LHS_Scalar : BinaryKernelType::Strided_RHS_Scalar;
+    }
+
+    if (iter.is_cpu_scalar(scalar_pos)) {
+      if (scalar_pos == 1) {
+        scalar = mps::getMPSScalar(inputTensor.item(), inputTensor.scalar_type());
+        inputBuffer = (id<MTLBuffer>)getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size).get();
+        inputTensorStorage = 0;
+      } else {
+        scalar = mps::getMPSScalar(otherTensor.item(), otherTensor.scalar_type());
+        otherBuffer = (id<MTLBuffer>)getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size).get();
+        otherTensorStorage = 0;
+      }
+    }
+  } else {
+    type = allContiguous ? BinaryKernelType::Tensor : BinaryKernelType::Strided_Tensor;
+  }
+
+  const uint32_t nDim = iter.ndim();
+  constexpr uint32_t nOffsets = 3;
+
+  dispatch_sync(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      uint32_t numThreads = iter.numel();
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
+      const IntArrayRef& iterShape = iter.shape();
+      std::vector<uint32_t> iterShapeData(iterShape.size());
+      std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
+
+      if (!allContiguous) {
+        for (const auto i : c10::irange(iterShape.size())) {
+          TORCH_CHECK(i <= UINT32_MAX);
+          iterShapeData[i] = (uint32_t)(iterShape[i]);
+        }
+
+        for (const auto i : c10::irange(nDim)) {
+          for (const auto offset : c10::irange(nOffsets)) {
+            strides[i][offset] = iter.strides(offset)[i];
+          }
+        }
+      }
+
+      std::string kernel = op;
+      kernel += "_kernel";
+      if (all_scalar) {
+        kernel += "_scalar";
+      }
+      if (scalar_pos) {
+        kernel += "_scalar_";
+        if (scalar_pos == 1) {
+          kernel += "lhs";
+        } else {
+          kernel += "rhs";
+        }
+      }
+      if (!allContiguous) {
+        kernel += "_strided";
+      }
+
+      id<MTLComputePipelineState> binaryPSO = mps::getBinaryPSO(device,
+                                                                getMetalScalarType(outputDataType),
+                                                                getMetalScalarType(inputDataType),
+                                                                getMetalScalarType(otherDataType),
+                                                                getMetalScalarType(common_dtype),
+                                                                kernel,
+                                                                op,
+                                                                kernel_operator,
+                                                                type);
+      [computeEncoder setComputePipelineState:binaryPSO];
+      [computeEncoder setBuffer:inputBuffer offset:inputTensorStorage atIndex:0];
+      [computeEncoder setBuffer:otherBuffer offset:otherTensorStorage atIndex:1];
+      [computeEncoder setBuffer:outputBuffer
+                         offset:outputTensor.storage_offset() * outputTensor.element_size()
+                        atIndex:2];
+      if (!allContiguous) {
+        [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:3];
+        [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:4];
+        [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:5];
+      }
+
+      NSUInteger tgSize = binaryPSO.maxTotalThreadsPerThreadgroup;
+      if (tgSize > numThreads) {
+        tgSize = numThreads;
+      }
+
+      MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
+      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+    }
+  });
+}
+
+static void dispatch_binary_kernel_mps(const Tensor& self,
+                                       const Tensor& other,
+                                       const Tensor& output,
+                                       const std::string& op,
+                                       const std::string& kernel_operator) {
+  TensorIterator iter;
+  if (op == "lt" || op == "le" || op == "gt" || op == "ge" || op == "ne" || op == "logical_or" || "logical_and" ||
+      op == "eq") {
+    iter = TensorIterator::comparison_op(const_cast<Tensor&>(output), self, other);
+  } else {
+    iter = TensorIterator::borrowing_binary_op(output, self, other);
+  }
+
+  dispatch_binary_kernel_mps_(iter, op, kernel_operator);
+}
+
+bool getBinaryKernelOperator(const std::string& op_name, std::pair<std::string, std::string>& kernel_operator) {
+  static bool macOS13_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS);
+  if (!macOS13_0_plus) {
+    return false;
+  }
+
+  static std::unordered_map<std::string, std::pair<std::string, std::string>> opToKernelOperator = {
+      {"multiplication", {"mul", "*"}},
+      {"div_out_mps:", {"div", "/"}},
+      {"add_out_mps:", {"add", "+"}},
+      {"sub_out_mps:", {"sub", "-"}},
+
+      // comparison ops
+      {"lessThan", {"lt", "<"}},
+      {"lessThanOrEqualTo", {"le", "<="}},
+      {"greaterThan", {"gt", ">"}},
+      {"greaterThanOrEqualTo", {"ge", ">="}},
+      {"notEqual", {"ne", "!="}},
+      {"logicalOR", {"logical_or", "||"}},
+      {"logicalAND", {"logical_and", "&&"}},
+      {"equal", {"eq", "=="}},
+  };
+
+  auto it = opToKernelOperator.find(op_name);
+  if (it == opToKernelOperator.end()) {
+    return false;
+  }
+
+  kernel_operator = it->second;
+  return true;
+}
+
+bool dispatchNativeBinaryKernel(const Tensor& self,
+                                const Tensor& other,
+                                const Tensor& output,
+                                const Scalar& alpha,
+                                const std::string& op_name) {
+  if (alpha.toFloat() == 1.0) {
+    std::pair<std::string, std::string> kernel_operator;
+    if (getBinaryKernelOperator(op_name, kernel_operator)) {
+      dispatch_binary_kernel_mps(self, other, output, kernel_operator.first, kernel_operator.second);
+      return true;
+    }
+  }
+
+  return false;
+}
 
 static const char* METAL_BINARY = R"BINARY_METAL(
 

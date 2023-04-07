@@ -49,7 +49,6 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
     return true;
   }
   const bool serial_index_put = at::globalContext().deterministicAlgorithms() && !accumulate && !index_select;
-
   const Tensor& inputTensor = iter.tensor(1);
   Tensor outputTensor = iter.tensor(0);
   id<MTLBuffer> inputBuffer = getMTLBufferStorage(inputTensor);
@@ -82,26 +81,6 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
 
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
-      id<MTLBuffer> kernelDataOffsets =
-          (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * sizeof(simd_uint3)).get();
-
-      [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
-      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
-      [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
-      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-      [computeEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
-
-      NSUInteger kernelOffsetsTGSize = kernelDataOffsetsPSO.maxTotalThreadsPerThreadgroup;
-      if (kernelOffsetsTGSize > numThreads) {
-        kernelOffsetsTGSize = numThreads;
-      }
-
-      MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:kernelOffsetsThreadGroupSize];
-
       std::string indexFunction =
           getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate, serial_index_put);
       id<MTLComputePipelineState> indexSelectPSO = nil;
@@ -151,19 +130,21 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       [computeEncoder setBuffer:indexAB offset:0 atIndex:0];
       [computeEncoder setBytes:index_size.data() length:sizeof(index_size[0]) * index_size.size() atIndex:1];
       [computeEncoder setBytes:index_stride.data() length:sizeof(index_stride[0]) * index_stride.size() atIndex:2];
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
+      if (serial_index_put) {
+        [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:3];
+        numThreads = 1;
+      } else {
+        gridSize = MTLSizeMake(numThreads, 1, 1);
+      }
       [computeEncoder setBuffer:inputBuffer offset:inputTensor.storage_offset() * inputTensor.element_size() atIndex:4];
       [computeEncoder setBuffer:outputBuffer
                          offset:outputTensor.storage_offset() * outputTensor.element_size()
                         atIndex:5];
       [computeEncoder setBytes:&num_indices length:sizeof(uint32_t) atIndex:6];
-      if (serial_index_put) {
-        [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:7];
-        gridSize = MTLSizeMake(1, 1, 1);
-        numThreads = 1;
-      } else {
-        gridSize = MTLSizeMake(numThreads, 1, 1);
-      }
+
+      [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:7];
+      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:8];
+      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:9];
 
       NSUInteger tgSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads) {
