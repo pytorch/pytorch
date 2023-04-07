@@ -121,13 +121,13 @@ public:
       std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
   }
-  void solution2_satuate(uint8_t* dst_data) {
+  void store_float_as_uint8(uint8_t* dst_data) {
     // Convert from float32 to int32
     __m512i x_values_int32 = _mm512_cvtps_epi32(values);
 
     // Convert from int32 to int16 using signed saturation
     __m512i xy_packed_v = _mm512_packs_epi32(x_values_int32, x_values_int32);
-  
+
     constexpr auto min_val = std::numeric_limits<uint8_t>::min();
     constexpr auto max_val = std::numeric_limits<uint8_t>::max();
 
@@ -141,12 +141,8 @@ public:
 
     // Store to dst
     _mm_storeu_si128(
-      reinterpret_cast<__m128i*>(dst_data), 
+      reinterpret_cast<__m128i*>(dst_data),
       _mm512_castsi512_si128(xyzw_clamped_v));
-  }
-  void store_to_uint8_v2(uint8_t* dst_data) {
-    // Solution2: add the saturiaty check and convert
-    solution2_satuate(dst_data);
   }
   const float& operator[](int idx) const  = delete;
   float& operator[](int idx) = delete;

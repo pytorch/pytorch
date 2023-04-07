@@ -1200,8 +1200,10 @@ class CppVecKernel(CppKernel):
             else:
                 assert opt_ctx.is_bf16_mem_copy
                 line = f"{value}.store({var} + {cexpr_index(new_index)}, {self.tiling_factor});"
-        elif (V.graph.get_dtype(name) in [torch.uint8]) and (opt_ctx.is_store_fp32_as_uint8):
-            line = f"{value}.store_to_uint8_v2({var} + {cexpr_index(new_index)});"
+        elif (V.graph.get_dtype(name) in [torch.uint8]) and (
+            opt_ctx.is_store_fp32_as_uint8
+        ):
+            line = f"{value}.store_float_as_uint8({var} + {cexpr_index(new_index)});"
         else:
             line = f"{value}.store({var} + {cexpr_index(new_index)});"
         self.stores.writeline(DeferredLine(name, line))
@@ -1475,7 +1477,11 @@ class CppVecKernelChecker(CppVecKernel):
             torch.bool,
             torch.uint8,
         ]
-        self.store_supported_dtypes: list[torch.dtype] = [torch.float, torch.bfloat16, torch.uint8]
+        self.store_supported_dtypes: list[torch.dtype] = [
+            torch.float,
+            torch.bfloat16,
+            torch.uint8,
+        ]
         # Cache the dtypes of the store operation. If the store is mixing dtypes, the
         # vectorization would not support it as it is hard to determine the vec dtype
         self.store_dtypes: list[torch.dtype] = []
@@ -1576,10 +1582,16 @@ class CppVecKernelChecker(CppVecKernel):
             user = list(users)[0]
             if (user.target == "to_dtype") and (user.args[-1] == torch.float):
                 return True
-            return False 
+            return False
         return False
 
     def can_store_fp32_as_uint8(self, store_var: str, value_node: torch.fx.Node):
+        """
+        Check:
+        1. store_type is torch.uint8
+        2. value_node is of target to_dtype
+        3. dtype of to_dtype node is torch.uint8
+        """
         store_type = V.graph.get_dtype(store_var)
         if store_type not in [torch.uint8]:
             return False
@@ -1595,12 +1607,16 @@ class CppVecKernelChecker(CppVecKernel):
             assert opt_ctx
             opt_ctx.dtype = load_dtype
             opt_ctx.is_load_as_mask = self.is_mask(name, node_ctx.get_fx_node().users)
-            opt_ctx.is_load_uint8_as_float = self.is_load_uint8_as_float(name, node_ctx.get_fx_node().users)
+            opt_ctx.is_load_uint8_as_float = self.is_load_uint8_as_float(
+                name, node_ctx.get_fx_node().users
+            )
 
             var = self.cse.newvar()
             self.load_results.append(var)
 
-            if load_dtype in [torch.bool, torch.uint8] and not (opt_ctx.is_load_as_mask or opt_ctx.is_load_uint8_as_float):
+            if load_dtype in [torch.bool, torch.uint8] and not (
+                opt_ctx.is_load_as_mask or opt_ctx.is_load_uint8_as_float
+            ):
                 if not opt_ctx.is_load_as_mask:
                     self.disable_vec(f"{load_dtype} not loaded as mask")
                 elif not opt_ctx.is_load_uint8_as_float:
@@ -1650,7 +1666,9 @@ class CppVecKernelChecker(CppVecKernel):
                     return self.simd_vec
             elif store_dtype in [torch.uint8]:
                 value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                opt_ctx.is_store_fp32_as_uint8 = self.can_store_fp32_as_uint8(name, value_node)
+                opt_ctx.is_store_fp32_as_uint8 = self.can_store_fp32_as_uint8(
+                    name, value_node
+                )
                 if not opt_ctx.is_store_fp32_as_uint8:
                     self.disable_vec("not support store float32 as uint8")
                     return self.simd_vec
@@ -1987,7 +2005,11 @@ class CppVecKernelChecker(CppVecKernel):
                             )
                             if dtype in [torch.bfloat16]:
                                 opt_ctx.is_load_bf16_as_fp32 = True
-                            elif (dtype == torch.uint8) and (input_value.target == "load"):
+                            elif (dtype == torch.uint8) and (
+                                input_value.target == "load"
+                            ):
+                                # 1. doing uint8 to float.
+                                # 2. the previous node of uint8 to float is load.
                                 opt_ctx.is_load_uint8_as_float = True
                             elif dtype == torch.float:
                                 pass
@@ -2014,9 +2036,13 @@ class CppVecKernelChecker(CppVecKernel):
                     elif dtype == torch.bool:
                         pass
                     elif dtype == torch.uint8:
+
                         def is_store_float_as_uint8(node):
                             return all(usr.target in ["store"] for usr in node.users)
-                        opt_ctx.is_store_float_as_uint8 = is_store_float_as_uint8(cur_node)
+
+                        opt_ctx.is_store_float_as_uint8 = is_store_float_as_uint8(
+                            cur_node
+                        )
                         if not opt_ctx.is_store_float_as_uint8:
                             self.disable_vec(f"to_dtype: dtype {dtype}")
                     else:
