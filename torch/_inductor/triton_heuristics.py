@@ -258,8 +258,12 @@ class CachingAutotuner(KernelInterface):
         return self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
+        if self.heuristic_type == HeuristicType.TEMPLATE:
+            # skip triton template
+            return launcher
+
         cloned_args = self.clone_args(*args)
-        config2launcher = {}
+        config2launcher = {launcher.config: launcher}
         def benchmark_one_config(config):
             with self.lock:
                 launcher = self._precompile_config(config, None)
