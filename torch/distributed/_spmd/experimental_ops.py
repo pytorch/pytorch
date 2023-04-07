@@ -235,7 +235,7 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
 
 
 @register_prop_rule(aten.nll_loss_backward.default)  # pyre-ignore
-def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
+def _prop_nll_loss_backward(op_schema: OpSchema) -> OutputSharding:
     grad_output, self = op_schema.args_schema[:2]
     assert isinstance(grad_output, DTensorSpec)
     assert isinstance(self, DTensorSpec)
