@@ -17,7 +17,6 @@ from torch._dynamo.utils import dynamo_timed
 
 from . import config
 from .codecache import cache_dir, cubin_cache_dir
-from .coordinate_descent_tuner import CoordescTuner
 
 from .ir import ReductionHint, TileHint
 from .utils import (
@@ -28,9 +27,7 @@ from .utils import (
     get_num_bytes,
     has_triton,
     next_power_of_2,
-    triton_config_to_hashable,
 )
-from enum import Enum, auto
 
 
 log = logging.getLogger(__name__)
@@ -45,13 +42,6 @@ else:
     KernelInterface = object
     triton = None
 
-DEBUG = False
-
-class HeuristicType(Enum):
-    POINTWISE = auto()
-    REDUCTION = auto()
-    PERSISTENT_REDUCTION = auto()
-    TEMPLATE = auto()
 
 class CachingAutotuner(KernelInterface):
     """
@@ -61,20 +51,13 @@ class CachingAutotuner(KernelInterface):
     configs, and does not rely on the Triton JIT.
     """
 
-    def __init__(self, fn, meta, configs, save_cache_hook, mutated_arg_names, heuristic_type):
+    def __init__(self, fn, meta, configs, save_cache_hook, mutated_arg_names):
         super().__init__()
         self.fn = fn
         self.meta = meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
         self.configs = configs
-        self.heuristic_type = heuristic_type
-
-        if DEBUG:
-            print(f"CachingAutotuner gets {len(self.configs)} configs")
-            for c in self.configs:
-                print(c)
-
         self.launchers = []
         self.lock = threading.Lock()
         if os.getenv("TRITON_CACHE_DIR") is None:
@@ -83,8 +66,6 @@ class CachingAutotuner(KernelInterface):
                 "triton",
                 str(self.meta.get("device", 0)),
             )
-
-        self.coordesc_tuner = CoordescTuner(is_mm=False, is_persistent_reduction=self.is_persistent_reduction())
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
@@ -180,8 +161,10 @@ class CachingAutotuner(KernelInterface):
 
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
-    def clone_args(self, *args):
+    @dynamo_timed
+    def benchmark_all_configs(self, *args, **kwargs):
         from .compile_fx import clone_preserve_strides
+
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
         # it leads to increase memory use
@@ -193,24 +176,10 @@ class CachingAutotuner(KernelInterface):
             else:
                 cloned_args.append(arg)
 
-        return cloned_args
-
-    @dynamo_timed
-    def benchmark_all_configs(self, *args, **kwargs):
-        cloned_args = self.clone_args(*args)
         timings = {
             launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
             for launcher in self.launchers
         }
-
-        for k, v in timings.items():
-            self.coordesc_tuner.cache_benchmark_result(k.config, v)
-
-        if DEBUG:
-            print("Benchmark all input configs get:")
-            for k, v in timings.items():
-                print(f"{k.config}: {v}")
-
         return timings
 
     def autotune_to_one_config(self, *args, **kwargs):
@@ -254,38 +223,12 @@ class CachingAutotuner(KernelInterface):
             else:
                 KernelParamCache.cache[kernel_name] = params
 
-    def is_persistent_reduction(self):
-        return self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
-
-    def coordinate_descent_tuning(self, launcher, *args, **kwargs):
-        if self.heuristic_type == HeuristicType.TEMPLATE:
-            # skip triton template
-            return launcher
-
-        cloned_args = self.clone_args(*args)
-        config2launcher = {launcher.config: launcher}
-        def benchmark_one_config(config):
-            with self.lock:
-                launcher = self._precompile_config(config, None)
-            config2launcher[config] = launcher
-            return self.bench(launcher, *cloned_args, **kwargs)[0]
-
-        best_config = self.coordesc_tuner.autotune(benchmark_one_config, launcher.config, None)
-        best_config.found_by_coordesc = True
-
-        if self.save_cache_hook:
-            self.save_cache_hook(best_config, found_by_coordesc=True)
-        return config2launcher.get(best_config)
-
     def run(self, *args, grid, stream):
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 self.precompile()
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid)
-
-        if not getattr(self.launchers[0].config, "found_by_coordesc", False) and config.coordinate_descent_tuning:
-            self.launchers = [self.coordinate_descent_tuning(self.launchers[0], *args, grid=grid)]
 
         if config.triton.store_cubin:
             self.save_cuda_kernel(grid, stream, self.launchers[0])
@@ -393,22 +336,13 @@ def load_cached_autotuning(
 
     with open(cache_filename, "r") as fd:
         best_config = json.loads(fd.read())
-    if best_config.pop("configs_hash", None) != configs_hash:
+    if best_config.get("configs_hash") != configs_hash:
         return None
-
-    if config.coordinate_descent_tuning and best_config.pop("found_by_coordesc", False):
-        num_warps = best_config.pop("num_warps")
-        num_stages = best_config.pop("num_stages")
-        triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
-        triton_config.found_by_coordesc = True 
-        return triton_config
 
     matching_configs = [
         cfg
         for cfg in configs
         if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
-           and cfg.num_warps == best_config.get("num_warps")
-           and cfg.num_stages == best_config.get("num_stages")
     ]
     if len(matching_configs) != 1:
         return None
@@ -419,7 +353,6 @@ def load_cached_autotuning(
 def cached_autotune(
     configs: List[Config],
     meta,
-    heuristic_type,
     filename=None,
 ):
     """
@@ -429,26 +362,22 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
 
+    # The autotune cache will simply replace the list of candidate configs with
+    # the best config cached. We don't want that when we benchmark triton kernels.
+    # We need the perf for each of the candidate config instead.
+    cache_autotune_result = not config.benchmark_kernel
+
     # on disk caching logic
-    if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):
+    if cache_autotune_result and filename is not None and len(configs) > 1:
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
         best_config = load_cached_autotuning(cache_filename, configs_hash, configs)
         if best_config:
             configs = [best_config]
 
-        def save_cache_hook(cfg, found_by_coordesc=False):
+        def save_cache_hook(cfg):
             with open(cache_filename, "w") as fd:
-                fd.write(json.dumps({
-                    **cfg.kwargs,
-                    "num_warps": cfg.num_warps,
-                    "num_stages": cfg.num_stages,
-                    "configs_hash": configs_hash,
-                    "found_by_coordesc": found_by_coordesc
-                }))
-            if DEBUG:
-                type_str = "coordesc" if found_by_coordesc else "heuristic"
-                print(f"Save {type_str} tuning result to {cache_filename}")
+                fd.write(json.dumps({**cfg.kwargs, "configs_hash": configs_hash}))
 
     else:
         save_cache_hook = None
@@ -464,7 +393,6 @@ def cached_autotune(
                 configs=configs,
                 save_cache_hook=save_cache_hook,
                 mutated_arg_names=mutated_arg_names,
-                heuristic_type=heuristic_type,
             )
         return CachingAutotuner(
             fn,
@@ -472,7 +400,6 @@ def cached_autotune(
             configs=configs,
             save_cache_hook=save_cache_hook,
             mutated_arg_names=mutated_arg_names,
-            heuristic_type=heuristic_type,
         )
 
     return decorator
@@ -482,9 +409,8 @@ def unique_configs(configs: List[Config]):
     """Remove duplicate configurations"""
     seen = set()
     pruned_configs = []
-
     for cfg in configs:
-        key = triton_config_to_hashable(cfg)
+        key = tuple(cfg.kwargs.items())
         if key not in seen:
             seen.add(key)
             pruned_configs.append(cfg)
@@ -637,12 +563,12 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     bs = max(256, min(numel // 128, 1024))
 
     if len(size_hints) == 1:
-        return cached_autotune([triton_config(size_hints, bs)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
+        return cached_autotune([triton_config(size_hints, bs)], meta=meta)
     if len(size_hints) == 2:
         if (
             not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
         ) and not (config.max_autotune or config.max_autotune_pointwise):
-            return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
+            return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
         return cached_autotune(
             [
                 triton_config(size_hints, 32, 32),
@@ -654,11 +580,10 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             ],
             meta=meta,
             filename=filename,
-            heuristic_type=HeuristicType.POINTWISE,
         )
     if len(size_hints) == 3:
         if not config.triton.autotune_pointwise:
-            return cached_autotune([triton_config(size_hints, 16, 16, 16)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
+            return cached_autotune([triton_config(size_hints, 16, 16, 16)], meta=meta)
         return cached_autotune(
             [
                 triton_config(size_hints, 16, 16, 16),
@@ -671,7 +596,6 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             ],
             meta=meta,
             filename=filename,
-            heuristic_type=HeuristicType.POINTWISE,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
@@ -691,16 +615,14 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:
-            return cached_autotune([contiguous_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
+            return cached_autotune([contiguous_config], meta=meta)
         elif reduction_hint == ReductionHint.OUTER:
-            return cached_autotune([outer_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
+            return cached_autotune([outer_config], meta=meta)
         elif reduction_hint == ReductionHint.OUTER_TINY:
-            return cached_autotune([tiny_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
+            return cached_autotune([tiny_config], meta=meta)
         if not config.triton.autotune_pointwise:
             return cached_autotune(
-                [triton_config_reduction(size_hints, 32, 128)], meta=meta,
-                heuristic_type=HeuristicType.REDUCTION,
-                filename=filename
+                [triton_config_reduction(size_hints, 32, 128)], meta=meta
             )
         return cached_autotune(
             [
@@ -712,7 +634,6 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             ],
             meta=meta,
             filename=filename,
-            heuristic_type=HeuristicType.REDUCTION,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
@@ -742,7 +663,6 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
         configs,
         meta=meta,
         filename=filename,
-        heuristic_type=HeuristicType.PERSISTENT_REDUCTION,
     )
 
 
@@ -751,7 +671,7 @@ def template(num_stages, num_warps, meta, filename=None):
     Compile a triton template
     """
     return cached_autotune(
-        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta, heuristic_type=HeuristicType.TEMPLATE, filename=filename
+        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta
     )
 
 
