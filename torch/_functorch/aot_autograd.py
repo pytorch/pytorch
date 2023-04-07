@@ -3029,6 +3029,8 @@ def aot_module_simplified(
     if inference_compiler is None:
         inference_compiler = fw_compiler
 
+    seen_sources = set()
+
     full_args = []
     # First, the params
     full_args.extend(params_flat)
@@ -3042,7 +3044,10 @@ def aot_module_simplified(
         # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
         for name in params.keys():
             assert name in mod._param_name_to_source, f"{name} not found."
-            aot_autograd_arg_pos_to_source.append(mod._param_name_to_source[name])
+            source = mod._param_name_to_source[name]
+            assert source not in seen_sources, source
+            seen_sources.add(source)
+            aot_autograd_arg_pos_to_source.append(source)
 
     # Next, the input args
     full_args.extend(args)
@@ -3055,7 +3060,10 @@ def aot_module_simplified(
                     # ... but not here!
                     if aot_autograd_arg_pos_to_source is None:
                         aot_autograd_arg_pos_to_source = []
-                    aot_autograd_arg_pos_to_source.append(node._dynamo_source)
+                    source = node._dynamo_source
+                    assert source not in seen_sources, source
+                    seen_sources.add(source)
+                    aot_autograd_arg_pos_to_source.append(source)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
