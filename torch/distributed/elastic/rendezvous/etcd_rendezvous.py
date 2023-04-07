@@ -697,7 +697,7 @@ class EtcdRendezvous:
                     # rendezvous version as dead (but only if it hadn't changed)
                     log.info("Keep-alive key %s is not renewed.", key)
                     log.info(
-                        "Rendevous version %s is incomplete. ",
+                        "Rendezvous version %s is incomplete. ",
                         expected_version
                     )
                     log.info("Attempting to destroy it.")

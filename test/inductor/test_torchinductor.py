@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import dataclasses
 import functools
 import importlib
@@ -36,7 +37,6 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TEST_WITH_SLOW,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -59,6 +59,7 @@ from torch._inductor import config, test_operators
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import has_torchvision_roi_align
 
+from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
@@ -68,7 +69,6 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
 )
-slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
@@ -1493,6 +1493,13 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_scalar_input(self):
+        def fn(x, y):
+            a = torch.div(x, y, rounding_mode="floor")
+            return a
+
+        self.common(fn, [torch.randint(5, (1, 8)), 5400])
+
     def test_shape_prop_torch_ones(self):
         class Model(torch.nn.Module):
             def forward(self, attention_scores):
@@ -1510,7 +1517,7 @@ class CommonTemplate:
                 (torch.randn(8, 12, 512, 512),),
             )
 
-    @slow()
+    @slowTest
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
@@ -1750,7 +1757,7 @@ class CommonTemplate:
                 m_opt(x)
                 self.assertEqual(m(x), m_opt(x))
 
-    @slow()
+    @slowTest
     def test_conv2d_unary(self):
         # For gpu path, there is an accuracy issue
         # see https://github.com/pytorch/pytorch/issues/87745
@@ -1826,7 +1833,7 @@ class CommonTemplate:
                     (v,),
                 )
 
-    @slow()
+    @slowTest
     def test_conv2d_binary(self):
         # For gpu path, there is an accuracy issue
         # see https://github.com/pytorch/pytorch/issues/87745
@@ -1976,6 +1983,8 @@ class CommonTemplate:
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
+    @slowTest
+    @unittest.skipIf(not has_bf16_support(), "requires bf16 support")
     def test_linear_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -2001,17 +2010,16 @@ class CommonTemplate:
 
         options = itertools.product(unary_list, [[2, 3, 10], [2, 10]], [True, False])
         dtype = torch.bfloat16
-        if has_bf16_support():
-            for eltwise_fn, input_shape, bias in options:
-                mod = M(eltwise_fn, input_shape[-1], 30, bias=bias).eval()
-                # only fuse for linear when the dtype is bf16
-                mod = mod.to(dtype)
-                v = torch.randn(input_shape).to(dtype)
-                with torch.no_grad():
-                    self.common(
-                        mod,
-                        (v,),
-                    )
+        for eltwise_fn, input_shape, bias in options:
+            mod = M(eltwise_fn, input_shape[-1], 30, bias=bias).eval()
+            # only fuse for linear when the dtype is bf16
+            mod = mod.to(dtype)
+            v = torch.randn(input_shape).to(dtype)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     def test_linear_binary(self):
         class M(torch.nn.Module):
@@ -2054,7 +2062,7 @@ class CommonTemplate:
                 (v,),
             )
 
-    @slow()
+    @slowTest
     def test_conv_transpose2d_unary(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv_transpose2d unary test")
@@ -2387,6 +2395,21 @@ class CommonTemplate:
                 torch.randn([16]),
             ),
             check_lowp=False,
+        )
+
+    def test_convolution3(self):
+        # Test stride or padding or dilation is 1 element list.
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(5, 6, [3, 3], stride=[1], padding=[0], dilation=[1]),
+            torch.nn.ReLU(),
+            ToTuple(),
+        )
+
+        self.common(
+            m,
+            (torch.randn([2, 5, 16, 16]),),
+            atol=6e-5,
+            rtol=0.001,
         )
 
     def test_conv2d_channels_last(self):
@@ -3396,6 +3419,23 @@ class CommonTemplate:
             (
                 torch.randint(0, 2, (2, 20), dtype=torch.bool),
                 torch.randint(0, 2, (2, 20), dtype=torch.bool),
+            ),
+        )
+
+    def test_bitwise3(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/97968
+        def fn(x, y):
+            return (
+                torch.max(torch.bitwise_and(x, y), y),
+                torch.clamp_max(torch.bitwise_or(x, y), y),
+                torch.clamp_min(torch.bitwise_xor(x, y), y),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.rand([5, 10, 1]).to(torch.int8),
+                torch.rand([10, 1]).to(torch.int8),
             ),
         )
 
@@ -4562,10 +4602,52 @@ class CommonTemplate:
         def fn(x, ind, src):
             return torch.scatter(x, 0, ind, src)
 
-        self.common(
-            fn,
-            (torch.randn(196, 992), torch.randint(196, (1, 992)), torch.randn(1, 992)),
-        )
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                self.common(
+                    fn,
+                    [
+                        torch.randn(196, 992),
+                        torch.randint(196, (1, 992)),
+                        torch.randn(1, 992),
+                    ],
+                )
+
+    def test_scatter5(self):
+        def fn(a, dim, index, b, reduce):
+            a = a.clone()
+            a.scatter_(dim, index, b, reduce=reduce)
+            a1 = a + 1.0
+            a1.scatter_(dim, index, b, reduce=reduce)
+            return (a, a1)
+
+        for reduce in ["add", "multiply"]:
+            self.common(
+                fn,
+                [
+                    torch.ones((4, 5)),
+                    0,
+                    torch.tensor([[1], [2], [3]], dtype=torch.int64),
+                    torch.randn(4, 5),
+                    reduce,
+                ],
+            )
+
+    def test_scatter6(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b)
+
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                self.common(
+                    fn,
+                    [
+                        torch.randn(5, 8, 13),
+                        2,
+                        torch.tensor([[[3, 5, 7, 9]]]),
+                        0.8,  # src can be a scalar
+                    ],
+                )
 
     @unittest.skip("Flaky test, needs debugging")
     def test_scatter_add1(self):
@@ -4600,15 +4682,17 @@ class CommonTemplate:
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
 
-        self.common(
-            fn,
-            [
-                torch.randn(5, 29, 13),
-                2,
-                torch.tensor([[[3, 5, 7, 9]]]),
-                torch.randn(1, 1, 10),
-            ],
-        )
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                self.common(
+                    fn,
+                    [
+                        torch.randn(5, 29, 13),
+                        2,
+                        torch.tensor([[[3, 5, 7, 9]]]),
+                        torch.randn(1, 1, 10),
+                    ],
+                )
 
     def test_scatter_reduce1(self):
         def fn(a, dim, index, b):
@@ -4637,6 +4721,26 @@ class CommonTemplate:
                 torch.randn(2, 3),
             ],
         )
+
+    def test_scatter_reduce3(self):
+        def fn(a, dim, index, b, reduce):
+            a = a.clone()
+            a.scatter_reduce_(dim, index, b, reduce=reduce)
+            a1 = a + 1.0
+            a1.scatter_reduce_(dim, index, b, reduce=reduce)
+            return (a, a1)
+
+        for reduce in ["sum", "prod"]:
+            self.common(
+                fn,
+                [
+                    torch.ones((4, 5)),
+                    0,
+                    torch.tensor([[1], [2], [3]], dtype=torch.int64),
+                    torch.randn(4, 5),
+                    reduce,
+                ],
+            )
 
     # issue #1150
     def test_dense_mask_index(self):
@@ -4681,6 +4785,18 @@ class CommonTemplate:
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1])
 
         self.common(fn, [torch.randn(55)], assert_equal=False)
+
+    def test_dropout_trivial_0(self):
+        def fn1(a):
+            return torch.nn.functional.dropout(a, 0.0, True) + a
+
+        self.common(fn1, [torch.randn(55)])
+
+    def test_dropout_trivial_1(self):
+        def fn2(a):
+            return torch.nn.functional.dropout(a, 1.0, True) + a
+
+        self.common(fn2, [torch.randn(55)])
 
     @config.patch({"triton.cudagraphs": True})
     def test_dropout(self):
@@ -5505,6 +5621,20 @@ class CommonTemplate:
                 with TestRefMode():
                     fn_compiled(inps)
 
+                # do an extra run to make sure we are deallocating on warmup and record
+                if self.device == "cuda":
+                    inps.extend(
+                        [
+                            torch.rand([5, 5]).to(self.device),
+                            torch.rand([5, 5]).to(self.device),
+                        ]
+                    )
+                    inp_refs.extend([weakref.ref(inp) for inp in inps])
+                    matmul_seen = False
+
+                    with TestRefMode():
+                        fn_compiled(inps)
+
                 # for some reason, TorchDispatch doesnt capture the
                 # cuda mm call (even without cudagraphs)
                 if self.device == "cpu":
@@ -5762,6 +5892,24 @@ class CommonTemplate:
 
         self.common(fn, ())
 
+    def test_getitem(self):
+        out_features = ["p3", "p4", "p5", "p6", "p7"]
+        in_feature = "p5"
+
+        def fn(a):
+            return a[out_features.index(in_feature)]
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = [
+                    torch.rand([1, 256, 100, 152]),
+                    torch.rand([1, 256, 50, 76]),
+                    torch.rand([1, 256, 25, 38]),
+                ]
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x), opt_fn(x))
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -5772,11 +5920,19 @@ class TestFailure:
 def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
-            # You cannot copy functions in Python, so we use lambdas here to
+            # You cannot copy functions in Python, so we use closures here to
             # create objects with different ids. Otherwise, unittest.skip
             # would modify all methods sharing the same object id. Also, by
-            # using a default argument in a lambda, we create a copy instead of
-            # a reference. Otherwise, we would lose access to the value.
+            # using a default argument, we create a copy instead of a
+            # reference. Otherwise, we would lose access to the value.
+
+            @functools.wraps(value)
+            def new_test(self, value=value):
+                return value(self)
+
+            # Copy __dict__ which may contain test metadata
+            new_test.__dict__ = copy.deepcopy(value.__dict__)
+
             tf = test_failures and test_failures.get(name)
             if tf is not None and suffix in tf.suffixes:
                 skip_func = (
@@ -5784,15 +5940,9 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
                     if tf.is_skip
                     else unittest.expectedFailure
                 )
-                setattr(
-                    other_cls,
-                    f"{name}_{suffix}",
-                    skip_func(lambda self, value=value: value(self)),
-                )
-            else:
-                setattr(
-                    other_cls, f"{name}_{suffix}", lambda self, value=value: value(self)
-                )
+                new_test = skip_func(new_test)
+
+            setattr(other_cls, f"{name}_{suffix}", new_test)
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
