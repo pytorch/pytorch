@@ -1253,6 +1253,7 @@ class CPUReproTests(TestCase):
         assert metrics.generated_cpp_vec_kernel_count == 2
 
     def test_transpose_sum_outer(self):
+        # https://github.com/pytorch/pytorch/issues/98573
         def fn(a):
             return a.transpose(2, 3).sum(dim=1).contiguous()
 
