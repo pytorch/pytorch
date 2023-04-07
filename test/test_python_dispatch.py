@@ -80,7 +80,7 @@ class TestPythonRegistration(TestCase):
 
         def my_sum(*args, **kwargs):
             run[0] = True
-            return args[0]
+            return args[0].clone()
 
         my_lib1 = Library("aten", "IMPL")
         my_lib1.impl('aten::sum', my_sum, "CPU")
@@ -216,7 +216,7 @@ class TestPythonRegistration(TestCase):
 
     def test_extend_library_with_dispatch_key_arg(self):
         def my_sum(*args, **kwargs):
-            return args[0]
+            return args[0].clone()
         my_lib1 = Library("aten", "IMPL", dispatch_key="CPU")
 
         # RuntimeError: Explicitly provided dispatch key (Conjugate) is
@@ -236,7 +236,7 @@ class TestPythonRegistration(TestCase):
         # Example 1
         @torch.library.impl(my_lib1, "sum", "CPU")
         def my_sum(*args, **kwargs):
-            return args[0]
+            return args[0].clone()
 
         x = torch.tensor([1, 2])
         self.assertEqual(torch.ops.foo.sum(x), x)
@@ -249,7 +249,7 @@ class TestPythonRegistration(TestCase):
             if args[0]._is_zerotensor():
                 return torch._efficientzerotensor(args[0].shape)
             else:
-                return args[0]
+                return args[0].clone()
 
         y = torch._efficientzerotensor(3)
         self.assertTrue(torch.ops.foo.sum(y)._is_zerotensor())
@@ -261,14 +261,14 @@ class TestPythonRegistration(TestCase):
     def test_create_new_library_fragment_no_existing(self):
         my_lib = Library("foo", "FRAGMENT")
 
-        my_lib.define("sum(Tensor self) -> Tensor")
+        my_lib.define("sum2(Tensor self) -> Tensor")
 
-        @torch.library.impl(my_lib, "sum", "CPU")
+        @torch.library.impl(my_lib, "sum2", "CPU")
         def my_sum(*args, **kwargs):
             return args[0]
 
         x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum(x), x)
+        self.assertEqual(torch.ops.foo.sum2(x), x)
 
         del my_lib
 
@@ -278,14 +278,14 @@ class TestPythonRegistration(TestCase):
         # Create a fragment
         my_lib2 = Library("foo", "FRAGMENT")
 
-        my_lib2.define("sum(Tensor self) -> Tensor")
+        my_lib2.define("sum4(Tensor self) -> Tensor")
 
-        @torch.library.impl(my_lib2, "sum", "CPU")
-        def my_sum(*args, **kwargs):
+        @torch.library.impl(my_lib2, "sum4", "CPU")
+        def my_sum4(*args, **kwargs):
             return args[0]
 
         x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum(x), x)
+        self.assertEqual(torch.ops.foo.sum4(x), x)
 
         # Create another fragment
         my_lib3 = Library("foo", "FRAGMENT")

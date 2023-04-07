@@ -52,6 +52,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     atol: float = 1e-7,
     opset_version: int = 18,
     additional_test_inputs: Optional[Sequence[_InputArgsType]] = None,
+    input_mutation: bool = False,
     **input_kwargs,
 ):
     """Compare the results of PyTorch model with exported ONNX model
@@ -65,6 +66,9 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         additional_test_inputs (Optional[Sequence[_InputArgsType]], optional):
             Test the models with another dataset, which is designed for dynamic axes
             testing. Defaults to None.
+        input_mutation (bool, optional): Whether the model mutates its input.
+            `input_mutation` as `True` incurs extra overhead of cloning the inputs.
+            Defaults to False.
 
     """
 
@@ -91,10 +95,14 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         else:
             signature = inspect.signature(model)
 
+        if input_mutation:
+            ref_model_input_args = copy.deepcopy(model_input_args)
+        else:
+            ref_model_input_args = model_input_args
         # Bind args and kwargs to the model's signature to
         # flatten kwargs into positional args since ONNX
         # model cannot be called with kwargs.
-        bound = signature.bind(*model_input_args)
+        bound = signature.bind(*ref_model_input_args)
         # Fill optional inputs.
         bound.apply_defaults()
         assert not bound.kwargs
@@ -200,6 +208,22 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
+        )
+
+    @unittest.skip(
+        "ORT flaky segfault: https://github.com/microsoft/onnx-script/issues/523"
+    )
+    def test_mutation(self):
+        class MutationModel(torch.nn.Module):
+            def forward(self, x):
+                x.view(3, 2, -1).add_(2.0)
+                return x
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            MutationModel(),
+            (torch.randn(12),),
+            additional_test_inputs=[(torch.randn(24),)],
+            input_mutation=True,
         )
 
     @unittest.skip("flaky test: https://github.com/microsoft/onnx-script/issues/523")
