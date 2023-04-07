@@ -6,7 +6,6 @@ from torch.ao.quantization import (
     QuantType,
 )
 from torch.ao.quantization.backend_config import (
-    BackendConfig,
     DTypeWithConstraints,
 )
 from torch.ao.quantization.fake_quantize import (
@@ -86,25 +85,23 @@ class ObservedGraphModuleAttrs:
     standalone_module_input_quantized_idxs: Optional[List[int]] = None
     standalone_module_output_quantized_idxs: Optional[List[int]] = None
 
-def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
+def node_arg_is_weight(node: Node, arg: Any) -> bool:
     """Returns if node arg is weight"""
-    if isinstance(node, Node) and node.op == "call_function" and \
-            node.target in backend_config._pattern_complex_format_to_config:
-        weight_index = backend_config._pattern_complex_format_to_config[node.target]._input_type_to_index.get("weight")
-        if weight_index is not None and weight_index < len(node.args) and node.args[weight_index] is arg:
-            return True
-        return node.kwargs.get("weight") is arg
-    return False
+    weight_index = None
+    if "target_dtype_info" in node.meta:
+        weight_index = node.meta["target_dtype_info"].get("weight_index", None)
+    if weight_index is not None and weight_index < len(node.args) and node.args[weight_index] is arg:
+        return True
+    return node.kwargs.get("weight") is arg
 
-def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
+def node_arg_is_bias(node: Node, arg: Any) -> bool:
     """Returns if node arg is bias"""
-    if isinstance(node, Node) and node.op == "call_function" and \
-            node.target in backend_config._pattern_complex_format_to_config:
-        bias_index = backend_config._pattern_complex_format_to_config[node.target]._input_type_to_index.get("bias")
-        if bias_index is not None and bias_index < len(node.args) and node.args[bias_index] is arg:
-            return True
-        return node.kwargs.get("bias") is arg
-    return False
+    bias_index = None
+    if "target_dtype_info" in node.meta:
+        bias_index = node.meta["target_dtype_info"].get("bias_index", None)
+    if bias_index is not None and bias_index < len(node.args) and node.args[bias_index] is arg:
+        return True
+    return node.kwargs.get("bias") is arg
 
 def get_custom_module_class_keys(custom_module_mapping: Dict[QuantType, Dict[Type, Type]]) -> List[Any]:
     r""" Get all the unique custom module keys in the custom config dict
