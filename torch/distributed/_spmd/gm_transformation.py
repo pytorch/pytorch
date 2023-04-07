@@ -8,7 +8,11 @@ from functorch import make_fx
 from torch import fx
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.decomposition import select_decomp_table
-from torch.distributed._spmd.graph_optimization import comm_fusion_with_concat
+from torch.distributed._spmd.graph_optimization import (
+    comm_fusion_with_concat,
+    enable_graph_optimization_dump,
+    schedule_comm_wait,
+)
 from torch.distributed._spmd.graph_utils import dump_graphs_to_files, OP
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
 from torch.utils._pytree import tree_flatten, tree_map_only
@@ -129,10 +133,12 @@ class GraphModuleTransformation:
             graph_folder = dump_graphs_to_files(
                 {"before_transformation_gm": gm.print_readable(False)}
             )
+            enable_graph_optimization_dump(graph_folder)
 
         iter_gm = IterGraphModule(gm)
         if self.enable_graph_optimization:
             comm_fusion_with_concat(iter_gm, 100)
+            schedule_comm_wait(iter_gm)
         iter_gm.freeze_cross_iter_movement()
         iter_gm.setup(self.num_iters)
 

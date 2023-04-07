@@ -49,15 +49,19 @@ class TransformationTest(DTensorTestBase):
     def world_size(self):
         return 2
 
-    def _init(self, batch_size, layers, dim):
+    def _init(self, batch_size, layers, dim, foreach: bool = True, fused: bool = False):
         torch.manual_seed(0)
         model = DummyModel(layers, dim).cuda()
         ddp_model = DDP(deepcopy(model), device_ids=[dist.get_rank()])
         optim = torch.optim.Adam(
-            model.parameters(), lr=0.01, foreach=True, capturable=True
+            model.parameters(), lr=0.01, foreach=foreach, fused=fused, capturable=True
         )
         ddp_optim = torch.optim.Adam(
-            ddp_model.parameters(), lr=0.01, foreach=True, capturable=True
+            ddp_model.parameters(),
+            lr=0.01,
+            foreach=foreach,
+            fused=fused,
+            capturable=True,
         )
         batch = torch.randn(batch_size, dim).cuda()
 
@@ -139,7 +143,7 @@ class TransformationTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_graph_optimization(self):
+    def test_graph_optimization_with_foreach(self):
         batch_size = 100
         layers = 2
         dim = 4096
@@ -147,7 +151,9 @@ class TransformationTest(DTensorTestBase):
 
         @compile(
             gm_transformation=GraphModuleTransformation(
-                num_iters=num_iters, enable_graph_optimization=True
+                num_iters=num_iters,
+                enable_graph_optimization=True,
+                dump_graphs=False,
             )
         )
         def train_step(model, optim, batch):
@@ -155,8 +161,34 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-
         model, optim, _, _ = self._init(batch_size, layers, dim)
+        for _ in range(num_iters):
+            batch = torch.randn(batch_size, dim).cuda()
+            out = train_step(model, optim, batch)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_graph_optimization_with_fused(self):
+        batch_size = 100
+        layers = 2
+        dim = 4096
+        num_iters = 5
+
+        @compile(
+            gm_transformation=GraphModuleTransformation(
+                num_iters=num_iters,
+                enable_graph_optimization=True,
+                dump_graphs=False,
+            )
+        )
+        def train_step(model, optim, batch):
+            model(batch).sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+        model, optim, _, _ = self._init(
+            batch_size, layers, dim, foreach=False, fused=True
+        )
         for _ in range(num_iters):
             batch = torch.randn(batch_size, dim).cuda()
             out = train_step(model, optim, batch)
