@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import math
+from typing import List
 
 import torch
 import torch.distributed as dist
@@ -26,7 +27,7 @@ def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
     """
     assert isinstance(
         device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {device_mesh} was passed in."
+    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
 
     if device_mesh.get_coordinate() is not None:
         # the current rank is in mesh
@@ -55,7 +56,7 @@ def get_rng_state(device_mesh: DeviceMesh) -> Tensor:
     """
     assert isinstance(
         device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {device_mesh} was passed in."
+    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
 
     if device_mesh.device_type == "cuda":
         return torch.cuda.get_rng_state()
@@ -85,7 +86,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     """
     assert isinstance(
         device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {device_mesh} was passed in."
+    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
 
     # allgather the seed from rank 0 over the default PG
     object_list = [seed] * dist.get_world_size()
@@ -174,28 +175,15 @@ def set_pre_op_offset(spec: DTensorSpec) -> None:
         else:
             local_tensor_size.append(dtensor_shape[tensor_dim])
 
-    # get rank coordinate
-    rank_coord = mesh.get_coordinate()
-    if rank_coord is None:
-        raise RuntimeError(
-            "Do not support calculating starting offset for DTensor over sub-mesh"
-        )
-
     # Compute shard coordinate:
     # The coordinate on each tensor dim is a tuple (idx, range)
     # If a DTensor is partitioned on its dim i into n shards, and the current rank
     # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
-    shard_coord = [
-        (rank_coord[mesh_dim], mesh.size(mesh_dim)) if mesh_dim >= 0 else (0, 1)
-        for mesh_dim in dim_map
-    ]
+    shard_coord = _get_shard_coord(spec)
 
     # compute shard linear index
-    shard_linear_idx = 0
-    shard_coord_stride = 1
-    for idx, size in shard_coord:
-        shard_linear_idx += idx * shard_coord_stride
-        shard_coord_stride *= size
+    shard_size = _get_shard_size(spec)
+    shard_linear_idx = _calc_shard_linear_idx(shard_coord, shard_size)
 
     # compute starting offset
     local_size = math.prod(local_tensor_size)
@@ -274,7 +262,7 @@ def _set_rng_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
     """
     assert isinstance(
         device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {device_mesh} was passed in."
+    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
 
     if device_mesh.get_coordinate() is not None:
         # the current rank is in mesh
@@ -293,3 +281,32 @@ def _set_rng_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
                 f"DTensor randomness only supports cuda device type, "
                 f"but got {device_mesh.device_type}"
             )
+
+
+def _get_shard_coord(spec: DTensorSpec) -> List[int]:
+    mesh = spec.mesh
+
+    # get rank coordinate
+    rank_coord = mesh.get_coordinate()
+    if rank_coord is None:
+        raise RuntimeError(
+            "Do not support calculating starting offset for DTensor over sub-mesh"
+        )
+
+    return [rank_coord[mesh_dim] if mesh_dim >= 0 else 0 for mesh_dim in spec.dim_map]
+
+
+def _get_shard_size(spec: DTensorSpec) -> List[int]:
+    mesh = spec.mesh
+    return [mesh.size(mesh_dim) if mesh_dim >= 0 else 1 for mesh_dim in spec.dim_map]
+
+
+def _calc_shard_linear_idx(shard_coord: List[int], shard_size: List[int]) -> int:
+    # compute shard linear index
+    shard_linear_idx = 0
+    shard_coord_stride = 1
+    for idx, size in zip(reversed(shard_coord), reversed(shard_size)):
+        shard_linear_idx += idx * shard_coord_stride
+        shard_coord_stride *= size
+
+    return shard_linear_idx
