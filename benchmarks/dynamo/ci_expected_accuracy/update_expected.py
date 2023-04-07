@@ -72,9 +72,9 @@ def get_artifacts_urls(results, suites):
     return urls
 
 
-def normalize_suite_filename(suite_name, for_csv=False):
+def normalize_suite_filename(suite_name, as_file_name=False):
     assert suite_name.find("inductor_") == 0
-    if for_csv:
+    if as_file_name:
         subsuite = suite_name.replace("inductor_", "")
     else:
         subsuite = suite_name.split("_")[1]
@@ -107,7 +107,7 @@ def download_artifacts_and_extract_csvs(urls):
 
 def write_filtered_csvs(root_path, dataframes):
     for (suite, phase), df in dataframes.items():
-        suite_fn = normalize_suite_filename(suite, for_csv=True)
+        suite_fn = normalize_suite_filename(suite, as_file_name=True)
         out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
         df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
 

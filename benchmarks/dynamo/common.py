@@ -1092,10 +1092,6 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def failing_torchinductor_models(self):
-        return set()
-
-    @property
     def failing_fx2trt_models(self):
         return set()
 
@@ -2126,12 +2122,6 @@ def run(runner, args, original_dir=None):
             runner.skip_models.update(runner.large_mem_models)
             if args.training:
                 runner.skip_models.add("hf_T5")
-
-    if args.inductor or args.inductor_settings:
-        runner.skip_models.update(runner.failing_torchinductor_models)
-        if args.float16:
-            # TODO(jansel): check if correctness issue is real
-            runner.skip_models.add("yolov3")
 
     if args.float16:
         # these give `INCORRECT - Variation in Eager runs itself` sometimes

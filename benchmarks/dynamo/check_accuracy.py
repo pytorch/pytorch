@@ -7,7 +7,10 @@ import pandas as pd
 
 
 def get_field(csv, model_name: str, field: str):
-    return csv.loc[csv["name"] == model_name][field].item()
+    try:
+        return csv.loc[csv["name"] == model_name][field].item()
+    except Exception as e:
+        return None
 
 
 def check_accuracy(actual_csv, expected_csv, expected_filename):
