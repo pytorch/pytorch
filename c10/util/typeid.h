@@ -663,7 +663,7 @@ inline std::ostream& operator<<(
 #define CAFFE_DECLARE_KNOWN_TYPE(T, ident)                 \
   extern template uint16_t TypeMeta::addTypeMetaData<T>(); \
   namespace detail {                                       \
-  extern C10_EXPORT const uint16_t ident##_metadata_index; \
+  extern C10_API const uint16_t ident##_metadata_index;    \
   } /* namespace detail */                                 \
   template <>                                              \
   EXPORT_IF_NOT_GCC C10_ALWAYS_INLINE uint16_t             \
