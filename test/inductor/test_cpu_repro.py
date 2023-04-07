@@ -1252,6 +1252,16 @@ class CPUReproTests(TestCase):
         self.assertTrue(same(fn(x, y), opt_fn(x, y)))
         assert metrics.generated_cpp_vec_kernel_count == 2
 
+    def test_transpose_sum_outer(self):
+        def fn(a):
+            return a.transpose(2, 3).sum(dim=1).contiguous()
+
+        metrics.reset()
+        x = torch.randn(10, 50, 50, 50)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
