@@ -2013,7 +2013,8 @@ class BufferList(IRNode):
         assert self.name
         return self.name
 
-    def get_device(self, ind):
+    # TODO mlazos: Ensure each Bufferlist has uniform dtype and device
+    def get_device(self, ind=0):
         return self.layouts[ind].device
 
     def get_dtype(self, ind):
@@ -2072,13 +2073,29 @@ class BufferList(IRNode):
     def get_mutation_names(self):
         return ()
 
-    @cache_on_self
     def get_read_writes(self):
-        with patch.object(FlexibleLayout, "allow_indexing", True):
-            return extract_read_writes(
-                self.make_loader(),
-                self.get_size(),
+        return self.normalized_read_writes()
+
+    @cache_on_self
+    def normalized_read_writes(self):
+        name = self.get_name()
+        deps = dependencies.ReadWrites(set(), set(), set())
+        for input in self.data.get_inputs():
+            layout = input.get_layout()
+            indexer = layout.make_indexer()
+
+            def dummy(index, rindex):
+                assert len(rindex) == 0
+                return ops.store(name, indexer(index), "fake")
+
+            deps = deps.merge(
+                dependencies.extract_read_writes(dummy, layout.size, (), normalize=True)
             )
+
+        deps.reads = {
+            dependencies.StarDep(x.get_name()) for x in self.data.get_inputs()
+        }
+        return deps
 
     def get_reads(self):
         return self.get_read_writes().reads
@@ -3787,13 +3804,18 @@ class StorageBox(MutableBox):
 
 # This will have some other metadata and stuffs
 class ForeachPointwise(IRNode):
-    def __init__(self, layouts):
+    def __init__(self, left_inputs, right_inputs):
         super().__init__()
-        self.layouts = layouts
+        self.layouts = [i.get_layout() for i in left_inputs]
+        self.left_inputs = InputsKernel.unwrap_storage(left_inputs)
+        self.right_inputs = InputsKernel.unwrap_storage(right_inputs)
 
     @classmethod
     def create(cls, *args, **kwargs):
         return BufferList(cls(*args, **kwargs))
+
+    def get_inputs(self):
+        return itertools.chain(self.left_inputs, self.right_inputs)
 
 
 class InterpreterShim(torch.fx.Interpreter):

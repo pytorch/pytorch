@@ -344,6 +344,10 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         return False
 
 
+class ForeachKernelSchedulernode(BaseSchedulerNode):
+    pass
+
+
 class NopKernelSchedulerNode(BaseSchedulerNode):
     pass
 
@@ -631,11 +635,11 @@ class Scheduler:
             ), "All nodes passed to scheduling must have an origin"
             if node.is_no_op():
                 self.nodes.append(NopKernelSchedulerNode(self, node))
-            elif isinstance(
-                node, (ir.ComputedBuffer, ir.TemplateBuffer, ir.BufferList)
-            ):
+            elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
                 group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(SchedulerNode(self, node, group_fn))
+            elif isinstance(node, ir.BufferList):
+                self.nodes.append(ForeachKernelSchedulernode(self, node))
             elif isinstance(node, ir.ExternKernel):
                 self.nodes.append(ExternKernelSchedulerNode(self, node))
             else:

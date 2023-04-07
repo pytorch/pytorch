@@ -433,9 +433,7 @@ def make_foreach_pointwise(
                 old_layout.offset,
             )
 
-        return ForeachPointwise.create(
-            layouts=[new_layout(input.get_layout()) for input in inputs[0]],
-        )
+        return ForeachPointwise.create(inputs[0], inputs[1])
 
     return inner
 
