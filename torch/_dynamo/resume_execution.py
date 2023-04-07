@@ -38,6 +38,15 @@ class ReenterWith:
     # If we do not want to destroy the stack, we can do the same thing as a
     # `SETUP_WITH` block, only that we store the context manager in a local_symbol
     def try_except(self, code_options, cleanup: List[Instruction]):
+        """
+        Codegen based off of:
+        load args
+        enter context
+        try:
+            (rest)
+        finally:
+            exit context
+        """
         load_args = []
         if self.target_values:
             load_args = [
@@ -51,7 +60,9 @@ class ReenterWith:
             if name not in code_options["co_names"]:
                 code_options["co_names"] += (name,)
 
-        except_jump_target = create_instruction("NOP")
+        except_jump_target = create_instruction(
+            "NOP" if sys.version_info < (3, 11) else "PUSH_EXC_INFO"
+        )
         cleanup_complete_jump_target = create_instruction("NOP")
 
         setup_finally = [
@@ -72,9 +83,8 @@ class ReenterWith:
             exn_tab_begin = create_instruction("NOP")
             exn_tab_end = create_instruction("NOP")
             exn_tab_begin.exn_tab_entry = InstructionExnTabEntry(
-                exn_tab_begin, exn_tab_end, except_jump_target, self.stack_index, False
+                exn_tab_begin, exn_tab_end, except_jump_target, self.stack_index + 1, False
             )
-            breakpoint()
             setup_finally.append(exn_tab_begin)
 
         reset = [
@@ -105,15 +115,23 @@ class ReenterWith:
                 cleanup_complete_jump_target,
             ]
         else:
+            finally_exn_tab_end = create_instruction("RERAISE", arg=0)
+            finally_exn_tab_target = create_instruction("COPY", arg=3)
+            except_jump_target.exn_tab_entry = InstructionExnTabEntry(
+                except_jump_target,
+                finally_exn_tab_end,
+                finally_exn_tab_target,
+                self.stack_index + 2,
+                True
+            )
             epilogue = [
                 exn_tab_end,
                 *reset,
                 create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
-                except_jump_target,
-                create_instruction("PUSH_EXC_INFO"),
+                except_jump_target,  # PUSH_EXC_INFO
                 *reset,
-                create_instruction("RERAISE", arg=0),
-                create_instruction("COPY", arg=3),
+                finally_exn_tab_end,  # RERAISE 0
+                finally_exn_tab_target,  # COPY 3
                 create_instruction("POP_EXCEPT"),
                 create_instruction("RERAISE", arg=1),
                 cleanup_complete_jump_target,
@@ -123,6 +141,11 @@ class ReenterWith:
         return setup_finally
 
     def __call__(self, code_options, cleanup):
+        """
+        Codegen based off of:
+        with ctx(args):
+            (rest)
+        """
         load_args = []
         if self.target_values:
             load_args = [
@@ -186,21 +209,38 @@ class ReenterWith:
             def create_load_none():
                 return create_instruction("LOAD_CONST", argval=None)
 
+            exn_tab_1_begin = create_instruction("POP_TOP")
+            exn_tab_1_end = create_instruction("NOP")
+            exn_tab_1_target = create_instruction("PUSH_EXC_INFO")
+            exn_tab_2_end = create_instruction("RERAISE", arg=2)
+            exn_tab_2_target = create_instruction("COPY", arg=3)
+
+            exn_tab_1_begin.exn_tab_entry = InstructionExnTabEntry(
+                exn_tab_1_begin, exn_tab_1_end, exn_tab_1_target, self.stack_index + 1, True
+            )
+            exn_tab_1_target.exn_tab_entry = InstructionExnTabEntry(
+                exn_tab_1_target, exn_tab_2_end, exn_tab_2_target, self.stack_index + 3, True
+            )
+            pop_top_after_with_except_start.exn_tab_entry = InstructionExnTabEntry(
+                pop_top_after_with_except_start, pop_top_after_with_except_start, exn_tab_2_target, self.stack_index + 3, True
+            )
+
             cleanup[:] = [
+                exn_tab_1_end,
                 create_load_none(),
                 create_load_none(),
                 create_load_none(),
                 *create_call_function(2, False),
                 create_instruction("POP_TOP"),
                 create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
-                create_instruction("PUSH_EXC_INFO"),
+                exn_tab_1_target,  # PUSH_EXC_INFO
                 create_instruction("WITH_EXCEPT_START"),
                 create_instruction(
                     "POP_JUMP_FORWARD_IF_TRUE",
                     target=pop_top_after_with_except_start,
                 ),
-                create_instruction("RERAISE", arg=2),
-                create_instruction("COPY", arg=3),
+                exn_tab_2_end,  # RERAISE 2
+                exn_tab_2_target,  # COPY 3
                 create_instruction("POP_EXCEPT"),
                 create_instruction("RERAISE", arg=1),
                 pop_top_after_with_except_start,
@@ -214,7 +254,7 @@ class ReenterWith:
                 *load_args,
                 *create_call_function(len(load_args), True),
                 create_instruction("BEFORE_WITH"),
-                create_instruction("POP_TOP"),
+                exn_tab_1_begin,  # POP_TOP
             ]
 
 
@@ -273,7 +313,7 @@ class ContinueExecutionCache:
             if sys.version_info >= (3, 11):
                 code_options[
                     "co_qualname"
-                ] = f"<graph break in {code_options['co_qualname']}>"
+                ] = f"<resume in {code_options['co_qualname']}>"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
             code_options["co_freevars"] = freevars
@@ -328,6 +368,7 @@ class ContinueExecutionCache:
             instructions[:] = prefix + instructions
 
         new_code = transform_code_object(code, update)
+        breakpoint()
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
         return new_code
 

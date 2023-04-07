@@ -563,6 +563,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
 
+        log.debug(f"TRACE {inst.opname} {inst.argval} {self.stack} {self.block_stack}")
+
         # Handle blocks in Python 3.11
         if sys.version_info >= (3, 11):
             entry = inst.exn_tab_entry
@@ -590,8 +592,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     self.block_stack.append(
                         BlockStackEntry(entry.target, len(self.stack))
                     )
-
-        log.debug(f"TRACE {inst.opname} {inst.argval} {self.stack}")
 
         try:
             if not hasattr(self, inst.opname):
@@ -1649,11 +1649,17 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
         # 3.11 no longer uses a block stack, but we still keep track of one
         # so that we know which contexts are currently active.
+        assert self.next_instruction
+        assert self.next_instruction.exn_tab_entry
+        target = self.next_instruction.exn_tab_entry.target
         if isinstance(self, InstructionTranslator):
-            self.block_stack.append(BlockStackEntry(inst.target, len(self.stack), ctx))
+            self.block_stack.append(
+                BlockStackEntry(target, len(self.stack), ctx)
+            )
         else:
-            # can't restore this while inlining
-            self.block_stack.append(BlockStackEntry(inst.target))
+            self.block_stack.append(
+                BlockStackEntry(target)
+            )
 
         self.push(exit)
         self.push(ctx.enter(self))
@@ -1997,7 +2003,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         log.debug("RETURN_VALUE triggered compile")
         self.output.compile_subgraph(
-            self, reason=GraphCompileReason("return_value", [self.frame_summary()])
+            self,
+            reason=GraphCompileReason(
+                "return_value", [self.frame_summary()], graph_break=False
+            ),
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 

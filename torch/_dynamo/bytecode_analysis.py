@@ -35,6 +35,8 @@ def remove_dead_code(instructions):
                 return
             live_code.add(i)
             inst = instructions[i]
+            if inst.exn_tab_entry:
+                find_live_code(indexof[id(inst.exn_tab_entry.target)])
             if inst.opcode in JUMP_OPCODES:
                 find_live_code(indexof[id(inst.target)])
             if inst.opcode in TERMINAL_OPCODES:
