@@ -6,7 +6,7 @@ import boto3 # type: ignore[import]
 from botocore.exceptions import ClientError  # type: ignore[import]
 
 
-TABLE_NAME_FILENAMES = "torchci-metrics-ci-wait-time"
+TABLE_NAME = "torchci-metrics-ci-wait-time"
 dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
 
 # Make the results more consistent, and ensure proper typing of the columns
@@ -291,9 +291,52 @@ def get_pr_stats() -> pd.DataFrame:
 
     return get_pr_level_stats(runs)
 
+def table_exists(table_name: str) -> bool:
+    """
+    Determines whether a table exists. As a side effect, stores the table in
+    a member variable.
+    """
+    exists = None
+    try:
+        table = dynamodb.Table(table_name)
+        table.load()
+        exists = True
+        print(f"Table '{table_name}' exists")
+    except ClientError as err:
+        if err.response["Error"]["Code"] == "ResourceNotFoundException":
+            print(f"Table '{table_name}' does not exist")
+            exists = False
+        else:
+            print("Unknown error")
+            print(err.response)
+    return exists
+
 def upload_stats(pr_stats):
-    print(pr_stats)
-    pass
+    print(pr_stats.head(30))
+
+    print(f"Uploading data to {TABLE_NAME}")
+
+    statsTable = dynamodb.Table(TABLE_NAME)
+
+    for index, row in pr_stats.iterrows():
+        statsTable.update_item(
+            Key={
+                'dynamoKey': f"{row['week'].isoformat()}_{row['pr_number']}",
+            },
+            UpdateExpression="set pr_number = :p duration_mins = :d, start_time = :s, end_time = :e, num_commits = :n, week = :w",
+            ExpressionAttributeValues={
+                ':p': row['pr_number'],
+                ':d': row['duration_mins'],
+                ':s': row['start_time'].isoformat(),
+                ':e': row['end_time'].isoformat(),
+                ':n': row['num_commits'],
+                ':w': row['week'].isoformat(),
+            },
+            ReturnValues="UPDATED_NEW"
+        )
+
+    print(f"Finished uploading data to {TABLE_NAME}")
+
 
 def main() -> None:
     pr_stats = get_pr_stats()
