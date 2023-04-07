@@ -1,4 +1,4 @@
-name: Update S3 HTML indices for download.pytorch.org
+name: Update CI Wait Time Metric
 on:
 #  schedule:
     # Update the indices every 30 minutes
