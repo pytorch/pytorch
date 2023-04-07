@@ -2650,9 +2650,29 @@ class NativeCachingAllocator : public CUDAAllocator {
     malloc(&r, device, nbytes, stream);
     return r;
   }
-  bool needsPoolSpecificPeerAccess() override {
-    return false;
+
+  void enablePeerAccess(int dev, int dev_to_access) override {
+    c10::cuda::CUDAGuard device_guard(dev);
+    cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
+    if (err == cudaErrorPeerAccessAlreadyEnabled) {
+      // ignore and clear the error if access was already enabled
+      cudaGetLastError();
+    } else {
+      C10_CUDA_CHECK(err);
+    }
   }
+
+  cudaError_t memcpyAsync(
+      void* dst,
+      int dstDevice,
+      const void* src,
+      int srcDevice,
+      size_t count,
+      cudaStream_t stream,
+      bool p2p_enabled) override {
+    return cudaMemcpyAsync(dst, src, count, cudaMemcpyDeviceToDevice, stream);
+  }
+
   void raw_delete(void* ptr) override {
     this->free(ptr);
   }
