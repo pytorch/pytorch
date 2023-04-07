@@ -7108,6 +7108,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_2 = torch.rand([5, 0], dtype=torch.float32)
         torch.nn.CrossEntropyLoss()(input_1, input_2)
 
+    def test_cross_entropy_dim_parameter(self):
+        input_1 = torch.randn(15, 10, 20, device="cpu", dtype=torch.float)
+        input_2 = input_1.swapaxes(2, 1)
+        target = torch.empty(15, 20, dtype=torch.long).random_(10)
+
+        loss_1 = F.cross_entropy(input_1, target)
+        loss_2 = F.cross_entropy(input_2, target, dim=2)
+        self.assertEqual(loss_1, loss_2, atol=1e-1, rtol=0)
+        
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(

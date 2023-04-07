@@ -1131,6 +1131,9 @@ class CrossEntropyLoss(_WeightedLoss):
             of smoothing when computing the loss, where 0.0 means no smoothing. The targets
             become a mixture of the original ground truth and a uniform distribution as described in
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+        dim (int, optional): Specifies the dimension of the classes (the dimension across which softmax is computed).
+            If :attr:`dim` is set to ``None``, then :attr:`dim` defaults to 1.
+            Default: ``None``
 
     Shape:
         - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
@@ -1165,20 +1168,22 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-    __constants__ = ['ignore_index', 'reduction', 'label_smoothing']
+    __constants__ = ['ignore_index', 'reduction', 'label_smoothing', 'dim']
     ignore_index: int
     label_smoothing: float
+    dim: int
 
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, ignore_index: int = -100,
-                 reduce=None, reduction: str = 'mean', label_smoothing: float = 0.0) -> None:
+                 reduce=None, reduction: str = 'mean', label_smoothing: float = 0.0, dim: Optional[int] = None) -> None:
         super().__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing
+        self.dim = dim
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.cross_entropy(input, target, weight=self.weight,
                                ignore_index=self.ignore_index, reduction=self.reduction,
-                               label_smoothing=self.label_smoothing)
+                               label_smoothing=self.label_smoothing, dim=self.dim)
 
 
 class MultiLabelSoftMarginLoss(_WeightedLoss):

@@ -2971,6 +2971,7 @@ def cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
     label_smoothing: float = 0.0,
+    dim: Optional[int] = None,
 ) -> Tensor:
     r"""This criterion computes the cross entropy loss between input logits and target.
 
@@ -3007,6 +3008,9 @@ def cross_entropy(
             of smoothing when computing the loss, where 0.0 means no smoothing. The targets
             become a mixture of the original ground truth and a uniform distribution as described in
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+        dim (int, optional): Specifies the dimension of the classes (the dimension across which softmax is computed).
+            If :attr:`dim` is set to ``None``, then :attr:`dim` defaults to 1.
+            Default: ``None``
 
     Shape:
         - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
@@ -3049,10 +3053,13 @@ def cross_entropy(
             reduce=reduce,
             reduction=reduction,
             label_smoothing=label_smoothing,
+            dim=dim,
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index, label_smoothing)
+        if dim is not None:
+            input = input.swapaxes(dim, 1)
+    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index, label_smoothing, dim)
 
 
 def binary_cross_entropy(
