@@ -1017,13 +1017,3 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         parse_profile_event_list(
             benchmark_name, event_list, wall_time_ms, times * repeat
         )
-
-def triton_config_to_hashable(cfg):
-    """
-    Convert triton config to a tuple that can uniquely identify it. We can use
-    the return value as a dictionary key.
-    """
-    items = list(sorted(cfg.kwargs.items()))
-    items.append(("num_warps", cfg.num_warps))
-    items.append(("num_stages", cfg.num_stages))
-    return tuple(items)
