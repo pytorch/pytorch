@@ -1,11 +1,14 @@
 import builtins
+import ast
 import collections
 import importlib
+import dataclasses
 import itertools
 import logging
 import math
 import os
 import re
+import sys
 import types
 import weakref
 from inspect import currentframe, getframeinfo
@@ -67,6 +70,34 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
     ]
 )
+
+if sys.version_info[:2] <= (3, 8):
+    # [Note: Python Version <= 3.8]
+    # This branch should be dropped when we drop support for Python 3.8.
+    # Reason: 'ast.unparse' function was introduced in Python 3.9.
+
+    try:
+        import astunparse  # type: ignore[import]
+
+        def _ast_unparse(node: ast.AST) -> str:
+            return astunparse.unparse(node).replace("\n", "")
+
+        def _ast_unparse_implemented(node: ast.AST) -> bool:
+            return hasattr(astunparse.Unparser, "_" + node.__class__.__name__)
+
+        HAS_UNPARSE_FUNCTIONS = True
+    except ImportError:
+        HAS_UNPARSE_FUNCTIONS = False
+        pass
+else:
+    HAS_UNPARSE_FUNCTIONS = True
+
+    def _ast_unparse(node: ast.AST) -> str:
+        return ast.unparse(node).replace("\n", "")
+
+    def _ast_unparse_implemented(node: ast.AST) -> bool:
+        return True
+
 
 
 def strip_function_call(name):
@@ -608,6 +639,145 @@ class GuardBuilder(GuardBuilderBase):
         )
 
 
+# Common Sub-Expression Elimination for Python expressions.
+#
+# There are 2 steps to this pass:
+#     1. Count the frequency of each sub-expression (i.e. inner
+#        node in the AST tree)
+#
+#     2. Replace those that occur more than once by a fresh variable 'v'.
+#        'v' will be defined in the 'preface' list (output argument to
+#        'NodeTransformer')
+class PyExprCSEPass:
+    IGNORED_NODE_TYPES = (
+        # Proxy nodes
+        # i.e. nodes that result in the same unparsed string as their children
+        ast.Expression,
+        ast.Index,
+        ast.Expr,
+        ast.Module,
+        # Leaf Expression nodes
+        ast.Name,
+        ast.Constant,
+        # Expr-Context nodes
+        ast.Load,
+        ast.Store,
+        ast.Del,
+        # Bool Operation nodes
+        ast.And,
+        ast.Or,
+        # Arithmetic Operation nodes
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.MatMult,
+        ast.Div,
+        ast.Mod,
+        ast.Pow,
+        ast.LShift,
+        ast.RShift,
+        ast.BitOr,
+        ast.BitXor,
+        ast.BitAnd,
+        ast.FloorDiv,
+        # Unary Operation nodes
+        ast.Invert,
+        ast.Not,
+        ast.UAdd,
+        ast.USub,
+        # Compare Operation nodes
+        ast.Eq,
+        ast.NotEq,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+        ast.Is,
+        ast.IsNot,
+        ast.In,
+        ast.NotIn,
+    )
+
+    class CSEVisitor(ast.NodeVisitor):
+        IGNORE = object()
+
+        def __init__(self) -> None:
+            self._expr_counter: Dict[str, int] = collections.defaultdict(lambda: 0)
+
+        def visit(self, node: ast.AST) -> Any:
+            if _ast_unparse_implemented(node) and not isinstance(
+                node, PyExprCSEPass.IGNORED_NODE_TYPES
+            ):
+                self._expr_counter[_ast_unparse(node)] += 1
+            super().visit(node)
+
+    class CSETransformer(ast.NodeTransformer):
+        def __init__(
+            self,
+            expr_counter: Dict[str, int],
+            preface: List[str],
+            gen_name: Callable[[], str],
+        ) -> None:
+            super().__init__()
+            self._expr_counter = expr_counter
+            self._preface = preface
+            self._gen_name = gen_name
+            self._expr_to_name: Dict[str, str] = {}
+
+        def visit(self, node: ast.AST) -> Any:
+            if _ast_unparse_implemented(node) and not isinstance(
+                node, PyExprCSEPass.IGNORED_NODE_TYPES
+            ):
+                expr = _ast_unparse(node)
+
+                # Replacement only occurs if a given expression is used more
+                # than once.
+                if self._expr_counter[expr] > 1:
+                    if expr not in self._expr_to_name:
+                        # Parent 'visit' is called so that we CSE the inner expressions first.
+                        #
+                        # The resulting expression is used as right-hand-side of the variable
+                        # assignment. i.e. we are CSE-ing the children before the parents.
+                        #
+                        # Indexing still uses the old 'node', since that's what was counted
+                        # by the 'NodeVisitor'.
+                        node_ = super().visit(node)
+                        expr_ = _ast_unparse(node_)
+                        var_name = self._gen_name()
+                        self._preface.append(f"{var_name} = {expr_}")
+                        self._expr_to_name[expr] = var_name
+                    else:
+                        var_name = self._expr_to_name[expr]
+                    return ast.Name(var_name, ast.Load())
+
+            return super().visit(node)
+
+    def __init__(self) -> None:
+        self._counter = 0
+
+    def _new_var(self, prefix: str = "_var") -> str:
+        name = f"{prefix}{self._counter}"
+        self._counter += 1
+        return name
+
+    def run(self, exprs: List[str]) -> Tuple[List[str], List[str]]:
+        preface: List[str] = []
+        parsed_exprs = [ast.parse(e) for e in exprs]
+        new_exprs = []
+
+        visitor = self.CSEVisitor()
+        transformer = self.CSETransformer(
+            visitor._expr_counter, preface, self._new_var
+        )
+
+        for e in parsed_exprs:
+            visitor.visit(e)
+        for e in parsed_exprs:
+            new_exprs.append(_ast_unparse(transformer.visit(e)))
+
+        return preface, new_exprs
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -747,7 +917,27 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        code = " and ".join(unique(code_parts))
+        def indent(line):
+            return " " * 4 + line
+
+        if HAS_UNPARSE_FUNCTIONS:
+            preface, code_parts = PyExprCSEPass().run(list(unique(code_parts)))
+        else:
+            preface = []
+            code_parts = list(unique(code_parts))
+
+
+        if len(preface) > 0:
+            preface = [
+                "try:",
+                *[indent(line) for line in preface],
+                "except:",
+                indent("return False"),
+            ]
+
+        preface_str = "\n".join(indent(indent(line)) for line in preface)
+        code = " and ".join(code_parts)
+
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
@@ -760,7 +950,10 @@ class CheckFunctionManager:
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda L: {code}
+    def guard(L):
+{preface_str}
+        return {code}
+    return guard
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
