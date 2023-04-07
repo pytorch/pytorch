@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from copy import deepcopy
 from typing import List, Optional, Sequence, Tuple
 
 import torch
@@ -173,14 +174,22 @@ def _prop__fused_adam(op_schema: OpSchema):
 @register_prop_rule(aten.nll_loss_forward.default)  # pyre-ignore
 def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
     self, target = op_schema.args_schema[:2]
-    # FIXME: weight is optional
+    assert isinstance(self, DTensorSpec)
+    assert isinstance(target, DTensorSpec)
     if self.placements != target.placements:
+        # Self and target must match in placements, which should be shard along
+        # batch dimension in data parallell use cases. Force redistribute.
+
+        # need to create a new self instead return (target, target) as target
+        # and self might not match in shape.
+        new_self = deepcopy(self)
+        new_self.placements = deepcopy(target.placements)
         return OutputSharding(
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
                     func_schema=op_schema.func_schema,
-                    args_schema=(target, target) + op_schema.args_schema[2:],
+                    args_schema=(new_self, target) + op_schema.args_schema[2:],
                     kwargs_schema=op_schema.kwargs_schema,
                     is_inplace=op_schema.is_inplace,
                     is_out_variant=op_schema.is_out_variant,
@@ -189,9 +198,11 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
         )
     else:
         from torch.fx.passes.shape_prop import TensorMetadata
-        #return OutputSharding(output_spec=(target,))
+
         return OutputSharding(
             output_spec=(
+                # by default, nll_loss_forward conducts a reduction and returns
+                # a scalar tensor, and hence the _Partial placements.
                 DTensorSpec(
                     mesh=self.mesh,
                     placements=[_Partial()],
@@ -205,19 +216,20 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
                         qparams={},
                     ),
                 ),
+                # the 2nd output total_weight is always a scalar tensor
                 DTensorSpec(
                     mesh=self.mesh,
                     placements=[Replicate()],
                     tensor_meta=TensorMetadata(
-                        shape=torch.Size([1]),
+                        shape=torch.Size([]),
                         dtype=self.tensor_meta.dtype,
                         memory_format=self.tensor_meta.memory_format,
                         requires_grad=False,
-                        stride=(1,),
+                        stride=(),
                         is_quantized=False,
                         qparams={},
                     ),
-                )
+                ),
             )
         )
 
@@ -225,7 +237,10 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
 @register_prop_rule(aten.nll_loss_backward.default)  # pyre-ignore
 def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
     grad_output, self = op_schema.args_schema[:2]
+    assert isinstance(grad_output, DTensorSpec)
+    assert isinstance(self, DTensorSpec)
     return OutputSharding(output_spec=self)
+
 
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
 def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:

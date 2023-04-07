@@ -690,28 +690,27 @@ class CoverageTest(DTensorTestBase):
     def world_size(self):
         return 2
 
-    def _test_train_step(self, train_step, mod, inp):
-
+    def _test_train_step(self, train_step, mod, *args):
         ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
 
         opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
         ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.01, foreach=True)
 
-        ddp_inp = deepcopy(inp)
+        ddp_args = deepcopy(args)
 
         # materialize optimizer states
-        mod(inp).sum().backward()
+        mod(*args).sum().backward()
         opt.step()
         opt.zero_grad()
 
-        ddp_mod(ddp_inp).sum().backward()
+        ddp_mod(*ddp_args).sum().backward()
         ddp_opt.step()
         ddp_opt.zero_grad()
 
         # test parameter parity
-        train_step(mod, opt, inp)
+        train_step(mod, opt, *args)
 
-        ddp_mod(ddp_inp).sum().backward()
+        ddp_mod(*ddp_args).sum().backward()
         # FIXME(@mrshenli): DDP by default divides grads by world size, but
         # torch.distributed.compile does not do that yet.
         with torch.no_grad():
@@ -736,31 +735,37 @@ class CoverageTest(DTensorTestBase):
             nn.Linear(10, 10),
             nn.LogSoftmax(dim=1),
         ).cuda(self.rank)
-        inp = torch.randn(20, 10).cuda(self.rank)
+        inp = torch.randn(2, 10).cuda(self.rank)
         self._test_train_step(train_step, mod, inp)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_nll_loss(self):
+        class ModuleWithLoss(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = nn.Sequential(
+                    nn.Linear(10, 10),
+                    nn.LogSoftmax(dim=1),
+                )
+                self.lss = nn.NLLLoss()
+
+            def forward(self, x, tgt):
+                return self.lss(self.mod(x), tgt)
+
         torch.manual_seed(0)
-        mod = nn.Sequential(
-            nn.Linear(10, 10),
-            nn.LogSoftmax(dim=1),
-        ).cuda(self.rank)
-        opt = torch.optim.SGD(mod.parameters(), lr=0.01)
+        mod = ModuleWithLoss().cuda(self.rank)
 
         @compile()
         def train_step(mod, opt, inp, tgt):
-            loss = nn.NLLLoss()
-            out = mod(inp)
-            l = loss(out, tgt)
-            l.backward()
+            mod(inp, tgt).backward()
             opt.step()
 
         inp = torch.randn(2, 10).to(self.rank)
         tgt = torch.empty(2, dtype=torch.long).random_(0, 10).to(self.rank)
 
-        train_step(mod, opt, inp, tgt)
+        self._test_train_step(train_step, mod, inp, tgt)
+
 
 if __name__ == "__main__":
     run_tests()
