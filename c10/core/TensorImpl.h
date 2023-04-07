@@ -1769,8 +1769,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             sizes_and_strides_.stride_at_unchecked(dim) = 1;
           } else {
             // Keep stride monotonically increasing to match NumPy.
-            overflowed |= c10::mul_overflows(sizes_and_strides_.stride_at_unchecked(dim + 1), std::max<int64_t>(
-              sizes_and_strides_.size_at_unchecked(dim + 1), 1), std::addressof(sizes_and_strides_.stride_at_unchecked(dim)));
+            overflowed |= c10::mul_overflows(
+                sizes_and_strides_.stride_at_unchecked(dim + 1),
+                std::max<int64_t>(
+                    sizes_and_strides_.size_at_unchecked(dim + 1), 1),
+                std::addressof(sizes_and_strides_.stride_at_unchecked(dim)));
           }
         }
         if (dim == 0)
@@ -2277,8 +2280,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           const auto last_idx = dim_ - 1;
           sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
-            overflowed |= c10::mul_overflows(sizes_and_strides_.stride_at_unchecked(i + 1), std::max<int64_t>(
-              sizes_and_strides_.size_at_unchecked(i + 1), 1), std::addressof(sizes_and_strides_.stride_at_unchecked(i)));
+            overflowed |= c10::mul_overflows(
+                sizes_and_strides_.stride_at_unchecked(i + 1),
+                std::max<int64_t>(
+                    sizes_and_strides_.size_at_unchecked(i + 1), 1),
+                std::addressof(sizes_and_strides_.stride_at_unchecked(i)));
           }
           TORCH_CHECK(!overflowed, "Stride calculation overflowed");
         }
