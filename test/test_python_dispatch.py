@@ -461,7 +461,7 @@ class TestCustomOp(TestCase):
         del foo
 
     def test_impl_cpu(self):
-        foo = CustomOp.define('custom::foo(Tensor x) -> Tensor')
+        foo = CustomOp.define('custom::foo.blahblahblah(Tensor x) -> Tensor')
 
         @foo.impl('cpu')
         def foo_cpu(x):
