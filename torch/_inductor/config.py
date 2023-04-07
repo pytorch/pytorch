@@ -247,9 +247,6 @@ class triton:
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
 
-    mathlib_name = "libdevice" if is_fbcode() else "math"
-
-# triton.persistent_reductions = False # TODO use a flag
 
 # create a directory containing lots of debug information
 class trace:

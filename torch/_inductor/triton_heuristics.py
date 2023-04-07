@@ -17,8 +17,8 @@ from torch._dynamo.utils import dynamo_timed
 
 from . import config
 from .codecache import cache_dir, cubin_cache_dir
+from .coordinate_descent_tuner import CoordescTuner
 
-inductor_config = config
 from .ir import ReductionHint, TileHint
 from .utils import (
     ceildiv,
@@ -28,7 +28,9 @@ from .utils import (
     get_num_bytes,
     has_triton,
     next_power_of_2,
+    triton_config_to_hashable,
 )
+from enum import Enum, auto
 
 
 log = logging.getLogger(__name__)
@@ -43,7 +45,13 @@ else:
     KernelInterface = object
     triton = None
 
-DEBUG = True
+DEBUG = False
+
+class HeuristicType(Enum):
+    POINTWISE = auto()
+    REDUCTION = auto()
+    PERSISTENT_REDUCTION = auto()
+    TEMPLATE = auto()
 
 class CachingAutotuner(KernelInterface):
     """
@@ -53,17 +61,17 @@ class CachingAutotuner(KernelInterface):
     configs, and does not rely on the Triton JIT.
     """
 
-    def __init__(self, fn, meta, configs, save_cache_hook, mutated_arg_names, filename=None):
+    def __init__(self, fn, meta, configs, save_cache_hook, mutated_arg_names, heuristic_type):
         super().__init__()
         self.fn = fn
         self.meta = meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
         self.configs = configs
-        self.filename = filename
+        self.heuristic_type = heuristic_type
 
         if DEBUG:
-            print(f"CachingAutotuner got {len(self.configs)} configs")
+            print(f"CachingAutotuner gets {len(self.configs)} configs")
             for c in self.configs:
                 print(c)
 
@@ -75,6 +83,8 @@ class CachingAutotuner(KernelInterface):
                 "triton",
                 str(self.meta.get("device", 0)),
             )
+
+        self.coordesc_tuner = CoordescTuner(is_mm=False, is_persistent_reduction=self.is_persistent_reduction())
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
@@ -170,10 +180,8 @@ class CachingAutotuner(KernelInterface):
 
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
-    @dynamo_timed
-    def benchmark_all_configs(self, *args, **kwargs):
+    def clone_args(self, *args):
         from .compile_fx import clone_preserve_strides
-
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
         # it leads to increase memory use
@@ -185,131 +193,31 @@ class CachingAutotuner(KernelInterface):
             else:
                 cloned_args.append(arg)
 
+        return cloned_args
+
+    @dynamo_timed
+    def benchmark_all_configs(self, *args, **kwargs):
+        cloned_args = self.clone_args(*args)
         timings = {
             launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
             for launcher in self.launchers
         }
+
+        for k, v in timings.items():
+            self.coordesc_tuner.cache_benchmark_result(k.config, v)
+
         if DEBUG:
+            print("Benchmark all input configs get:")
             for k, v in timings.items():
                 print(f"{k.config}: {v}")
+
         return timings
-
-    def is_persistent_reduction(self):
-        fn_name = self.fn.__name__
-        assert any([fn_name.startswith(prefix) for prefix in ["triton_poi_", "triton_red_", "triton_per_"]]), f"name {fn_name}"
-        return fn_name.startswith("triton_per_")
-
-    def coordinate_descent_tuning(self, launcher, *args, **kwargs):
-        """
-        Tune one config parameter at a time.
-
-        TODO: will it be beneficial to tune multiple config parameters
-        simultaneously?
-
-        TODO: what if both increasing and descreasing a coordinate can improve
-        perf. i.e., there are multiple local optimal..
-        """
-        # clone inplace buffers to avoid autotune contaminating them if
-        # the kernel does in-place stores. avoid cloning other buffers because
-        # it leads to increase memory use
-        from .compile_fx import clone_preserve_strides
-        cloned_args = []
-        for i, arg in enumerate(args):
-            if self.fn.arg_names[i] in self.mutated_arg_names:
-                assert isinstance(arg, torch.Tensor)
-                cloned_args.append(clone_preserve_strides(arg))
-            else:
-                cloned_args.append(arg)
-
-        baseline_timing = best_timing = self.bench(launcher, *cloned_args, **kwargs)[0]
-        tuning_coordinates = ["XBLOCK", "YBLOCK", "ZBLOCK", "num_warps"]
-        if not self.is_persistent_reduction():
-            tuning_coordinates.append("RBLOCK") 
-
-        def get_coord(config, name):
-            if name in ["XBLOCK", "YBLOCK", "ZBLOCK", "RBLOCK"]:
-                return config.kwargs.get(name, None)
-            elif name == "num_warps":
-                return config.num_warps
-            else:
-                raise KeyError(f"Unrecognized name {name}")
-
-        def set_coord(config, name, value):
-            if name in ["XBLOCK", "YBLOCK", "ZBLOCK", "RBLOCK"]:
-                config.kwargs[name] = value
-            elif name == "num_warps":
-                config.num_warps = value
-            else:
-                raise KeyError(f"Unrecognized name {name}")
-
-        improved = True
-        best_launcher = launcher
-        baseline_config = launcher.config
-
-        def has_improvement(baseline, test):
-            threshold = 0.00001
-            return test is not None and test < baseline * (1 - threshold)
-
-        print("= Do coordinate descent tuning =")
-        while improved:
-            improved = False
-            for name in tuning_coordinates:
-                lhs_config, rhs_config = None, None
-                cur_val = get_coord(best_launcher.config, name)
-                # some kernel don't have RBLOCK. So cur_val may be None
-                if cur_val is None:
-                    continue
-
-                if cur_val > 1:
-                    lhs_config = copy.deepcopy(best_launcher.config)
-                    set_coord(lhs_config, name, cur_val // 2)
-                rhs_config = copy.deepcopy(best_launcher.config)
-                set_coord(rhs_config, name, cur_val * 2)
-
-                cand_launchers = [None, None]
-                cand_timings = [None, None]
-                # TODO: shout if both increasing/decreasing direction can improve perf
-                with self.lock:  # compiling
-                    idx = 0
-                    for config in [lhs_config, rhs_config]:
-                        if config is None:
-                            continue
-                        try:
-                            cand_launchers[idx] = self._precompile_config(config, None)
-                            cand_timings[idx] = self.bench(cand_launchers[idx], *cloned_args, **kwargs)[0]
-                        except RuntimeError:
-                            # example: RuntimeError: Triton Error [CUDA]: invalid argument
-                            continue
-                        idx += 1
-
-                for launcher, timing in zip(cand_launchers, cand_timings):
-                    if launcher is None:
-                        continue
-                    if has_improvement(best_timing, timing):
-                        improved = True
-                        print(f"Tune from {best_launcher.config} {best_timing} -> {launcher.config} {timing}")
-                        best_timing = timing
-                        best_launcher = launcher
-                        break
-                    else:
-                        print(f"  Drop {launcher.config} {timing}")
-                        pass
-
-        print(f"Improve from {baseline_config} {baseline_timing} -> {best_launcher.config} {best_timing}, {baseline_timing / best_timing:.3f}x")
-
-        # don't save cache for coordinate descent tuning for now
-        if not inductor_config.coordinate_descent_tuning and self.save_cache_hook:
-            self.save_cache_hook(best_launcher.config, True)
-
-        best_launcher.config.found_by_coordesc = True
-        return best_launcher
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
         timings = self.benchmark_all_configs(*args, **kwargs)
         self.launchers = [builtins.min(timings, key=timings.get)]
-
-        if not inductor_config.coordinate_descent_tuning and self.save_cache_hook:
+        if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
 
     def save_cuda_kernel(self, grid, stream, launcher):
@@ -346,24 +254,43 @@ class CachingAutotuner(KernelInterface):
             else:
                 KernelParamCache.cache[kernel_name] = params
 
-    def run(self, *args, grid, stream):
-        # if len(self.launchers) == 1 and getattr(self.launchers[0].config, "found_by_coordesc", False):
-        #     print(f"Got coorddesc tuning result from cache")
+    def is_persistent_reduction(self):
+        return self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
 
+    def coordinate_descent_tuning(self, launcher, *args, **kwargs):
+        if self.heuristic_type == HeuristicType.TEMPLATE:
+            # skip triton template
+            return launcher
+
+        cloned_args = self.clone_args(*args)
+        config2launcher = {launcher.config: launcher}
+        def benchmark_one_config(config):
+            with self.lock:
+                launcher = self._precompile_config(config, None)
+            config2launcher[config] = launcher
+            return self.bench(launcher, *cloned_args, **kwargs)[0]
+
+        best_config = self.coordesc_tuner.autotune(benchmark_one_config, launcher.config, None)
+        best_config.found_by_coordesc = True
+
+        if self.save_cache_hook:
+            self.save_cache_hook(best_config, found_by_coordesc=True)
+        return config2launcher.get(best_config)
+
+    def run(self, *args, grid, stream):
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 self.precompile()
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid)
 
-        if config.triton.store_cubin:
-            self.save_cuda_kernel(grid, stream, self.launchers[0])
-
         if not getattr(self.launchers[0].config, "found_by_coordesc", False) and config.coordinate_descent_tuning:
             self.launchers = [self.coordinate_descent_tuning(self.launchers[0], *args, grid=grid)]
 
-        (launcher,) = self.launchers
+        if config.triton.store_cubin:
+            self.save_cuda_kernel(grid, stream, self.launchers[0])
 
+        (launcher,) = self.launchers
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
@@ -466,7 +393,6 @@ def load_cached_autotuning(
 
     with open(cache_filename, "r") as fd:
         best_config = json.loads(fd.read())
-
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
 
@@ -474,14 +400,15 @@ def load_cached_autotuning(
         num_warps = best_config.pop("num_warps")
         num_stages = best_config.pop("num_stages")
         triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
-        # TODO: should we pass a flags around rather than monkey packing?
         triton_config.found_by_coordesc = True 
         return triton_config
 
     matching_configs = [
         cfg
         for cfg in configs
-        if all(val == best_config.get(key) for key, val in cfg.kwargs.items()) and cfg.num_warps == best_config.get("num_warps") and cfg.num_stages == best_config.get("num_stages")
+        if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
+           and cfg.num_warps == best_config.get("num_warps")
+           and cfg.num_stages == best_config.get("num_stages")
     ]
     if len(matching_configs) != 1:
         return None
@@ -492,6 +419,7 @@ def load_cached_autotuning(
 def cached_autotune(
     configs: List[Config],
     meta,
+    heuristic_type,
     filename=None,
 ):
     """
@@ -502,7 +430,7 @@ def cached_autotune(
     assert len(configs) == 1 or filename
 
     # on disk caching logic
-    if filename is not None and len(configs) > 1:
+    if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
         best_config = load_cached_autotuning(cache_filename, configs_hash, configs)
@@ -518,8 +446,10 @@ def cached_autotune(
                     "configs_hash": configs_hash,
                     "found_by_coordesc": found_by_coordesc
                 }))
-            type_str = "coordesc" if found_by_coordesc else "heuristic"
-            print(f"Save {type_str} tuning result to {cache_filename}")
+            if DEBUG:
+                type_str = "coordesc" if found_by_coordesc else "heuristic"
+                print(f"Save {type_str} tuning result to {cache_filename}")
+
     else:
         save_cache_hook = None
 
@@ -534,6 +464,7 @@ def cached_autotune(
                 configs=configs,
                 save_cache_hook=save_cache_hook,
                 mutated_arg_names=mutated_arg_names,
+                heuristic_type=heuristic_type,
             )
         return CachingAutotuner(
             fn,
@@ -541,7 +472,7 @@ def cached_autotune(
             configs=configs,
             save_cache_hook=save_cache_hook,
             mutated_arg_names=mutated_arg_names,
-            filename=filename,
+            heuristic_type=heuristic_type,
         )
 
     return decorator
@@ -552,14 +483,8 @@ def unique_configs(configs: List[Config]):
     seen = set()
     pruned_configs = []
 
-    def config_to_hashable(cfg):
-        items = list(cfg.kwargs.items())
-        items.append(("num_warps", cfg.num_warps))
-        items.append(("num_stages", cfg.num_stages))
-        return tuple(items)
-        
     for cfg in configs:
-        key = config_to_hashable(cfg)
+        key = triton_config_to_hashable(cfg)
         if key not in seen:
             seen.add(key)
             pruned_configs.append(cfg)
@@ -750,12 +675,12 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 # improve 1.111x for https://gist.github.com/shunting314/189a1d0e59f8eb759fa3db24a594218c
                 Config({"XBLOCK": 512}, num_warps=4, num_stages=1),
             ])
-        return cached_autotune(configs, meta=meta, filename=filename)
+        return cached_autotune(configs, meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
     if len(size_hints) == 2:
         if (
             not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
         ) and not (config.max_autotune or config.max_autotune_pointwise):
-            return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
+            return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
         return cached_autotune(
             [
                 triton_config(size_hints, 32, 32),
@@ -775,10 +700,11 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             ],
             meta=meta,
             filename=filename,
+            heuristic_type=HeuristicType.POINTWISE,
         )
     if len(size_hints) == 3:
         if not config.triton.autotune_pointwise:
-            return cached_autotune([triton_config(size_hints, 16, 16, 16)], meta=meta)
+            return cached_autotune([triton_config(size_hints, 16, 16, 16)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
         return cached_autotune(
             [
                 triton_config(size_hints, 16, 16, 16),
@@ -791,6 +717,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             ],
             meta=meta,
             filename=filename,
+            heuristic_type=HeuristicType.POINTWISE,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
@@ -810,14 +737,16 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:
-            return cached_autotune([contiguous_config], meta=meta)
+            return cached_autotune([contiguous_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
         elif reduction_hint == ReductionHint.OUTER:
-            return cached_autotune([outer_config], meta=meta)
+            return cached_autotune([outer_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
         elif reduction_hint == ReductionHint.OUTER_TINY:
-            return cached_autotune([tiny_config], meta=meta)
+            return cached_autotune([tiny_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
         if not config.triton.autotune_pointwise:
             return cached_autotune(
-                [triton_config_reduction(size_hints, 32, 128)], meta=meta
+                [triton_config_reduction(size_hints, 32, 128)], meta=meta,
+                heuristic_type=HeuristicType.REDUCTION,
+                filename=filename
             )
         return cached_autotune(
             [
@@ -890,6 +819,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             ],
             meta=meta,
             filename=filename,
+            heuristic_type=HeuristicType.REDUCTION,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
@@ -930,6 +860,7 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
         configs,
         meta=meta,
         filename=filename,
+        heuristic_type=HeuristicType.PERSISTENT_REDUCTION,
     )
 
 
@@ -938,7 +869,7 @@ def template(num_stages, num_warps, meta, filename=None):
     Compile a triton template
     """
     return cached_autotune(
-        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta, filename=filename,
+        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta, heuristic_type=HeuristicType.TEMPLATE, filename=filename
     )
 
 
