@@ -3919,7 +3919,6 @@ try:
         result = ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
         return list(map(TensorBox.create, result))
 
-
 except ImportError:
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"
