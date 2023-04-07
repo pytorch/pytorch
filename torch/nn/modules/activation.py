@@ -991,12 +991,12 @@ class MultiheadAttention(Module):
             self.q_proj_weight = Parameter(torch.empty((embed_dim, embed_dim), **factory_kwargs))
             self.k_proj_weight = Parameter(torch.empty((embed_dim, self.kdim), **factory_kwargs))
             self.v_proj_weight = Parameter(torch.empty((embed_dim, self.vdim), **factory_kwargs))
-            self.register_parameter('in_proj_weight', None)
-        else:
-            self.in_proj_weight = Parameter(torch.empty((3 * embed_dim, embed_dim), **factory_kwargs))
             self.register_parameter('q_proj_weight', None)
             self.register_parameter('k_proj_weight', None)
             self.register_parameter('v_proj_weight', None)
+        else:
+            self.in_proj_weight = Parameter(torch.empty((3 * embed_dim, embed_dim), **factory_kwargs))
+            self.register_parameter('in_proj_weight', None)
 
         if bias:
             self.in_proj_bias = Parameter(torch.empty(3 * embed_dim, **factory_kwargs))
