@@ -782,7 +782,8 @@ class CheckFunctionManager:
             code += f"      passing = {code_part.code} \n"
             code += "      if not passing: \n"
             code += f"          code_part = part_map[{id(code_part)}] \n"
-            code += "          code_part.scope = {'L': L, '___check_tensors_verbose':___check_tensors_verbose} \n"
+            code += "          code_part.scope = locals() \n"
+            code += "          code_part.scope['___check_tensors_verbose'] = ___check_tensors_verbose \n"
             code += "          return (False, code_part) \n"
         code += "      return (True, None)"
         closure_vars = collections.OrderedDict(
