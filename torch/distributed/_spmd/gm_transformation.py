@@ -1,16 +1,17 @@
 import operator
 from typing import Any, Callable, Dict, List, Optional
 
+from functorch import make_fx
+
 import torch
 import torch.nn as nn
 
-from functorch import make_fx
 from torch import fx
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.decomposition import select_decomp_table
 from torch.distributed._spmd.graph_utils import dump_graphs_to_files, OP
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
-from torch.utils._pytree import tree_flatten, tree_map_only
+from torch.utils._pytree import tree_flatten
 
 
 class InductorWrapper(nn.Module):
