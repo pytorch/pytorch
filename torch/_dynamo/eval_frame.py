@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import dis
 import functools
 import inspect
 import logging
+import math
+import operator
 import os
 import sys
+import sympy
 import textwrap
 import threading
 import traceback
 import types
 import warnings
+import weakref
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
@@ -49,6 +55,8 @@ from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
+from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental import proxy_tensor
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
@@ -96,6 +104,13 @@ class OptimizedModule(torch.nn.Module):
         super().__setattr__(name, value)
 
     def __call__(self, *args, **kwargs):
+        if hasattr(self._orig_mod, "_initialize_hook"):
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
+            assert len(kwargs) == 0
+            self._orig_mod._infer_parameters(self._orig_mod, args)
         return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
@@ -339,11 +354,21 @@ class DisableContext(_TorchDynamoContext):
         super().__init__(callback=None)
 
 
+def first_real_inst_idx(code):
+    if sys.version_info < (3, 11):
+        return 0
+    for inst in dis.get_instructions(code):
+        if inst.opname == "RESUME":
+            return inst.offset // 2
+    raise RuntimeError("RESUME instruction not found in code")
+
+
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
         if (
-            frame.f_lasti >= 0
+            # TODO: the first condition is not covered by any test
+            frame.f_lasti >= first_real_inst_idx(frame.f_code)
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):
@@ -562,6 +587,23 @@ def explain(f, *args, **kwargs):
     )
 
 
+@dataclasses.dataclass
+class Constraint:
+    """
+    This represents constraints on input tensor dimensions, e.g., requiring
+    them to be fully polymorphic or within some range.  Don't create this
+    class directly; instead, use :func:`torch._export.dynamic_dim`.
+    """
+
+    w_tensor: weakref.ReferenceType[torch.Tensor]
+    # TODO: We don't need t_id; we can get it off of w_tensor
+    t_id: int
+    dim: int
+    constraint_range: Optional[
+        torch.fx.experimental.symbolic_shapes.StrictMinMaxConstraint
+    ]
+
+
 def export(
     f: Callable[..., Any],
     *args,
@@ -570,6 +612,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "real",
+    constraints: List[Constraint] = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -615,6 +658,7 @@ def export(
     graph = None
     out_guards = None
     graph_captured_input = None
+    example_fake_inputs = []
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
 
     def produce_matching(source_args, candidate_args):
@@ -660,6 +704,9 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
+        nonlocal example_fake_inputs
+        example_fake_inputs = example_inputs
+
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
             nonlocal graph_captured_input
@@ -679,8 +726,12 @@ def export(
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
-            hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
+            hooks=Hooks(
+                guard_export_fn=guard_export_print,
+                guard_fail_fn=None,
+            ),
             export=True,
+            export_constraints=constraints,
             dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
@@ -714,7 +765,6 @@ def export(
             self.old_args_gen = (
                 self.new_args[i] for i in matched_input_elements_positions
             )
-
         def placeholder(self, target, args, kwargs):
             arg = next(self.old_args_gen)
             if "val" in self.current_node.meta:
@@ -736,21 +786,88 @@ def export(
                 r.node.meta["val"] = self.current_node.meta["val"]
             return r
 
+    class AddRuntimeChecksInInputConstraint(torch.fx.interpreter.Transformer):
+        def __init__(
+            self,
+            m,
+        ):
+            super().__init__(m)
+            self.count = 0
+            self.constraints_id_to_constrain = {}
+            if constraints is not None:
+                for constrain in constraints:
+                    self.constraints_id_to_constrain[constrain.t_id] = constrain
+
+        def placeholder(self, target, args, kwargs):
+            arg = super().placeholder(target, args, kwargs)
+            orig_inp_id = id(flat_args[self.count])
+
+            if orig_inp_id not in self.constraints_id_to_constrain:
+                self.count += 1
+                return arg
+
+            constrain = self.constraints_id_to_constrain[orig_inp_id]
+            constraint_range = constrain.constraint_range
+
+            if constraint_range is None:
+                self.count += 1
+                return arg
+
+            def _convert_to_int(val):
+                if val == sympy.oo:
+                    return math.inf
+                if isinstance(val, sympy.Integer):
+                    return int(val)
+                return None
+
+            min_int_val = _convert_to_int(constraint_range.vr.lower)
+            max_int_val = _convert_to_int(constraint_range.vr.upper)
+
+            if min_int_val is None and max_int_val is None:
+                self.count += 1
+                return arg
+
+            dim = self.tracer.create_proxy('call_function', torch.ops.aten.sym_size, (arg, constrain.dim), {})
+
+            if min_int_val:
+                gt = self.tracer.create_proxy('call_function', operator.gt, (dim, min_int_val), {})
+                tensor_gt = self.tracer.create_proxy('call_function', torch.scalar_tensor, (gt,), {})
+                self.tracer.create_proxy('call_function', torch.ops.aten._assert_async.msg, (tensor_gt, "min_value"), {})
+
+            if max_int_val:
+                lt = self.tracer.create_proxy('call_function', operator.lt, (dim, max_int_val), {})
+                tensor_lt = self.tracer.create_proxy('call_function', torch.scalar_tensor, (lt,), {})
+                self.tracer.create_proxy('call_function', torch.ops.aten._assert_async.msg, (tensor_lt, "max_value"), {})
+
+            self.count += 1
+            return arg
+
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(
-            graph_with_interpreter,
-            decomposition_table=decomposition_table,
-            tracing_mode=tracing_mode,
-            _allow_non_fake_inputs=True,
-        )(*graph_captured_input)
+        fake_tensor_mode = null_context()
+        for val in example_fake_inputs:
+            if isinstance(val, FakeTensor):
+                fake_tensor_mode = val.fake_mode
+                break
+
+        with enable_python_dispatcher(), fake_tensor_mode:
+            graph = make_fx(
+                graph_with_interpreter,
+                decomposition_table=decomposition_table,
+                tracing_mode="real",
+                _allow_non_fake_inputs=True,
+            )(*example_fake_inputs)
 
     new_graph = ChangeInputOutputSignature(
         graph,
+    ).transform()
+
+    new_graph = AddRuntimeChecksInInputConstraint(
+        new_graph,
     ).transform()
 
     def signature_to_fullargspec(sig: inspect.Signature):
@@ -845,6 +962,10 @@ def export(
 
     new_graph.recompile()
 
+    # TODO remove this once Executorch uses proper functionalization
+    new_graph._example_fake_inputs = example_fake_inputs
+    new_graph._matched_input_elements_positions = matched_input_elements_positions
+
     return (new_graph, out_guards)
 
 
@@ -853,7 +974,14 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=False):
+def optimize_assert(
+    backend,
+    *,
+    hooks=Hooks(None, None),
+    export=False,
+    export_constraints=None,
+    dynamic=False,
+):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -863,7 +991,9 @@ def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=F
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, export=export),
+        convert_frame.convert_frame_assert(
+            backend, export=export, export_constraints=export_constraints
+        ),
         hooks,
         backend_ctx_ctor,
         export=export,

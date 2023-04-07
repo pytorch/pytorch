@@ -33,28 +33,21 @@ if IS_WINDOWS and IS_CI:
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from inductor.test_cpp_wrapper import CppWrapperTemplate
 from inductor.test_torchinductor import (
     check_model,
     check_model_cuda,
     CommonTemplate,
     copy_tests,
+    TestFailure,
 )
 
 importlib.import_module("filelock")
 
-test_skips = {
-    "test_cpp_wrapper_dynamic_shapes": ("cpu",),
-    "test_cudnn_rnn_dynamic_shapes": ("cuda",),
-    "test_kwargs_dynamic_shapes": ("cpu",),
-    # test_roi_align uses torchvision, which doesn't work with dynamic shapes
-    "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
-    #
-    # These are from switching to specialize_int=False
-    #
-    "test_div8_dynamic_shapes": ("cpu", "cuda"),  # StopIteration
-    # NotImplementedError: argument of type: <class 'sympy.core.add.Add'>
-    "test_reflection_pad2d_backward_dynamic_shapes": ("cpu", "cuda"),
-    "test_both_scalars_dynamic_shapes": ("cpu", "cuda"),  # StopIteration
+# xfail by default, set is_skip=True to skip
+test_failures = {
+    "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
 }
 
 
@@ -68,6 +61,7 @@ def make_dynamic_cls(cls):
 
 
 DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
+DynamicShapesCppWrapperTemplate = make_dynamic_cls(CppWrapperTemplate)
 
 
 if HAS_CPU:
@@ -76,7 +70,15 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
-    copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_skips)
+    class DynamicShapesCppWrapperCpuTests(TestCase):
+        device = "cpu"
+
+    copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
+    copy_tests(
+        DynamicShapesCppWrapperTemplate,
+        DynamicShapesCppWrapperCpuTests,
+        "cpp_wrapper",
+    )
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
@@ -85,7 +87,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         common = check_model_cuda
         device = "cuda"
 
-    copy_tests(DynamicShapesCommonTemplate, DynamicShapesCudaTests, "cuda", test_skips)
+    copy_tests(
+        DynamicShapesCommonTemplate, DynamicShapesCudaTests, "cuda", test_failures
+    )
 
 
 class TestInductorDynamic(TestCase):
