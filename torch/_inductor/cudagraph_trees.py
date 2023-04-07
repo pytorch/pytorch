@@ -472,6 +472,9 @@ class CUDAWarmupNode:
         ):
             out = self.wrapped_function.model(new_inputs)
 
+        # sync up stream used in `_use_cuda_memory_pool_manager` - TODO - wait stream instead ?
+        torch.cuda.synchronize()
+
         assert len(new_inputs) == 0
 
         self.outputs_weakrefs.extend(
