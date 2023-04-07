@@ -136,7 +136,7 @@ class TestModuleMatcher(JitTestCase):
                 x = self.linear2(x, weight, bias)
                 x = torch.nn.functional.relu(x)
                 return x
-        
+
         inputs = (torch.randn(1, 5), torch.rand((5, 5)), torch.zeros(5))
         gm, _ = torch._dynamo.export(M(), *inputs, aten_graph=True)
         gm.graph.eliminate_dead_code()

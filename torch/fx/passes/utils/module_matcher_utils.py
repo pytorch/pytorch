@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-import torch
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
@@ -48,7 +47,7 @@ class ModulePartition():
 @compatibility(is_backward_compatible=False)
 def get_module_partitions(
     graph: Graph,
-    wanted_module_types: List
+    wanted_module_types: List[Type]
 ) -> Dict[Type, List[ModulePartition]]:
     """
     Args:
@@ -67,7 +66,7 @@ def get_module_partitions(
     for node in graph.nodes:
         if (nn_module_stack := node.meta.get("nn_module_stack", None)) is None:
             continue
-       
+
         # First value in the nn_module_stack contains the leaf module trace
         module_call, (_, module_type) = list(nn_module_stack.items())[0]
 
@@ -77,7 +76,6 @@ def get_module_partitions(
         diff_modules = modules.setdefault(module_type, {})
         partition = diff_modules.setdefault(module_call, [])
         partition.append(node)
-    
 
     def make_partition(nodes: List[Node], module_type: Type) -> ModulePartition:
         input_nodes = set()
@@ -90,13 +88,13 @@ def get_module_partitions(
             for user in node.users.keys():
                 if user not in nodes:
                     output_nodes.add(node)
-        
+
         return ModulePartition(nodes, module_type, list(input_nodes), list(output_nodes))
 
-    ret: Dict[Type[Any], List[List[torch.fx.Node]]] = {}
+    ret: Dict[Type[Any], List[ModulePartition]] = {}
     for k, v in modules.items():
         ret[k] = [make_partition(partition, k) for partition in v.values()]
-    
+
     return ret
 
 
