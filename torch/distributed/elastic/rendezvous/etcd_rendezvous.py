@@ -211,7 +211,7 @@ class EtcdRendezvous:
         last_call_timeout,
     ):
         self.client = client
-        log.info("Etcd machines: " + str(self.client.machines))
+        log.info("Etcd machines: %s", self.client.machines)
 
         self._prefix = prefix
         self._run_id = run_id
@@ -310,7 +310,7 @@ class EtcdRendezvous:
                 # to avoid spamming etcd
                 # FIXME: there are a few things that fall under this like
                 # etcd.EtcdKeyNotFound, etc, which could be handled more explicitly.
-                log.info("Rendezvous attempt failed, will retry. Reason: " + str(e))
+                log.info("Rendezvous attempt failed, will retry. Reason: %s", e)
                 time.sleep(1)
 
     def init_phase(self):
@@ -335,12 +335,12 @@ class EtcdRendezvous:
         try:
             active_version = self.try_create_rendezvous()
             state = json.loads(active_version.value)
-            log.info("New rendezvous state created: " + str(state))
+            log.info("New rendezvous state created: %s", state)
         except etcd.EtcdAlreadyExist:
             active_version, state = self.get_rdzv_state()
             # Note: it is possible for above query to fail (etcd.EtcdKeyNotFound),
             # but this is ok for us - just means we'll restart from beginning.
-            log.info("Observed existing rendezvous state: " + str(state))
+            log.info("Observed existing rendezvous state: %s", state)
 
         if state["status"] == "closed":
             raise RendezvousClosedError()
@@ -365,9 +365,8 @@ class EtcdRendezvous:
         active_version, this_rank = self.join_rendezvous(expected_version)
         state = json.loads(active_version.value)
         log.info(
-            "Joined rendezvous version {} as rank {}. Full state: {}".format(
-                state["version"], this_rank, state
-            )
+            "Joined rendezvous version %s as rank %s. Full state: %s",
+            state["version"], this_rank, state
         )
 
         # If this worker was first to reach num_min_workers requirement,
@@ -380,10 +379,10 @@ class EtcdRendezvous:
         # when min_num_workers is reached.
 
         if this_rank == self._num_min_workers - 1 and state["status"] == "joinable":
-            log.info("Rank {} is responsible for join last call.".format(this_rank))
+            log.info("Rank %s is responsible for join last call.", this_rank)
             last_call_deadline = time.time() + self._last_call_timeout
             self.handle_join_last_call(expected_version, last_call_deadline)
-            log.info("Rank {} finished join last call.".format(this_rank))
+            log.info("Rank %s finished join last call.", this_rank)
 
         # Wait for rendezvous state to be frozen, which means a fixed set of peers
         log.info("Waiting for remaining peers.")
@@ -412,9 +411,8 @@ class EtcdRendezvous:
         state = json.loads(active_version.value)
 
         log.info(
-            "Rendezvous version {} is complete. Final state: {}".format(
-                state["version"], state
-            )
+            "Rendezvous version %s is complete. Final state: %s",
+            state["version"], state
         )
 
         # Rendezvous version number; our rank in it; world size
@@ -433,9 +431,8 @@ class EtcdRendezvous:
         #   2. if keep alives are missing, destroy it and bail out.
         active_state = self.announce_self_waiting(expected_version)
         log.info(
-            "Added self to waiting list. Rendezvous full state: {}".format(
-                active_state.value
-            )
+            "Added self to waiting list. Rendezvous full state: %s",
+            active_state.value
         )
 
         self.wait_for_rendezvous_to_free(expected_version)
@@ -698,9 +695,10 @@ class EtcdRendezvous:
                 if key not in keep_alive_keys:
                     # This participant didn't renew their lease. We'll declare this
                     # rendezvous version as dead (but only if it hadn't changed)
-                    log.info("Keep-alive key {} is not renewed.".format(key))
+                    log.info("Keep-alive key %s is not renewed.", key)
                     log.info(
-                        "Rendevous version {} is incomplete. ".format(expected_version)
+                        "Rendezvous version %s is incomplete. ",
+                        expected_version
                     )
                     log.info("Attempting to destroy it.")
 
@@ -713,9 +711,8 @@ class EtcdRendezvous:
                     )
 
                     log.info(
-                        "Destroyed rendezvous version {} successfully.".format(
-                            expected_version
-                        )
+                        "Destroyed rendezvous version %s successfully.",
+                        expected_version
                     )
 
                     # We can return (and retry) immediately

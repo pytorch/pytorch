@@ -1,4 +1,4 @@
-name: Upload contribution stats
+name: Nightly Upload to rockset
 
 on:
   schedule:
@@ -11,11 +11,14 @@ concurrency:
 
 jobs:
 
-  upload-contribution-stats:
+  upload-stats-to-rockset:
     runs-on: [self-hosted, linux.2xlarge]
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          fetch-depth: 1
+          submodules: false
 
       - run: |
           pip3 install requests==2.26
@@ -32,5 +35,7 @@ jobs:
           max_attempts: 5
           retry_wait_seconds: 90
           command: |
+            echo "Uploading testing aggregate data" "$(date -d yesterday '+%Y-%m-%d')"
+            python3 -m tools.stats.upload_test_stat_aggregates --date "$(date -d yesterday '+%Y-%m-%d')"
             echo "Uploading external contribution stats for" "$(date -d yesterday '+%Y-%m-%d')"
             python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d yesterday '+%Y-%m-%d')"
