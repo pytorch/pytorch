@@ -1,6 +1,7 @@
 import triton
 from typing import Optional, Callable
 import copy
+from .utils import triton_config_to_hashable
 
 DEBUG = True
 
@@ -35,6 +36,23 @@ class CoordescTuner:
     def __init__(self, is_mm=False, is_persistent_reduction=False):
         self.is_mm = is_mm  # we will tune num_stages for mm
         self.is_persistent_reduction = is_persistent_reduction
+        self.cached_benchmark_results = {}
+
+    def cache_benchmark_result(self, config, timing):
+        self.cached_benchmark_results[triton_config_to_hashable(config)] = timing
+
+    def lookup_in_cache(self, config):
+        return self.cached_benchmark_results.get(triton_config_to_hashable(config))
+
+    def call_func(self, func, config):
+        found = self.lookup_in_cache(config)
+        if found is not None:
+            if DEBUG:
+                print("  CACHED")
+            return found
+        timing = func(config)
+        self.cache_benchmark_result(config, timing)
+        return timing
 
     @property
     def tunable_fields(self):
@@ -83,7 +101,7 @@ class CoordescTuner:
 
     def autotune(self, func: Callable[triton.Config, float], baseline_config: triton.Config, baseline_timing: Optional[float]=None) -> triton.Config:
         if baseline_timing is None:
-            baseline_timing = func(baseline_config)
+            baseline_timing = self.call_func(func, baseline_config)
 
         if DEBUG:
             print(f"Baseline Config {baseline_config}, baseline timing {baseline_timing}")
@@ -110,7 +128,7 @@ class CoordescTuner:
                     if DEBUG:
                         print(f"Try config {candidate_config}")
                     try:
-                        candidate_timing = func(candidate_config)
+                        candidate_timing = self.call_func(func, candidate_config)
                     except Exception as e:
                         if DEBUG:
                             print(f"Got exception {e}")
