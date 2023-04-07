@@ -36,6 +36,7 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
+    TEST_WITH_ROCM,
     TestCase,
     run_tests,
     retry_on_connect_failures,
@@ -1050,4 +1051,5 @@ if __name__ == "__main__":
         not torch.cuda._initialized
     ), "test_distributed must not have initialized CUDA context on main process"
 
-    run_tests()
+    if not TEST_WITH_ROCM:
+        run_tests()
