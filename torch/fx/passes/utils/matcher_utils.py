@@ -9,7 +9,7 @@ from typing import Dict, List, Set, Any, Union, Tuple
 import logging
 import os
 
-__all__ = ['SubgraphMatcher', 'InternalMatch']
+__all__ = ['SubgraphMatcher', 'InternalMatch', 'get_module_partitions']
 
 # Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
 def _init_logger():
