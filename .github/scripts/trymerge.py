@@ -1926,6 +1926,10 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
 
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
+
+        # in case mergebot crashes, also remove the label here
+        pr.remove_label(MERGE_IN_PROGRESS_LABEL)
+
         exception = f"**Reason**: {e}"
 
         failing_rule = None
