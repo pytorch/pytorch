@@ -571,6 +571,7 @@ class NNModuleVariable(VariableTracker):
                 isinstance(x, variables.TensorVariable)
                 for x in itertools.chain(args, kwargs.values())
             )
+            or name == "zero_grad"
         ):
             # TODO(voz): Refactor this into a generic as_proxy() for nn module
             # We use variations of this pattern in a few places now.

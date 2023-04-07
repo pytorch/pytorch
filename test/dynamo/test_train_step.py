@@ -29,7 +29,6 @@ def init_weights(m):
         m.bias.data.fill_(0.01)
 
 
-
 class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
     """
     The Basic Idea
@@ -39,7 +38,6 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
 
     WIP/Issues
     - handle an optimizer with actual states
-    - put zero-grad in the graph
     - dynamo asserts empty backward tape before trace
     - train_step backend asserts full_graph mode was used
     - handle more than one optimizer (e.g. for different submodules)
@@ -82,7 +80,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             # uses for module tracing
             optimizer.step()
 
-            # model.zero_grad()
+            model.zero_grad()
             return loss
 
         # copy the model/optimizer up front so we don't have to reset them between eager/compile runs
@@ -108,6 +106,12 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             self.assertTrue(name in opt_params)
             self.assertTrue(same(correct_params[name], opt_params[name]))
 
+            # Note: the train_step compiler never sets .grad on the original param objects due to how it traces,
+            # so we insist that the user puts .zero_grad in the train_step so there is no discrepancy between running
+            # under eager or under compile
+            self.assertTrue(correct_params[name].grad is None)
+            self.assertTrue(opt_params[name].grad is None)
+
     def test_smoke(self):
         # currently test_sgd and smoke both fail with the same error:
         # RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
@@ -124,7 +128,9 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_model.apply(init_weights)
         opt_optimizer = torch.optim.SGD(opt_model.parameters(), lr=0.01, momentum=0.9)
         inputs = [torch.randn((128, 10))]
-        opt_train_step = torch.compile(train_step, backend="train_step_eager", fullgraph=True)
+        opt_train_step = torch.compile(
+            train_step, backend="train_step_eager", fullgraph=True
+        )
         opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
 
 
