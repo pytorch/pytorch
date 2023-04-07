@@ -48,7 +48,6 @@ mm_configs = functools.partial(
     filtered_configs,
     configs=(
         # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
-        (128, 128, 32, 1, 4),  # found by coordesc
         (64, 64, 32, 2, 4),
         (64, 128, 32, 3, 4),
         (128, 64, 32, 3, 4),
@@ -57,7 +56,6 @@ mm_configs = functools.partial(
         (64, 32, 32, 5, 8),
         (32, 64, 32, 5, 8),
         (128, 128, 32, 2, 8),
-        (128, 128, 32, 2, 4),  # found by coordesc
         (64, 64, 64, 3, 8),
         (32, 32, 128, 2, 4),
         (64, 64, 16, 2, 4),

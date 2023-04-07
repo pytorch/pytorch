@@ -174,9 +174,9 @@ def timed(model, example_inputs, times=1):
     return t1 - t0
 
 
-def print_performance(fn, args=(), times=2, repeat=5, baseline=1.0):
+def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
     timings = torch.tensor([timed(fn, args, times) for _ in range(repeat)])
-    took = torch.median(timings) / times
+    took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took
 
@@ -1017,3 +1017,13 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         parse_profile_event_list(
             benchmark_name, event_list, wall_time_ms, times * repeat
         )
+
+def triton_config_to_hashable(cfg):
+    """
+    Convert triton config to a tuple that can uniquely identify it. We can use
+    the return value as a dictionary key.
+    """
+    items = list(sorted(cfg.kwargs.items()))
+    items.append(("num_warps", cfg.num_warps))
+    items.append(("num_stages", cfg.num_stages))
+    return tuple(items)
