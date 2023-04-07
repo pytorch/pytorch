@@ -70,13 +70,14 @@ class AllReduce:
         self.op = op.op
 
     def work(self, data):
-        tensors = []
-        for src_rank in range(0, len(data)):
-            tensors.append(data[src_rank][0])
-        res = _reduce_ops[self.op](tensors)
-        with torch.no_grad():
-            for src_rank in range(len(data)):
-                data[src_rank][0].copy_(res)
+        for i in range(len(data[0])):
+            tensors = []
+            for src_rank in range(0, len(data)):
+                tensors.append(data[src_rank][i])
+            res = _reduce_ops[self.op](tensors)
+            with torch.no_grad():
+                for src_rank in range(len(data)):
+                    data[src_rank][i].copy_(res)
 
 
 class AllGather:
@@ -268,6 +269,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
             cls._terminate.clear()
 
     def allreduce(self, tensor_list, opts=AllreduceOptions()):
+        coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
+        res = coll.join(self._rank, tensor_list)
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
+
+    def allreduce_coalesced(self, tensor_list, opts=AllreduceOptions()):
         coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll, self)
