@@ -81,8 +81,8 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
-    @make_logging_test(recompilations=True)
-    def test_recompilations(self, records):
+    @make_logging_test(recompiles=True)
+    def test_recompiles(self, records):
         def fn(x, y):
             return torch.add(x, y)
 
@@ -153,7 +153,7 @@ class LoggingTests(LoggingTestCase):
 
 
 # single record tests
-exclusions = {"bytecode", "output_code", "schedule", "aot_graphs"}
+exclusions = {"bytecode", "output_code", "schedule", "aot_graphs", "recompiles"}
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
         setattr(LoggingTests, f"test_{name}", single_record_test(**{name: True}))
