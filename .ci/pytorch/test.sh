@@ -366,14 +366,14 @@ test_single_dynamo_benchmark() {
       if [[ "${TEST_CONFIG}" == *inductor_timm* ]]; then
         python benchmarks/dynamo/check_accuracy.py \
         --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-        --expected "benchmarks/dynamo/ci_expected_accuracy/${expected_csv}.csv"
+        --expected "benchmarks/dynamo/ci_expected_accuracy/${expected_csv}"
       else
         # There are more cleanup coming for HF and TB
         python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
       fi
       python benchmarks/dynamo/check_graph_breaks.py \
         --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-        --expected "benchmarks/dynamo/ci_expected_accuracy/${expected_csv}.csv"
+        --expected "benchmarks/dynamo/ci_expected_accuracy/${expected_csv}"
     else
       # No expected csv to check against yet
       python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
