@@ -1,13 +1,11 @@
-import warnings
 from typing import List
 
 import torch
-import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dynamo import register_backend
 from torch._dynamo.backends.registry import lookup_backend
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.func import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
