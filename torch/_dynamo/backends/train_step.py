@@ -1,4 +1,6 @@
-from typing import List
+from contextlib import contextmanager
+from copy import copy
+from typing import Any, Dict, List
 
 import torch
 import torch.utils._pytree as pytree
@@ -11,6 +13,33 @@ from torch.func import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.interpreter import Interpreter
 from torch.nn.utils import stateless
+
+
+@contextmanager
+def _rematerialize_optimizer(
+    opt: torch.optim.Optimizer,
+    named_states: Dict[str, Any],
+    params: Dict[str, torch.nn.Parameter],
+):
+    assert opt is not None
+
+    # update opt.state with proxy tensors
+    orig_states: Dict[str, Any] = copy(opt.state)
+    for n in named_states:
+        # opt.state's key type is string, but optimizer uses Parameter as keys
+        opt.state[params[n]] = named_states[n]  # type: ignore[index]
+
+    # FIXME: support multiple parameter groups
+    param_group = opt.param_groups[0]
+    orig_params = param_group["params"]
+    # FIXME(@mrshenli): exclude buffers
+    param_group["params"] = params.values()
+
+    try:
+        yield
+    finally:
+        param_group["params"] = orig_params
+        opt.state.update(orig_states)
 
 
 def train_step_compiler(backend_compile_fn):
@@ -56,7 +85,25 @@ def train_step_compiler(backend_compile_fn):
         params_flat, params_spec = pytree.tree_flatten(params)
         params_len = len(params_flat)
         fake_params_flat = fakeify_inputs(params_flat)
-        full_fake_args = fake_params_flat + fake_inputs
+
+        opt = mod.__optimizer_0
+        named_states = {}
+        # Pass named_states instead of opt.state to stateless_func, because
+        # the later uses nn.Parameter as key. During tracing, we need to
+        # make sure optimizers can find the states using proxy tensors.
+        for n, p in params.items():
+            if p in opt.state:
+                # opt.state's key type is string, but optimizer uses
+                # Parameter as keys
+                named_states[n] = opt.state[p]  # type: ignore[index]
+
+        opt_states_flat, spec = pytree.tree_flatten(dict(opt.state))
+        named_states_flat, spec = pytree.tree_flatten(named_states)
+        fake_named_states_flat = fakeify_inputs(named_states_flat)
+        named_states_len = len(named_states_flat)
+        # ok, sgd has no states, so this whole thing is untested for now
+
+        full_fake_args = fake_params_flat + fake_named_states_flat + fake_inputs
 
         """
         Step 2: Create a new graphmodule that accepts parameters and user-inputs
@@ -64,10 +111,14 @@ def train_step_compiler(backend_compile_fn):
         """
 
         def functional_call(*args, **kwargs):
+            _params = args[:params_len]
+            _params_dict = pytree.tree_unflatten(_params, params_spec)
+            _named_states = args[params_len : params_len + named_states_len]
+            _user_args = args[params_len + named_states_len :]
             with stateless._reparametrize_module(
-                mod, pytree.tree_unflatten(args[:params_len], params_spec)
-            ):
-                out = mod(*args[params_len:], **kwargs)
+                mod, _params_dict
+            ), _rematerialize_optimizer(opt, _named_states, _params_dict):
+                out = mod(*_user_args, **kwargs)
 
             if not isinstance(out, (tuple, list)):
                 raise RuntimeError(
@@ -103,7 +154,9 @@ def train_step_compiler(backend_compile_fn):
 
         def call_without_params(*runtime_args):
             with torch.no_grad():
-                return functional_fx_g(*params_flat + list(runtime_args))
+                return functional_fx_g(
+                    *params_flat + named_states_flat + list(runtime_args)
+                )
 
         return call_without_params
 

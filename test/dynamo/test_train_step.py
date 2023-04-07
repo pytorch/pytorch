@@ -82,8 +82,9 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         What i tried first:
         - make a local function on user side that wraps calling optimizer.step() also using no_grad(), trace it
         Why it failed:
-        - the optimizer states need to be reparametrized to faketensors inside train_step_compiler since that's where the fake mode exists
-          but the optimizer object is not easily accessible as currently wrapped up in that call_opt_step thing
+        - the optimizer states need to be reparametrized to faketensors inside train_step_compiler since that's
+          where the fake mode exists but the optimizer object is not easily accessible as currently wrapped up
+          in that call_opt_step thing
 
         """
         # copy the model/optimizer up front so we don't have to reset them between eager/compile runs

@@ -141,7 +141,7 @@ class FakeRootModule(torch.nn.Module):
             ), "Name conflict between optimizers and nnmodules"
             setattr(self, k, v)
         # extra structure for train_step_compiler to iterate optimizers pre-trace
-        self._optimizers = optimizers
+        setattr(self, "_optimizers", optimizers)
 
     def __repr__(self):
         return "FakeRootModule(...)"
