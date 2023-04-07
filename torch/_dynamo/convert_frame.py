@@ -310,8 +310,8 @@ def _compile(
     export: bool,
     export_constraints,
     hooks: Hooks,
-    dynamic_plan,
     frame: Optional[types.FrameType] = None,
+    dynamic_plan = None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts
@@ -333,7 +333,7 @@ def _compile(
             export,
             export_constraints,
             mutated_closure_cell_contents,
-            dynamic_plan,
+            dynamic_plan=dynamic_plan,
         )
         with tracing(tracer.output.tracing_context):
             tracer.run()

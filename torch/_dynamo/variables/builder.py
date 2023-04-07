@@ -1187,6 +1187,7 @@ def wrap_to_fake_tensor_and_record(
                     # case
                     dynamic = DimDynamic.DYNAMIC
                 elif static_shapes or config.assume_static_by_default or marked_static:
+                    breakpoint()
                     dynamic = DimDynamic.STATIC
                 else:
                     dynamic = DimDynamic.DUCK

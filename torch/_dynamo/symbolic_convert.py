@@ -1833,6 +1833,14 @@ class InstructionTranslator(InstructionTranslatorBase):
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
 
+        if config.dynamic_shapes and dynamic_plan:
+            for k in vars:
+                if k in dynamic_plan:
+                    tensor_at_k = f_locals[k]
+                    assert isinstance(tensor_at_k, torch.Tensor)
+                    torch._dynamo.mark_dynamic(tensor_at_k, dynamic_plan[k])
+                    breakpoint()
+                    
         self.symbolic_locals = collections.OrderedDict(
             (
                 k,
