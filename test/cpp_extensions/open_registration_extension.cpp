@@ -10,7 +10,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Resize.h>
 #include <ATen/EmptyTensor.h>
-#include <ATen/core/GeneratorForPrivateuseone.h>
+#include <ATen/privateuseone/GeneratorForPrivateuseone.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;

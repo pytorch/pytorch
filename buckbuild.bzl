@@ -846,6 +846,7 @@ def define_buck_targets(
             ("aten/src", "ATen/vulkan/*.h"),
             ("aten/src", "ATen/metal/*.h"),
             ("aten/src", "ATen/nnapi/*.h"),
+            ("aten/src", "ATen/privateuseone/*.h"),
             # ATen Native
             ("aten/src", "ATen/native/*.h"),
             ("aten/src", "ATen/native/ao_sparse/quantized/cpu/*.h"),
