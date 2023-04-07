@@ -183,14 +183,14 @@ def _apply_to_tensors(
 
     return apply(container)
 
-def _to_kwargs(inputs, kwargs, device_id, use_side_stream_for_tensor_copies):
+def _to_kwargs(inputs, kwargs, device, use_side_stream_for_tensor_copies):
     inputs = (
-        _recursive_to(inputs, device_id, use_side_stream_for_tensor_copies)
+        _recursive_to(inputs, device, use_side_stream_for_tensor_copies)
         if inputs
         else []
     )
     kwargs = (
-        _recursive_to(kwargs, device_id, use_side_stream_for_tensor_copies)
+        _recursive_to(kwargs, device, use_side_stream_for_tensor_copies)
         if kwargs
         else []
     )
