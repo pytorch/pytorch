@@ -1544,7 +1544,6 @@ class DistributedDataParallel(Module, Joinable):
             p.grad is None for p in self.module.parameters()
         ):
             self.reducer._point_grads_to_bucket()
-            print("RV: pointed grads to bucket.")
 
         return output
 
