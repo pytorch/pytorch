@@ -13,8 +13,8 @@ from functools import reduce
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not c10d.is_ucc_available():
+    print("c10d UCC not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
@@ -36,7 +36,6 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_ROCM,
     TestCase,
     run_tests,
     retry_on_connect_failures,
@@ -1051,5 +1050,4 @@ if __name__ == "__main__":
         not torch.cuda._initialized
     ), "test_distributed must not have initialized CUDA context on main process"
 
-    if not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()

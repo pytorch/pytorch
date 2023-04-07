@@ -14,8 +14,8 @@ from itertools import groupby
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not c10d.is_gloo_available():
+    print("c10d GLOO not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
