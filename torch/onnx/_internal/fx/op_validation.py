@@ -131,7 +131,7 @@ def validate_op_between_ort_torch(
             flattened_torch_outputs, flattened_function_outputs
         ):
             try:
-                if isinstance(function_output, onnxscript.Tensors):
+                if isinstance(function_output, onnxscript.tensor.Tensor):
                     function_output = function_output.value
 
                 # Use torch.testing as opposed to np.testing to ensure dtypes and shapes match

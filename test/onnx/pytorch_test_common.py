@@ -158,16 +158,17 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
     return skip_dec
 
 
-def skip_unsupported_min_ort_version(min_opset_version: str):
+def skip_min_ort_version(reason: str, version: str):
     def skip_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
             if (
                 packaging.version.parse(self.ort_version).release
-                < packaging.version.parse(min_opset_version).release
+                < packaging.version.parse(version).release
             ):
                 raise unittest.SkipTest(
-                    f"Unsupported onnxruntime version: {self.ort_version} < {min_opset_version}"
+                    f"ONNX Runtime version: {version} is older than required version {version}."
+                    f"This reason we skip it: {reason}."
                 )
             return func(self, *args, **kwargs)
 

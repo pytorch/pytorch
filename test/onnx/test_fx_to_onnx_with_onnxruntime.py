@@ -213,7 +213,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, func, (tensor_x,), b=torch.tensor(5.0)
         )
 
-    @pytorch_test_common.skip_unsupported_min_ort_version("1.15")
+    @pytorch_test_common.skip_min_ort_version(reason="SegFault", version="1.15")
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
@@ -308,7 +308,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @pytorch_test_common.skip_unsupported_min_ort_version("1.15")
+    @pytorch_test_common.skip_min_ort_version(reason="SegFault", version="1.15")
     def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
             def forward(self, x, y):
@@ -510,7 +510,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, model, (x,), additional_test_inputs=[(y,)]
         )
 
-    @pytorch_test_common.skip_unsupported_min_ort_version("1.15")
+    @pytorch_test_common.skip_min_ort_version(reason="SegFault", version="1.15")
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
         # Download pytorch model
