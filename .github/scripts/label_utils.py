@@ -6,7 +6,7 @@ from functools import lru_cache
 from typing import Any, List, Tuple, TYPE_CHECKING, Union
 from urllib.request import Request, urlopen
 
-from github_utils import gh_fetch_json, GitHubComment
+from github_utils import gh_fetch_url, GitHubComment
 
 # TODO: this is a temp workaround to avoid circular dependencies,
 #       and should be removed once GitHubPR is refactored out of trymerge script.
@@ -77,15 +77,17 @@ def gh_get_labels(org: str, repo: str) -> List[str]:
 def gh_add_labels(
     org: str, repo: str, pr_num: int, labels: Union[str, List[str]]
 ) -> None:
-    gh_fetch_json(
-        f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels",
+    gh_fetch_url(
+        url=f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels",
+        headers={"Accept": "application/vnd.github.v3+json"},
         data={"labels": labels},
     )
 
 
 def gh_remove_label(org: str, repo: str, pr_num: int, label: str) -> None:
-    gh_fetch_json(
-        f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels/{label}",
+    gh_fetch_url(
+        url=f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels/{label}",
+        headers={"Accept": "application/vnd.github.v3+json"},
         method="DELETE",
     )
 

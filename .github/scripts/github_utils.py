@@ -128,10 +128,4 @@ def gh_post_commit_comment(
 
 def gh_delete_comment(org: str, repo: str, comment_id: int) -> None:
     url = f"https://api.github.com/repos/{org}/{repo}/issues/comments/{comment_id}"
-    # gh_fetch_url(url, method="DELETE")
-    print(
-        cast(
-            List[Dict[str, Any]],
-            [],
-        )
-    )
+    gh_fetch_url(url, method="DELETE")
