@@ -533,6 +533,11 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, torch.optim.Optimizer):
+            return self.tx.output.register_optimizer(
+                value,
+                source=self.source,
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,

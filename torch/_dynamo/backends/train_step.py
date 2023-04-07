@@ -1,8 +1,6 @@
 import warnings
 from typing import List
 
-from functorch import functionalize
-
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
@@ -10,6 +8,8 @@ from torch import fx
 from torch._dynamo import register_backend
 from torch._dynamo.backends.registry import lookup_backend
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+from torch.func import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.interpreter import Interpreter
 from torch.nn.utils import stateless
@@ -82,6 +82,8 @@ def train_step_compiler(backend_compile_fn):
         assert torch.is_grad_enabled(), "grad isn't enabled before calling make_fx"
         fx_g = make_fx(functional_call)(*full_fake_args)
         torch.set_grad_enabled(False)
+        print("fx_g")
+        print(fx_g)
         """
         Step 3: Functionalize the resulting flattend graph, producing code with copy_ ops
                 as an epilogue for any inplace/mutating ops such as optimizer update.
@@ -98,9 +100,12 @@ def train_step_compiler(backend_compile_fn):
         Step 4: Reverse the calling-convention change we made above with _reparametrize_module,
                 and return a function that accepts the arguments as originally provided by dynamo
         """
+        print("functional_fx_g.graph")
+        print(functional_fx_g.graph)
 
         def call_without_params(*runtime_args):
-            return functional_fx_g(*params_flat + list(runtime_args))
+            with torch.no_grad():
+                return functional_fx_g(*params_flat + list(runtime_args))
 
         return call_without_params
 

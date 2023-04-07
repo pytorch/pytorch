@@ -34,6 +34,56 @@ from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
 
 
+class OptimizerVariable(VariableTracker):
+    def __init__(self, optimizer_key: int, **kwargs):
+        super().__init__(**kwargs)
+        self.optimizer_key = optimizer_key
+        assert self.source
+
+    def var_getattr(self, tx, name):
+        options = VariableTracker.propagate(self)
+        guards = options.get("guards", set())
+        if name == "step":
+            return OptimizerStepVariable(self, source=AttrSource(self.source, "step"))
+
+
+class OptimizerStepVariable(VariableTracker):
+    def __init__(self, optimizer: VariableTracker, **kwargs):
+        super().__init__(**kwargs)
+        self.optimizer = optimizer
+        assert self.source
+
+    def call_function(
+        self,
+        tx,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        assert len(args) == 0, "no args for optimizer.step()"
+        # ok i need to register the optimizer on the output graph... but how to i call_method on it?
+        # optimizer_key = self.optimizer.optimizer_key
+        from .builder import wrap_fx_proxy
+
+        optimizer_proxy = tx.output.create_proxy(
+            "get_attr",
+            self.optimizer.optimizer_key,
+            tuple(),
+            {},
+        )
+        optimizer_proxy.node.meta["example_value"] = None
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_method",
+                "step",
+                args=(optimizer_proxy,),
+                kwargs={},
+            ),
+            **options,
+        )
+
+
 class NNModuleVariable(VariableTracker):
     _nonvar_fields = ["module_type", "module_key"]
 

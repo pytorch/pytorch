@@ -1193,6 +1193,10 @@ def get_fake_value(node, tx):
         # The actual return type here is None anyway (from .backward()) so no need to run it to find out.
         return None
 
+    if op == "call_module" and "__optimizer_" in node.target:
+        # same as above...
+        return None
+
     nnmodule = None
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]

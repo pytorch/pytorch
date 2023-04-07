@@ -58,7 +58,7 @@ from .utils import (
 )
 from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
-from .variables.nn_module import NNModuleVariable
+from .variables.nn_module import NNModuleVariable, OptimizerVariable
 from .variables.tensor import (
     SymNodeVariable,
     TensorVariable,
@@ -127,10 +127,21 @@ def _get_gen_rand_values_fn(random_calls):
 class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
 
-    def __init__(self, nn_modules: Dict[str, torch.nn.Module]):
+    def __init__(
+        self,
+        nn_modules: Dict[str, torch.nn.Module],
+        optimizers: Dict[str, torch.optim.Optimizer],
+    ):
         super().__init__()
         for k, v in nn_modules.items():
             setattr(self, k, v)
+        for k, v in optimizers.items():
+            assert not hasattr(
+                self, k
+            ), "Name conflict between optimizers and nnmodules"
+            setattr(self, k, v)
+        # extra structure for train_step_compiler to iterate optimizers pre-trace
+        self._optimizers = optimizers
 
     def __repr__(self):
         return "FakeRootModule(...)"
@@ -233,6 +244,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # should use original graphargs.
         self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
+        self.optimizers: Optional[Dict[str, torch.optim.Optimizer]] = dict()
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = dict()
         self.side_effects = SideEffects()
@@ -398,6 +410,24 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
 
+    def register_optimizer(
+        self,
+        target: torch.optim.Optimizer,
+        *names,
+        **options,
+    ):
+        options = dict(options)
+        options["guards"] = set(options.get("guards", []))
+        assert "source" in options
+        source = options["source"]
+
+        options["guards"].add(source.make_guard(GuardBuilder.ID_MATCH))
+
+        assert self.optimizers is not None
+        optimizer_key = f"__optimizer_{len(self.optimizers)}"
+        self.optimizers[optimizer_key] = target
+        return OptimizerVariable(optimizer_key, **options)
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
@@ -552,7 +582,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
         assert self.nn_modules is not None
-        root = FakeRootModule(self.nn_modules)
+        assert self.optimizers is not None
+        root = FakeRootModule(self.nn_modules, self.optimizers)
 
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
@@ -864,7 +895,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = target
-        elif kind == "call_module":
+        elif kind == "call_module" and "__optimizer_" not in target:
             # For modules we store the class
             rv.node.meta["source_fn"] = rv.node.meta["nn_module_stack"][target][1]
 
