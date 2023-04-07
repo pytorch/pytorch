@@ -135,6 +135,9 @@ py::handle type_caster<c10::Scalar>::cast(
       return py::cast(scalar.toDouble()).release();
     }
   } else if (scalar.isBoolean()) {
+    if (scalar.isSymbolic()) {
+      return py::cast(scalar.toSymBool()).release();
+    }
     return py::cast(scalar.toBool()).release();
   } else if (scalar.isComplex()) {
     return py::cast(scalar.toComplexDouble()).release();

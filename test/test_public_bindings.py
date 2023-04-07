@@ -140,7 +140,7 @@ class TestPublicBindings(TestCase):
             "InterfaceType",
             "IntType",
             "SymFloatType",
-            "SymBoolType"
+            "SymBoolType",
             "SymIntType",
             "IODescriptor",
             "is_anomaly_enabled",
