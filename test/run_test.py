@@ -289,6 +289,7 @@ CI_SERIAL_LIST = [
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
+    "test_transformers",  # OOM
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -1301,8 +1302,8 @@ def main():
         x for x in selected_tests if x not in selected_tests_parallel
     ]
     print_to_stderr(
-        "parallel (file granularity) tests:\n {}".format(
-            "\n ".join(str(x) for x in selected_tests_parallel)
+        "parallel (file granularity) tests ({} procs):\n {}".format(
+            NUM_PROCS, "\n ".join(str(x) for x in selected_tests_parallel)
         )
     )
     print_to_stderr(
