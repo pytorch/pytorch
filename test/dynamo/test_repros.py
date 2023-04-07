@@ -2743,6 +2743,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         from torch._dynamo.utils import counters
 
         counters.clear()
+        torch._dynamo.reset()
 
         def fn(input, mask):
             return XSoftmax.apply(input, mask, 1)
