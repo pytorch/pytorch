@@ -207,21 +207,6 @@ class DeferredLine(DeferredLineBase):
         return DeferredLine(self.name, line)
 
 
-class DeferredIndentedBuffer(IndentedBuffer):
-    def __init__(self, initial_indent=0):
-        super().__init__(initial_indent)
-
-    def writeline(self, name, line):
-        if name is None:
-            return super().writeline(line)
-        assert "buf" in name
-        return super().writeline(DeferredLine(name, line))
-
-    def writelines(self, name, lines):
-        for line in lines:
-            self.writeline(name, line)
-
-
 class BracesBuffer(IndentedBuffer):
     def indent(self, offset=1):
         @contextlib.contextmanager
@@ -504,15 +489,11 @@ class CSE:
         buffer: IndentedBuffer,
         expr: typing.Union[str, CSEVariable],
         write=True,
-        append_broadcast=None,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
-        if append_broadcast:
-            assert isinstance(append_broadcast, str)
-            cache_key = expr + append_broadcast
         if cache_key not in self.cache:
             var = self.newvar()
             self.cache[cache_key] = var
@@ -521,17 +502,7 @@ class CSE:
                     V.kernel.current_node.codegen_originating_info(
                         buffer, only_once=True
                     )
-                if append_broadcast:
-                    var_suffix = "_load"
-                else:
-                    var_suffix = ""
-                buffer.writeline(
-                    f"{self.prefix}{var}{var_suffix} = {expr}{self.suffix}"
-                )
-                if append_broadcast:
-                    buffer.writeline(
-                        f"{self.prefix}{var} = tl.broadcast_to({var}{var_suffix}, {append_broadcast})"
-                    )
+                buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
 
         return self.cache[cache_key]
 
@@ -568,7 +539,7 @@ class Kernel(CodeGen):
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = DeferredIndentedBuffer()
+        self.stores = IndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.current_node = None

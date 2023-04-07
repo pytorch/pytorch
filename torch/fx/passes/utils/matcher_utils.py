@@ -52,7 +52,8 @@ class SubgraphMatcher:
     def __init__(self, pattern: Graph,
                  match_output: bool = False,
                  match_placeholder: bool = False,
-                 remove_overlapping_matches: bool = True) -> None:
+                 remove_overlapping_matches: bool = True,
+                 ignore_literals: bool = False) -> None:
         """
         Args:
             pattern: the targeted matching pattern, represented in fx.Graph.
@@ -62,12 +63,15 @@ class SubgraphMatcher:
                 the targeted pattern. If False, placeholder nodes will be used a wildcard.
             remove_overlapping_matches: If True, in the case of overlapping matches, only the first match
                 will be returned.
+            ignore_literals: If True, will not check if literals are equal and
+                will instead treat them as wildcards.
         """
 
         self.pattern = pattern
         self.match_output = match_output
         self.match_placeholder = match_placeholder
         self.remove_overlapping_matches = remove_overlapping_matches
+        self.ignore_literals = ignore_literals
 
         if len(pattern.nodes) == 0:
             raise ValueError("SubgraphMatcher cannot be initialized with an empty pattern")
@@ -217,7 +221,8 @@ class SubgraphMatcher:
                 elif isinstance(a1, (list, tuple)) and isinstance(a2, (list, tuple)):
                     matched = _match_args(a1, a2)
                 else:
-                    matched = self._match_literals(a1, a2, match)
+                    if not self.ignore_literals:
+                        matched = self._match_literals(a1, a2, match)
 
                 if not matched:
                     return False
