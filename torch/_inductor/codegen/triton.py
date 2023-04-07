@@ -1468,7 +1468,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r":
                 grid.append(expr)
 
-        if V.graph.aot_mode:
+        if V.graph.cpp_wrapper:
             V.graph.wrapper_code.generate_kernel_call(
                 name, call_args, V.graph.scheduler.current_device.index
             )

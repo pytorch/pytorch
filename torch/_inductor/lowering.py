@@ -2138,32 +2138,36 @@ def scatter(x, dim: int, index, src, **kwargs):
 def scatter_fallback(
     fn, self, dim: int, index, src, *, reduce: str = None, include_self: bool = True
 ):
-    if reduce not in {None, "sum"} or (
-        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
+    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
+    if (
+        reduce not in {None, reduce_ty}
+        or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
+        or torch.are_deterministic_algorithms_enabled()
     ):
-        self.realize()
-        return fallback_handler(fn)(
-            self, dim, index, src, reduce=reduce, include_self=include_self
+        ir.ScatterFallback(
+            fn, self, dim, index, src, reduce=reduce, include_self=include_self
         )
+        return self
 
     return None
 
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
-    if reduce == "add":
-        reduce = "sum"
-    elif reduce == "multiply":
-        reduce = "prod"
-    else:
-        assert reduce is None
+    assert reduce in {None, "add", "multiply"}
 
     fallback_result = scatter_fallback(
-        aten.scatter_, self, dim, index, src, reduce=reduce
+        "aten.scatter_", self, dim, index, src, reduce=reduce
     )
 
     if fallback_result:
         return fallback_result
+
+    if reduce == "add":
+        reduce = "sum"
+    elif reduce == "multiply":
+        reduce = "prod"
+
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
@@ -2182,15 +2186,12 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
     return scatter_reduce_(clone(x), dim, index, src, reduction_type, **kwargs)
 
 
-fallback_scatter_reduce_ = fallback_handler(aten.scatter_reduce_)
-
-
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
 
     fallback_result = scatter_fallback(
-        aten.scatter_reduce_,
+        "aten.scatter_reduce_",
         self,
         dim,
         index,
