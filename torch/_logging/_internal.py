@@ -129,7 +129,7 @@ def set_logs(
     graph=False,
     graph_code=False,
     guards=False,
-    recompilations=False,
+    recompiles=False,
     output_code=False,
     schedule=False,
 ):
@@ -179,7 +179,7 @@ def set_logs(
         graph=graph,
         graph_code=graph_code,
         guards=guards,
-        recompilations=recompilations,
+        recompiles=recompiles,
         output_code=output_code,
         schedule=schedule,
     )
