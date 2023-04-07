@@ -20,14 +20,9 @@ from typing import (
 )
 
 import torch
-import torch.distributed as dist
 import torch.fx as fx
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.distributed._spmd.graph_utils import (
-    CommType,
-    dump_graphs_to_files,
-    get_output,
-)
+from torch.distributed._spmd.graph_utils import CommType, dump_graphs_to_files
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_unflatten
@@ -225,7 +220,7 @@ def _create_meta_tensor_meta(
         shape=val.shape,
         dtype=val.dtype,
         requires_grad=val.requires_grad,
-        stride=val.stride,  #  type: ignore[arg-type]
+        stride=val.stride,  # type: ignore[arg-type]
         # TODO: fix these value
         memory_format=None,
         is_quantized=False,
@@ -332,7 +327,7 @@ def _fuse_with_cat(
     gm: IterGraphModule,
     comm_blocks: List[CommBlock],
     node_indices: Dict[fx.Node, int],
-) -> fx.Node:
+) -> CommBlock:
     """
     Given a list of CommBlock (only allreduce), fuse the CommBlocks using concat.
     """
@@ -344,7 +339,7 @@ def _fuse_with_cat(
         input_node = comm_block.inputs[0]
         # If the input node is a clone, this is CommTensor based implementation.
         if input_node.name.startswith("clone"):
-            input_node = input_node.args[0]
+            input_node = cast(fx.Node, input_node.args[0])
         all_input_nodes.append(input_node)
         index = node_indices[input_node]
         if index >= last_input_index:
@@ -402,12 +397,12 @@ def _fuse_with_cat(
 
     tensor_meta = cat_node.meta.get("tensor_meta")
     fused_comm_block = CommBlock(
-        shape=tensor_meta.shape,
+        shape=tensor_meta.shape,  # type: [union-attr]
         node_list=[fused_comm_node, fused_wait_node],
         wait_nodes=[fused_wait_node],
         comm_node=fused_comm_node,
         inputs=[cat_node],
-        outputs=[fused_wait_node],
+        outputs=set([fused_wait_node]),
     )
 
     _scatter_wait_result(gm, fused_comm_block, comm_blocks, node_indices)
@@ -432,7 +427,7 @@ def comm_fusion_with_concat(
     begin = end = curr_size = 0
     while end < len(comm_blocks):
         # TODO: determine the dtype
-        curr_size += comm_blocks[end].shape.numel() * 4
+        curr_size += cast(torch.Size, comm_blocks[end].shape).numel() * 4
         end += 1
         if curr_size < bucket_size:
             continue
