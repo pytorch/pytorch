@@ -7,10 +7,9 @@ import torch
 import torch._C as _C
 import torch.library as library
 import torch.utils._pytree as pytree
-from torch._ops import OpOverload
 
 """
-There are various APIs for defining custom operators in PyTorch:
+There are various APIs for defining custom-operator-like things in PyTorch:
 - [user-facing] autograd.Function (Python)
 - [user-facing] CustomOp (Python)
 - [for power users] torch.library (Python)
@@ -58,24 +57,29 @@ class CustomOp:
     To construct a `CustomOp`, use :meth:`CustomOp.define`.
     """
 
-    def __init__(
-        self, lib, ns, opname, schema, dispatcher_op, *, _private_access=False
-    ):
+    def __init__(self, lib, ns, schema, *, _private_access=False):
         if not _private_access:
             raise RuntimeError(
                 "The CustomOp constructor is private. Please use "
-                "CustomOp.define or CustomOp.from_existing to create "
-                "a CustomOp object"
+                "CustomOp.define to create a CustomOp object"
             )
+        name = f"{ns}::{str(schema.name.name)}"
+        overload_name = (
+            "" if schema.name.overload_name is None else schema.name.overload_name
+        )
 
         self._lib: library.Library = lib
         self._ns: str = ns
-        self._opname: str = opname
         self._schema: FunctionSchema = schema
-        self._dispatcher_op: OpOverload = dispatcher_op
+        self._ophandle: _C._DispatchOperatorHandle = _C._dispatch_find_schema_or_throw(
+            name, overload_name
+        )
+        # Has the overload name, e.g. "foo.out" Computable from the schema but
+        # we cache here for convenience.
+        self._opname: str = str(schema.name)
 
     @staticmethod
-    def define(namespaced_schema_str: str) -> "CustomOp":
+    def define(namespaced_schema: str) -> "CustomOp":
         r"""Creates a new CustomOp object.
 
         In PyTorch, defining an op (short for "operator") is a two step-process:
@@ -88,7 +92,7 @@ class CustomOp:
         the CustomOp object.
 
         Arguments:
-            namespaced_schema_str (str): The schema of the CustomOp.
+            namespaced_schema (str): The schema of the CustomOp.
 
         Example::
             >>> import numpy as np
@@ -115,28 +119,27 @@ class CustomOp:
             >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
 
         """
-        ns, schema_str, schema = process_namespaced_schema_str(namespaced_schema_str)
+        ns, schema_str, schema = process_namespaced_schema_str(namespaced_schema)
 
         lib = library.Library(ns, "FRAGMENT")
         lib.define(schema_str)
-        opname = str(schema.name)
-        op_ns = getattr(torch.ops, ns)
-        packet = getattr(op_ns, str(schema.name.name))
-        dispatcher_op = getattr(packet, schema.name.overload_name)
-        result = CustomOp(lib, ns, opname, schema, dispatcher_op, _private_access=True)
+        result = CustomOp(lib, ns, schema, _private_access=True)
 
         # NYI: autograd not supported
-        # In the future we will either directly use the
+        # In the near future we will either directly use the
         # autograd_not_implemented kernels or make those the default fallback
         # for the Autograd and ADInplaceOrView keys. Both of those are a bit tricky.
-        library.impl(lib, opname, "Autograd")(
+        library.impl(lib, result._opname, "Autograd")(
             get_autograd_not_implemented_kernel(weakref.proxy(result))
         )
 
         return result
 
     def __call__(self, *args, **kwargs):
-        result = self._dispatcher_op(*args, **kwargs)
+        # Bypass torch.ops.* and directly do OperatorHandle::callBoxed.
+        # Using torch.ops.* is a bit of a pain (it can be slow and it has lifetime
+        # issues from caching operators that make testing CustomOp difficult).
+        result = _C._dispatch_call_boxed(self._ophandle, *args, **kwargs)
         return result
 
     def impl(self, device_type: str) -> Callable:
@@ -188,6 +191,9 @@ class CustomOp:
         The meta implementation is a shape propagation rule that gets invoked
         for device='meta' Tensors and FakeTensors (Tensors that do not have storage).
 
+        To register a data-dependent shape propagation rule, use the
+        not-yet-implemented method to register a rule for FakeTensor.
+
         This API is used as a decorator (see examples).
 
         Examples::
@@ -214,16 +220,16 @@ class CustomOp:
 
 
 def process_namespaced_schema_str(
-    namespaced_schema_str: str,
+    namespaced_schema: str,
 ) -> Tuple[str, str, FunctionSchema]:
-    ns, schema_str = parse_namespace(namespaced_schema_str)
+    ns, schema_str = parse_namespace(namespaced_schema)
     schema = FunctionSchema.parse(schema_str)
 
     if ns in RESERVED_NS:
         raise ValueError(
             f"{ns} is a reserved namespace, please choose something else. "
             f"Found when trying to create a new CustomOp with schema "
-            f"{namespaced_schema_str}"
+            f"{namespaced_schema}"
         )
 
     # Coming in the future. Requires us to have correct logic for
@@ -276,7 +282,7 @@ def get_autograd_not_implemented_kernel(custom_op) -> Callable:
             lambda x: isinstance(x, torch.Tensor) and x.requires_grad, (args, kwargs)
         ):
             raise RuntimeError("Autograd has not been implemented for operator")
-        # TODO(rzou): RAII guard should be contextmanager, or else
+        # TODO(rzou): RAII guard should be contextmanager, or else bad things will happen
         guard = _C._AutoDispatchBelowAutograd()
         try:
             return custom_op(*args, **kwargs)

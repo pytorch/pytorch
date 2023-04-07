@@ -22,6 +22,14 @@ import logging
 import sys
 
 
+class TestDispatcherPythonBindings(TestCase):
+    def test_call_boxed(self) -> None:
+        sin = torch._C._dispatch_find_schema_or_throw("aten::sin", "")
+        x = torch.randn(3)
+        y = torch._C._dispatch_call_boxed(sin, x)
+        self.assertEqual(y, x.sin())
+
+
 class TestPythonRegistration(TestCase):
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
@@ -83,7 +91,7 @@ class TestPythonRegistration(TestCase):
 
         def my_sum(*args, **kwargs):
             run[0] = True
-            return args[0]
+            return args[0].clone()
 
         my_lib1 = Library("aten", "IMPL")
         my_lib1.impl('aten::sum', my_sum, "CPU")
@@ -219,7 +227,7 @@ class TestPythonRegistration(TestCase):
 
     def test_extend_library_with_dispatch_key_arg(self):
         def my_sum(*args, **kwargs):
-            return args[0]
+            return args[0].clone()
         my_lib1 = Library("aten", "IMPL", dispatch_key="CPU")
 
         # RuntimeError: Explicitly provided dispatch key (Conjugate) is
@@ -239,7 +247,7 @@ class TestPythonRegistration(TestCase):
         # Example 1
         @torch.library.impl(my_lib1, "sum", "CPU")
         def my_sum(*args, **kwargs):
-            return args[0]
+            return args[0].clone()
 
         x = torch.tensor([1, 2])
         self.assertEqual(torch.ops.foo.sum(x), x)
@@ -252,7 +260,7 @@ class TestPythonRegistration(TestCase):
             if args[0]._is_zerotensor():
                 return torch._efficientzerotensor(args[0].shape)
             else:
-                return args[0]
+                return args[0].clone()
 
         y = torch._efficientzerotensor(3)
         self.assertTrue(torch.ops.foo.sum(y)._is_zerotensor())
@@ -264,14 +272,14 @@ class TestPythonRegistration(TestCase):
     def test_create_new_library_fragment_no_existing(self):
         my_lib = Library("foo", "FRAGMENT")
 
-        my_lib.define("sum(Tensor self) -> Tensor")
+        my_lib.define("sum2(Tensor self) -> Tensor")
 
-        @torch.library.impl(my_lib, "sum", "CPU")
+        @torch.library.impl(my_lib, "sum2", "CPU")
         def my_sum(*args, **kwargs):
             return args[0]
 
         x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum(x), x)
+        self.assertEqual(torch.ops.foo.sum2(x), x)
 
         del my_lib
 
@@ -281,14 +289,14 @@ class TestPythonRegistration(TestCase):
         # Create a fragment
         my_lib2 = Library("foo", "FRAGMENT")
 
-        my_lib2.define("sum(Tensor self) -> Tensor")
+        my_lib2.define("sum4(Tensor self) -> Tensor")
 
-        @torch.library.impl(my_lib2, "sum", "CPU")
-        def my_sum(*args, **kwargs):
+        @torch.library.impl(my_lib2, "sum4", "CPU")
+        def my_sum4(*args, **kwargs):
             return args[0]
 
         x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum(x), x)
+        self.assertEqual(torch.ops.foo.sum4(x), x)
 
         # Create another fragment
         my_lib3 = Library("foo", "FRAGMENT")
@@ -383,13 +391,13 @@ class TestCustomOp(TestCase):
         # (we share the same mechanism), but here's a sanity check.
         schemas = [
             'a::b(Tensor x) -> Tensor',
-            'a::b(Tensor x) -> Tensor y',
+            'a::b.with_overload(Tensor x) -> Tensor y',
             'a::b(Tensor[] x) -> Tensor y',
             'a::b(Tensor x) -> (Tensor, Tensor)',
             'a::b(Tensor x) -> (Tensor y, Tensor z)',
             'a::b(Tensor x) -> (Tensor y, Tensor z)',
             'a::b(Tensor x, Tensor w) -> (Tensor y, Tensor z)',
-            'a::b(Tensor x, Tensor w) -> (Tensor, Tensor)',
+            'a::b.with_overload(Tensor x, Tensor w) -> (Tensor, Tensor)',
             'a::b(Tensor x, Tensor w) -> Tensor',
             'a::b(Tensor? x, Tensor w) -> Tensor',
             'a::b(Tensor? x, Tensor[] w) -> Tensor',
@@ -413,7 +421,7 @@ class TestCustomOp(TestCase):
 
     def test_private_ctor(self):
         with self.assertRaisesRegex(RuntimeError, 'CustomOp constructor is private'):
-            CustomOp(None, None, None, None, None)
+            CustomOp(None, None, None)
 
     def test_lifetime_is_tied_to_object(self):
         foo = CustomOp.define('custom::foo(Tensor x) -> Tensor')
