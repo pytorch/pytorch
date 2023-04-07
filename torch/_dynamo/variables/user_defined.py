@@ -23,7 +23,7 @@ from ..utils import (
     object_has_getattribute,
 )
 from .base import MutableLocal, VariableTracker
-from .ctx_manager import NullContextVariable
+from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -105,6 +105,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if self.value is contextlib.nullcontext:
             return NullContextVariable(**options)
+        elif (
+            issubclass(type(self.value), type)
+            and hasattr(self.value, "__enter__")
+            and hasattr(self.value, "__exit__")
+            and len(args) == 0
+        ):
+            ctx_manager = self.value()
+            return GenericContextWrappingVariable([ctx_manager], **options)
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             items = list(args)

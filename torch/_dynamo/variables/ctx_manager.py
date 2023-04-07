@@ -64,6 +64,45 @@ class ContextWrappingVariable(VariableTracker):
             return WrappedUserFunctionVariable(args[0], self)
 
 
+class GenericContextWrappingVariable(ContextWrappingVariable):
+    def __init__(self, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def enter(self, tx):
+        options = VariableTracker.propagate(self)
+        options["source"] = (
+            None if self.source is None else AttrSource(self.source, "__enter__")
+        )
+        cm_obj = self.target_values[0]
+        return variables.UserMethodVariable(
+            cm_obj.__enter__.__func__,
+            variables.UserDefinedObjectVariable(cm_obj, **options),
+            **options,
+        ).call_function(tx, [], {})
+
+    def exit(self, tx, *args):
+        options = VariableTracker.propagate(self)
+        options["source"] = (
+            None if self.source is None else AttrSource(self.source, "__exit__")
+        )
+        cm_obj = self.target_values[0]
+        return variables.UserMethodVariable(
+            cm_obj.__exit__.__func__,
+            variables.UserDefinedObjectVariable(cm_obj, **options),
+            **options,
+        ).call_function(
+            tx,
+            [
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+            ],
+            {},
+        )
+
+
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
