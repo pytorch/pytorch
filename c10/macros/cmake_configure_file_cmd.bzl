@@ -1,10 +1,14 @@
-def cmake_configure_file_cmd(template_path, definitions, output_path):
-    command = ["sed", "--regexp-extended"]
+def cmake_configure_file_cmd(definitions, path):
+    command = ["sed",
+               "--in-place",
+               "--regexp-extended",
+               path,  # this is our input and output argument
+               ]
     for definition in definitions:
         command.append(
-            # Note that because of the shell redirection at the end of
-            # the command, we must return arguments that are parseable
-            # by a shell, hence the quoting here.
+            # We must return arguments that are parseable by a shell
+            # because of our internal implementation, hence the
+            # quoting here.
             "--expr='s@#cmakedefine {}@#define {}@'".format(
                 definition,
                 definition,
@@ -13,14 +17,5 @@ def cmake_configure_file_cmd(template_path, definitions, output_path):
 
     # Replace any that remain with /* #undef FOO */.
     command.append("--expr='s@#cmakedefine ([A-Z0-9_]+)@/* #undef \\1 */@'")
-
-    # The input is the final argument to sed.
-    command.append(template_path)
-
-    # You can not specify the output to sed, so file redirection is
-    # our only option. This means that even though we're returning a
-    # list, we have to join it into a string and have a shell evaluate
-    # it.
-    command.append("> {}".format(output_path))
 
     return command

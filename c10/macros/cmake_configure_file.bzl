@@ -7,15 +7,28 @@ load(":cmake_configure_file_cmd.bzl", "cmake_configure_file_cmd")
 def _cmake_configure_file_impl(ctx):
     command = cmake_configure_file_cmd("$1", ctx.attr.definitions, "$2")
 
-    ctx.actions.run_shell(
+    # Copy the input template to the output, so the subsequent command
+    # can treat it as an in-out argument.
+    ctx.actions.run(
         inputs = [ctx.file.src],
         outputs = [ctx.outputs.out],
-        command = " ".join(command),
+        command = ["cp", "$1", "$2"],
         arguments = [
             ctx.file.src.path,
             ctx.outputs.out.path,
         ],
     )
+
+    # This action transforms the template into a valid header file.
+    ctx.actions.run(
+        inputs = [ctx.outputs.out],
+        outputs = [ctx.outputs.out],
+        command = cmake_configure_file_cmd(ctx.attr.definitions, "$1"),
+        arguments = [
+            ctx.outputs.out.path,
+        ],
+    )
+
     return [
         # create a provider which says that this
         # out file should be made available as a header
