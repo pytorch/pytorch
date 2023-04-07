@@ -43,6 +43,9 @@ def remove_dead_code(instructions):
                 return
 
     find_live_code(0)
+    # change exception table entries if instructions are dead
+    if sys.version_info >= (3, 11):
+        live_idxes = sorted(live_code)
     return [inst for i, inst in enumerate(instructions) if i in live_code]
 
 

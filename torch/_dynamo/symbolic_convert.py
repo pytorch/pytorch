@@ -1653,13 +1653,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert self.next_instruction.exn_tab_entry
         target = self.next_instruction.exn_tab_entry.target
         if isinstance(self, InstructionTranslator):
-            self.block_stack.append(
-                BlockStackEntry(target, len(self.stack), ctx)
-            )
+            self.block_stack.append(BlockStackEntry(target, len(self.stack), ctx))
         else:
-            self.block_stack.append(
-                BlockStackEntry(target)
-            )
+            self.block_stack.append(BlockStackEntry(target))
 
         self.push(exit)
         self.push(ctx.enter(self))

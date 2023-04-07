@@ -306,3 +306,10 @@ def skipIfPy311(fn):
         return fn
     else:
         return unittest.skip(fn)
+
+
+# test Python 3.11+ specific features
+def skipIfNotPy311(fn):
+    if sys.version_info >= (3, 11):
+        return fn
+    return unittest.skip(fn)

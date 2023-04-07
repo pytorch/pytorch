@@ -566,10 +566,67 @@ def compute_exception_table(
                 assert exn_dict[key] == val
             exn_dict[key] = val
 
-    keys_sorted = sorted(exn_dict.keys())
+    # sort by ascending start, then descending end
+    keys_sorted = sorted(exn_dict.keys(), key=lambda t: (t[0], -t[1]))
+    # break down nested entries
+    nexti = 0
+    key_stack = []
+    exn_tab = []
+
+    def pop():
+        nonlocal nexti, key_stack, exn_tab
+        if key_stack:
+            key = key_stack.pop()
+            if nexti <= key[1]:
+                exn_tab.append(
+                    ExceptionTableEntry(max(key[0], nexti), key[1], *exn_dict[key])
+                )
+                nexti = key[1] + 1
+
+    for key in keys_sorted:
+        pass
     exn_tab = [ExceptionTableEntry(*key, *exn_dict[key]) for key in keys_sorted]
     check_exception_table(exn_tab)
     return exn_tab
+
+
+def check_exception_table_nested(tab: List[InstructionExnTabEntry], indexof):
+    """
+    Checks `tab` is a properly sorted list of nested exception table entries;
+    i.e. no entries partially overlap.
+    "Properly sorted" means starts are sorted in increasing order, ties are
+    broken by ends, in decreasing order.
+    """
+    entry_stack = []
+    for entry in tab:
+        key = (indexof[entry.start], indexof[entry.end])
+        while entry_stack and entry_stack[-1][1] < key[0]:
+            entry_stack.pop()
+        if entry_stack:
+            assert entry_stack[-1][0] <= key[0] <= key[1] <= entry_stack[-1][1]
+        entry_stack.append(key)
+
+
+def propagate_exn_table_entries(instructions: List[Instruction]):
+    """
+    Copies exception table entries to all instructions in an entry's range.
+    Supports nested exception table entries.
+    """
+    indexof = {inst: i for i, inst in enumerate(instructions)}
+    entries = {}
+    for inst in instructions:
+        if inst.exn_tab_entry:
+            key = (indexof[inst.exn_tab_entry.start], indexof[inst.exn_tab_entry.end])
+            if key in entries:
+                assert inst.exn_tab_entry is entries[key]
+            entries[key] = inst.exn_tab_entry
+    sorted_entries = [
+        entries[key] for key in sorted(entries.keys(), key=lambda t: (t[0], -t[1]))
+    ]
+    check_exception_table_nested(sorted_entries, indexof)
+    for entry in sorted_entries:
+        for i in range(indexof[entry.start], indexof[entry.end] + 1):
+            instructions[i].exn_tab_entry = entry
 
 
 def strip_extended_args(instructions: List[Instruction]):

@@ -83,7 +83,11 @@ class ReenterWith:
             exn_tab_begin = create_instruction("NOP")
             exn_tab_end = create_instruction("NOP")
             exn_tab_begin.exn_tab_entry = InstructionExnTabEntry(
-                exn_tab_begin, exn_tab_end, except_jump_target, self.stack_index + 1, False
+                exn_tab_begin,
+                exn_tab_end,
+                except_jump_target,
+                self.stack_index + 1,
+                False,
             )
             setup_finally.append(exn_tab_begin)
 
@@ -122,7 +126,7 @@ class ReenterWith:
                 finally_exn_tab_end,
                 finally_exn_tab_target,
                 self.stack_index + 2,
-                True
+                True,
             )
             epilogue = [
                 exn_tab_end,
@@ -216,13 +220,25 @@ class ReenterWith:
             exn_tab_2_target = create_instruction("COPY", arg=3)
 
             exn_tab_1_begin.exn_tab_entry = InstructionExnTabEntry(
-                exn_tab_1_begin, exn_tab_1_end, exn_tab_1_target, self.stack_index + 1, True
+                exn_tab_1_begin,
+                exn_tab_1_end,
+                exn_tab_1_target,
+                self.stack_index + 1,
+                True,
             )
             exn_tab_1_target.exn_tab_entry = InstructionExnTabEntry(
-                exn_tab_1_target, exn_tab_2_end, exn_tab_2_target, self.stack_index + 3, True
+                exn_tab_1_target,
+                exn_tab_2_end,
+                exn_tab_2_target,
+                self.stack_index + 3,
+                True,
             )
             pop_top_after_with_except_start.exn_tab_entry = InstructionExnTabEntry(
-                pop_top_after_with_except_start, pop_top_after_with_except_start, exn_tab_2_target, self.stack_index + 3, True
+                pop_top_after_with_except_start,
+                pop_top_after_with_except_start,
+                exn_tab_2_target,
+                self.stack_index + 3,
+                True,
             )
 
             cleanup[:] = [
