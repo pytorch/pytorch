@@ -1,5 +1,4 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from copy import deepcopy
 from typing import List, Optional, Sequence, Tuple
 
 import torch
@@ -182,8 +181,11 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
 
         # need to create a new self instead return (target, target) as target
         # and self might not match in shape.
-        new_self = deepcopy(self)
-        new_self.placements = deepcopy(target.placements)
+        new_self = DTensorSpec(
+            mesh=self.mesh,
+            placements=target.placements,
+            tensor_meta=self.tensor_meta,
+        )
         return OutputSharding(
             output_spec=None,
             schema_suggestions=[
@@ -197,39 +199,13 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
             ],
         )
     else:
-        from torch.fx.passes.shape_prop import TensorMetadata
-
         return OutputSharding(
             output_spec=(
                 # by default, nll_loss_forward conducts a reduction and returns
                 # a scalar tensor, and hence the _Partial placements.
-                DTensorSpec(
-                    mesh=self.mesh,
-                    placements=[_Partial()],
-                    tensor_meta=TensorMetadata(
-                        shape=torch.Size([]),
-                        dtype=self.tensor_meta.dtype,
-                        memory_format=self.tensor_meta.memory_format,
-                        requires_grad=True,
-                        stride=(),
-                        is_quantized=False,
-                        qparams={},
-                    ),
-                ),
+                DTensorSpec(mesh=self.mesh, placements=[_Partial()]),
                 # the 2nd output total_weight is always a scalar tensor
-                DTensorSpec(
-                    mesh=self.mesh,
-                    placements=[Replicate()],
-                    tensor_meta=TensorMetadata(
-                        shape=torch.Size([]),
-                        dtype=self.tensor_meta.dtype,
-                        memory_format=self.tensor_meta.memory_format,
-                        requires_grad=False,
-                        stride=(),
-                        is_quantized=False,
-                        qparams={},
-                    ),
-                ),
+                DTensorSpec(mesh=self.mesh, placements=[Replicate()]),
             )
         )
 
