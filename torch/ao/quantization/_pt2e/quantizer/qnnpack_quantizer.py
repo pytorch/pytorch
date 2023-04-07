@@ -3,7 +3,7 @@ from .quantizer import Quantizer
 
 import copy
 from dataclasses import dataclass
-from typing import List, NamedTuple, Optional, Set, Dict
+from typing import List, NamedTuple, Optional, Set, Dict, Callable
 from torch.ao.quantization.observer import (
     PlaceholderObserver,
     HistogramObserver,
