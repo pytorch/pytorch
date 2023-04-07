@@ -609,7 +609,7 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(index_var):
+            def indirect_indexing(index_var, size):
                 return sympy_symbol(str(index_var))
 
             @staticmethod
