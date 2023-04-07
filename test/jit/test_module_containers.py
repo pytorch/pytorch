@@ -236,6 +236,9 @@ class TestModuleContainers(JitTestCase):
         with self.assertRaisesRegexWithHighlight(Exception, "Enumeration is supported", "self.mods[i]"):
             torch.jit.script(M3())
 
+        with self.assertRaisesRegex(Exception, "will fail because i is not a literal"):
+            torch.jit.script(M3())
+
     def test_module_interface_special_methods(self):
         class CustomModuleInterface(torch.nn.Module):
             pass
@@ -683,3 +686,17 @@ class TestModuleContainers(JitTestCase):
                 return self.parameter_dict['a'] * x + self.parameter_dict['b'] * self.parameter_dict['c']
 
         self.checkModule(MyModule(), (torch.ones(1),))
+
+    def test_parameterlist_script_getitem_bad_idx(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.modules = nn.ModuleList([nn.Linear(1, 1)])
+
+            def forward(self, x: torch.Tensor, idx: torch.Tensor):
+                return self.modules[idx](x)
+
+        mod = MyModule()
+
+        with self.assertRaisesRegex(RuntimeError, "but got type Tensor"):
+            torch.jit.script(mod)
