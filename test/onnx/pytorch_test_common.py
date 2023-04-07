@@ -167,8 +167,8 @@ def skip_min_ort_version(reason: str, version: str):
                 < packaging.version.parse(version).release
             ):
                 raise unittest.SkipTest(
-                    f"ONNX Runtime version: {version} is older than required version {version}."
-                    f"This reason we skip it: {reason}."
+                    f"ONNX Runtime version: {version} is older than required version {version}. "
+                    f"Reason: {reason}."
                 )
             return func(self, *args, **kwargs)
 
