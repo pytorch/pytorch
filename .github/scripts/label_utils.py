@@ -79,7 +79,6 @@ def gh_add_labels(
 ) -> None:
     gh_fetch_url(
         url=f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels",
-        headers={"Accept": "application/vnd.github.v3+json"},
         data={"labels": labels},
     )
 
@@ -87,7 +86,6 @@ def gh_add_labels(
 def gh_remove_label(org: str, repo: str, pr_num: int, label: str) -> None:
     gh_fetch_url(
         url=f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels/{label}",
-        headers={"Accept": "application/vnd.github.v3+json"},
         method="DELETE",
     )
 
