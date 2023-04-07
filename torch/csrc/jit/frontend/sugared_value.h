@@ -269,14 +269,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
       GraphFunction& m,
       Value* idx,
       TypePtr type_hint = nullptr) override {
-    if (!idx->type()->cast<IntType>()) {
-      throw ErrorReport(loc)
-          << "Expected integer literal for index but got type "
-          << idx->type()->str()
-          << ". ModuleList/Sequential indexing is only supported with integer literals. "
-          << "Enumeration is supported, e.g. 'for index, v in enumerate(self): out = v(inp)'";
-    }
-    if (!toIValue(idx)) {
+    if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
       throw ErrorReport(loc)
           << "Expected integer literal for index but got a variable integer. "
           << "ModuleList/Sequential indexing is only supported with integer literals. "

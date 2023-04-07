@@ -381,6 +381,10 @@ class TestModuleContainers(JitTestCase):
             b = AnotherBadModule()
             torch.jit.script(b)
 
+        with self.assertRaisesRegex(Exception, "will fail because i is not a literal"):
+            b = AnotherBadModule()
+            torch.jit.script(b)
+
     def test_normal_list_attribute_with_modules_error(self):
         """
         Test that an attempt to script a module with a regular list attribute
@@ -686,17 +690,3 @@ class TestModuleContainers(JitTestCase):
                 return self.parameter_dict['a'] * x + self.parameter_dict['b'] * self.parameter_dict['c']
 
         self.checkModule(MyModule(), (torch.ones(1),))
-
-    def test_parameterlist_script_getitem_bad_idx(self):
-        class MyModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.modules = nn.ModuleList([nn.Linear(1, 1)])
-
-            def forward(self, x: torch.Tensor, idx: torch.Tensor):
-                return self.modules[idx](x)
-
-        mod = MyModule()
-
-        with self.assertRaisesRegex(RuntimeError, "but got type Tensor"):
-            torch.jit.script(mod)
