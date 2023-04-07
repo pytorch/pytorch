@@ -204,7 +204,7 @@ cudaError_t GetDeviceCount(int* dev_count) {
 // x = torch.empty(1, device=“cuda:1”) # no CUDA context on cuda:0 after this
 // call y = torch.empty(1, device=“cuda”) # CUDA context is created on cuda:0
 // ```
-#if CUDA_VERSION >= 11000
+#if CUDA_VERSION >= 12000
 thread_local int targetDeviceIndex = -1;
 
 cudaError_t GetDevice(int* device) {
@@ -223,9 +223,7 @@ cudaError_t SetDevice(int device) {
   if (device == cur_device) {
     return cudaSuccess;
   }
-  cudaError_t err = cudaSetDevice(device);
-  C10_CUDA_CHECK(cudaFree(0));
-  return err;
+  return cudaSetDevice(device);
 }
 
 cudaError_t MaybeSetDevice(int device) {
@@ -236,6 +234,8 @@ cudaError_t MaybeSetDevice(int device) {
   return cudaSuccess;
 }
 
+// This function always initializes the CUDA context
+// on to_device
 int ExchangeDevice(int to_device) {
   int cur_device = targetDeviceIndex;
   targetDeviceIndex = -1;
@@ -246,10 +246,11 @@ int ExchangeDevice(int to_device) {
     }
   }
   C10_CUDA_CHECK(cudaSetDevice(to_device));
-  C10_CUDA_CHECK(cudaFree(0));
   return cur_device;
 }
 
+// This function does not initialize the CUDA context
+// on to_device if it does not already exist
 int MaybeExchangeDevice(int to_device) {
   int cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
@@ -258,7 +259,6 @@ int MaybeExchangeDevice(int to_device) {
   }
   if (hasPrimaryContext(to_device)) {
     C10_CUDA_CHECK(cudaSetDevice(to_device));
-    C10_CUDA_CHECK(cudaFree(0));
   } else {
     targetDeviceIndex = to_device;
   }
