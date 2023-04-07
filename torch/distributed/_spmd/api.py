@@ -17,12 +17,13 @@ from typing import (
     Union,
 )
 
+from functorch import make_fx
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.utils._pytree as pytree
 
-from functorch import make_fx
 from torch import fx
 from torch.distributed._spmd.distribute import (
     _convert_to_distributed,
