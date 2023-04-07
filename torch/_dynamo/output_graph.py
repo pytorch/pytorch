@@ -118,7 +118,7 @@ class GraphCompileReason:
     reason: str
     user_stack: List[traceback.FrameSummary]
 
-    # Indicates if this was a graph compile reason due to graph break. 
+    # Indicates if this was a graph compile reason due to graph break.
     graph_break: bool = True
 
 
