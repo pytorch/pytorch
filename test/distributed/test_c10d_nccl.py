@@ -16,7 +16,7 @@ from unittest import mock
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_nccl_available():
+if not c10d.is_available() or not c10d.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
