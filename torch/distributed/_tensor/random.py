@@ -23,7 +23,7 @@ def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
     """
     assert isinstance(
         device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {device_mesh} was passed in."
+    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
 
     if device_mesh.get_coordinate() is not None:
         # the current rank is in mesh
@@ -52,7 +52,7 @@ def get_rng_state(device_mesh: DeviceMesh) -> Tensor:
     """
     assert isinstance(
         device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {device_mesh} was passed in."
+    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
 
     if device_mesh.device_type == "cuda":
         return torch.cuda.get_rng_state()
@@ -82,7 +82,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     """
     assert isinstance(
         device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {device_mesh} was passed in."
+    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
 
     # allgather the seed from rank 0 over the default PG
     object_list = [seed] * dist.get_world_size()
@@ -123,7 +123,7 @@ def _set_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
     """
     assert isinstance(
         device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {device_mesh} was passed in."
+    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
 
     if device_mesh.get_coordinate() is not None:
         # the current rank is in mesh
