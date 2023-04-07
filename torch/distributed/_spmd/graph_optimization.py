@@ -8,6 +8,7 @@ from functools import wraps
 from typing import (
     Any,
     Callable,
+    cast,
     DefaultDict,
     Dict,
     Iterable,
@@ -40,9 +41,6 @@ _run_before_sets: DefaultDict[str, Set[str]] = collections.defaultdict(set)
 _dump_graph_folder: str = ""
 
 
-logger: logging.Logger = logging.getLogger("graph_optimization")
-
-
 def enable_graph_optimization_dump(folder: str = ""):
     global _dump_graph_folder
     if not folder:
@@ -50,17 +48,25 @@ def enable_graph_optimization_dump(folder: str = ""):
     _dump_graph_folder = folder
 
 
-def graph_optimization_pass(
-    run_after: Iterable[str] = tuple(),
-) -> Callable[..., Callable[..., None]]:
+def graph_optimization_pass(run_after: Iterable[str]) -> Callable:
     """
     The contract of graph optimization pass. All the passes should be wrapped with
-    this decorator.
+    this decorator. `run_after` is used to denote which optimizer passes must be
+    run before the wrapped optimizer pass. Optimizer pass developers are required
+    to add this field accordingly and users need to follow the restrictions to
+    avoid the assert.
+
+    Current design has one limitation: users can only apply the optimizations once.
+    In some cases, we may need to run multiple the same optimization multiple time,
+    e.g., optimization passes -> profiling the result -> apply optimization passes
+    with the profiling result again. Will address this limitation in the future.
+
+    Args:
+        run_after (Iterable[str]): the list of string to the names of passes which
+            must be run before this optimization pass.
     """
 
-    def inner(
-        func: Callable[..., Union[fx.GraphModule, IterGraphModule]]
-    ) -> Callable[..., Union[fx.GraphModule, IterGraphModule]]:
+    def inner(func: Callable) -> Callable:
         for name in run_after:
             _run_before_sets[name].add(func.__name__)
 
@@ -116,9 +122,10 @@ class CommBlock:
     outputs: Set[fx.Node]
 
 
-def get_comm_block_nodes(comm_node: fx.Node) -> CommBlock:
+def get_comm_block(comm_node: fx.Node) -> CommBlock:
     """
-    Given a wait_comm node, find out all the nodes belong to this communcation.
+    Given a collective node (e.g., allreduce), find out all the nodes belong to
+    this communcation.
 
     Args:
         comm_node(fx.Node): The target communication/collective node.
@@ -126,6 +133,9 @@ def get_comm_block_nodes(comm_node: fx.Node) -> CommBlock:
         The CommBlock that encapsulates the related nodes (e.g., wait_node) of
         the given comm_node.
     """
+    # We choose 5 to prevent some accidents that cause infinite loop. But
+    # with functional collective, the distance is 1.
+    MAX_WAIT_DISTANCE = 5
     node_list = []
     wait_nodes = []
     inputs, _ = tree_flatten((comm_node.args, comm_node.kwargs))
@@ -154,17 +164,18 @@ def get_comm_block_nodes(comm_node: fx.Node) -> CommBlock:
             "The wait nodes are too far away from the comm node {comm_node}."
         )
 
-    # Identify all the outputs
-    outputs: Dict[fx.Node, Any] = {}
+    # Identify all the outputs of this collective block.
+    outputs: Set[fx.Node] = set()
     nodes = collections.deque(wait_nodes)
     while nodes:
         node = nodes.popleft()
+        assert node is not None
         for user in node.users:
             if isinstance(user, fx.Node) and user.name.startswith(non_end_users_nodes):
                 nodes.append(user)
                 node_list.append(user)
             else:
-                outputs[node] = None
+                outputs.add(node)
                 break
 
     # TODO: populate all the tensor metadata and remove the default.
@@ -177,6 +188,16 @@ def get_comm_block_nodes(comm_node: fx.Node) -> CommBlock:
         inputs=inputs,
         outputs=outputs,
     )
+
+
+def get_all_comm_blocks(
+    gm: IterGraphModule, comm_ops: Tuple[str, ...]
+) -> List[CommBlock]:
+    return [
+        get_comm_block(node)
+        for node in gm.graph.nodes
+        if node.name.startswith(comm_ops)
+    ]
 
 
 def _create_meta_val(
@@ -199,12 +220,12 @@ def _create_meta_val(
 def _create_meta_tensor_meta(
     fake_tensor_mode: FakeTensorMode,
     val: FakeTensor,
-) -> FakeTensor:
+) -> TensorMetadata:
     return TensorMetadata(
         shape=val.shape,
         dtype=val.dtype,
         requires_grad=val.requires_grad,
-        stride=val.stride,
+        stride=val.stride,  #  type: ignore[arg-type]
         # TODO: fix these value
         memory_format=None,
         is_quantized=False,
@@ -213,7 +234,7 @@ def _create_meta_tensor_meta(
 
 
 def _call_function(
-    gm: fx.GraphModule,
+    gm: IterGraphModule,
     fake_tensor_mode: FakeTensorMode,
     meta_val: Optional[FakeTensor],
     function: Any,
@@ -243,11 +264,15 @@ def _call_function(
 
 
 def _scatter_wait_result(
-    gm: fx.GraphModule,
+    gm: IterGraphModule,
     fused_comm_block: CommBlock,
     comm_blocks: List[CommBlock],
     node_indices: Dict[fx.Node, int],
 ) -> None:
+    """
+    Scatters the result of the fused communication node to the original users --
+    splitting the output and reshape each subitem.
+    """
     last_wait_node_idx = 0
     for node in gm.graph.nodes:
         if node == fused_comm_block.comm_node:
@@ -261,20 +286,24 @@ def _scatter_wait_result(
 
     with gm.graph.inserting_after(fused_wait_node):
         split_node = gm.graph.call_function(
-            aten.split, (fused_wait_node, [cb.shape.numel() for cb in comm_blocks])
+            aten.split,
+            (
+                fused_wait_node,
+                [cast(torch.Size, cb.shape).numel() for cb in comm_blocks],
+            ),
         )
 
+    # Scatter the split result.
     need_sort_nodes = []
     last_split_reshape_node = split_node
     with gm.graph.inserting_after(split_node):
         for idx, comm_block in enumerate(comm_blocks):
+            # Some users of the original allreduce and wait are scheduled
+            # before the fused allreduce. We must move these users to a
+            # correct topological sort order -- right after the last fused
+            # allreduce result, the `last_split_reshape_node` variable.
             orig_wait = comm_block.wait_nodes[0]
             nodes = collections.deque(list(orig_wait.users))
-            split_idx_node = gm.graph.call_function(operator.getitem, (split_node, idx))
-            with gm.graph.inserting_after(split_idx_node):
-                wait_output_node = gm.graph.call_function(
-                    aten.reshape, (split_idx_node, comm_block.shape)
-                )
             while nodes:
                 user_node = nodes.popleft()
                 if not isinstance(user_node, fx.Node):
@@ -283,7 +312,13 @@ def _scatter_wait_result(
                     need_sort_nodes.append(user_node)
                     nodes.extend(list(user_node.users))
 
+            split_idx_node = gm.graph.call_function(operator.getitem, (split_node, idx))
+            with gm.graph.inserting_after(split_idx_node):
+                wait_output_node = gm.graph.call_function(
+                    aten.reshape, (split_idx_node, comm_block.shape)
+                )
             gm.graph.node_replace_all_uses_with(orig_wait, wait_output_node)
+
         if last_split_reshape_node == split_node:
             last_split_reshape_node = wait_output_node
 
@@ -294,10 +329,13 @@ def _scatter_wait_result(
 
 
 def _fuse_with_cat(
-    gm: fx.GraphModule,
+    gm: IterGraphModule,
     comm_blocks: List[CommBlock],
     node_indices: Dict[fx.Node, int],
 ) -> fx.Node:
+    """
+    Given a list of CommBlock (only allreduce), fuse the CommBlocks using concat.
+    """
     # Find the last input node.
     last_input_node = comm_blocks[0].inputs[0]
     last_input_index = -1
@@ -314,6 +352,7 @@ def _fuse_with_cat(
             last_input_node = input_node
             last_input_index = index
 
+    # Flatten all the inputs right after the last input is ready.
     with gm.graph.inserting_after(last_input_node):
         cat_inputs = []
         for input_node in all_input_nodes:
@@ -326,6 +365,7 @@ def _fuse_with_cat(
     with gm.graph.inserting_after(cat_inputs[0]):
         cat_node = _call_function(gm, fake_tensor_mode, None, aten.cat, cat_inputs)
 
+    # Create a new Comm node.
     last_comm = comm_blocks[-1]
     last_comm_node = last_comm.comm_node
     last_wait_node = last_comm.wait_nodes[0]
@@ -342,6 +382,7 @@ def _fuse_with_cat(
             **kwargs,
         )
 
+    # Create a new Wait node.
     with gm.graph.inserting_after(fused_comm_node):
         flatten_args, spec = tree_flatten((last_wait_node.args, last_wait_node.kwargs))
         flatten_args[0] = fused_comm_node
@@ -374,7 +415,7 @@ def _fuse_with_cat(
     return fused_comm_block
 
 
-@graph_optimization_pass()
+@graph_optimization_pass(run_after=tuple())
 def comm_fusion_with_concat(
     gm: IterGraphModule,
     bucket_size_mb: int,
@@ -383,11 +424,7 @@ def comm_fusion_with_concat(
     Run fuse communication with concat.
     This implementation uses concat to concat the bucketed gradients.
     """
-    comm_blocks = [
-        get_comm_block_nodes(node)
-        for node in gm.graph.nodes
-        if node.name.startswith((CommType.ALLREDUCE, "all_reduce"))
-    ]
+    comm_blocks = get_all_comm_blocks(gm, (CommType.ALLREDUCE, "all_reduce"))
     node_indices = {node: i for i, node in enumerate(gm.graph.nodes)}
 
     bucket_size = 1 * 1024**2

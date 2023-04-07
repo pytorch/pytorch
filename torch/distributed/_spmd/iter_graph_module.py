@@ -5,15 +5,15 @@ from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
 
 import torch.nn as nn
 from torch import fx
-from torch.fx.graph import _PyTreeCodeGen, PythonCode
-from torch.fx.node import Argument
-from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 from torch.distributed._spmd.graph_utils import (
     clone_subgraph,
     get_output,
     is_leaf_subgraph,
 )
+from torch.fx.graph import _PyTreeCodeGen, PythonCode
+from torch.fx.node import Argument
+from torch.profiler import record_function
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -28,7 +28,7 @@ class IterGraph(fx.Graph):
     IterGraph subclass fx.Graph to override the necessary APIs that will be used
     when constructing a optimization, e.g., communication fusion. IterGraph also
     provides APIs that originally belong to fx.Node and all these APIs will have
-    ``node_`` prefix. For example, ``IterGraph.node_prepend`` is the equivalance
+    ``node_`` prefix. For example, ``IterGraph.node_prepend`` is the equivalence
     of ``fx.Node.prepend``. Note that all the optimizations must be constructed
     using these APIs.
     """
@@ -281,7 +281,7 @@ class IterGraph(fx.Graph):
 
         self._cross_iter_block_count += 1
         # The main graph must be the last one to be modified. Otherwise, the
-        # mapping may change and hence intorduce incorrect mapping for setup
+        # mapping may change and hence introduce incorrect mapping for setup
         # and cleanup graphs.
 
         # For the setup graph, no additional input is needed but additional
@@ -300,7 +300,7 @@ class IterGraph(fx.Graph):
 
         # For the cleanup graph, additional input is required to get the output
         # from the last iteration -- main graph. Additional nodes are also
-        # needed to perform the action moved from the last itertion.
+        # needed to perform the action moved from the last iteration.
         target_cleanup_node = self._lookup_node(target_node, self.cleanup_graph)
         assert target_cleanup_node is not None, "The target_cleanup_node is None."
         cleanup_subgraph: List[fx.Node] = []
@@ -559,7 +559,7 @@ class IterGraph(fx.Graph):
 
     def functionalize_optim(self) -> None:
         # IterGraph can only support full graph (fwd+bwd+optim). As optimizer
-        # is not a functional call (it is inplace op), this mehod adds the of
+        # is not a functional call (it is inplace op), this method adds the of
         # the optimizer call. This method has strong assumption of the optimizer
         # and may not always be working. This method is intended be a temporary
         # solution only.

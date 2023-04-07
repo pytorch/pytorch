@@ -1,11 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
+import unittest
 from copy import deepcopy
 from functools import wraps
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch._inductor.utils import has_triton
 from torch.distributed._spmd.api import compile
 from torch.distributed._spmd.gm_transformation import GraphModuleTransformation
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -33,7 +35,10 @@ def with_comms(func):
 class DummyModel(nn.Module):
     def __init__(self, layers: int, dim: int):
         super().__init__()
-        self.mod = nn.Sequential(*((nn.Linear(dim, dim), nn.ReLU()) * layers))
+        modules = []
+        for _ in range(layers):
+            modules.extend([nn.Linear(dim, dim), nn.ReLU()])
+        self.mod = nn.Sequential(*modules)
 
     def forward(self, x):
         return self.mod(x)
@@ -68,6 +73,7 @@ class TransformationTest(DTensorTestBase):
         ddp_optim.zero_grad()
 
         self.assertEqual(ddp_out, out)
+        self.assertEqual(list(ddp_model.parameters()), list(model.parameters()))
         return model, optim, ddp_model, ddp_optim
 
     def _test_tran_step_with_ddp_without_optim_step(
@@ -104,6 +110,7 @@ class TransformationTest(DTensorTestBase):
             train_step, num_iters, batch_size, layers, dim
         )
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_inductor(self):
