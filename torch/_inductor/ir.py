@@ -2027,9 +2027,6 @@ class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
 
-    def cpp_wrapper_codegen_reference(self):
-        return "at::Tensor()"
-
 
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
@@ -2039,11 +2036,12 @@ class ShapeAsConstantBuffer(IRNode):
     def codegen_reference(self):
         from torch._inductor.codegen.wrapper import pexpr
 
-        return pexpr(V.graph.sizevars.simplify(self.shape))
-
-    # wrap scalar to 0-d tensor for cpp wrapper
-    def cpp_wrapper_codegen_reference(self):
-        return f"torch::tensor({self.codegen_reference()})"
+        expr = pexpr(V.graph.sizevars.simplify(self.shape))
+        if V.graph.cpp_wrapper:
+            # wrap scalar to 0-d tensor for cpp wrapper
+            return f"torch::tensor({expr})"
+        else:
+            return expr
 
 
 @dataclasses.dataclass
@@ -2670,18 +2668,15 @@ class ExternKernel(InputsKernel):
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
-            kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
-        return kwargs
-
-    def cpp_wrapper_codegen_kwargs(self):
-        kwargs = []
-        if self.kwargs:
-            for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                assert arg_name in self.kwargs, (
-                    "arg %s not found in self.kwargs" % arg_name
-                )
-                v = self.kwargs.get(arg_name)
-                kwargs.append(repr(v))
+            if V.graph.cpp_wrapper:
+                for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                    assert arg_name in self.kwargs, (
+                        "arg %s not found in self.kwargs" % arg_name
+                    )
+                    v = self.kwargs.get(arg_name)
+                    kwargs.append(repr(v))
+            else:
+                kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
@@ -2745,13 +2740,7 @@ class ExternKernelOut(ExternKernel):
 
     def codegen(self, wrapper):
         args = self.codegen_args()
-
-        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
-
-        if isinstance(wrapper, CppWrapperCodeGen):
-            kwargs = self.cpp_wrapper_codegen_kwargs()
-        else:
-            kwargs = self.codegen_kwargs()
+        kwargs = self.codegen_kwargs()
         if kwargs:
             args.extend(kwargs)
 
@@ -2849,6 +2838,61 @@ class InplaceBernoulliFallback(ExternKernel):
             MutationLayout(x),
             self.unwrap_storage([x]),
             constant_args,
+        )
+        self.name = V.graph.register_buffer(self)
+
+
+class ScatterFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly.
+    This class handles both aten.scatter_ and aten.scatter_reduce_.
+    It also handle the case `src` being a scalar properly.
+    """
+
+    def codegen(self, wrapper):
+        if self.src_is_tensor:
+            (x, index, src) = [t.codegen_reference() for t in self.inputs]
+        else:
+            (x, index) = [t.codegen_reference() for t in self.inputs]
+            src = self.constant_args[1]
+        line = f"{self.kernel}({x}, {self.constant_args[0]}, {index}, {src}"
+        if self.kernel == "aten.scatter_":
+            if self.kwargs["reduce"]:
+                line += f", reduce={repr(self.kwargs['reduce'])}"
+        else:
+            line += ", ".join([""] + self.codegen_kwargs())
+        line += ")"
+        wrapper.writeline(line)
+
+    def should_allocate(self):
+        return False
+
+    def __init__(
+        self,
+        fn,
+        x,
+        dim: int,
+        index,
+        src,
+        *,
+        reduce: str = None,
+        include_self: bool = True,
+    ):
+        assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
+        self.kernel = fn
+        self.src_is_tensor = isinstance(src, TensorBox)
+        if self.src_is_tensor:
+            tensors = [self.realize_input(t) for t in [x, index, src]]
+            constant_args = [dim]
+        else:
+            tensors = [self.realize_input(t) for t in [x, index]]
+            constant_args = [dim, src]
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage(tensors),
+            constant_args,
+            {"reduce": reduce, "include_self": include_self},
         )
         self.name = V.graph.register_buffer(self)
 
@@ -4137,15 +4181,18 @@ class AllGatherIntoTensor(CollectiveKernel):
 
 
 class ReduceScatterTensor(CollectiveKernel):
-    def __init__(self, layout, inputs, constant_args, reduce_op):
+    def __init__(self, layout, inputs, constant_args, reduce_op, scatter_dim):
         super().__init__(layout, inputs, constant_args)
         self.reduce_op = reduce_op
+        # TODO support dim
+        self.scatter_dim = scatter_dim
 
     @classmethod
     def create(
         cls,
         x: "TensorBox",
         reduce_op: str,
+        scatter_dim: int,
         tag: str,
         ranks: List[int],
         group_size: int,
@@ -4155,7 +4202,7 @@ class ReduceScatterTensor(CollectiveKernel):
         # is there a difference between literally using x.data.layout below, vs
         # creating a new one that has the same properties?
         new_size = x.get_size()
-        new_size[0] /= group_size
+        new_size[scatter_dim] /= group_size
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
 
         return ReduceScatterTensor(
@@ -4163,6 +4210,7 @@ class ReduceScatterTensor(CollectiveKernel):
             inputs=[x],
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
+            scatter_dim=scatter_dim,
         )
 
     def codegen_collective(self, wrapper, output_name, input_names):
