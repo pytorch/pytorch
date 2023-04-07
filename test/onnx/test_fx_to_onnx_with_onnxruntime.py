@@ -63,6 +63,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     rtol: float = 1e-3,
     atol: float = 1e-7,
     opset_version: int = 18,
+    input_mutation: bool = False,
     additional_test_inputs: Optional[Sequence[Sequence[_InputArgsType]]] = None,
     **input_kwargs,
 ):
@@ -74,6 +75,9 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         rtol (float, optional): relative tolerance. Defaults to 1e-3.
         atol (float, optional): absolute tolerance. Defaults to 1e-7.
         opset_version (int, optional): ONNX opset version. Defaults to 18.
+        input_mutation (bool, optional): Whether the model mutates its input.
+            `input_mutation` as `True` incurs extra overhead of cloning the inputs.
+            Defaults to False.
         additional_test_inputs (Optional[Sequence[_InputArgsType]], optional):
             Test the models with another dataset, which is designed for dynamic axes
             testing. Defaults to None.
@@ -97,10 +101,16 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         export_output: torch.onnx.ExportOutput,
         model_input_args: Sequence[_InputArgsType],
     ):
+        if input_mutation:
+            ref_input_args = copy.deepcopy(model_input_args)
+            ref_input_kwargs = copy.deepcopy(input_kwargs)
+        else:
+            ref_input_args = model_input_args
+            ref_input_kwargs = input_kwargs
         # Bind args and kwargs to the model's signature to
         # flatten kwargs into positional args since ONNX
         # model cannot be called with kwargs.
-        bound = exporter.model_signature.bind(*model_input_args, **input_kwargs)
+        bound = exporter.model_signature.bind(*ref_input_args, **ref_input_kwargs)
         # Fill optional inputs.
         bound.apply_defaults()
         assert not bound.kwargs
@@ -408,6 +418,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             DynamicSliceExportMod(),
             (x,),
             additional_test_inputs=[(y,)],
+        )
+
+    def test_mutation(self):
+        class MutationModel(torch.nn.Module):
+            def forward(self, x):
+                x.view(3, 2, -1).add_(2.0)
+                return x
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self, MutationModel(), (torch.randn(12),), input_mutation=True
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
