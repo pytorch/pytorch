@@ -19,6 +19,8 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
+    DEFAULT_DISABLED_TESTS_FILE,
+    DEFAULT_SLOW_TESTS_FILE,
     FILE_SCHEMA,
     IS_CI,
     is_slow_gradcheck_env,
@@ -390,6 +392,8 @@ def print_to_stderr(message):
 def get_executable_command(options, disable_coverage=False):
     if options.coverage and not disable_coverage:
         executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
+    elif options.pytest:
+        executable = [sys.executable, "-bb", "-m", "pytest"]
     else:
         executable = [sys.executable, "-bb"]
     return executable
@@ -403,6 +407,7 @@ def run_test(
     extra_unittest_args=None,
     env=None,
 ) -> int:
+    env = env or {}
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_unittest_args.copy()
     test_file = test_module
@@ -430,11 +435,10 @@ def run_test(
         unittest_args.extend(get_pytest_args(options))
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
     if IS_CI:
-        ci_args = ["--import-slow-tests", "--import-disabled-tests"]
+        env["SLOW_TESTS_FILE"] = DEFAULT_SLOW_TESTS_FILE
+        env["DISABLED_TESTS_FILE"] = DEFAULT_DISABLED_TESTS_FILE
         if RERUN_DISABLED_TESTS:
-            ci_args.append("--rerun-disabled-tests")
-        # use the downloaded test cases configuration, not supported in pytest
-        unittest_args.extend(ci_args)
+            unittest_args.append("--rerun-disabled-tests")
     if test_file in PYTEST_SKIP_RETRIES:
         if not options.pytest:
             raise RuntimeError(
@@ -812,7 +816,6 @@ def get_pytest_args(options):
         rerun_options = ["-x", "--reruns=2", "--sw"]
 
     pytest_args = [
-        "--use-pytest",
         "-vv",
         "-rfEX",
         "-p",
