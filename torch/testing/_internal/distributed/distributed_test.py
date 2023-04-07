@@ -5171,6 +5171,12 @@ class DistributedTest:
                 gradient_as_bucket_view=False,
                 set_grad_to_none=False,
             )
+            os.environ["DDP_POINT_GRADS_TO_BUCKET"] = "1"
+            self._test_ddp_native_mixed_precision(
+                gradient_as_bucket_view=False,
+                set_grad_to_none=False,
+            )
+            os.environ["DDP_POINT_GRADS_TO_BUCKET"] = "0"
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_native_mixed_precision_grad_as_bucket_view_no_set_grad_none(self):
@@ -5178,18 +5184,36 @@ class DistributedTest:
                 gradient_as_bucket_view=True,
                 set_grad_to_none=False,
             )
+            os.environ["DDP_POINT_GRADS_TO_BUCKET"] = "1"
+            self._test_ddp_native_mixed_precision(
+                gradient_as_bucket_view=False,
+                set_grad_to_none=False,
+            )
+            os.environ["DDP_POINT_GRADS_TO_BUCKET"] = "0"
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_native_mixed_precision_grad_as_bucket_view_set_grad_to_none(self):
             self._test_ddp_native_mixed_precision(
                 gradient_as_bucket_view=True, set_grad_to_none=True
             )
+            os.environ["DDP_POINT_GRADS_TO_BUCKET"] = "1"
+            self._test_ddp_native_mixed_precision(
+                gradient_as_bucket_view=False,
+                set_grad_to_none=False,
+            )
+            os.environ["DDP_POINT_GRADS_TO_BUCKET"] = "0"
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_native_mixed_precision_no_grad_as_bucket_view_set_grad_to_none(self):
             self._test_ddp_native_mixed_precision(
                 gradient_as_bucket_view=False, set_grad_to_none=True
             )
+            os.environ["DDP_POINT_GRADS_TO_BUCKET"] = "1"
+            self._test_ddp_native_mixed_precision(
+                gradient_as_bucket_view=False,
+                set_grad_to_none=False,
+            )
+            os.environ["DDP_POINT_GRADS_TO_BUCKET"] = "0"
 
         def _test_ddp_hook_parity(self, state, hook, num_validated_iters=100):
             rank = self.rank
@@ -6244,6 +6268,26 @@ class DistributedTest:
                 global_bs=global_bs,
                 offset=bs_offset,
             )
+
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_SyncBatchNorm_half(self):
+            group, group_id, rank = self._init_global_test()
+
+            model = copy.deepcopy(BN_NET)
+            model = model.half()
+            model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+            model = nn.parallel.DistributedDataParallel(model.cuda(rank), device_ids=[rank])
+            inp = torch.randn(2, 2, dtype=torch.float16, device=torch.device(rank))
+            # Check that forward/backward do not error with dtype mismatch
+            out = model(inp)
+            self.assertEqual(out.dtype, torch.float16)
+            out.sum().backward()
+            for param in model.parameters():
+                self.assertEqual(param.grad.dtype, torch.float16)
 
         def _test_ddp_logging_data(self, is_gpu):
             rank = dist.get_rank()

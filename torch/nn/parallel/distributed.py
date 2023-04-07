@@ -788,6 +788,9 @@ class DistributedDataParallel(Module, Joinable):
         self.use_side_stream_for_tensor_copies = (
             os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
         )
+        self._point_grads_to_bucket_grad_as_bucket_view = (
+            os.environ.get("DDP_POINT_GRADS_TO_BUCKET", "0") == "1"
+        )
 
         # Initialize gradient buffers and register all reduce hook
         self._delay_grad_buffer = None
@@ -1539,9 +1542,11 @@ class DistributedDataParallel(Module, Joinable):
 
         # At the end of the forward pass, reset the grad buffer and grad views
         self._clear_grad_buffer()
-
-        if self.num_iterations > 1 and self.gradient_as_bucket_view and any(
-            p.grad is None for p in self.module.parameters()
+        if (
+            self._point_grads_to_bucket_grad_as_bucket_view
+            and self.num_iterations > 1
+            and self.gradient_as_bucket_view
+            and any(p.grad is None for p in self._module_parameters)
         ):
             self.reducer._point_grads_to_bucket()
 
