@@ -1509,23 +1509,27 @@ class DimConstraints:
                 if s == symbol:
                     # This means the solution is of the form s = modulus*tmp + remainder.
                     modulus, remainder = sympy.polys.polytools.div(solution, tmp)
-                    # Make sure 0 <= remainder <= modulus.
-                    remainder = remainder % modulus
-                    remainder_modulus_pairs.append((remainder, modulus))
-                else:
-                    # This means that we did not get a unique solution to the equation.
-                    # No problem, we will check it.
-                    congruences_to_check.add(congruence)
+                    if isinstance(modulus, int) and isinstance(remainder, int):
+                        # Make sure 0 <= remainder <= modulus.
+                        remainder = remainder % modulus
+                        remainder_modulus_pairs.append((remainder, modulus))
+                        continue
+                # This means that we did not get a unique solution to the equation.
+                # No problem, we will check it.
+                congruences_to_check.add(congruence)
             # Finally we solve for a congruence s such that s = r_i mod m_i for each (r_i, m_i).
             # The solution will be a congruence of the form s = r mod m.
             # NOTE(avik): Since the given m_i may not be pairwise coprime, we can't just use CRT.
-            remainder, modulus = sympy.ntheory.modular.solve_congruence(*remainder_modulus_pairs)
-            reduced_congruences[s] = {(s - remainder) % modulus}
-            substitution = {s: modulus * sympy.Symbol("tmp", integer=True) + remainder}
-            reduced_congruences[s].update(
-                congruence for congruence in congruences_to_check
-                if not sympy.checksol(congruence, substitution)
-            )
+            if remainder_modulus_pairs:
+                remainder, modulus = sympy.ntheory.modular.solve_congruence(*remainder_modulus_pairs)
+                reduced_congruences[s] = {(s - remainder) % modulus}
+                substitution = {s: modulus * sympy.Symbol("tmp", integer=True) + remainder}
+                reduced_congruences[s].update(
+                    congruence for congruence in congruences_to_check
+                    if not sympy.checksol(congruence, substitution)
+                )
+            else:
+                reduced_congruences[s] = congruences_to_check
 
         return reduced_congruences
 
@@ -1535,7 +1539,9 @@ class DimConstraints:
             s = self._symbols_with_equalities.pop()
             exprs = self._univariate_inequalities.pop(s)
             solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
-            assert isinstance(solution, sympy.Eq), f"Expected an equality constraint for {s}, got {solution} instead"
+            if isinstance(solution, sympy.And):
+                solution = next((arg for arg in solution.args if isinstance(arg, sympy.Eq)), solution)
+            assert isinstance(solution, sympy.Eq), f"Expected an equality constraint for {s}, got {solution}"
             symbol, val = solution.args
             assert symbol == s, f"Expected a constraint on {s} instead of on {symbol}"
             # because this is univariate, the solution is a specialization
