@@ -813,10 +813,15 @@ class Reduction(Loops):
                 ranges,
             )
 
-        split_reduction = is_triton(device) and reduction_type not in {
-            "argmax",
-            "argmin",
-        }
+        split_reduction = (
+            is_triton(device)
+            and reduction_type
+            not in {
+                "argmax",
+                "argmin",
+            }
+            and config.split_reductions
+        )
         if split_reduction and not dynamo_config.dynamic_shapes:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
@@ -1399,12 +1404,12 @@ class View(BaseView):
 
         while stack_old:
             size_old = stack_old.pop()
-            assert size_old == 1
+            V.graph.sizevars.guard_equals(size_old, 1)
             view_expr.append(sympy.Integer(0))
 
         while stack_new:
             var, size_new = stack_new.pop()
-            assert size_new == 1
+            V.graph.sizevars.guard_equals(size_new, 1)
 
         view_expr = list(reversed(view_expr))
         assert len(view_expr) == len(old_size)
@@ -2039,9 +2044,6 @@ class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
 
-    def cpp_wrapper_codegen_reference(self):
-        return "at::Tensor()"
-
 
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
@@ -2051,7 +2053,12 @@ class ShapeAsConstantBuffer(IRNode):
     def codegen_reference(self):
         from torch._inductor.codegen.wrapper import pexpr
 
-        return pexpr(V.graph.sizevars.simplify(self.shape))
+        expr = pexpr(V.graph.sizevars.simplify(self.shape))
+        if V.graph.cpp_wrapper:
+            # wrap scalar to 0-d tensor for cpp wrapper
+            return f"torch::tensor({expr})"
+        else:
+            return expr
 
 
 @dataclasses.dataclass
@@ -2526,8 +2533,14 @@ class ExternKernel(InputsKernel):
         # TODO(jansel): replace this with dynamic shape formulas
         example_args = []
 
+        # We need to retain the constant values of fake tensors that we originally
+        # propagated the graph with, because for some operators running without a
+        # constant would trigger an error / DataDependentException
         for x in tensor_args:
-            example_args.append(ir_node_to_tensor(x, guard_shape=True))
+            if x.get_name() in V.graph.constants:
+                example_args.append(V.graph.constants[x.get_name()])
+            else:
+                example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
@@ -2664,21 +2677,23 @@ class ExternKernel(InputsKernel):
         args.extend(map(repr, self.constant_args))
         return args
 
+    def cpp_wrapper_codegen_args(self):
+        args = [x.codegen_reference() for x in self.inputs]
+        args.extend(self.cpp_constant_args)
+        return args
+
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
-            kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
-        return kwargs
-
-    def cpp_wrapper_codegen_kwargs(self):
-        kwargs = []
-        if self.kwargs:
-            for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                assert arg_name in self.kwargs, (
-                    "arg %s not found in self.kwargs" % arg_name
-                )
-                v = self.kwargs.get(arg_name)
-                kwargs.append(repr(v))
+            if V.graph.cpp_wrapper:
+                for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                    assert arg_name in self.kwargs, (
+                        "arg %s not found in self.kwargs" % arg_name
+                    )
+                    v = self.kwargs.get(arg_name)
+                    kwargs.append(repr(v))
+            else:
+                kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
@@ -2742,13 +2757,7 @@ class ExternKernelOut(ExternKernel):
 
     def codegen(self, wrapper):
         args = self.codegen_args()
-
-        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
-
-        if isinstance(wrapper, CppWrapperCodeGen):
-            kwargs = self.cpp_wrapper_codegen_kwargs()
-        else:
-            kwargs = self.codegen_kwargs()
+        kwargs = self.codegen_kwargs()
         if kwargs:
             args.extend(kwargs)
 
@@ -2801,15 +2810,17 @@ class ExternKernelAlloc(ExternKernel):
         kernel=None,
         cpp_kernel=None,
         ordered_kwargs_for_cpp_kernel=(),
+        cpp_constant_args=(),
     ):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
+        self.cpp_kernel = cpp_kernel
+        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
+        self.cpp_constant_args = cpp_constant_args
         self.name = V.graph.register_buffer(self)
         if kernel is not None:
             self.kernel = kernel
-        self.cpp_kernel = cpp_kernel
-        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
     def should_allocate(self):
         return False
@@ -2844,6 +2855,61 @@ class InplaceBernoulliFallback(ExternKernel):
             MutationLayout(x),
             self.unwrap_storage([x]),
             constant_args,
+        )
+        self.name = V.graph.register_buffer(self)
+
+
+class ScatterFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly.
+    This class handles both aten.scatter_ and aten.scatter_reduce_.
+    It also handle the case `src` being a scalar properly.
+    """
+
+    def codegen(self, wrapper):
+        if self.src_is_tensor:
+            (x, index, src) = [t.codegen_reference() for t in self.inputs]
+        else:
+            (x, index) = [t.codegen_reference() for t in self.inputs]
+            src = self.constant_args[1]
+        line = f"{self.kernel}({x}, {self.constant_args[0]}, {index}, {src}"
+        if self.kernel == "aten.scatter_":
+            if self.kwargs["reduce"]:
+                line += f", reduce={repr(self.kwargs['reduce'])}"
+        else:
+            line += ", ".join([""] + self.codegen_kwargs())
+        line += ")"
+        wrapper.writeline(line)
+
+    def should_allocate(self):
+        return False
+
+    def __init__(
+        self,
+        fn,
+        x,
+        dim: int,
+        index,
+        src,
+        *,
+        reduce: str = None,
+        include_self: bool = True,
+    ):
+        assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
+        self.kernel = fn
+        self.src_is_tensor = isinstance(src, TensorBox)
+        if self.src_is_tensor:
+            tensors = [self.realize_input(t) for t in [x, index, src]]
+            constant_args = [dim]
+        else:
+            tensors = [self.realize_input(t) for t in [x, index]]
+            constant_args = [dim, src]
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage(tensors),
+            constant_args,
+            {"reduce": reduce, "include_self": include_self},
         )
         self.name = V.graph.register_buffer(self)
 
@@ -3059,6 +3125,13 @@ class MultiOutput(ExternKernel):
         return False
 
 
+def _string(shape: tuple):
+    from .codegen.wrapper import CppWrapperCodeGen
+
+    cpp_wrapper_codegen = CppWrapperCodeGen()
+    return cpp_wrapper_codegen.codegen_shape_tuple(shape)
+
+
 def _prepare_convolution_fusion_create(
     cls,
     x: "TensorBox",
@@ -3129,6 +3202,8 @@ def _prepare_convolution_fusion_create(
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
     output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
+    x.realize()
+    weight.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
@@ -3368,14 +3443,36 @@ class MKLPackedLinear(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
+        cpp_constant_args=(),
         kernel="torch.ops.mkl._mkl_linear",
+        cpp_kernel="mkl::_mkl_linear",
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
+        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
+        self.cpp_kernel_key = "mkl_linear"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& self,
+                const at::Tensor& mkl_weight_t,
+                const at::Tensor& origin_weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                const int64_t prepack_batch_size)"""
+        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            args = self.cpp_wrapper_codegen_args()
+        else:
+            args = self.codegen_args()
+
+        wrapper.generate_fusion_ops_code(
+            self.get_name(),
+            self.kernel,
+            self.cpp_kernel,
+            args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
         )
 
     @classmethod
@@ -3390,7 +3487,9 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
         bias = None
+        cpp_bias = "at::Tensor()"
         constant_args = [bias, batch_size]
+        cpp_constant_args = [cpp_bias, str(batch_size)]
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -3398,6 +3497,7 @@ class MKLPackedLinear(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
+            cpp_constant_args=cpp_constant_args,
             kernel=kernel,
         )
 
@@ -3411,13 +3511,36 @@ class LinearUnary(ExternKernelAlloc):
         inputs,
         constant_args=(),
         kernel="torch.ops.mkldnn._linear_pointwise",
+        cpp_kernel="mkldnn::_linear_pointwise",
+        cpp_constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
+        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
+        self.cpp_kernel_key = "linear_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& input_t,
+                const at::Tensor& weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                c10::string_view attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
+        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            args = self.cpp_wrapper_codegen_args()
+        else:
+            args = self.codegen_args()
+
+        wrapper.generate_fusion_ops_code(
+            self.get_name(),
+            self.kernel,
+            self.cpp_kernel,
+            args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
         )
 
     @classmethod
@@ -3431,11 +3554,17 @@ class LinearUnary(ExternKernelAlloc):
 
         inputs = [x, w]
         constant_args = [attr, scalars, algorithm]
+        cpp_constant_args = [
+            f'"{attr}"',
+            _string(scalars) if scalars else "{-1}",
+            f'"{algorithm}"',
+        ]
         if b is not None:
             b = cls.require_stride1(cls.realize_input(b))
             inputs.append(b)
         else:
             constant_args.insert(0, b)
+            cpp_constant_args.insert(0, "at::Tensor()")
 
         return LinearUnary(
             layout=FlexibleLayout(
@@ -3445,6 +3574,7 @@ class LinearUnary(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
+            cpp_constant_args=cpp_constant_args,
             kernel=kernel,
         )
 
@@ -3700,18 +3830,20 @@ class StorageBox(MutableBox):
 
 
 class InterpreterShim(torch.fx.Interpreter):
+    @staticmethod
+    @functools.lru_cache(None)
+    def _dummy_gm():
+        return torch.fx.symbolic_trace(identity)
+
     def __init__(self, graph, submodules):
-        """
-        We don't call super() here to avoid constructing a
-        GraphModule which is very expensive (it does codegen).
-        """
+        # call super() with a placeholder to avoid constructing a
+        # GraphModule which is very expensive (it does codegen).
+        super().__init__(self._dummy_gm(), garbage_collect_values=False)
         self.module = self
         self.graph = graph
         self.submodules = submodules
-        self.garbage_collect_values = False
-        self.env = {}
+        self.extra_traceback = False
         self.fetch_attr = submodules.__getitem__
-        self.name = "InterpreterShim"
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:

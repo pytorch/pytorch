@@ -1,7 +1,6 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
-load("@rules_proto//proto:defs.bzl", "proto_library")
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@pytorch//third_party:substitution.bzl", "header_template_rule")
 load("@pytorch//:tools/bazel.bzl", "rules")
 load("@pytorch//tools/rules:cu.bzl", "cu_library")
@@ -264,6 +263,7 @@ header_template_rule(
     include = "aten/src",
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
+        "@AT_MKLDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
         "@AT_FFTW_ENABLED@": "0",
@@ -314,7 +314,7 @@ cc_library(
         "aten/src",
     ],
     deps = [
-        "//c10:headers",
+        "//c10",
     ],
 )
 
@@ -383,7 +383,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
-        "//c10:headers",
+        "//c10",
         "@cuda",
         "@cuda//:cuda_driver",
         "@cuda//:nvrtc",
@@ -431,6 +431,7 @@ cu_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_cuda_cpp",
+        "//c10/util:bit_cast",
         "@cuda//:cublas",
         "@cuda//:cufft",
         "@cuda//:cusparse",
@@ -449,41 +450,6 @@ CAFFE2_COPTS = COMMON_COPTS + [
     "-fno-math-errno",
     "-fno-trapping-math",
 ]
-
-proto_library(
-    name = "caffe2_proto_source",
-    srcs = glob([
-        "caffe2/proto/*.proto",
-    ]),
-    visibility = ["//visibility:public"],
-)
-
-cc_proto_library(
-    name = "caffe2_protos",
-    deps = [":caffe2_proto_source"],
-)
-
-header_template_rule(
-    name = "caffe2_core_macros_h",
-    src = "caffe2/core/macros.h.in",
-    out = "caffe2/core/macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-        "#define CAFFE2_FORCE_FALLBACK_CUDA_MPI": "/* #undef CAFFE2_FORCE_FALLBACK_CUDA_MPI */",
-        "#define CAFFE2_HAS_MKL_DNN": "/* #undef CAFFE2_HAS_MKL_DNN */",
-        "#define CAFFE2_HAS_MKL_SGEMM_PACK": "/* #undef CAFFE2_HAS_MKL_SGEMM_PACK */",
-        "#define CAFFE2_THREADPOOL_MAIN_IMBALANCE": "/* #undef CAFFE2_THREADPOOL_MAIN_IMBALANCE */",
-        "#define CAFFE2_THREADPOOL_STATS": "/* #undef CAFFE2_THREADPOOL_STATS */",
-        "#define CAFFE2_USE_ACCELERATE": "/* #undef CAFFE2_USE_ACCELERATE */",
-        "#define CAFFE2_USE_EIGEN_FOR_BLAS": "/* #undef CAFFE2_USE_EIGEN_FOR_BLAS */",
-        "#define CAFFE2_USE_FBCODE": "/* #undef CAFFE2_USE_FBCODE */",
-        "#define CAFFE2_USE_GOOGLE_GLOG": "/* #undef CAFFE2_USE_GOOGLE_GLOG */",
-        "#define CAFFE2_USE_LITE_PROTO": "/* #undef CAFFE2_USE_LITE_PROTO */",
-        "#define CAFFE2_USE_MKL\n": "/* #undef CAFFE2_USE_MKL */\n",
-        "#define CAFFE2_USE_NVTX": "/* #undef CAFFE2_USE_NVTX */",
-        "#define CAFFE2_USE_TRT": "/* #undef CAFFE2_USE_TRT */",
-    },
-)
 
 filegroup(
     name = "caffe2_contrib_srcs",
@@ -1040,7 +1006,6 @@ filegroup(
         "caffe2/utils/math/utils.cc",
         "caffe2/utils/math_cpu.cc",
         "caffe2/utils/murmur_hash3.cc",
-        "caffe2/utils/proto_convert.cc",
         "caffe2/utils/proto_utils.cc",
         "caffe2/utils/proto_wrap.cc",
         "caffe2/utils/signal_handler.cc",
@@ -1293,14 +1258,13 @@ cc_library(
         "caffe2/utils/fixed_divisor.h",
     ] + glob([
         "caffe2/utils/threadpool/*.h",
-        "caffe2/proto/*.h",
     ]),
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
     deps = [
-        ":caffe2_core_macros_h",
-        ":caffe2_protos",
-        "//c10:headers",
+        ":caffe2_core_macros",
+        "//c10",
+        "//caffe2/proto:caffe2_pb",
     ],
 )
 
@@ -1329,42 +1293,46 @@ genrule(
 
 cc_library(
     name = "caffe2_headers",
-    hdrs = glob([
-        "caffe2/contrib/aten/*.h",
-        "caffe2/contrib/gloo/*.h",
-        "caffe2/core/*.h",
-        "caffe2/core/nomnigraph/include/nomnigraph/Converters/*.h",
-        "caffe2/core/nomnigraph/include/nomnigraph/Generated/*.h",
-        "caffe2/core/nomnigraph/include/nomnigraph/Graph/*.h",
-        "caffe2/core/nomnigraph/include/nomnigraph/Representations/*.h",
-        "caffe2/core/nomnigraph/include/nomnigraph/Support/*.h",
-        "caffe2/core/nomnigraph/include/nomnigraph/Transformations/*.h",
-        "caffe2/core/nomnigraph/tests/*.h",
-        "caffe2/db/*.h",
-        "caffe2/distributed/*.h",
-        "caffe2/ideep/*.h",
-        "caffe2/ideep/operators/*.h",
-        "caffe2/ideep/operators/quantization/*.h",
-        "caffe2/ideep/utils/*.h",
-        "caffe2/onnx/*.h",
-        "caffe2/operators/*.h",
-        "caffe2/operators/rnn/*.h",
-        "caffe2/opt/*.h",
-        "caffe2/perfkernels/*.h",
-        "caffe2/predictor/*.h",
-        "caffe2/predictor/emulator/*.h",
-        "caffe2/proto/*.h",
-        "caffe2/quantization/server/*.h",
-        "caffe2/queue/*.h",
-        "caffe2/serialize/*.h",
-        "caffe2/sgd/*.h",
-        "caffe2/share/contrib/depthwise/*.h",
-        "caffe2/transforms/*.h",
-        "caffe2/utils/*.h",
-        "caffe2/utils/math/*.h",
-        "caffe2/utils/threadpool/*.h",
-        "modules/**/*.h",
-    ]) + if_cuda(glob([
+    hdrs = glob(
+        [
+            "caffe2/contrib/aten/*.h",
+            "caffe2/contrib/gloo/*.h",
+            "caffe2/core/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Converters/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Generated/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Graph/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Representations/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Support/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Transformations/*.h",
+            "caffe2/core/nomnigraph/tests/*.h",
+            "caffe2/db/*.h",
+            "caffe2/distributed/*.h",
+            "caffe2/ideep/*.h",
+            "caffe2/ideep/operators/*.h",
+            "caffe2/ideep/operators/quantization/*.h",
+            "caffe2/ideep/utils/*.h",
+            "caffe2/onnx/*.h",
+            "caffe2/operators/*.h",
+            "caffe2/operators/rnn/*.h",
+            "caffe2/opt/*.h",
+            "caffe2/perfkernels/*.h",
+            "caffe2/predictor/*.h",
+            "caffe2/predictor/emulator/*.h",
+            "caffe2/quantization/server/*.h",
+            "caffe2/queue/*.h",
+            "caffe2/serialize/*.h",
+            "caffe2/sgd/*.h",
+            "caffe2/share/contrib/depthwise/*.h",
+            "caffe2/transforms/*.h",
+            "caffe2/utils/*.h",
+            "caffe2/utils/math/*.h",
+            "caffe2/utils/threadpool/*.h",
+            "modules/**/*.h",
+        ],
+        exclude = [
+            "caffe2/core/macros.h",
+        ],
+    ) + if_cuda(glob([
         "caffe2/**/*.cuh",
         "caffe2/image/*.h",
     ])) + [":generated_caffe2_aten_op_headers"],
@@ -1375,8 +1343,10 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":caffe2_core_macros",
         ":caffe2_for_aten_headers",
-        ":caffe2_protos",
+        "//caffe2/proto:caffe2_pb",
+        "//caffe2/proto:cc_proto",
     ],
 )
 
@@ -1432,12 +1402,14 @@ cc_library(
     linkstatic = 1,
     visibility = ["//visibility:public"],
     deps = [
+        ":caffe2_core_macros",
         ":caffe2_dnnlowp_avx2_ops",
         ":caffe2_headers",
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
-        ":caffe2_protos",
+        "//caffe2/proto:caffe2_pb",
+        "//caffe2/proto:cc_proto",
         "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
@@ -1474,7 +1446,12 @@ cc_library(
 
 cu_library(
     name = "caffe2_cuda",
-    srcs = [":caffe2_cu_srcs"],
+    # one may think that `quantization_gpu.cu` could be a separate kernel,
+    # however that leads to de-registration problem that's described in
+    # https://github.com/pytorch/pytorch/issues/79236
+    # To solve it we add it into the `caffe2_cuda`,
+    # this is also aligned with the CMake build.
+    srcs = [":caffe2_cu_srcs"] + ["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"],
     copts = CAFFE2_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
     deps = [
@@ -1603,7 +1580,7 @@ cc_library(
     deps = [
         ":aten_headers",
         ":caffe2_headers",
-        "//c10:headers",
+        "//c10",
         "@com_github_google_flatbuffers//:flatbuffers",
         "@local_config_python//:python_headers",
         "@onnx",
@@ -1620,12 +1597,6 @@ TORCH_COPTS = COMMON_COPTS + [
     "-fno-math-errno ",
     "-fno-trapping-math",
 ]
-
-cu_library(
-    name = "torch_distributed_cuda",
-    srcs = ["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"],
-    deps = [":torch_headers"],
-)
 
 torch_sources = {
     k: ""
@@ -1658,9 +1629,9 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
+        "//caffe2/proto:torch_cc_proto",
         "@kineto",
     ] + if_cuda([
-        ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",
         "@cutlass",
     ]),

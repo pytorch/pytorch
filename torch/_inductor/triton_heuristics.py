@@ -16,7 +16,8 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config
-from .codecache import cache_dir
+from .codecache import cache_dir, CudaKernelParamCache
+
 from .ir import ReductionHint, TileHint
 from .utils import (
     ceildiv,
@@ -137,6 +138,12 @@ class CachingAutotuner(KernelInterface):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
+        launcher.store_cubin = config.triton.store_cubin
+        # store this global varible to avoid the high overhead of reading it when calling run
+        if launcher.store_cubin:
+            launcher.fn = self.fn
+            launcher.bin = binary
+
         return launcher
 
     def bench(self, launcher, *args, grid):
@@ -184,6 +191,24 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
 
+    def save_cuda_kernel(self, grid, stream, launcher):
+        if callable(grid):
+            grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
+        else:
+            grid_x, grid_y, grid_z = grid
+
+        key = launcher.fn.module.split(".")[-1]
+        params = {
+            "mangled_name": launcher.bin.metadata["name"],
+            "grid_x": grid_x,
+            "grid_y": grid_y,
+            "grid_z": grid_z,
+            "num_warps": launcher.bin.num_warps,
+            "shared_mem": launcher.bin.shared,
+            "stream": stream,
+        }
+        CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
+
     def run(self, *args, grid, stream):
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
@@ -192,6 +217,9 @@ class CachingAutotuner(KernelInterface):
                 self.autotune_to_one_config(*args, grid=grid)
 
         (launcher,) = self.launchers
+        if launcher.store_cubin:
+            self.save_cuda_kernel(grid, stream, self.launchers[0])
+
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
@@ -442,6 +470,13 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     if z:
         cfg["ZBLOCK"] = z
     num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 256, 1), 8))
+    # we are going to arrive at 2 warps only if bs was too small due to
+    # numel being too small. However to workaround some ptx bugs we still
+    # want at least 4 warps if there's enough elements per thread
+    # given that this is a rare situation, don't expect this to affect perf
+    # in general
+    # see https://github.com/pytorch/pytorch/pull/97950
+    num_warps = max(num_warps, 4) if conditional_product(x, y, z) >= 128 else num_warps
     xnumel = size_hints[0]
     ynumel = size_hints[1] if y else None
     znumel = size_hints[2] if z else None
@@ -449,7 +484,7 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -476,7 +511,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=2):
+def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     """
     Construct a tile reduction triton config with some adjustment
     heuristics based on size_hints. Size_hints is a tuple of numels in
@@ -557,7 +592,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
         contiguous_config = triton_config_reduction(
-            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), num_stages=1
+            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
         )
         outer_config = triton_config_reduction(size_hints, 128, 8)
         tiny_config = triton_config_reduction(

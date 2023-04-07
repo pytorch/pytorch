@@ -7,6 +7,7 @@
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorAccessor.h>
 #include <c10/util/Logging.h>
+#include <c10/util/bit_cast.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -542,7 +543,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
       "expected `qkv_weight` second dim to be embed_Dim");
   TORCH_CHECK(
       qkv_bias.dim() == 1,
-      "expected 2-D `qkv_bias`, got ",
+      "expected 1-D `qkv_bias`, got ",
       qkv_bias.dim(),
       "-D tensor");
   TORCH_CHECK(
@@ -844,8 +845,8 @@ std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
 
   debug_attn_mask = return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
 
-  int64_t signed_philox_seed = sdp::bit_cast<int64_t>(philox_seed);
-  int64_t signed_philox_offset= sdp::bit_cast<int64_t>(philox_offset);
+  int64_t signed_philox_seed = c10::bit_cast<int64_t>(philox_seed);
+  int64_t signed_philox_offset= c10::bit_cast<int64_t>(philox_offset);
 
   return std::make_tuple(output, logsumexp, signed_philox_seed, signed_philox_offset, debug_attn_mask);
 #endif
