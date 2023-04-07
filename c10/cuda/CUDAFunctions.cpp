@@ -229,7 +229,6 @@ cudaError_t SetDevice(int device) {
 }
 
 cudaError_t MaybeSetDevice(int device) {
-  TORCH_CHECK(targetDeviceIndex < 0, "targetDeviceIndex was not expected");
   if (hasPrimaryContext(device)) {
     return c10::cuda::SetDevice(device);
   }
@@ -252,7 +251,6 @@ int ExchangeDevice(int to_device) {
 }
 
 int MaybeExchangeDevice(int to_device) {
-  TORCH_CHECK(targetDeviceIndex < 0, "targetDeviceIndex was not expected!");
   int cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
   if (to_device == cur_device) {
