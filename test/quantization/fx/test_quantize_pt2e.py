@@ -27,7 +27,12 @@ from torch.ao.quantization.backend_config.x86 import get_x86_backend_config
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_to_reference_fx, convert_fx
 from torch.ao.quantization._pt2e.quantizer import Quantizer
 from torch.ao.quantization._pt2e.quantizer import QNNPackQuantizer
-from torch.ao.quantization._quantize_pt2e import prepare_pt2e, convert_pt2e, prepare_pt2e_quantizer
+from torch.ao.quantization._quantize_pt2e import (
+    prepare_pt2e,
+    convert_pt2e,
+    prepare_pt2e_quantizer,
+    prepare_qat_pt2e_quantizer,
+)
 from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
@@ -237,6 +242,37 @@ class TestQuantizePT2E(QuantizationTestCase):
         ]
         self.checkGraphModuleNodes(
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence)
+
+    @xfailIfPython311
+    def test_qat_conv_bn_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
+        quantizer = QNNPackQuantizer()
+        quantizer.set_global(qq.get_default_per_channel_symmetric_qnnpack_operator_spec())
+        m = M().eval()
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+
+        # program capture
+        m, guards = torchdynamo.export(
+            m,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+            tracing_mode="real",
+        )
+        m = prepare_qat_pt2e_quantizer(m, quantizer)
+        m(*example_inputs)
+
+        # TODO: check that subgraph was replaced
 
     @xfailIfPython311
     def test_rearrange_weight_observer_for_decomposed_linear(self):
