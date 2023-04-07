@@ -4,6 +4,9 @@ on:
     # Update the indices every 30 minutes
 #    - cron: "*/30 * * * *"
   # Enable triggering this job manually using the API as well
+  push:
+    branches:
+      - 'zainr/ci-wait-metric'
   workflow_dispatch:
 
 jobs:
