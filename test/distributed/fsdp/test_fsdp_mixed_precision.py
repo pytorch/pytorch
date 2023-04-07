@@ -211,7 +211,7 @@ class LinearMixedPrecision(nn.Module):
                         num_active_fsdp += 1
                         # This FSDP unit is active, verify param points to mixed
                         cls.assertEqual(param.dtype, expected_param_type)
-                        # _rebuild_full_param should have also freed the fp16 shard.
+                        # _unshard should have also freed the fp16 shard.
                         # Shard is never allocated if param_dtype mixed precision is not
                         # enabled.
                         if mp_config.param_dtype is not None:
