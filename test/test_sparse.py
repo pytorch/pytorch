@@ -4654,10 +4654,8 @@ class TestSparseAny(TestCase):
         def run_test(m, n, k, dtype_inout):
             a = make_tensor((m, k), dtype_inout[0]).cuda()
             b = make_tensor((n, k), dtype_inout[0]).cuda().T
-            c = make_tensor((m, n), dtype_inout[1]).cuda()
+            c = make_tensor((m, 1), dtype_inout[1]).cuda()
 
-            c0_results = []
-            c1_results = []
             for meta_choice in (list(range(6)) + [None]):
                 mask_entries = []
                 for i in range(m * (k // 4)):
@@ -4672,6 +4670,7 @@ class TestSparseAny(TestCase):
                 c1 = torch.mm(a_dense.to(dtype_dense), b.to(dtype_dense)) + c.to(dtype_dense)
 
                 c0, meta_reordered = torch._cutlass_linear(a_sparse, b, c, mask)
+
                 torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
 
         dtypes_inout = [[torch.int8, torch.int32], [torch.half, torch.half]]

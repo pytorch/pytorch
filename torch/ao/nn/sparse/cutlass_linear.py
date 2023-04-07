@@ -6,16 +6,14 @@ TODO find a better name for this class/file
 
 class CUTLASSLinear(nn.Linear):
     def forward(self, x):
-        m = self.weight_tensor.size(0)
         b = x.view(-1, x.shape[-1]).T
-        n = b.size(-1)
-        c = self.bias_tensor.view(m, 1).expand(m, n).contiguous()
+        c = self.bias_tensor.view(torch.numel(self.bias_tensor), 1)
         if self.mask is not None:
             prod, self.meta = torch._cutlass_linear(self.weight_tensor, b, c, self.mask)
             self.mask = None
         else:
             prod, _ = torch._cutlass_linear(self.weight_tensor, b, c, self.meta)
-        return prod.T.view(*x.shape[:-1], m)
+        return prod.T.view(*x.shape[:-1], -1)
 
     @classmethod
     def from_dense(cls, mod):
