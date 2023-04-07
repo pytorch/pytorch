@@ -24,6 +24,9 @@ e = torch.nn.Linear(10, 10)
 flag = True
 
 
+clip01 = functools.partial(torch.clip, min=0.0, max=1.0)
+
+
 def constant3(a, b):
     return a - b + (1.0 + 2)
 
@@ -89,6 +92,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_is_not_null(a, b):
         if a is not None and b is not None:
             return a + b
+
+    @make_test
+    def test_functools_partial(a, b):
+        return clip01(a + b)
+
+    @make_test
+    def test_itertools_product(a, b):
+        v = a
+        for x, i in itertools.product([a, b], [1, 2]):
+            v = v + x * i
+        return v
 
     @make_test
     def test_constant1(a, b, c):
@@ -342,6 +356,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         y = float(1.2)
         y += float("1.2")
         return torch.add(x, y)
+
+    @make_test
+    def test_is_floating_point(x):
+        y = x + 1
+        return torch.is_floating_point(y), torch.is_floating_point(input=y)
 
     @make_test
     def test_dtype(x):
@@ -877,6 +896,7 @@ class WrapperModule(torch.nn.Module):
         return self.m()
 
 
+@unittest.skipIf(torch.backends.mps.is_available(), "not applicable to mps")
 class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_func_default_tensor_args(self):
         """

@@ -20,7 +20,12 @@ import weakref
 import operator
 from torch.utils._stats import count
 
-from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, _get_current_dispatch_mode
+from torch.utils._python_dispatch import (
+    TorchDispatchMode,
+    _pop_mode_temporarily,
+    _get_current_dispatch_mode,
+)
+
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
@@ -124,8 +129,8 @@ def set_meta(proxy, val):
     elif isinstance(val, py_sym_types):
         proxy.node.meta['val'] = val
     elif isinstance(val, (list, tuple)):
-        if all(isinstance(x, FakeTensor) for x in val):
-            proxy.node.meta['val'] = [snapshot_fake(x) for x in val]
+        if any(isinstance(x, FakeTensor) for x in val):
+            proxy.node.meta['val'] = [snapshot_fake(x) if isinstance(x, FakeTensor) else None for x in val]
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
@@ -679,7 +684,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, pre_autograd=False):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, *, pre_autograd=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
