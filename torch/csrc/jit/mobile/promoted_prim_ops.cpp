@@ -92,14 +92,6 @@ void device(Stack& stack) {
   push(stack, pop(stack).toTensor().device());
 }
 
-void device_with_index(Stack& stack) {
-  std::string type = pop(stack).toStringRef();
-  int index = pop(stack).toInt();
-  std::string device_str = type + ":" + std::to_string(index);
-  auto device = c10::Device(device_str);
-  push(stack, device);
-}
-
 void dtype(Stack& stack) {
   at::Tensor a;
   pop(stack, a);

@@ -115,19 +115,6 @@ class CPUReproTests(TestCase):
         compiled_out = opt_fn(p0, p1)
         assert same(real_out, compiled_out)
 
-    def test_pow_cos(self):
-        # https://github.com/pytorch/pytorch/issues/98149
-        def fn(x):
-            t = x.pow(5)
-            return torch.cos(t)
-
-        x = torch.tensor([4], dtype=torch.uint8)
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
-        opt_fn(x)
-        real_out = fn(x)
-        compiled_out = opt_fn(x)
-        assert same(real_out, compiled_out)
-
     def test_reduce_with_masked(self):
         # https://github.com/pytorch/pytorch/issues/96484
         def fn(a, b):

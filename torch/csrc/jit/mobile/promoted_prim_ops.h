@@ -33,8 +33,6 @@ void sym_stride(Stack& stack);
 
 void device(Stack& stack);
 
-void device_with_index(Stack& stack);
-
 void dtype(Stack& stack);
 
 void layout(Stack& stack);

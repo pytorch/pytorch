@@ -49,45 +49,6 @@ def toRealValueType(dtype):
     return from_complex.get(dtype, dtype)
 
 
-@register_meta([aten.take.default, aten.take.out])
-def meta_take(self, index, *, out=None):
-    # Type and device checks
-    check(
-        index.dtype == torch.long,
-        lambda: f"take(): Expected a long tensor for index, but got {index.dtype}",
-    )
-    if out is not None:
-        check(
-            self.dtype == out.dtype,
-            lambda: (
-                f"take(): self and out expected to have the same dtype, "
-                f"but got self.dtype = {self.dtype} and out.dtype = {out.dtype}"
-            ),
-        )
-        check(
-            self.device == out.device and self.device == index.device,
-            lambda: (
-                f"take(): self, index and out expected to be in the same device, "
-                f"but got self.device = {self.device}, index.device = {index.device}, "
-                f"and out.device = {out.device}"
-            ),
-        )
-
-    # Index checks
-    check(
-        not (self.numel() == 0 and index.numel() != 0),
-        lambda: "take(): tried to take from an empty tensor",
-        IndexError,
-    )
-
-    result = self.new_empty(index.shape)
-    if out is not None:
-        assert isinstance(out, TensorLike)
-        out = _maybe_resize_out(out, result.shape)
-        return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
-    return result
-
-
 @register_meta([aten._fft_c2c.default, aten._fft_c2c.out])
 @out_wrapper()
 def meta_fft_c2c(self, dim, normalization, forward):
@@ -2062,6 +2023,20 @@ def full(size, fill_value, *args, **kwargs):
     return torch.empty(size, *args, **kwargs)
 
 
+@register_meta(
+    [
+        aten.randint_like.default,
+        aten.randint_like.low_dtype,
+        aten.randn_like.default,
+        aten.rand_like.default,
+        aten.full_like.default,
+        aten.ones_like.default,
+    ]
+)
+def meta_like(self, *args, **kwargs):
+    return aten.empty_like.default(self, **kwargs)
+
+
 # zeros_like is special cased to work for sparse
 @register_meta(aten.zeros_like.default)
 def zeros_like(
@@ -2095,7 +2070,7 @@ def zeros_like(
 
         res._coalesced_(True)
         return res
-    res = aten.empty_like.default(
+    return aten.empty_like.default(
         self,
         dtype=dtype,
         layout=layout,
@@ -2103,9 +2078,6 @@ def zeros_like(
         pin_memory=pin_memory,
         memory_format=memory_format,
     )
-    # device can be not "meta"
-    res.fill_(0)
-    return res
 
 
 @register_meta(aten.select.int)

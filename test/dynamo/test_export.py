@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
 import inspect
-import math
 import operator
 import unittest
 from enum import Enum
@@ -2341,25 +2340,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def f_correct(x):
             a = A()
             return x.sum() + a.__class__.func().sum()
-
-        gm, _ = torch._dynamo.export(
-            f_correct, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
-        )
-
-        self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
-
-    @config.patch(dynamic_shapes=True)
-    def test_round_dynamic_shapes(self):
-        def f(x):
-            return x[: round(x.shape[0] / 2)]
-
-        def f_correct(x):
-            return x[: math.floor(x.shape[0] / 2)]
-
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Calling round()"):
-            gm, _ = torch._dynamo.export(
-                f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
-            )
 
         gm, _ = torch._dynamo.export(
             f_correct, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"

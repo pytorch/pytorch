@@ -13,7 +13,7 @@ ciflow_push_tags:
 - ciflow/slow
 - ciflow/trunk
 - ciflow/unstable
-retryable_workflows:
+allowed_workflows:
 - lint
 - pull
 - trunk

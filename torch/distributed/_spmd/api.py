@@ -115,6 +115,7 @@ class Override(ABC):
     def transform(
         self,
         gm: fx.GraphModule,
+        schema_map: Dict[str, Schema],
         flat_state: List[torch.Tensor],
     ) -> fx.GraphModule:
         r"""
@@ -125,6 +126,8 @@ class Override(ABC):
 
         Args:
             gm (:class:`fx.Graph`): a DTensor-expanded graph.
+            schema_map (Dict[str, :class:`Schema`]): a dictionary maps from node
+                name to DTensor schema.
             flat_state (List[str, :class:`Tensor`]): a reference to the list of
                 flattened state. The elements in ``flat_state`` map to the first
                 ``len(flat_state)`` placeholders in the graph. The transformation
@@ -188,7 +191,7 @@ def _dtensor_expand(
     kwargs: Dict[str, Any],
     named_states: Dict[str, Any],
     params_and_buffers: Dict[str, Any],
-) -> fx.GraphModule:
+) -> Tuple[fx.GraphModule, Dict[str, Schema]]:
     flat_args, _ = pytree.tree_flatten(list(args) + list(kwargs.values()))
 
     mesh = DeviceMesh("cuda", torch.arange(dist.get_world_size()).cuda())
@@ -229,7 +232,7 @@ def _dtensor_expand(
             inps.append(torch.empty(0))
             schemas.append(shard_schema)
 
-    return _convert_to_distributed(gm, inps, schemas, _allow_partial=False)[0]
+    return _convert_to_distributed(gm, inps, schemas, _allow_partial=False)
 
 
 @contextmanager
@@ -495,7 +498,9 @@ def _compile(
         )(named_states, params_and_buffers, args, kwargs)
 
     # 4. Use DTensor to insert collectives
-    gm = _dtensor_expand(gm, args, kwargs, named_states, params_and_buffers)
+    gm, name_to_spec = _dtensor_expand(
+        gm, args, kwargs, named_states, params_and_buffers
+    )
 
     # 5. Move the responsibility of flattening the input arguments from the
     # graph module to the caller. This serves two purposes:
@@ -522,7 +527,7 @@ def _compile(
     # 7. Replace previously inserted dummy ones with real graphs.
     if module_override:
         for _, override in module_override.items():
-            gm = override.transform(gm, flat_state)
+            gm = override.transform(gm, name_to_spec, flat_state)
 
     return _CompiledResult(gm, mod, opt, flat_state)
 

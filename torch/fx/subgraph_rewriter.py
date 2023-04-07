@@ -302,8 +302,6 @@ def _replace_pattern(
 
         def get_replacement_nodes(curr_node: Node):
             nonlocal replacement_nodes
-            if curr_node in match.placeholder_nodes:
-                return
             for arg in curr_node.args:
                 if isinstance(arg, Node):
                     if arg not in val_map.values():

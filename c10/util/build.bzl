@@ -33,7 +33,6 @@ def define_targets(rules):
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
-            ":bit_cast",
             "//c10/macros",
             "@fmt",
         ] + rules.select({

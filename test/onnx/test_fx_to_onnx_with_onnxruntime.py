@@ -1,8 +1,6 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
-import copy
-
 import io
 import os
 import tempfile
@@ -60,7 +58,6 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     rtol: float = 1e-3,
     atol: float = 1e-7,
     opset_version: int = 18,
-    input_mutation: bool = False,
     **input_kwargs,
 ):
     # Feed args and kwargs into exporter.
@@ -77,16 +74,10 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
 
     export_output = exporter.export()
 
-    if input_mutation:
-        ref_input_args = copy.deepcopy(input_args)
-        ref_input_kwargs = copy.deepcopy(input_kwargs)
-    else:
-        ref_input_args = input_args
-        ref_input_kwargs = input_kwargs
     # Bind args and kwargs to the model's signature to
     # flatten kwargs into positional args since ONNX
     # model cannot be called with kwargs.
-    bound = exporter.model_signature.bind(*ref_input_args, **ref_input_kwargs)
+    bound = exporter.model_signature.bind(*input_args, **input_kwargs)
     # Fill optional inputs.
     bound.apply_defaults()
     assert not bound.kwargs
@@ -210,16 +201,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return self.sigmoid(x)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(SigmoidAddModel(), (x,))
-
-    def test_mutation(self):
-        class MutationModel(torch.nn.Module):
-            def forward(self, x):
-                x.view(3, 2, -1).add_(2.0)
-                return x
-
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            MutationModel(), (torch.randn(12),), input_mutation=True
-        )
 
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"

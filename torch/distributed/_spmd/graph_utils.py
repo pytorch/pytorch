@@ -1,9 +1,8 @@
 from enum import Enum
-from typing import Dict, List, Set, Tuple, Union
+from typing import List, Optional, Set, Tuple, Union
 
 import torch.fx as fx
 from torch.fx.passes.shape_prop import TensorMetadata
-from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 class OP(str, Enum):
@@ -87,72 +86,18 @@ def get_node_tensor_metadata(node: fx.Node, is_required: bool = True) -> TensorM
     return metadata
 
 
-def get_output(graph: fx.Graph) -> fx.Node:
+def get_output_node(gm: fx.GraphModule) -> Optional[fx.Node]:
     """
     Take a graphmodule and returns the graph output node. We traverse in reverse
     to expedite it, with the idea that last node should be output
     """
-    for node in reversed(graph.nodes):
+    if gm.graph is None:
+        raise ValueError("Missing graph from graph module.")
+
+    for node in reversed(gm.graph.nodes):
         if node.op == OP.OUTPUT:
             return node
-    raise RuntimeError(f"Cannot find the output node in {graph}")
-
-
-def is_leaf_subgraph(graph: fx.Graph, subgraph: List[fx.Node]) -> bool:
-    """
-    This function ensures nodes in ``subgraph`` satisfy one of the rules:
-    1. The user of the node is in ``subgraph``.
-    2. The user of the node is output.
-    3. There are no users -- the node is a side-effect node.
-    """
-    all_nodes: Set[fx.Node] = set(subgraph)
-    output = get_output(graph)
-    for node in subgraph:
-        for user in node.users:
-            if not isinstance(user, fx.Node):
-                continue
-            if user not in all_nodes and user != output:
-                return False
-    return True
-
-
-def clone_subgraph(
-    graph: fx.Graph, subgraph: List[fx.Node], target: fx.Node
-) -> List[fx.Node]:
-    """
-    Clone the given subgraph and insert it before ``target``.
-    This API currently does not support inserting after ``target``.
-    """
-
-    all_nodes = set(subgraph)
-    mapping: Dict[fx.Node, fx.Node] = dict()
-    cloned_subgraph = []
-    with graph.inserting_before(target):
-        for node in subgraph:
-            cloned_node = graph.call_function(
-                node.target, node.args, node.kwargs, node.type
-            )
-            # TODO: there are many flatten/unflatten in IterGraph that
-            # can be simplified with tree_map. Will simplify this in
-            # a follow-up PR.
-            original_input, _ = tree_flatten((node.args, node.kwargs))
-            cloned_input, spec = tree_flatten((cloned_node.args, cloned_node.kwargs))
-            mapped_cloned_input = []
-            for original_input_node, cloned_input_node in zip(
-                original_input, cloned_input
-            ):
-                if original_input_node in all_nodes:
-                    assert original_input_node in mapping
-                    mapped_cloned_input.append(mapping[original_input_node])
-                else:
-                    mapped_cloned_input.append(cloned_input_node)
-            cloned_node.args, cloned_node.kwargs = tree_unflatten(
-                mapped_cloned_input, spec
-            )
-            mapping[node] = cloned_node
-            cloned_subgraph.append(cloned_node)
-
-    return cloned_subgraph
+    return None
 
 
 def rebuild_graph(gm: fx.GraphModule, remove_dead_code: bool = True) -> None:

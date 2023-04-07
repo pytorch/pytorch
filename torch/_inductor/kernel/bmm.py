@@ -101,7 +101,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
                 )
             )
 
-    return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
+    return autotune_select_algorithm(choices, [mat1, mat2], layout)
 
 
 # Don't register this since it is slower than decomposing it
@@ -123,4 +123,4 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 )
             )
 
-    return autotune_select_algorithm("baddbmm", choices, [inp, mat1, mat2], layout)
+    return autotune_select_algorithm(choices, [inp, mat1, mat2], layout)

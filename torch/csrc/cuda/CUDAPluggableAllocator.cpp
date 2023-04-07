@@ -1,5 +1,4 @@
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
@@ -292,26 +291,8 @@ c10::cuda::CUDACachingAllocator::CheckpointDelta CUDAPluggableAllocator::
       "If you need it, please file an issue describing your use case.");
 }
 
-void CUDAPluggableAllocator::enablePeerAccess(int dev, int dev_to_access) {
-  c10::cuda::CUDAGuard device_guard(dev);
-  cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
-  if (err == cudaErrorPeerAccessAlreadyEnabled) {
-    // ignore and clear the error if access was already enabled
-    cudaGetLastError();
-  } else {
-    C10_CUDA_CHECK(err);
-  }
-}
-
-cudaError_t CUDAPluggableAllocator::memcpyAsync(
-    void* dst,
-    int dstDevice,
-    const void* src,
-    int srcDevice,
-    size_t count,
-    cudaStream_t stream,
-    bool p2p_enabled) {
-  return cudaMemcpyAsync(dst, src, count, cudaMemcpyDeviceToDevice, stream);
+bool CUDAPluggableAllocator::needsPoolSpecificPeerAccess() {
+  return false;
 }
 
 std::string CUDAPluggableAllocator::name() {
