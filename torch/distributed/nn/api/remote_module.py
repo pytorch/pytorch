@@ -745,7 +745,7 @@ def _recursive_script_module_receiver(
     recursive_script_module_serialized,
 ):
     """
-    Deserializes a RecursiveScirptModule that does not contain a script RemoteModule.
+    Deserializes a RecursiveScriptModule that does not contain a script RemoteModule.
     """
     f = io.BytesIO(recursive_script_module_serialized)
     m = torch.jit.load(f)
@@ -754,7 +754,7 @@ def _recursive_script_module_receiver(
 
 def _recursive_script_module_reducer(recursive_script_module):
     """
-    Serializes a RecursiveScirptModule that does not contain a script RemoteModule,
+    Serializes a RecursiveScriptModule that does not contain a script RemoteModule,
     and raises an error otherwise.
     """
     if hasattr(recursive_script_module._c, "module_rref"):
