@@ -1175,25 +1175,26 @@ def wrap_to_fake_tensor_and_record(
             dynamic_dims = []
             constraint_dims = []
             for i in range(e.dim()):
+                # NB: mark dynamic has precedence over static
+                marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
+                marked_static = i in getattr(e, "_dynamo_static_indices", set())
+
                 # We will process constraints first, as they will imply that we
                 # have a dynamic dimension
                 # Precedence: export constraints > eager constraints
                 constraint = dim2constraint.get(i)
                 if constraint is None:
-                    if (
-                        i in getattr(e, "_dynamo_dynamic_indices", set())
-                        and not config.allow_ignore_mark_dynamic
-                    ):
+                    if marked_dynamic and not config.allow_ignore_mark_dynamic:
                         constraint = RelaxedUnspecConstraint()
                 constraint_dims.append(constraint)
 
                 # Now, figure out if the dim is dynamic/duck/static
-                if constraint is not None:
+                if constraint is not None or marked_dynamic:
                     # NB: We could assert static_shapes is False here, but it
                     # seems better to allow the user to override policy in this
                     # case
                     dynamic = DimDynamic.DYNAMIC
-                elif static_shapes or config.assume_static_by_default:
+                elif static_shapes or config.assume_static_by_default or marked_static:
                     dynamic = DimDynamic.STATIC
                 else:
                     dynamic = DimDynamic.DUCK
