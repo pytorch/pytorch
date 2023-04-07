@@ -346,7 +346,7 @@ def _broadcast_shapes(*_shapes):
 def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     # Computes common shape
     common_shape = _broadcast_shapes(
-        *map(lambda t: t.shape if isinstance(t, TensorLike) else None, args)
+        *(t.shape if isinstance(t, TensorLike) else None for t in args)
     )
 
     def __maybe_broadcast(x, shape):
@@ -3583,7 +3583,15 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
     dims = tuple(d for d in dims if a.shape[d] == 1)
-    return prims.squeeze(a, dims) if dims else prims.view_of(a)
+    if len(dims) == 0:
+        return prims.view_of(a)
+    if len(dims) == 1:
+        return prims.squeeze(a, dims)
+    dims_list = list(dims)
+    dims_list = sorted(dims_list, reverse=True)
+    for i in dims_list:
+        a = squeeze(a, i)
+    return a
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
@@ -4279,8 +4287,6 @@ def empty_like(
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
-    strides: Tuple[int, ...]
-
     if memory_format != torch.preserve_format:
         return torch.empty(
             a.shape,
@@ -4562,7 +4568,7 @@ def meshgrid(
     # This ref simultaneously handles two overloads (see stubs above)
     # The `indexing` argument is currently optional for torch.meshgrid, but we
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
-    if isinstance(tensors[0], list) or isinstance(tensors[0], tuple):
+    if isinstance(tensors[0], (list, tuple)):
         assert len(tensors) == 1
         tensors = tuple(tensors[0])
 
@@ -5388,7 +5394,15 @@ def log_normal(self, mean=1, std=2, generator=None):
 def normal(self, mean=0, std=1, generator=None):
     assert generator is None
     utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
-    return std * torch.randn_like(self) + mean
+    normal_samples = prims.normal(
+        self.shape,
+        mean=0.0,
+        std=1.0,
+        dtype=self.dtype,
+        device=self.device,
+        requires_grad=False,
+    )
+    return std * normal_samples + mean
 
 
 # inplace

@@ -21,6 +21,7 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
+from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
@@ -37,7 +38,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, pad_list, sympy_product
+from .utils import ceildiv, developer_warning, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -681,6 +682,11 @@ def permute(x, dims):
 def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
+    dim_size = x.get_size()[dim]
+    if start < -dim_size:
+        start = 0
+    if end < -dim_size:
+        end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
@@ -1027,8 +1033,9 @@ def register_onednn_fusion_ops():
 register_onednn_fusion_ops()
 
 
-def fallback_handler(kernel):
-    fallbacks.add(kernel)
+def fallback_handler(kernel, add_to_fallback_set=True):
+    if add_to_fallback_set:
+        fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
         return pytree.tree_map(
@@ -1036,6 +1043,38 @@ def fallback_handler(kernel):
         )
 
     return handler
+
+
+def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
+    if t.dtype in (torch.complex32, torch.complex64, torch.complex128):
+        return True
+    return t.is_cpu and config.disable_cpp_codegen
+
+
+def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
+    def check_skip_condition(node, is_output):
+        if not isinstance(node, torch.fx.Node):
+            return False
+
+        if "val" not in node.meta:
+            return False
+
+        for meta in tree_flatten(node.meta["val"])[0]:
+            if not isinstance(meta, torch._subclasses.FakeTensor):
+                continue
+
+            if is_output:
+                if unsupported_output_tensor(meta):
+                    return True
+
+        return False
+
+    # only skip codegen if there is a cpu output, not input
+    for arg in tree_flatten((node.args, node.kwargs))[0]:
+        if check_skip_condition(arg, is_output=(False or not allow_cpu_inputs)):
+            return True
+
+    return check_skip_condition(node, is_output=True)
 
 
 def make_fallback(kernel, layout_constraint=None, warn=True):
@@ -1055,15 +1094,16 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
-    assert (
-        config.fallback_random
-    ), "this should be handled in decomps unless config.fallback_random"
-    if train:
+    assert train and p not in (0, 1), "inference should have been handled as a decomp"
+    if config.fallback_random:
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
         )
-
-    return x, ones_like(x, dtype=torch.bool)
+    else:
+        bool_mask = gt(rand_like(x), p)
+        bool_mask.realize()
+        res = mul(mul(bool_mask, x), float(1.0 / (1.0 - p)))
+        return res, bool_mask
 
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
@@ -1745,9 +1785,9 @@ def constant_like(fill_value):
 
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
 ones_like = create_tensor_like(tensor_constructor(1))
-if not config.fallback_random:
-    rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
-    randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
+zeros_like = create_tensor_like(tensor_constructor(0))
+rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
 
 
 def new_constant(fill_value):
@@ -2009,6 +2049,10 @@ def index_put_(self, indices, values, accumulate=False):
             mask = unsqueeze(mask, -1)
         return index_put_as_masked_fill(self, [mask], values, accumulate)
 
+    # Fallback in torch deterministic mode
+    if torch.are_deterministic_algorithms_enabled():
+        return index_put_fallback(self, indices, values, accumulate)
+
     # Fallback if there is a boolean index
     for index in indices:
         if index is not None and index.get_dtype() in {torch.bool, torch.uint8}:
@@ -2100,32 +2144,36 @@ def scatter(x, dim: int, index, src, **kwargs):
 def scatter_fallback(
     fn, self, dim: int, index, src, *, reduce: str = None, include_self: bool = True
 ):
-    if reduce not in {None, "sum"} or (
-        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
+    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
+    if (
+        reduce not in {None, reduce_ty}
+        or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
+        or torch.are_deterministic_algorithms_enabled()
     ):
-        self.realize()
-        return fallback_handler(fn)(
-            self, dim, index, src, reduce=reduce, include_self=include_self
+        ir.ScatterFallback(
+            fn, self, dim, index, src, reduce=reduce, include_self=include_self
         )
+        return self
 
     return None
 
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
-    if reduce == "add":
-        reduce = "sum"
-    elif reduce == "multiply":
-        reduce = "prod"
-    else:
-        assert reduce is None
+    assert reduce in {None, "add", "multiply"}
 
     fallback_result = scatter_fallback(
-        aten.scatter_, self, dim, index, src, reduce=reduce
+        "aten.scatter_", self, dim, index, src, reduce=reduce
     )
 
     if fallback_result:
         return fallback_result
+
+    if reduce == "add":
+        reduce = "sum"
+    elif reduce == "multiply":
+        reduce = "prod"
+
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
@@ -2144,15 +2192,12 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
     return scatter_reduce_(clone(x), dim, index, src, reduction_type, **kwargs)
 
 
-fallback_scatter_reduce_ = fallback_handler(aten.scatter_reduce_)
-
-
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
 
     fallback_result = scatter_fallback(
-        aten.scatter_reduce_,
+        "aten.scatter_reduce_",
         self,
         dim,
         index,
@@ -2671,9 +2716,9 @@ def max_pool2d_with_indices(
         padding = [0, 0]
     if not stride:
         stride = kernel_size
-    kernel_size = pad_list(kernel_size)
-    stride = pad_list(stride)
-    padding = pad_list(padding)
+    kernel_size = pad_listlike(kernel_size, 2)
+    stride = pad_listlike(stride, 2)
+    padding = pad_listlike(padding, 2)
 
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
@@ -3084,9 +3129,9 @@ def avg_pool2d(
         stride = kernel_size
     if not padding:
         padding = [0, 0]
-    kernel_size = pad_list(kernel_size)
-    stride = pad_list(stride)
-    padding = pad_list(padding)
+    kernel_size = pad_listlike(kernel_size, 2)
+    stride = pad_listlike(stride, 2)
+    padding = pad_listlike(padding, 2)
 
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
@@ -3750,7 +3795,7 @@ register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 register_pointwise(aten.le, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, override_return_dtype=torch.bool)
 register_pointwise(aten.ge, override_return_dtype=torch.bool)
-register_pointwise(aten.gt, override_return_dtype=torch.bool)
+gt = register_pointwise(aten.gt, override_return_dtype=torch.bool)
 register_pointwise(aten.eq, override_return_dtype=torch.bool)
 register_pointwise(aten.ne, override_return_dtype=torch.bool)
 logical_and = register_pointwise(

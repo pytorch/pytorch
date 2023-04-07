@@ -552,9 +552,7 @@ class TritonTemplateCaller(ChoiceCaller):
         return self.bmreq.benchmark(*args, output_tensor=out)
 
     def __str__(self):
-        return (
-            f"TritonTemplateCaller({self.to_callable().__file__}, {self.debug_extra})"
-        )
+        return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
     def call_name(self):
         return f"template_kernels.{self.name}"
@@ -651,7 +649,7 @@ class ErrorFromChoice(RuntimeError):
 
 
 class AlgorithmSelectorCache(PersistentCache):
-    def __call__(self, choices: List[ChoiceCaller], input_nodes, layout):
+    def __call__(self, name, choices: List[ChoiceCaller], input_nodes, layout):
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
         assert len(choices) > 0, "no choices to select"
@@ -702,7 +700,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if make_benchmark_fn.cache_info().currsize:
             counters["inductor"]["select_algorithm_autotune"] += 1
-            self.log_results(choices[0].name, input_nodes, timings, autotune_elapse)
+            self.log_results(name, input_nodes, timings, autotune_elapse)
         return builtins.min(timings, key=timings.__getitem__).output_node()
 
     @classmethod
@@ -807,12 +805,14 @@ class AlgorithmSelectorCache(PersistentCache):
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
+            sys.stderr.write(
+                f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
+            )
 
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse} seconds\n")
+        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse:.4f} seconds\n")
 
     @staticmethod
     def benchmark_example_value(node):

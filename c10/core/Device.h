@@ -17,7 +17,7 @@ namespace c10 {
 /// DeviceIndex directly.
 using DeviceIndex = int8_t;
 
-/// Represents a a compute device on which a tensor is located. A device is
+/// Represents a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
 /// (e.g. CPU or CUDA GPU), and a device index or ordinal, which identifies the
 /// specific compute device when there is more than one of a certain type. The
@@ -146,10 +146,10 @@ struct C10_API Device final {
     return type_ == DeviceType::CPU;
   }
 
-  /// Return true if the device supports arbirtary strides.
+  /// Return true if the device supports arbitrary strides.
   bool supports_as_strided() const noexcept {
     return type_ != DeviceType::IPU && type_ != DeviceType::XLA &&
-        type_ != DeviceType::Lazy;
+        type_ != DeviceType::Lazy && type_ != DeviceType::MTIA;
   }
 
   /// Same string as returned from operator<<.
