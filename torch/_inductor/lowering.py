@@ -682,11 +682,6 @@ def permute(x, dims):
 def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    dim_size = x.get_size()[dim]
-    if start < -dim_size:
-        start = 0
-    if end < -dim_size:
-        end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
@@ -1094,16 +1089,15 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
-    assert train and p not in (0, 1), "inference should have been handled as a decomp"
-    if config.fallback_random:
+    assert (
+        config.fallback_random
+    ), "this should be handled in decomps unless config.fallback_random"
+    if train:
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
         )
-    else:
-        bool_mask = gt(rand_like(x), p)
-        bool_mask.realize()
-        res = mul(mul(bool_mask, x), float(1.0 / (1.0 - p)))
-        return res, bool_mask
+
+    return x, ones_like(x, dtype=torch.bool)
 
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
@@ -1785,9 +1779,9 @@ def constant_like(fill_value):
 
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
 ones_like = create_tensor_like(tensor_constructor(1))
-zeros_like = create_tensor_like(tensor_constructor(0))
-rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
-randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
+if not config.fallback_random:
+    rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+    randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
 
 
 def new_constant(fill_value):
@@ -2144,36 +2138,32 @@ def scatter(x, dim: int, index, src, **kwargs):
 def scatter_fallback(
     fn, self, dim: int, index, src, *, reduce: str = None, include_self: bool = True
 ):
-    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
-    if (
-        reduce not in {None, reduce_ty}
-        or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
-        or torch.are_deterministic_algorithms_enabled()
+    if reduce not in {None, "sum"} or (
+        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
     ):
-        ir.ScatterFallback(
-            fn, self, dim, index, src, reduce=reduce, include_self=include_self
+        self.realize()
+        return fallback_handler(fn)(
+            self, dim, index, src, reduce=reduce, include_self=include_self
         )
-        return self
 
     return None
 
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
-    assert reduce in {None, "add", "multiply"}
-
-    fallback_result = scatter_fallback(
-        "aten.scatter_", self, dim, index, src, reduce=reduce
-    )
-
-    if fallback_result:
-        return fallback_result
-
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
         reduce = "prod"
+    else:
+        assert reduce is None
 
+    fallback_result = scatter_fallback(
+        aten.scatter_, self, dim, index, src, reduce=reduce
+    )
+
+    if fallback_result:
+        return fallback_result
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
@@ -2192,12 +2182,15 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
     return scatter_reduce_(clone(x), dim, index, src, reduction_type, **kwargs)
 
 
+fallback_scatter_reduce_ = fallback_handler(aten.scatter_reduce_)
+
+
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
 
     fallback_result = scatter_fallback(
-        "aten.scatter_reduce_",
+        aten.scatter_reduce_,
         self,
         dim,
         index,
@@ -3795,7 +3788,7 @@ register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 register_pointwise(aten.le, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, override_return_dtype=torch.bool)
 register_pointwise(aten.ge, override_return_dtype=torch.bool)
-gt = register_pointwise(aten.gt, override_return_dtype=torch.bool)
+register_pointwise(aten.gt, override_return_dtype=torch.bool)
 register_pointwise(aten.eq, override_return_dtype=torch.bool)
 register_pointwise(aten.ne, override_return_dtype=torch.bool)
 logical_and = register_pointwise(

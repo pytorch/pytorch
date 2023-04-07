@@ -21,6 +21,14 @@
 
 namespace sdp {
 
+template <typename To, typename From>
+To bit_cast(From f) {
+  static_assert(sizeof(To) == sizeof(From));
+  To t;
+  std::memcpy(&t, &f, sizeof(f));
+  return t;
+}
+
 // This helper function creates a constexpr std::array
 // From a compile time list of values
 template <typename V, typename... T>

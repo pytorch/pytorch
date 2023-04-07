@@ -11,8 +11,9 @@ import sympy
 from sympy import Expr
 
 from torch._dynamo.utils import dynamo_timed
+
 from .. import codecache, config, ir
-from ..codecache import CudaKernelParamCache
+from ..codecache import code_hash, cpp_compile_command, cubin_cache_dir, get_code_path
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
@@ -24,7 +25,6 @@ from ..utils import (
 )
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
-
 
 pexpr = PythonPrinter().doprint
 
@@ -56,6 +56,21 @@ def is_float(s: str):
     except ValueError:
         return False
     return True
+
+
+class KernelParamCache:
+    cache = dict()
+
+    def __init__(self):
+        self.prev_cache = None
+
+    def __enter__(self):
+        self.prev_cache = KernelParamCache.cache
+        KernelParamCache.cache = dict()
+
+    def __exit__(self, *args):
+        KernelParamCache.cache.clear()
+        KernelParamCache.cache = self.prev_cache
 
 
 class MemoryPlanningState:
@@ -183,7 +198,7 @@ class NullLine(MemoryPlanningLine):
 
 class WrapperCodeGen(CodeGen):
     """
-    Generate outer wrapper in Python that calls the kernels.
+    The outer wrapper that calls the kernels.
     """
 
     def __init__(self):
@@ -192,8 +207,7 @@ class WrapperCodeGen(CodeGen):
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
-        self.src_to_kernel = {}
-        self.kernel_to_hash = {}
+        self.kernels = {}
         self.lines = []
         self.need_seed = False
         self.declare = ""
@@ -203,7 +217,7 @@ class WrapperCodeGen(CodeGen):
         self.size = "size()"
         self.stride = "stride()"
 
-        self.write_header()
+        self.set_header()
         self.write_prefix()
 
         for name, value in V.graph.constants.items():
@@ -228,7 +242,7 @@ class WrapperCodeGen(CodeGen):
         self.add_import_once = add_import_once
         self._metas = {}
 
-    def write_header(self):
+    def set_header(self):
         self.header.splice(
             f"""
                 from ctypes import c_void_p, c_long
@@ -530,7 +544,9 @@ class WrapperCodeGen(CodeGen):
 
             call_str = f"call([{', '.join(V.graph.graph_inputs.keys())}])"
             output.writeline(
-                f"return print_performance(lambda: {call_str}, times=times, repeat=repeat)"
+                call_str
+                if V.graph.aot_mode
+                else f"return print_performance(lambda: {call_str}, times=times, repeat=repeat)"
             )
 
     def add_benchmark_harness(self, output):
@@ -554,6 +570,9 @@ class WrapperCodeGen(CodeGen):
     def define_kernel(self, name: str, kernel: str, metadata: str = None):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
+
+    def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
+        return
 
     def wrap_kernel_call(self, name, call_args):
         return "{}({})".format(name, ", ".join(call_args))
@@ -693,11 +712,14 @@ class WrapperCodeGen(CodeGen):
 
 class CppWrapperCodeGen(WrapperCodeGen):
     """
-    Generates cpp wrapper for running on CPU and calls cpp kernels
+    The outer wrapper that calls the kernels.
     """
+
+    call_func_id = count()
 
     def __init__(self):
         super().__init__()
+        self._call_func_id = next(CppWrapperCodeGen.call_func_id)
         self.declare = "auto "
         self.ending = ";"
         self.comment = "//"
@@ -705,8 +727,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
-        self.call_func_name = "inductor_cpp_entry"
-        self.cuda = False
 
     def seed(self):
         """
@@ -718,27 +738,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.need_seed = True
         return sympy_symbol("seed")
 
-    def write_header(self):
-        if V.graph.aot_mode:
-            self.header.splice("\n#include <ATen/ATen.h>")
-        else:
-            self.header.splice(
-                """
-                import torch
-                from torch.utils.cpp_extension import load_inline
-
-                cpp_wrapper_src = (
-                '''
-                """
-            )
-
     @cache_on_self
     def get_output_refs(self):
-        from ..ir import NoneAsConstantBuffer
+        def has_cpp_codegen_func(x):
+            return hasattr(x, "cpp_wrapper_codegen_reference") and callable(
+                x.cpp_wrapper_codegen_reference
+            )
 
         return [
-            "at::Tensor()"
-            if isinstance(x, NoneAsConstantBuffer)
+            x.cpp_wrapper_codegen_reference()
+            if has_cpp_codegen_func(x)
             else x.codegen_reference()
             for x in V.graph.graph_outputs
         ]
@@ -756,13 +765,38 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.output_is_tensor = output_is_tensor
 
+    def call_func_name(self):
+        return f"call_{self._call_func_id}"
+
     def write_prefix(self):
-        return
+        self.prefix.splice(
+            """
+            async_compile.wait(globals())
+            del async_compile
+            from torch.utils.cpp_extension import load_inline
+            wrapper = (
+            '''
+            #include <dlfcn.h>
+            #include <assert.h>
+
+            typedef at::BFloat16 bfloat16;
+
+            template <typename KernelFunc>
+            KernelFunc load_cpp_kernel(const char* so_filename) {
+                KernelFunc kernel_cpp;
+                auto kernel_cpp_lib = dlopen(so_filename, RTLD_NOW);
+                assert(kernel_cpp_lib != nullptr);
+                *(void **) (&kernel_cpp) = dlsym(kernel_cpp_lib, "kernel");
+                return kernel_cpp;
+            }
+
+            """
+        )
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         self.prefix.splice(
-            f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& args) {{"""
+            f"""std::vector<at::Tensor> {self.call_func_name()}(const std::vector<at::Tensor>& args) {{"""
         )
         with self.wrapper_call.indent():
             if inputs_len != 0:
@@ -798,29 +832,52 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.write_wrapper_decl()
         return super().generate()
 
-    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
-        self.header.splice(f"\n{kernel}\n")
+    def get_kernel_path(self, code):
+        from ..codecache import pick_vec_isa
+
+        picked_vec_isa = pick_vec_isa()
+        ext = "so"
+        extra = code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa)))
+        # \n is required to match with the CodeCache behavior
+        #  For reductions, the code string gotten from code.getvalue() will use backslash '\'
+        # at the end of lines for readability purpose:
+        #       #pragma omp declare reduction(xxx :\
+        #                       omp_out.value = xxx,\
+        # While the code string loaded during the execution will escape the backslash '\':
+        #       #pragma omp declare reduction(xxx :                omp_out.value = xxx,
+        # Use code.getrawvalue() here to escape the backslash to
+        # make sure the same code string is used during compilation and execution,
+        # so that the hash value is the same.
+        source_code = "\n" + code.getrawvalue()
+        _, _, kernel_path = get_code_path(source_code, ext, extra)
+        return kernel_path
+
+    def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
+        kernel_path = self.get_kernel_path(kernel)
+        self.writeline(
+            f'static auto {name} = load_cpp_kernel<void (*)({arg_types})>("{kernel_path}");'
+        )
 
     def wrap_kernel_call(self, name, call_args):
-        return f"{name}({', '.join(call_args)});"
+        return "{}({});".format(name, ", ".join(call_args))
+
+    def return_end_str(self):
+        return "\n}\n'''\n)"
 
     def generate_return(self, output_refs):
-        self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
+        if output_refs:
+            self.wrapper_call.writeline(
+                "return {" + ", ".join(output_refs) + "};" + self.return_end_str()
+            )
+        else:
+            self.wrapper_call.writeline(f"return;{self.return_end_str()}")
 
     def generate_end(self, result):
-        if V.graph.aot_mode:
-            return
-
-        result.writeline("'''\n)")
-        # Generate load_inline to jit compile the generated cpp code and to use it in Python
         shared = codecache.get_shared()
         warning_all_flag = codecache.get_warning_all_flag()
         cpp_flags = codecache.cpp_flags()
-        ipaths, lpaths, libs, macros = codecache.get_include_and_linking_paths(
-            vec_isa=codecache.pick_vec_isa(),
-            cuda=self.cuda,
-        )
-        optimization_flags = codecache.optimization_flags(cuda=self.cuda)
+        ipaths, lpaths, libs, macros = codecache.get_include_and_linking_paths()
+        optimization_flags = codecache.optimization_flags()
         use_custom_generated_macros = codecache.use_custom_generated_macros()
 
         extra_cflags = f"{cpp_flags} {optimization_flags} {warning_all_flag} {macros} {use_custom_generated_macros}"
@@ -833,8 +890,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"""
             module = load_inline(
                 name='inline_extension_{wrapper_call_hash}',
-                cpp_sources=[cpp_wrapper_src],
-                functions=['{self.call_func_name}'],
+                cpp_sources=[wrapper],
+                functions=['call_{self._call_func_id}'],
                 extra_cflags=['{extra_cflags}'],
                 extra_ldflags=['{extra_ldflags}'],
                 extra_include_paths=['{extra_include_paths}'])
@@ -863,7 +920,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]
                     {return_str}
                 return g
-            call = _wrap_func(module.{self.call_func_name})
+            call = _wrap_func(module.call_{self._call_func_id})
             """
         )
 
@@ -945,42 +1002,70 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
 
-class CudaWrapperCodeGen(CppWrapperCodeGen):
+class CppAotWrapperCodeGen(CppWrapperCodeGen):
     """
-    Generates cpp wrapper for running on GPU and calls CUDA kernels
+    The AOT-version outer C++ wrapper that calls the kernels in C++
+    """
+
+    def set_header(self):
+        return
+
+    def write_prefix(self):
+        self.prefix.splice("\n#include <ATen/ATen.h>")
+
+    def call_func_name(self):
+        return "aot_inductor_entry"
+
+    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
+        self.header.splice(f"\n{kernel}\n")
+
+    def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
+        return
+
+    def wrap_kernel_call(self, name, call_args):
+        return f"{name}({', '.join(call_args)});"
+
+    def return_end_str(self):
+        return "\n}\n"
+
+    def generate_end(self, result):
+        return
+
+    def add_benchmark_harness(self, output):
+        return
+
+
+class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
+    """
+    The AOT-version outer C++ wrapper that calls the kernels in CUDA
     """
 
     def __init__(self):
         super().__init__()
-        self.kernel_callsite_id = count()
-        self.arg_var_id = count()
-        self.cuda = True
+        self.kernel_callsite_id = 0
+        self.arg_var_id = 0
+
+    def set_header(self):
+        return
 
     def write_prefix(self):
         self.prefix.splice(
             """
             #include <ATen/ATen.h>
-            #include <c10/util/Exception.h>
+            #include <ATen/cuda/CUDAContext.h>
+            #include <ATen/cuda/Exceptions.h>
+            #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
             #include <c10/cuda/CUDAGuard.h>
 
-            #define AT_CUDA_DRIVER_CHECK_OVERRIDE(EXPR)                                     \
-            do {                                                                            \
-                CUresult __err = EXPR;                                                      \
-                if (__err != CUDA_SUCCESS) {                                                \
-                    AT_ERROR("CUDA driver error: ", static_cast<int>(__err));               \
-                }                                                                           \
-            } while (0)
-
-            static inline CUfunction loadKernel(const std::string &filePath,
-                    const std::string &funcName) {
+            CUfunction loadKernel(const std::string &filePath, const std::string &funcName) {
                 CUmodule mod;
                 CUfunction func;
-                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleLoad(&mod, filePath.c_str()));
-                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                AT_CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
+                AT_CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 return func;
             }
 
-            static inline void launchKernel(
+            void launchKernel(
                     CUfunction func,
                     int gridX,
                     int gridY,
@@ -989,7 +1074,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int sharedMemBytes,
                     void* args[],
                     int device_index) {
-                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
+                AT_CUDA_DRIVER_CHECK(cuLaunchKernel(
                     func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
                     at::cuda::getCurrentCUDAStream(device_index), args, nullptr));
             }
@@ -1001,15 +1086,19 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
     def generate(self):
         self.prefix.writeline("\n")
-        for kernel in self.src_to_kernel.values():
+        for kernel in self.kernels.values():
             self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
         self.prefix.writeline("\n")
         return super().generate()
 
-    def generate_load_kernel(self, name, params):
+    def generate_load_kernel(self, name: str = None):
+        params = KernelParamCache.cache.get(name, None)
+        assert (
+            params is not None
+        ), "cuda kernel parameters should already exist at this moment"
         mangled_name = params.get("mangled_name", None)
         assert mangled_name is not None, "missing mangled_name"
-        cubin_path = params.get("cubin_path", None)
+        cubin_path = os.path.join(cubin_cache_dir(), f"{name}.cubin")
         assert os.path.exists(
             cubin_path
         ), "cubin file should already exist at this moment"
@@ -1024,7 +1113,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         # TODO: only works for constant now, need type info
         new_args = []
         for arg in call_args:
-            var_name = f"var_{next(self.arg_var_id)}"
+            var_name = f"var_{self.arg_var_id}"
             if is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
             elif is_float(arg):
@@ -1034,29 +1123,27 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
                 )
             new_args.append(f"&{var_name}")
+            self.arg_var_id += 1
 
         return ", ".join(new_args)
 
     def generate_kernel_call(self, name, call_args, device_index):
-        params = CudaKernelParamCache.get(self.kernel_to_hash.get(name, None))
+        params = KernelParamCache.cache.get(name, None)
         assert (
             params is not None
         ), "cuda kernel parameters should already exist at this moment"
+        grid_x = params.get("grid_x", None)
+        grid_y = params.get("grid_y", None)
+        grid_z = params.get("grid_z", None)
+        num_warps = params.get("num_warps", None)
+        shared_mem = params.get("shared_mem", None)
 
-        self.generate_load_kernel(name, params)
+        self.generate_load_kernel(name)
 
         call_args = self.generate_args_decl(call_args)
-        kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-        self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
+        args_name = f"kernel_args_{self.kernel_callsite_id}"
+        self.kernel_callsite_id += 1
+        self.writeline(f"void* {args_name}[] = {{{call_args}}};")
         self.writeline(
-            "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
-                name,
-                params["grid_x"],
-                params["grid_y"],
-                params["grid_z"],
-                params["num_warps"],
-                params["shared_mem"],
-                kernel_args_var,
-                device_index,
-            )
+            f"launchKernel({name}, {grid_x}, {grid_y}, {grid_z}, {num_warps}, {shared_mem}, {args_name}, {device_index});"
         )

@@ -89,36 +89,6 @@ class TestSubgraphRewriter(JitTestCase):
         test_output = traced.forward(x)
         self.assertEqual(ref_output, test_output)
 
-    def test_subgraph_rewriter_with_trivial_replacement(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                val = torch.neg(x)
-                return torch.add(val, val)
-
-        def pattern(x):
-            return torch.add(x, x)
-
-        def replacement(x):
-            return x
-
-        def comparison(x):
-            return torch.neg(x)
-
-        traced = symbolic_trace(M())
-        comparison_fn = symbolic_trace(comparison)
-
-        x = torch.randn(1, 5)
-
-        matches = subgraph_rewriter.replace_pattern_with_filters(traced, pattern, replacement, [])
-
-        traced.graph.lint()
-
-        ref_output = comparison_fn(x)
-        test_output = traced.forward(x)
-        one_replacement = len(matches) == 1 and len(matches[0].replacements) == 0
-        self.assertEqual(ref_output, test_output)
-        self.assertTrue(one_replacement)
-
     def test_subgraph_rewriter_single_pattern_match(self):
         class M(torch.nn.Module):
             def forward(self, x):

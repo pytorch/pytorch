@@ -855,7 +855,7 @@ namespace {
         // generate expected_val
         for (int64_t i = 0; i < vec::size(); i++) {
             bit_rep hex_mask = 0;
-            hex_mask=c10::bit_cast<bit_rep>(mask[i]);
+            hex_mask=bit_cast<bit_rep>(mask[i]);
             expected_val[i] = (hex_mask & 0x01) ? b[i] : a[i];
         }
         // test with blendv

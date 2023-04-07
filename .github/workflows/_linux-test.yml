@@ -72,7 +72,6 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        if: ${{ !contains(matrix.runner, 'gcp.a100') }}
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |

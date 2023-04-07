@@ -281,7 +281,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   }
   int threads_batch = std::min(max_threads / threads_target, (int) batch_size);
   dim3 block(threads_target, threads_batch);
-  dim3 grid(1, (batch_size+threads_batch-1)/threads_batch);
+  dim3 grid((2*max_target_length+1 + threads_target-1)/threads_target, (batch_size+threads_batch-1)/threads_batch);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   ctc_loss_log_alpha_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>(
@@ -634,7 +634,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
 
   {
     dim3 block(threads_target, threads_batch);
-    dim3 grid(1, (batch_size+threads_batch-1)/threads_batch);
+    dim3 grid((2*max_target_length+1 + threads_target-1)/threads_target, (batch_size+threads_batch-1)/threads_batch);
     ctc_loss_backward_log_beta_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
       (log_beta.data_ptr<scalar_t>(),
        log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(), log_probs.size(0),

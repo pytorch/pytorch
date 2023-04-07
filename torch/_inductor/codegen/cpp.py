@@ -52,16 +52,16 @@ DTYPE_TO_CPP = {
 }
 
 DTYPE_TO_ATEN = {
-    torch.float32: "at::kFloat",
-    torch.float64: "at::kDouble",
-    torch.float16: "at::kHalf",
-    torch.int64: "at::kLong",
-    torch.int32: "at::kInt",
-    torch.int16: "at::kShort",
-    torch.int8: "at::kChar",
-    torch.uint8: "at::kByte",
-    torch.bool: "at::kBool",
-    torch.bfloat16: "at::kBFloat16",
+    torch.float32: "at::ScalarType::Float",
+    torch.float64: "at::ScalarType::Double",
+    torch.float16: "at::ScalarType::Half",
+    torch.int64: "at::ScalarType::Long",
+    torch.int32: "at::ScalarType::Int",
+    torch.int16: "at::ScalarType::Short",
+    torch.int8: "at::ScalarType::Char",
+    torch.uint8: "at::ScalarType::Byte",
+    torch.bool: "at::ScalarType::Bool",
+    torch.bfloat16: "at::ScalarType::BFloat16",
 }
 
 DEVICE_TO_ATEN = {
@@ -624,10 +624,6 @@ class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
-    def mul(a, b):
-        return f"decltype({a})({a} * {b})"
-
-    @staticmethod
     def to_dtype(x, dtype):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>({x})"
@@ -1104,10 +1100,7 @@ class CppKernel(Kernel):
 
             def gen_loop(loop: LoopLevel, in_reduction=False):
                 with contextlib.ExitStack() as stack:
-                    loop_lines = loop.lines()
-                    if loop_lines is None:
-                        return
-                    code.writelines(loop_lines)
+                    code.writelines(loop.lines())
                     stack.enter_context(code.indent())
                     # generate inner loops or loop body
                     if loop.inner:
@@ -2429,8 +2422,10 @@ class KernelGroup:
         )
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
-        code.writeline(cpp_prefix())
+        kernel_decl_name = kernel_name if V.graph.aot_mode else "kernel"
+
+        if not V.graph.aot_mode or self.count == 1:
+            code.writeline(cpp_prefix())
 
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
@@ -2447,10 +2442,11 @@ class KernelGroup:
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
-        if not V.graph.cpp_wrapper:
+        if V.graph.aot_mode:
+            codecache_def.splice(code)
+        else:
             codecache_def.writeline("async_compile.cpp('''")
-        codecache_def.splice(code)
-        if not V.graph.cpp_wrapper:
+            codecache_def.splice(code)
             codecache_def.writeline("''')")
 
         codecache_str = codecache_def.getvalue()
@@ -2458,6 +2454,7 @@ class KernelGroup:
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
         wrapper.define_kernel(kernel_name, codecache_str)
+        wrapper.load_kernel(kernel_name, code, arg_types)
         # generate the code to call this
         wrapper.generate_kernel_call(kernel_name, call_args)
 
@@ -2622,10 +2619,6 @@ class LoopLevel:
         return loop
 
     def lines(self):
-        offset_expr = cexpr_index(self.offset)
-        size_expr = cexpr_index(self.size)
-        if config.cpp.no_redundant_loops and offset_expr == size_expr:
-            return None
         if self.reduction_var_map:
             reduction = " " + " ".join(
                 f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
@@ -2653,8 +2646,8 @@ class LoopLevel:
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
-        offset_str = f"{INDEX_TYPE} {self.var}={offset_expr}"
-        size_str = f"{self.var}<{size_expr}"
+        offset_str = f"{INDEX_TYPE} {self.var}={cexpr_index(self.offset)}"
+        size_str = f"{self.var}<{cexpr_index(self.size)}"
         steps_str = f"{self.var}+={cexpr_index(self.steps)}"
         line2 = f"for({offset_str}; {size_str}; {steps_str})"
         if self.collapsed or not line1:
