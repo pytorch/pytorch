@@ -1,17 +1,18 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import itertools
 import sys
 from functools import partial
 from itertools import product
 from typing import Any, Dict, List
 
 import torch
-import itertools
 import torch.cuda.nccl as nccl
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
+from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import (
     BackwardPrefetch,
     CPUOffload,
@@ -19,10 +20,9 @@ from torch.distributed.fsdp import (
     MixedPrecision,
     ShardingStrategy,
 )
-from torch.distributed._composable import fully_shard
-from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy, ModuleWrapPolicy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy, size_based_auto_wrap_policy
+from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
@@ -240,25 +240,37 @@ class TestFSDPMixedPrecision(FSDPTest):
     def world_size(self):
         raise ValueError("To be implemented by child classes")
 
-    def _get_simple_nested_model(self, param_dtype, run_checks, *fsdp_args, **fsdp_kwargs):
+    def _get_simple_nested_model(
+        self, param_dtype, run_checks, *fsdp_args, **fsdp_kwargs
+    ):
         model = FSDP(
             nn.Sequential(
                 FSDP(
-                    LinearMixedPrecision(param_dtype, buffer_name="buffer0", run_checks=run_checks).cuda(),
+                    LinearMixedPrecision(
+                        param_dtype, buffer_name="buffer0", run_checks=run_checks
+                    ).cuda(),
                     *fsdp_args,
                     **fsdp_kwargs,
                 ),
-                LinearMixedPrecision(param_dtype, buffer_name="buffer1", run_checks=run_checks).cuda(),
+                LinearMixedPrecision(
+                    param_dtype, buffer_name="buffer1", run_checks=run_checks
+                ).cuda(),
             ),
             *fsdp_args,
             **fsdp_kwargs,
         )
         return model
 
-    def _get_simple_nested_model_composable(self, param_dtype, run_checks, *fsdp_args, **fsdp_kwargs):
+    def _get_simple_nested_model_composable(
+        self, param_dtype, run_checks, *fsdp_args, **fsdp_kwargs
+    ):
         model = nn.Sequential(
-            LinearMixedPrecision(param_dtype, buffer_name="buffer0", run_checks=run_checks).cuda(),
-            LinearMixedPrecision(param_dtype, buffer_name="buffer1", run_checks=run_checks).cuda(),
+            LinearMixedPrecision(
+                param_dtype, buffer_name="buffer0", run_checks=run_checks
+            ).cuda(),
+            LinearMixedPrecision(
+                param_dtype, buffer_name="buffer1", run_checks=run_checks
+            ).cuda(),
         )
         fully_shard(model[0], *fsdp_args, **fsdp_kwargs)
         fully_shard(model, *fsdp_args, **fsdp_kwargs)
@@ -739,7 +751,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
     @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval(self):
-        for use_composable, cast_forward_inputs in itertools.product([True, False], [True, False]):
+        for use_composable, cast_forward_inputs in itertools.product(
+            [True, False], [True, False]
+        ):
             mp_config = MixedPrecision(
                 param_dtype=torch.float16,
                 reduce_dtype=torch.float16,
@@ -782,7 +796,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
     @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval_buffers(self):
-        for use_composable, cast_forward_inputs in itertools.product([True, False], [True, False]):
+        for use_composable, cast_forward_inputs in itertools.product(
+            [True, False], [True, False]
+        ):
             mp_config = MixedPrecision(
                 param_dtype=torch.float16,
                 reduce_dtype=torch.float16,
@@ -790,13 +806,15 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 cast_forward_inputs=cast_forward_inputs,
             )
             model_getter = (
-                self._get_simple_nested_model_composable if use_composable else self._get_simple_nested_model
+                self._get_simple_nested_model_composable
+                if use_composable
+                else self._get_simple_nested_model
             )
             fsdp_model = model_getter(
-                    param_dtype=torch.float32,
-                    run_checks=False,
-                    mixed_precision=mp_config,
-                )
+                param_dtype=torch.float32,
+                run_checks=False,
+                mixed_precision=mp_config,
+            )
 
             inp = torch.randn(3, 10, device="cuda")
             fsdp_model((inp, self, fsdp_model, mp_config, torch.float32))
@@ -818,7 +836,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
     @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval_comm(self):
-        for use_composable, cast_forward_inputs in itertools.product([True, False], [True, False]):
+        for use_composable, cast_forward_inputs in itertools.product(
+            [True, False], [True, False]
+        ):
             mp_config = MixedPrecision(
                 param_dtype=torch.float32,
                 reduce_dtype=torch.float16,
@@ -826,10 +846,10 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 cast_forward_inputs=cast_forward_inputs,
             )
             model = TransformerWithSharedParams.init(
-                    self.process_group,
-                    FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
-                    CUDAInitMode.CUDA_BEFORE,
-                    {"mixed_precision": mp_config},
+                self.process_group,
+                FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_BEFORE,
+                {"mixed_precision": mp_config},
             )
             if use_composable:
                 auto_wrap_policy = ModuleWrapPolicy(

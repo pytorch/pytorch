@@ -2244,11 +2244,12 @@ class FlatParamHandle:
     @property
     def _force_full_precision(self) -> bool:
         return (
-            (self._uses_param_mixed_precision or self._uses_reduce_mixed_precision) and (
-                self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS or
-                # Also disable mixed precision in model eval mode
-                not self._fully_sharded_module.training
-            )
+            self._uses_param_mixed_precision or self._uses_reduce_mixed_precision
+        ) and (
+            self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
+            or
+            # Also disable mixed precision in model eval mode
+            not self._fully_sharded_module.training
         )
 
 
