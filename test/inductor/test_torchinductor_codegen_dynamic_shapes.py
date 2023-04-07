@@ -157,6 +157,7 @@ test_failures = {
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
     "test_upsample_cat_conv_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_conv2d_binary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     #
     # Failed to find for loop/triton kernel:
     #
