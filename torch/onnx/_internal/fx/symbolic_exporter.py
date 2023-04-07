@@ -4,7 +4,7 @@ import functools
 
 import inspect
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import onnx
 
@@ -13,7 +13,7 @@ import torch.fx
 
 from torch.onnx import _constants
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import exporter
+from torch.onnx._internal.fx import exporter, passes
 
 # Functions directly wrapped to produce torch.fx.Proxy so that symbolic
 # data can flow through those functions. Python functions (e.g., `torch.arange`)
@@ -54,77 +54,6 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
         # FIXME: This is a hack to tracing through if-else Python blocks.
         # It may generate incorrect ONNX graphs if the if-else block
         return False
-
-
-@_beartype.beartype
-def _move_placeholder_to_front(graph_module: torch.fx.GraphModule) -> None:
-    """
-    This function move all placeholder nodes to the front of the graph node list.
-    In torch.fx.Graph, placeholder is a special assignment node. If it's not
-    executed in the beginning, it could overwrite values computed by upstream
-    nodes.
-    """
-
-    graph = graph_module.graph
-    placeholders = []
-    first_not_placeholder = None
-    for node in graph.nodes:
-        if node.op == "placeholder":
-            placeholders.append(node)
-        if first_not_placeholder is None and node.op != "placeholder":
-            first_not_placeholder = node
-    if first_not_placeholder is None:
-        return
-    for placeholder in placeholders:
-        first_not_placeholder.prepend(placeholder)
-
-
-@_beartype.beartype
-def _replace_get_attr_with_placeholder(
-    graph_module: torch.fx.GraphModule,
-) -> Tuple[torch.Tensor, ...]:
-    """
-    Replace get_attr with placeholder.
-    The parameters and buffers accessed by the original get_attr are returned;
-    they are useful when creating random inputs for the modified graph_module.
-    """
-    graph = graph_module.graph
-    replaced_attrs: List[torch.Tensor] = []
-    for node in graph.nodes:
-        if node.op == "get_attr":
-            replaced_attr: Optional[torch.Tensor] = None
-            # get_attr could retrieve either parameter or buffer, so
-            # we need to try both.
-            try:
-                replaced_attr = graph_module.get_parameter(node.target)
-            except AttributeError:
-                # It's possible that model author use buffer instead of
-                # parameter to store trainable weights. In this case,
-                # 1. get_parameter will throw something like
-                #    AttributeError: `bias` is not an nn.Parameter.
-                # 2. get_buffer should work.
-                replaced_attr = graph_module.get_buffer(node.target)
-
-            # Reassign op type so that get_attr node becomes placeholder node.
-            node.op = "placeholder"
-            # The target name in placeholder must be a valid Python identifier.
-            # Thus, we replace, e.g., "module.submodule.weight" with
-            # "module_submodule_weight".
-            node.target = node.target.replace(".", "_")
-            # Default value is None. This is needed as long as the "graph_module"
-            # has optional inputs. Assume the original forward signature is
-            #  def forward(self, x, y=None)
-            # and the replaced get_attr node has target "z". Then, the modified
-            # signature should be
-            #  def forward(self, x, y=None, z=None)
-            # Without the following line, the signature will be
-            #  def forward(self, x, y=None, z)
-            # , which is not valid Python code.
-            node.args = (None,)
-
-            replaced_attrs.append(replaced_attr)
-
-    return tuple(replaced_attrs)
 
 
 @_beartype.beartype
@@ -244,6 +173,7 @@ def export_without_parameters_and_buffers(
     use_binary_format: bool = True,
     opset_version: int = _constants.ONNX_DEFAULT_OPSET,
     op_level_debug: bool = False,
+    enable_dynamic_axes: bool = True,
     # kwargs are the keyword arguments to call "module"; that is,
     # module(*args, **kwargs) must run.
     **kwargs,
@@ -251,7 +181,7 @@ def export_without_parameters_and_buffers(
     Union[onnx.ModelProto, bytes],
     torch.fx.GraphModule,
     Tuple[Any, ...],
-    Tuple[Any, ...],
+    Tuple[torch.Tensor, ...],
 ]:
     graph_module, bound_args = _trace_into_fx_graph_via_fx_symbolic_trace(
         module, *args, **kwargs
@@ -265,12 +195,16 @@ def export_without_parameters_and_buffers(
     # and we don't want
     #  ModeoProto.graph.input =
     #   [input_0, weight_0, input_1, weight_1, ..., input_n, weight_0, weight_1, ..., weight_m]
-    _move_placeholder_to_front(graph_module)
+    graph_module = passes.MovePlaceholderToFront(graph_module).run()
     # To save memory, move get_attr to input so that the generated model doesn't
-    # have weigh tensors. "replaced_attrs" are the list of replaced weight tensors.
-    replaced_attrs = _replace_get_attr_with_placeholder(graph_module)
+    # have weigh tensors. "replaced_attrs" are a tuple of replaced weight tensors.
+    replace_get_attr_with_placeholder_pass = passes.ReplaceGetAttrWithPlaceholder(
+        graph_module
+    )
+    graph_module = replace_get_attr_with_placeholder_pass.run()
+    replaced_attrs = replace_get_attr_with_placeholder_pass.replaced_attrs
     # Move all newly created placeholder nodes to the front of the graph.
-    _move_placeholder_to_front(graph_module)
+    graph_module = passes.MovePlaceholderToFront(graph_module).run()
     # Finalize the graph editing.
     graph_module.recompile()
     return (
@@ -281,6 +215,7 @@ def export_without_parameters_and_buffers(
             decomposition_table=decomposition_table,
             use_binary_format=use_binary_format,
             op_level_debug=op_level_debug,
+            enable_dynamic_axes=enable_dynamic_axes,
         ),
         graph_module,
         bound_args,

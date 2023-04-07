@@ -621,7 +621,7 @@
   result: auto_element_wise
 
 - name: expm1(Tensor self) -> Tensor
-  self: grad * (result + 1)
+  self: grad * (result.conj() + 1)
   result: auto_element_wise
 
 # TODO: this derivative is not SymInt safe, need sum_to support
@@ -1493,8 +1493,12 @@
   result: auto_linear
 
 - name: split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
+      result: auto_linear
+    AutogradNestedTensor:
+      self: _nested_split_with_sizes_backward(grads, split_sizes, dim, self)
 
 - name: unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
@@ -1822,7 +1826,7 @@
     Default:
       self: at::_sparse_coo_tensor_unsafe_symint(self.indices(), grad, self.sym_sizes())._coalesced_(true)
     AutogradNestedTensor:
-      self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_offsets())
+      self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_storage_offsets())
 
 # Why is _values() not differentiable?
 # See NOTE [ Sparse: autograd and API ]
@@ -2171,7 +2175,10 @@
   output_differentiability: [True, False]
 
 - name: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
-  input, weight, bias: linear_backward(input, grad, weight, grad_input_mask)
+  input, weight, bias: "grad.defined() ? linear_backward(input, grad, weight, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+
+- name: linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  self, grad_output, weight: linear_double_backward(grads, self, grad_output, weight)
 
 #mps
 - name: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
@@ -2662,7 +2669,7 @@
   self: at::_nested_from_padded(grad, self._nested_tensor_size())
   padding: non_differentiable
 
-- name:  _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, int[] offsets) -> Tensor(a)
+- name:  _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, Tensor offsets) -> Tensor(a)
   self: grad.values()
   nested_size: non_differentiable
   nested_strides: non_differentiable
@@ -3002,6 +3009,9 @@
 
 - name: all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor
   shard: non_differentiable
+
+- name: reduce_scatter_tensor(Tensor input, str reduceOp, int scatter_dim, str tag, int[] ranks, int group_size) -> Tensor
+  input: non_differentiable
 
 - name: wait_tensor(Tensor self) -> Tensor
   self: non_differentiable

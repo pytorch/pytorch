@@ -391,9 +391,8 @@ class Optimizer:
                              "that doesn't match the size of optimizer's group")
 
         # Update the state
-        id_map = {old_id: p for old_id, p in
-                  zip(chain.from_iterable((g['params'] for g in saved_groups)),
-                      chain.from_iterable((g['params'] for g in groups)))}
+        id_map = dict(zip(chain.from_iterable((g['params'] for g in saved_groups)),
+                      chain.from_iterable((g['params'] for g in groups))))
 
         def cast(param, value, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""
@@ -447,7 +446,7 @@ class Optimizer:
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        foreach = self.defaults.get('foreach', False)
+        foreach = self.defaults.get('foreach', False) or self.defaults.get('fused', False)
 
         if not hasattr(self, "_zero_grad_profile_name"):
             self._patch_step_function()

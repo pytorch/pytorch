@@ -5,6 +5,7 @@ import itertools
 import logging
 import operator
 import re
+import sys
 import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
@@ -13,7 +14,13 @@ import torch._logging
 
 import torch.nn
 from torch import fx
-from torch._guards import Checkpointable, Guard, GuardsCheckpointState, TracingContext
+from torch._guards import (
+    Checkpointable,
+    Guard,
+    GuardsCheckpointState,
+    Source,
+    TracingContext,
+)
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -31,9 +38,10 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     ConstantSource,
+    DeterministicAlgorithmsSource,
     is_constant_source,
-    LocalInputSource,
     LocalSource,
+    ParamBufferSource,
     ShapeEnvSource,
 )
 from .utils import (
@@ -67,6 +75,7 @@ class OutputGraphState(NamedTuple):
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
+    param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
 
@@ -180,19 +189,19 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         compiler_fn: CompilerFn,
         root_tx,
         export: bool,
+        export_constraints,
     ):
         super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
         self.export = export
+        self.export_constraints = export_constraints
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                strict_mark_dyn=export,
-                assume_static_by_default=config.assume_static_by_default,
             )
             if config.dynamic_shapes
             else None,
@@ -202,6 +211,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             # Register a SHAPE_ENV guard to make sure we setup shape guards
             # that show up in ShapeEnv
             self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
+        self.guards.add(
+            DeterministicAlgorithmsSource().make_guard(
+                GuardBuilder.DETERMINISTIC_ALGORITHMS
+            )
+        )
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -218,6 +233,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # should use original graphargs.
         self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
+        # Stores the full fqn of a param or buffer to the relevant source.
+        self.param_name_to_source: Optional[Dict[str, Source]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
@@ -239,9 +256,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
-        # Maps the source arg position to the grapharg position
-        self.pos_to_arg: Dict[int, int] = {}
-
         # Enables creating unique node names by tracking
         # all current placeholder node names
         self.name_to_input: OrderedDict[
@@ -277,12 +291,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
+        assert self.param_name_to_source is not None
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         state = OutputGraphState(
             list(self.graphargs),
             list(self.tracked_fakes),
             guards_graph_state,
             dict(self.nn_modules),
+            dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
         )
@@ -296,6 +312,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.tracked_fakes,
             guards_state,
             self.nn_modules,
+            self.param_name_to_source,
             self.side_effects,
             self.timestamp,
         ) = state
@@ -316,8 +333,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def add_grapharg(self, arg: GraphArg):
         curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
-        if isinstance(arg.source, LocalInputSource):
-            self.pos_to_arg[arg.source.pos] = curr_pos
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -396,11 +411,15 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         options["guards"] = set(options.get("guards", []))
         assert "source" in options
         source = options["source"]
+        assert not isinstance(source, ParamBufferSource)
+
         if isinstance(target, torch.Tensor):
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
+                assert self.param_name_to_source is not None
+                self.param_name_to_source[module_key] = source
                 return wrap_fx_proxy(
                     self.root_tx,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
@@ -411,8 +430,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
             if self.module_has_hooks(target, only_check_unsupported=True):
-                log.warning(
-                    "nn.Module hooks are not fully supported, they may be ignored"
+                torch._logging.warning_once(
+                    log, "nn.Module hooks are not fully supported, they may be ignored"
                 )
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
@@ -450,9 +469,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if v is target:
                 # it already exists
                 return wrap_name(k)
-
         # create a new unique name
         name = "_".join(map(str, names))
+        # Strip the guard lookup L/G access
+        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
         # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
         name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
         # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
@@ -464,6 +484,27 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for i in itertools.count():
             if name not in self.nn_modules:
                 self.nn_modules[name] = target
+                if isinstance(target, torch.nn.Module):
+
+                    def register_leaf_name(leaf_name):
+                        assert self.param_name_to_source is not None
+                        new_source = ParamBufferSource(source, leaf_name)
+                        new_name = f"{name}.{leaf_name}"
+                        self.param_name_to_source[new_name] = new_source
+
+                    # annoying, but there are cases when we do not have parameters
+                    # see test_nn_moduledict_contains
+                    if hasattr(target, "_parameters"):
+                        for leaf_name, _ in target.named_parameters(
+                            remove_duplicate=False
+                        ):
+                            register_leaf_name(leaf_name)
+                    if hasattr(target, "_buffers"):
+                        for leaf_name, _ in target.named_buffers(
+                            remove_duplicate=False
+                        ):
+                            register_leaf_name(leaf_name)
+
                 return wrap_name(name)
             name = f"{base}_{i}"
 
@@ -486,6 +527,27 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
 
+        prefix_insts: List[Instruction] = []
+        if sys.version_info >= (3, 11):
+            # prefix instructions (Python 3.11+)
+            for inst in tx.prefix_insts:
+                if inst.opname == "MAKE_CELL":
+                    prefix_insts.append(
+                        create_instruction("MAKE_CELL", argval=inst.argval)
+                    )
+                elif inst.opname == "COPY_FREE_VARS":
+                    prefix_insts.append(
+                        create_instruction(
+                            "COPY_FREE_VARS", arg=len(tx.code_options["co_freevars"])
+                        )
+                    )
+                else:
+                    prefix_insts.append(inst)
+
+        def append_prefix_insts():
+            self.add_output_instructions(prefix_insts)
+            prefix_insts.clear()
+
         for block in reversed(tx.block_stack):
             block.exit(tx)
 
@@ -502,7 +564,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if stack_values:
             val_to_names[stack_values[-1]] = list()
         for k, v in tx.symbolic_locals.items():
-            if isinstance(v.source, LocalSource) and v.source.name() == k:
+            # Note! this explicitly uses .local_name for matching
+            # Failure to do so will cause spurious registrations in val_to_names.
+            # This will in turn result in spurious variables showing up in the graph.
+            # This was very tricky to debug. For an example, dump the graph at call_user_compiler
+            # while running test_subgraphs.py
+            if isinstance(v.source, LocalSource) and v.source.local_name == k:
                 continue  # no need to restore initial state
             if v not in val_to_names:
                 val_to_names[v] = list()
@@ -513,6 +580,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # to handle random calls
         if len(tx.random_calls) > 0:
+            append_prefix_insts()
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
             rand_fn_name = unique_id("__gen_rand_values")
@@ -545,10 +613,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
+            append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
-                + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
+                + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
         else:
             graph_output_var = self.new_var("graph_out")
@@ -578,6 +647,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     output.append(pass2.create_store(graph_output_var))
                 else:
                     output.append(create_instruction("POP_TOP"))
+            append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
         # restore all the live local vars
@@ -603,7 +673,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.remove_unused_graphargs()
         ncalls = count_calls(self.graph)
         counters["stats"]["calls_captured"] += ncalls
-        counters["stats"]["fusions_possible"] += ncalls - 1
 
         # free a bit of memory
         for node in self.graph.nodes:
@@ -633,10 +702,19 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         tot = 0
+        placeholders = []
         for node in gm.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
                 tot += 1
+            if node.op == "placeholder":
+                placeholders.append(node)
         torch._dynamo.utils.increment_op_count(tot)
+        assert len(placeholders) == len(self.graphargs)
+        for pl, arg in zip(placeholders, self.graphargs):
+            pl._dynamo_source = arg.source
+
+        gm._param_name_to_source = self.param_name_to_source
+
         try:
             name = (
                 self.compiler_fn.__name__
@@ -757,6 +835,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # Note: generated fx graph will hold a reference to the nn_module,
         # So depending on the backend they may not be released
         self.nn_modules = None
+        self.param_name_to_source = None
 
         # Cleanup graphargs
         for graph_arg in self.graphargs:
