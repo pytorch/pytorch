@@ -45,6 +45,7 @@ from common_utils import (
     compute_quantities_for_vmap_test,
     is_valid_inplace_sample_input,
     decorate,
+    DisableVmapFallback,
 )
 import types
 from collections import namedtuple
@@ -1056,6 +1057,16 @@ class TestVmapAPI(TestCase):
         out = vmap(vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
         expected = torch.mv(y, torch.ones(2)).view(3, 1, 1) + x
         self.assertEqual(out, expected)
+
+    def test_decomposition_under_python_dispatcher(self):
+        # This test will raise an error if the vmap fallback gets invoked.
+        # Here we test that decomps registered to FuncTorchBatchedDecomposition
+        # are respected by the Python Dispatcher.
+        t = torch.ones(3, 3) * 5
+        with DisableVmapFallback():
+            with torch._dispatch.python.enable_python_dispatcher():
+                o = torch.vmap(torch.square)(t)
+        self.assertEqual(o, torch.square(t))
 
     def _test_vmap_autocast(self, device):
 
@@ -3427,7 +3438,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             check_shape_only = op.name in ('empty_like', 'new_empty')
             for sample_input in sample_inputs_itr:
                 args = (sample_input.input,) + sample_input.args
-                if not any(map(lambda arg: isinstance(arg, torch.Tensor), args)):
+                if not any((isinstance(arg, torch.Tensor) for arg in args)):
                     # Atleast one tensor required for vmap.
                     continue
                 kwargs = sample_input.kwargs

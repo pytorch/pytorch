@@ -314,7 +314,11 @@ class SizeVarAllocator:
             expr = sympy_subs(expr, self.inv_precomputed_replacements)
             free_symbols = expr.free_symbols
         out = sympy_subs(expr, self.var_to_val)
-        return int(out)
+        try:
+            return int(out)
+        except Exception:
+            log.warning(f"failed on: {out}")
+            raise
 
     def size_hints(self, exprs: List[Expr]) -> int:
         return tuple(self.size_hint(x) for x in exprs)
@@ -397,7 +401,7 @@ class SizeVarAllocator:
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         strides = tuple(
-            map(lambda x: abs(x), self.stride_hints(index, vars))
+            map(abs, self.stride_hints(index, vars))
         )  # lambda to placate mypy
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
