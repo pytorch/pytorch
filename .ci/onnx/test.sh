@@ -2,7 +2,11 @@
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/../pytorch/common.sh"
+
+# Use to retry ONNX test, only retry it twice
+retry () {
+    "$@" || (sleep 60 && "$@")
+}
 
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip -q install --user "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
