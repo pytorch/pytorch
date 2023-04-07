@@ -61,6 +61,8 @@ _collate_fn_t = Callable[[List[T]], Any]
 # aspect.
 default_collate: _collate_fn_t = _utils.collate.default_collate
 default_convert = _utils.collate.default_convert
+default_collator: _collate_fn_t = _utils.collate.default_collator
+Collator = _utils.collate.Collator
 
 get_worker_info = _utils.worker.get_worker_info
 

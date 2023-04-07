@@ -14,7 +14,50 @@ import torch
 
 from typing import Callable, Dict, Optional, Tuple, Type, Union
 
+from torch.utils import Registry
+
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
+
+
+class Collator(Registry):
+    def __call__(self, batch):
+        elem = batch[0]
+        elem_type = type(elem)
+
+        if elem_type in self:
+            return self[elem_type](batch, collate_fn_map=self)
+        for collate_type in self:
+            if isinstance(elem, collate_type):
+                return self[collate_type](batch, collate_fn_map=self)
+
+        if isinstance(elem, collections.abc.Mapping):
+            try:
+                return elem_type({key: collate([d[key] for d in batch], collate_fn_map=self) for key in elem})
+            except TypeError:
+                # The mapping type may not support `__init__(iterable)`.
+                return {key: collate([d[key] for d in batch], collate_fn_map=self) for key in elem}
+        elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
+            return elem_type(*(collate(samples, collate_fn_map=self) for samples in zip(*batch)))
+        elif isinstance(elem, collections.abc.Sequence):
+            # check to make sure that the elements in batch have consistent size
+            it = iter(batch)
+            elem_size = len(next(it))
+            if not all(len(elem) == elem_size for elem in it):
+                raise RuntimeError('each element in list of batch should be of equal size')
+            transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
+
+            if isinstance(elem, tuple):
+                return [collate(samples, collate_fn_map=self) for samples in transposed]  # Backwards compatibility.
+            else:
+                try:
+                    return elem_type([collate(samples, collate_fn_map=self) for samples in transposed])
+                except TypeError:
+                    # The sequence type may not support `__init__(iterable)` (e.g., `range`).
+                    return [collate(samples, collate_fn_map=self) for samples in transposed]
+
+        raise TypeError(default_collate_err_msg_format.format(elem_type))
+
+default_collator = Collator()
 
 
 def default_convert(data):
@@ -150,6 +193,7 @@ def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]
     raise TypeError(default_collate_err_msg_format.format(elem_type))
 
 
+@default_collator.register(torch.Tensor)
 def collate_tensor_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     elem = batch[0]
     out = None
@@ -175,14 +219,18 @@ def collate_numpy_scalar_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, 
     return torch.as_tensor(batch)
 
 
+@default_collator.register(float)
 def collate_float_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     return torch.tensor(batch, dtype=torch.float64)
 
 
+@default_collator.register(int)
 def collate_int_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     return torch.tensor(batch)
 
 
+@default_collator.register(str)
+@default_collator.register(bytes)
 def collate_str_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     return batch
 
@@ -192,9 +240,11 @@ with contextlib.suppress(ImportError):
     import numpy as np
     # For both ndarray and memmap (subclass of ndarray)
     default_collate_fn_map[np.ndarray] = collate_numpy_array_fn
+    default_collator[np.ndarray] = collate_numpy_array_fn
     # See scalars hierarchy: https://numpy.org/doc/stable/reference/arrays.scalars.html
     # Skip string scalars
     default_collate_fn_map[(np.bool_, np.number, np.object_)] = collate_numpy_scalar_fn
+    default_collator[(np.bool_, np.number, np.object_)] = collate_numpy_scalar_fn
 default_collate_fn_map[float] = collate_float_fn
 default_collate_fn_map[int] = collate_int_fn
 default_collate_fn_map[str] = collate_str_fn
