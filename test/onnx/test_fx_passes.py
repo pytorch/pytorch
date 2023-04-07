@@ -24,9 +24,9 @@ class TestFxPasses(common_utils.TestCase):
         nodes = list(gm.graph.nodes)
         for i, node in enumerate(nodes[1:]):
             post_fix = f".{1}"
-            node.name = f"tensor{post_fix*i}"
+            node.name = f"{base_name}{post_fix*i}"
 
-        # Run the pass and verify that the names are correct.
+        # Run `set_node_name` and verify that the names are correct.
         pass_utils.set_node_name(nodes[0], base_name)
         assert nodes[0].name == base_name, f"Expected {base_name}, got {nodes[0].name}"
         assert len({node.name for node in nodes}) == len(
