@@ -178,7 +178,7 @@ class TransformationTest(DTensorTestBase):
             gm_transformation=GraphModuleTransformation(
                 num_iters=num_iters,
                 enable_graph_optimization=True,
-                dump_graphs=False,
+                dump_graphs=True,
             )
         )
         def train_step(model, optim, batch):

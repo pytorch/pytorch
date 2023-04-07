@@ -11,6 +11,7 @@ from torch._inductor.decomposition import select_decomp_table
 from torch.distributed._spmd.graph_optimization import (
     comm_fusion_with_concat,
     enable_graph_optimization_dump,
+    remove_copy_from_optimizer,
     schedule_comm_wait,
 )
 from torch.distributed._spmd.graph_utils import dump_graphs_to_files, OP
@@ -139,6 +140,7 @@ class GraphModuleTransformation:
         if self.enable_graph_optimization:
             comm_fusion_with_concat(iter_gm, 100)
             schedule_comm_wait(iter_gm)
+            remove_copy_from_optimizer(iter_gm)
         iter_gm.freeze_cross_iter_movement()
         iter_gm.setup(self.num_iters)
 

@@ -27,6 +27,7 @@ from torch.distributed._spmd.graph_utils import (
     CommType,
     dump_graphs_to_files,
     get_output,
+    OP,
 )
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -481,3 +482,44 @@ def schedule_comm_wait(gm: IterGraphModule) -> None:
                 break
         assert wait_idx >= 0
         gm.graph.move_before(allreduce.node_list[wait_idx:], target_node)
+
+
+@graph_optimization_pass(run_after=tuple())
+def remove_copy_from_optimizer(gm: IterGraphModule) -> None:
+    MAX_COPY_DISTANCE = 5
+    remove_candidates: Set[fx.Node] = set()
+    for node in reversed(gm.graph.nodes):
+        if node.users:
+            continue
+        if node.op != OP.CALL_FUNCTION or node.target != aten.copy_.default:
+            continue
+
+        copy_ancestors: Set[fx.Node] = set()
+        nodes = collections.deque([node, None])
+        distance = 0
+        should_remove = False
+        while nodes and distance < MAX_COPY_DISTANCE:
+            visiting = nodes.popleft()
+            if visiting is None:
+                distance += 1
+                if nodes:
+                    nodes.append(None)
+                continue
+            copy_ancestors.add(visiting)
+            if visiting.op == OP.CALL_FUNCTION and str(visiting.target).startswith(
+                ("aten._foreach_", "aten._fused_")
+            ):
+                should_remove = True
+            parents, _ = tree_flatten((visiting.args, visiting.kwargs))
+            for parent in parents:
+                if isinstance(parent, fx.Node):
+                    nodes.append(parent)
+        if should_remove:
+            remove_candidates.update(copy_ancestors)
+
+    for node in reversed(gm.graph.nodes):
+        if node.users:
+            continue
+        if node not in remove_candidates:
+            continue
+        gm.graph.erase_node(node)
