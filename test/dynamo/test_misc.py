@@ -1075,6 +1075,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertTrue(same(opt_fn(mod, x), fn(mod, x)))
 
+    def test_constant_getattr(self):
+        # https://github.com/pytorch/pytorch/issues/97480
+        def fn():
+            return getattr(None, "arg", 3)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        optimized_fn = torch._dynamo.optimize(cnt)(fn)
+        res = optimized_fn()
+        self.assertTrue(same(res, 3))
+
     def test_user_property(self):
         class MyConfig:
             @property
@@ -1574,6 +1584,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_typing_union_and_optional(self):
+        def fn(x):
+            a = torch.jit.annotate(typing.Dict[str, typing.Optional[torch.Tensor]], {})
+            b = torch.jit.annotate(
+                typing.Dict[str, typing.Union[torch.Tensor, None]], {}
+            )
+            return a, b, x + 1
+
+        x = torch.randn(3)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
@@ -4424,6 +4448,21 @@ def fn():
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
+    def test_mark_static(self):
+        counter = CompileCounter()
+
+        def my_dyn_fn(x):
+            return x.cos()
+
+        y = torch.randn([3])
+        torch._dynamo.mark_static(y, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(y)
+
+        z = torch.randn([4])
+        torch._dynamo.optimize(counter)(my_dyn_fn)(z)
+
+        self.assertEqual(counter.frame_count, 2)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -4798,6 +4837,14 @@ def fn():
         # strip_function_call should extract the object from the string.
         for name, expect_obj in test_case:
             self.assertEqual(strip_function_call(name), expect_obj)
+
+    def test_int_neg(self):
+        def int_neg(a, b):
+            x = a.shape[0]
+            y = b.shape[0]
+            return -x * -y * a * b
+
+        torch._dynamo.testing.standard_test(self, int_neg, 2)
 
 
 class CustomFunc1(torch.autograd.Function):

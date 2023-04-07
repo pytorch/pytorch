@@ -9108,7 +9108,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
             v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
             v(lambda: F.gaussian_nll_loss(input, input, var, reduction=reduction))
-            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input, reduction=reduction))
+            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.gt(0).double(), reduction=reduction))
             v(lambda: F.binary_cross_entropy_with_logits(input, input, reduction=reduction))
 
             zeros = torch.zeros_like(input).to(torch.int64)
