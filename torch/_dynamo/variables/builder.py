@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -60,6 +61,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
+from .ctx_manager import CUDAStreamVariable, NullContextVariable
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -80,7 +82,6 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
-    CUDAStreamVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -524,6 +525,14 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif (
+            istype(value, contextlib.nullcontext)
+            and inspect.getattr_static(value, "enter_result", None) is None
+        ):
+            return NullContextVariable(
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,
@@ -894,9 +903,7 @@ class VariableBuilder:
             )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
-                if self.tx.export and not isinstance(
-                    self.get_source(), LocalInputSource
-                ):
+                if self.tx.export and not isinstance(self.get_source(), LocalSource):
                     raise AssertionError(
                         "Dynamo attempts to add additional input during export: value={}, source={}".format(
                             wrapped_value, self.get_source()
@@ -1193,7 +1200,7 @@ def wrap_to_fake_tensor_and_record(
                 constraint_dims=constraint_dims,
             )
         )
-        if is_tensor:
+        if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
         return fake_e
     else:
