@@ -45,7 +45,7 @@ else:
     KernelInterface = object
     triton = None
 
-DEBUG = True
+DEBUG = False
 
 class HeuristicType(Enum):
     POINTWISE = auto()
@@ -181,6 +181,7 @@ class CachingAutotuner(KernelInterface):
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args):
+        from .compile_fx import clone_preserve_strides
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
         # it leads to increase memory use
@@ -196,8 +197,6 @@ class CachingAutotuner(KernelInterface):
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        from .compile_fx import clone_preserve_strides
-
         cloned_args = self.clone_args(*args)
         timings = {
             launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
@@ -259,9 +258,6 @@ class CachingAutotuner(KernelInterface):
         return self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
-        if DEBUG:
-            print("= Do coordinate descent tuning =")
-
         cloned_args = self.clone_args(*args)
         config2launcher = {}
         def benchmark_one_config(config):
@@ -430,7 +426,7 @@ def cached_autotune(
     assert len(configs) == 1 or filename
 
     # on disk caching logic
-    if filename is not None and len(configs) > 1:
+    if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
         best_config = load_cached_autotuning(cache_filename, configs_hash, configs)
@@ -637,12 +633,12 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     bs = max(256, min(numel // 128, 1024))
 
     if len(size_hints) == 1:
-        return cached_autotune([triton_config(size_hints, bs)], meta=meta, heuristic_type=HeuristicType.POINTWISE)
+        return cached_autotune([triton_config(size_hints, bs)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
     if len(size_hints) == 2:
         if (
             not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
         ) and not (config.max_autotune or config.max_autotune_pointwise):
-            return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta, heuristic_type=HeuristicType.POINTWISE)
+            return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
         return cached_autotune(
             [
                 triton_config(size_hints, 32, 32),
@@ -658,7 +654,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
         )
     if len(size_hints) == 3:
         if not config.triton.autotune_pointwise:
-            return cached_autotune([triton_config(size_hints, 16, 16, 16)], meta=meta, heuristic_type=HeuristicType.POINTWISE)
+            return cached_autotune([triton_config(size_hints, 16, 16, 16)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
         return cached_autotune(
             [
                 triton_config(size_hints, 16, 16, 16),
@@ -691,15 +687,16 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:
-            return cached_autotune([contiguous_config], meta=meta, heuristic_type=HeuristicType.REDUCTION)
+            return cached_autotune([contiguous_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
         elif reduction_hint == ReductionHint.OUTER:
-            return cached_autotune([outer_config], meta=meta, heuristic_type=HeuristicType.REDUCTION)
+            return cached_autotune([outer_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
         elif reduction_hint == ReductionHint.OUTER_TINY:
-            return cached_autotune([tiny_config], meta=meta, heuristic_type=HeuristicType.REDUCTION)
+            return cached_autotune([tiny_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
         if not config.triton.autotune_pointwise:
             return cached_autotune(
                 [triton_config_reduction(size_hints, 32, 128)], meta=meta,
-                heuristic_type=HeuristicType.REDUCTION
+                heuristic_type=HeuristicType.REDUCTION,
+                filename=filename
             )
         return cached_autotune(
             [
@@ -750,7 +747,7 @@ def template(num_stages, num_warps, meta, filename=None):
     Compile a triton template
     """
     return cached_autotune(
-        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta, heuristic_type=HeuristicType.TEMPLATE,
+        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta, heuristic_type=HeuristicType.TEMPLATE, filename=filename
     )
 
 

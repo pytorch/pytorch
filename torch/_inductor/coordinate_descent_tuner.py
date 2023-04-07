@@ -104,6 +104,7 @@ class CoordescTuner:
             baseline_timing = self.call_func(func, baseline_config)
 
         if DEBUG:
+            print("= Do coordinate descent tuning =")
             print(f"Baseline Config {baseline_config}, baseline timing {baseline_timing}")
         improved = True
         best_config = baseline_config
