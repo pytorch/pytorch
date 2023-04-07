@@ -19,7 +19,7 @@ template<typename T>
 id<MTLBuffer> _makeMTLBuffer(const std::vector<T>& src) {
     id<MTLBuffer> buffer = [[MetalContext sharedInstance].device
           newBufferWithLength:src.size() * sizeof(T)
-                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+                      options:MTLResourceCPUCacheModeWriteCombined];
     memcpy(buffer.contents, src.data(), src.size() * sizeof(T));
     return buffer;
 }

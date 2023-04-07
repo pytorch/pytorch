@@ -52,6 +52,7 @@ def bitwise_reduce(tensors, op):
 
 _reduce_ops = {
     ReduceOp.SUM: partial(binop_reduce, op=torch.sum),
+    ReduceOp.AVG: partial(binop_reduce, op=torch.mean),
     ReduceOp.PRODUCT: partial(binop_reduce, op=torch.prod),
     ReduceOp.MIN: partial(binop_reduce, op=torch.min),
     ReduceOp.MAX: partial(binop_reduce, op=torch.max),
@@ -108,6 +109,23 @@ class Scatter:
             dest_tensor = out_tensor_list[0]
             with torch.no_grad():
                 dest_tensor.copy_(src_in_tensors[rank])
+
+
+class Gather:
+    def __init__(self, dst):
+        self.dst = dst
+
+    def work(self, data):
+        # Can't handle gather with multiple tensor lists
+        assert len(data[self.dst][0]) == 1
+        out_tensor_list = data[self.dst][0][0]
+        for rank, each_rank_data in enumerate(data):
+            src_in_tensor_list = each_rank_data[1]
+            # Can't handle gather with multiple tensor lists
+            assert len(src_in_tensor_list) == 1
+            dest_tensor = out_tensor_list[rank]
+            with torch.no_grad():
+                dest_tensor.copy_(src_in_tensor_list[0])
 
 class ReduceScatter:
     def __init__(self, op):
@@ -261,6 +279,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
+    def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+        tensor_list = list(torch.chunk(output_tensor, self._world_size))
+        return self.allgather([tensor_list], [input_tensor], opts)
+
     def broadcast(self, tensor_list, opts=BroadcastOptions()):
         coll = ProcessLocalGroup._start_coll(Broadcast(opts.rootRank), self)
         res = coll.join(self._rank, tensor_list)
@@ -269,6 +291,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
 
     def scatter(self, output_tensors, input_tensors, opts=ScatterOptions()):
         coll = ProcessLocalGroup._start_coll(Scatter(opts.rootRank), self)
+        res = coll.join(self._rank, (output_tensors, input_tensors))
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
+
+    def gather(self, output_tensors, input_tensors, opts=ScatterOptions()):
+        coll = ProcessLocalGroup._start_coll(Gather(opts.rootRank), self)
         res = coll.join(self._rank, (output_tensors, input_tensors))
         ProcessLocalGroup._end_coll(coll, self)
         return res
