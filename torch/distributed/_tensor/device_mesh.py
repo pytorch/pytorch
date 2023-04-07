@@ -236,9 +236,8 @@ class DeviceMesh(object):
             raise RuntimeError("DeviceMesh process groups not initialized!")
         return self._dim_groups
 
-    # pyre-fixme[3]: Return type must be annotated.
-    def size(self, dim: int = 0):
-        return self.mesh.size(dim)
+    def size(self, dim: Optional[int] = None) -> int:
+        return self.mesh.numel() if dim is None else self.mesh.size(dim)
 
     @property
     def ndim(self) -> int:
