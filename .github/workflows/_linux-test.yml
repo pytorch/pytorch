@@ -331,3 +331,21 @@ jobs:
             echo "NVIDIA driver installation has failed, shutting down the runner..."
             .github/scripts/stop_runner_service.sh
           fi
+
+          # For runner with multiple GPUs, we also want to confirm that the number of GPUs are the
+          # power of 2, i.e. 1, 2, 4, or 8. This is to avoid flaky test issue when one GPU fails
+          # https://github.com/pytorch/test-infra/issues/4000
+          GPU_COUNT=$(nvidia-smi --list-gpus | wc -l)
+          NVIDIA_SMI_STATUS=$?
+
+          # These are acceptable return code from nvidia-smi as copied from setup-nvidia GitHub action
+          if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
+            echo "NVIDIA driver installation has failed, shutting down the runner..."
+            .github/scripts/stop_runner_service.sh
+          fi
+
+          # Check the GPU count to be a power of 2
+          if [ "$GPU_COUNT" -le 8 ] && [ "$GPU_COUNT" -ne 1 ] && [ "$GPU_COUNT" -ne 2 ] && [ "$GPU_COUNT" -ne 4 ] && [ "$GPU_COUNT" -ne 8 ]; then
+            echo "NVIDIA driver detects $GPU_COUNT GPUs. The runner has a broken GPU, shutting it down..."
+            .github/scripts/stop_runner_service.sh
+          fi
