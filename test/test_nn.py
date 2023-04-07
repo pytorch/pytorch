@@ -7116,7 +7116,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         loss_1 = F.cross_entropy(input_1, target)
         loss_2 = F.cross_entropy(input_2, target, dim=2)
         self.assertEqual(loss_1, loss_2, atol=1e-1, rtol=0)
-        
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(
