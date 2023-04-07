@@ -4326,3 +4326,101 @@ class ReduceScatterTensor(CollectiveKernel):
             f"{output_name}, {input_names[0]}, "
             f"async_op=True, group={output_name}_pg, op=_str_to_reduce_op('{str(self.reduce_op)}'))"
         )
+
+
+class OutputBuffer(ExternKernel):
+    """
+    Represent the output buffer used by ops that require multiple of them
+    """
+
+    def __init__(self, layout):
+        super().__init__(name=None, layout=layout, inputs=[])
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return True
+
+    def codegen(self, wrapper):
+        wrapper.writeline(f"# collective out buffer {self.name}")
+
+
+class AllGatherIntoTensorCoalesced(ExternKernel):
+    def __init__(self, layout, inputs, constant_args, outputs):
+        super().__init__(None, layout, inputs + outputs, constant_args)
+        self.original_inputs = inputs
+        self.outputs = outputs
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return False
+
+    @classmethod
+    def create(
+        cls,
+        inputs: List["TensorBox"],
+        tag: str,
+        ranks: List[int],
+        group_size: int,
+    ):
+        inputs = [cls.realize_input(x) for x in inputs]
+
+        outputs = []
+        for input in inputs:
+            new_size = input.get_size()
+            new_size[0] *= group_size
+
+            buff = OutputBuffer(
+                layout=FlexibleLayout(
+                    device=input.get_device(),
+                    dtype=input.get_dtype(),
+                    size=new_size,
+                ),
+            )
+            outputs.append(buff)
+
+        layout = MultiOutputLayout(inputs[0].get_device())
+
+        packed = AllGatherIntoTensorCoalesced(
+            layout=layout,
+            inputs=inputs,
+            constant_args=[tag, ranks, group_size],
+            outputs=outputs,
+        )
+
+        return [
+            MultiOutputNoSizeAssert(
+                out_t.layout,
+                packed,
+                f"[{i}]",
+            )
+            for i, out_t in enumerate(outputs)
+        ]
+
+    def codegen(self, wrapper):
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once("import torch.distributed.distributed_c10d as c10d")
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _str_to_reduce_op, _register_tensor_work"
+        )
+        wrapper.add_import_once(
+            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
+        )
+
+        input_names = [t.codegen_reference() for t in self.original_inputs]
+        output_name = self.get_name()
+        tag, ranks, group_size = self.constant_args
+
+        wrapper.writeline(
+            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+        )
+
+        wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
+        wrapper.writeline(f"{output_name} = [{','.join(x.name for x in self.outputs)}]")
+
+        wrapper.writeline(
+            f"{output_name}_work = c10d._all_gather_into_tensor_coalesced("
+            f"{output_name}_inputs, "
+            f"{output_name}, "
+            f"group={output_name}_pg, "
+            "async_op=True)"
+        )

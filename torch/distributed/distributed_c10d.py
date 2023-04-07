@@ -3901,3 +3901,12 @@ def _get_group_tag(pg: ProcessGroup) -> str:
     if tag.startswith("user:"):
         tag = tag[5:]
     return tag
+
+
+def _all_gather_into_tensor_coalesced(input_tensors, output_tensors, group, async_op=False):
+    work_list = []
+    with _coalescing_manager(group, input_tensors[0].device, work_list):
+        for shard, out_tensor in zip(input_tensors, output_tensors):
+            work = all_gather_into_tensor(out_tensor, shard, group=group, async_op=async_op)
+            work_list.append(work)
+    return work_list
