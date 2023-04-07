@@ -17,8 +17,8 @@ from torch._inductor.codegen.cpp import (
     CppOverrides,
     CppVecKernelChecker,
     CppVecOverrides,
-    OptimizationContext,
     dtype_propagation,
+    OptimizationContext,
 )
 from torch._inductor.compile_fx import compile_fx_inner, complex_memory_overlap
 from torch._inductor.graph import GraphLowering
@@ -1244,7 +1244,9 @@ class CPUReproTests(TestCase):
     def test_cpp_data_type_propogation(self):
         _graph: torch.fx.Graph = torch.fx.Graph()
         ops: torch.fx.Node = _graph.create_node("placeholder", "ops")
-        get_index: torch.fx.Node = _graph.create_node("call_module", "get_index", args=("index0", ))
+        get_index: torch.fx.Node = _graph.create_node(
+            "call_module", "get_index", args=("index0",)
+        )
         c1: torch.fx.Node = _graph.create_node(
             "call_method",
             "constant",
@@ -1286,10 +1288,10 @@ class CPUReproTests(TestCase):
             "reduction",
             args=(
                 ops,
-                'buf',
+                "buf",
                 torch.float,
                 torch.int64,
-                'argmin',
+                "argmin",
                 get_index,
                 add,
             ),
@@ -1299,15 +1301,16 @@ class CPUReproTests(TestCase):
             "reduction",
             args=(
                 ops,
-                'buf',
+                "buf",
                 torch.float,
                 torch.bool,
-                'any',
+                "any",
                 get_index,
                 add,
             ),
         )
         dtype_propagation(_graph)
+
         def get_data_type(node: torch.fx.Node):
             if OptimizationContext.key in node.meta:
                 return node.meta[OptimizationContext.key].dtype
