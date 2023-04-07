@@ -487,11 +487,10 @@ def _compile(
         # case yet. Use explicit decompositions for foreach ops.
         # Remove this when the following issue is addressed.
         # Issue: https://github.com/pytorch/pytorch/issues/97852
-        decomps = {**FOREACH_DECOMP_TABLE, **torch._decomp.global_decomposition_table}
         gm = make_fx(
             partial(stateless_func, func),
             tracing_mode="symbolic",
-            decomposition_table=decomps,
+            decomposition_table=FOREACH_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
         )(named_states, params_and_buffers, args, kwargs)
 
