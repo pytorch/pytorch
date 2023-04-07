@@ -996,6 +996,38 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
+    def gen_assert_indirect_indexing(self, buffer, original_index, mask):
+        body = self.current_node._body
+        indirect_size = dict(zip(body.indirect_vars, body.indirect_max_sizes))
+        indirect_name = body.indirect_new
+        # Many indirect variables may be mapped to the same CSE'd variable
+        var_size = {}
+        for ind, size in indirect_size.items():
+            var_size.setdefault(indirect_name[ind], []).append(V.kernel.rename_indexing(size))
+
+        indirect_vars = [s for s in original_index.free_symbols if s.name.startswith("tmp")]
+        for var in indirect_vars:
+            sizes = var_size[var]
+            if all(isinstance(s, sympy.Integer) for s in sizes):
+                size = min(sizes)
+            else:
+                # Should this go here or in TritonPrinter?
+                def print_min(expr):
+                    if len(expr) == 1:
+                        return texpr(expr[0])
+                    else:
+                        return f"min({texpr(expr[0])}, {print_min(expr[1:])})"
+                size = print_min(sizes)
+            cond_gt = f"0 <= {var}"
+            cond_lt = f"{var} < {size}"
+            if not isinstance(original_index, sympy.Integer):
+                var_mask = f"({mask})" if "&" in mask else mask
+                var_mask = f" | ~{var_mask}"
+            else:
+                var_mask = ""
+            buffer.writeline(f'tl.device_assert({cond_gt}{var_mask}, f"index out of bounds: {cond_gt}")')
+            buffer.writeline(f'tl.device_assert({cond_lt}{var_mask}, f"index out of bounds: {cond_lt}")')
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
@@ -1045,6 +1077,10 @@ class TritonKernel(Kernel):
         else:
             load_buffer = self.loads
 
+        # Assert that the loaded indices will not read garbage
+        if indirect_indexing and config.triton.assert_indirect_indexing:
+            self.gen_assert_indirect_indexing(load_buffer, original_index, mask)
+
         result_var = self.cse.generate(load_buffer, line)
         result_var.mask_vars = mask_vars
 
@@ -1059,7 +1095,13 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
+        indirect_indexing = self.is_indirect_indexing(index)
+        original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
+
+        if indirect_indexing and config.triton.assert_indirect_indexing:
+            self.gen_assert_indirect_indexing(self.stores, original_index, mask)
+
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
