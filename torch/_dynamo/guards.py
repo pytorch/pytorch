@@ -792,7 +792,7 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensor_verbose),
                 ("tensor_check_names", tensor_check_names),
-                ("part_map", part_map)
+                ("part_map", part_map),
             ]
             + list(SYMPY_INTERP.items())
         )
@@ -858,6 +858,8 @@ def guard_fail_hook(
         guard_fail_fn(GuardFail(reason, code))
 
 
+# TODO(voz): Rewrite this API, we don't use most of these,
+# leftover from when we had 2 fns.
 def guard_error_hook(
     guard_fn: GuardFn,
     code: types.CodeType,
@@ -873,7 +875,7 @@ def guard_error_hook(
     # require us to have the TRUE code that was eval'ed, not a shoddy
     # reconstruction (like is done here)
     print("lambda " + ", ".join(guard_fn.args) + ":")
-    print(" ", " and\n  ".join(guard_fn.code_parts))
+    print(" ", " and\n  ".join([code_part.code for code_part in guard_fn.code_parts]))
 
 
 set_guard_error_hook(guard_error_hook)

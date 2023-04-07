@@ -892,8 +892,17 @@ void ProcessGroupNCCL::workCleanupLoop() {
         abort();
         // Report desync state in case of timeout
         if (desyncDebug_ && timedOut) {
-          auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
-          LOG(ERROR) << desyncMsg;
+          try {
+            auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
+            LOG(ERROR) << desyncMsg;
+          } catch (const std::exception& e) {
+            LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
+                       << " Please file an issue. Error: " << e.what();
+          } catch (...) {
+            LOG(ERROR)
+                << "Failed to rerieve NCCL_DESYNC_DEBUG report with unknown error."
+                << " Please file an issue.";
+          }
         }
         // Throw exception
         work.handleException(asyncErrorHandling_);
