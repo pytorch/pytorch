@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import functools
 import inspect
+import math
 import operator
 import unittest
 from enum import Enum
@@ -2321,6 +2322,50 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         # this should be captured as static, as export won't generate any symbols.
         self.assertEqual(gm(torch.ones(2, 4)), torch.ones(2, 4).sin())
+
+    def test_access_class_method_from_user_class(self):
+        class A:
+            @classmethod
+            def func(cls):
+                return torch.Tensor([4, 5])
+
+        def f(x):
+            a = A()
+            return x.sum() + type(a).func().sum()
+
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Can't call type()"):
+            gm, _ = torch._dynamo.export(
+                f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
+            )
+
+        def f_correct(x):
+            a = A()
+            return x.sum() + a.__class__.func().sum()
+
+        gm, _ = torch._dynamo.export(
+            f_correct, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
+
+    @config.patch(dynamic_shapes=True)
+    def test_round_dynamic_shapes(self):
+        def f(x):
+            return x[: round(x.shape[0] / 2)]
+
+        def f_correct(x):
+            return x[: math.floor(x.shape[0] / 2)]
+
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Calling round()"):
+            gm, _ = torch._dynamo.export(
+                f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
+            )
+
+        gm, _ = torch._dynamo.export(
+            f_correct, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
