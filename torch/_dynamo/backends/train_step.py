@@ -34,6 +34,7 @@ def train_step_compiler(backend_compile_fn):
         Step 1: Assert inputs (from user) are already Fake, and user their FakeTensorMode
                 (created by dynamo) to fakeify the module's parameters
         """
+        print(mod.graph)
         torch.set_grad_enabled(True)
         torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
         assert len(fake_inputs) > 0, "Expected at least one input"
@@ -81,7 +82,6 @@ def train_step_compiler(backend_compile_fn):
         assert torch.is_grad_enabled(), "grad isn't enabled before calling make_fx"
         fx_g = make_fx(functional_call)(*full_fake_args)
         torch.set_grad_enabled(False)
-
         """
         Step 3: Functionalize the resulting flattend graph, producing code with copy_ ops
                 as an epilogue for any inplace/mutating ops such as optimizer update.

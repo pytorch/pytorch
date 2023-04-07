@@ -138,7 +138,7 @@ def _allowed_function_ids():
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = (
-            "torch.optim.",
+            # "torch.optim.",
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",
