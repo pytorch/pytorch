@@ -5926,6 +5926,41 @@ if HAS_CPU and not torch.backends.mps.is_available():
                 compiled_out = opt_fn(x)
                 assert same(real_out, compiled_out, equal_nan=True)
 
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_decomposed_dequant_relu_quant(self):
+            def fn(x, scale, zero_point):
+                # For quantized_decomposed.dequantize_per_tensor
+                # Refer to torch/ao/quantization/fx/_decomposed.py
+                tmp = (x.to(torch.float32) - zero_point) * scale
+
+                tmp = torch.relu(tmp)
+
+                # For quantized_decomposed.quantize_per_tensor
+                # Refer to torch/ao/quantization/fx/_decomposed.py
+                inv_scale = 1.0 / scale
+                y = torch.clamp(
+                        torch.round(tmp * inv_scale) + zero_point, 0, 255
+                    ).to(torch.uint8)
+                return y
+
+            x = torch.randn((1, 8, 9, 9), dtype=torch.float32) * 100
+            x = torch.clamp(x, 0, 255).to(torch.uint8)
+            zero_point = 100
+            scale = 0.01
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x, scale, zero_point)
+
+                real_out = fn(x, scale, zero_point)
+                compiled_out = opt_fn(x, scale, zero_point)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
         def test_inplace_add_alpha(self):
             def fn(x, y):
                 aten.add_.Tensor(x, y, alpha=0.55)

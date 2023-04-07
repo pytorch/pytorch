@@ -1157,7 +1157,7 @@ class CppVecKernel(CppKernel):
 
         if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
             if opt_ctx.is_load_uint8_as_float:
-                line = f"at::vec::Vectorized<uint8_t>::convert_to_float({var_expr})"
+                line = f"at::vec::load_uint8_as_float({var_expr})"
             else:
                 nelements = codecache.pick_vec_isa().nelements()
                 if var not in self.var_vec_buf_map:
