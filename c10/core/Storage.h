@@ -60,16 +60,6 @@ struct C10_API Storage {
     set_data_ptr_noswap(allocator()->allocate(0));
   }
 
-  template <typename T>
-  T* data() const {
-    return storage_impl_->data<T>();
-  }
-
-  template <typename T>
-  T* unsafe_data() const {
-    return storage_impl_->mutable_unsafe_data<T>();
-  }
-
   // TODO: remove later
   void set_nbytes(size_t size_bytes) const {
     storage_impl_.get()->set_nbytes(size_bytes);

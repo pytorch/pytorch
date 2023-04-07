@@ -35,52 +35,52 @@ class InductorWrapper(nn.Module):
 def lower_to_inductor(
     gm: torch.fx.GraphModule, enable_cudagraphs: bool
 ) -> torch.fx.GraphModule:
-    orig_placeholders = []
+    """
+    This API lowers the entire `gm` to the Inductor
+    """
+    orig_placeholders: List[fx.Node] = []
     orig_output_args: List[Any] = []
-    output = next(iter(gm.graph.nodes))
-    move_nodes = []
+    output: fx.Node = next(iter(gm.graph.nodes))
+    move_nodes: List[fx.Node] = []
 
     for node in gm.graph.nodes:
         if node.op == OP.OUTPUT:
             output = node
-            orig_output_args, _ = tree_flatten(node.args)
+            orig_output_args, _ = tree_flatten((node.args, node.kwargs))
         elif node.op == OP.PLACEHOLDER:
             orig_placeholders.append(node)
         else:
             move_nodes.append(node)
-    orig_placeholders_set = set(orig_placeholders)
 
     subgraph: torch.fx.Graph = torch.fx.Graph()
     node_mapping: Dict[torch.fx.Node, torch.fx.Node] = {}
     attrs = {}
-    for i, p in enumerate(orig_placeholders):
-        node_mapping[p] = subgraph.placeholder(name=f"placeholder_{i}")
 
+    # Map all the inputs/placeholders first.
+    for p in orig_placeholders:
+        node_mapping[p] = subgraph.node_copy(p)
+
+    # Create all other non-placeholders nodes
     for node in move_nodes:
         if node.op == OP.GET_ATTR:
             attrs[node.target] = getattr(gm, node.target)
-        args, kwargs = tree_map_only(
-            fx.Node, lambda n: node_mapping[n], (node.args, node.kwargs)
-        )
-        node_mapping[node] = subgraph.create_node(
-            op=node.op, target=node.target, args=args, kwargs=kwargs
-        )
-        node_mapping[node].meta = node.meta
+        node_mapping[node] = subgraph.node_copy(node, lambda n: node_mapping[n])
 
+    output_args = tuple(node_mapping[n] for n in orig_output_args)
+    subgraph.output(result=output_args)
+
+    # Remove unused placeholders from the subgraph. This is required as the
+    # `train_step()` has module and optimizer as the inputs which cannot be
+    # lowered to Inductor.
     placeholders: List[torch.fx.Node] = []
     for placeholder in orig_placeholders:
         new_placeholder = node_mapping[placeholder]
         if len(new_placeholder.users) == 0:
-            # Remove unused placeholders from the subgraph. This is required as
-            # the `train_step()` has module and optimizer as the inputs which
-            # cannot be lowered to Inductor.
             subgraph.erase_node(new_placeholder)
         else:
             placeholders.append(placeholder)
-    output_args = tuple(
-        node_mapping[n] for n in orig_output_args if n not in orig_placeholders_set
-    )
-    subgraph.output(result=output_args)
+
+    # Create the subgraph node in the original graph.
     sub_gm = torch.fx.GraphModule(root=attrs, graph=subgraph)
     gm.subgraph = InductorWrapper(sub_gm, enable_cudagraphs)
     with gm.graph.inserting_after(move_nodes[-1]):
@@ -91,8 +91,6 @@ def lower_to_inductor(
     # Redistribute the output from the subgraph to the original output.
     output_idx = 0
     for i, node in enumerate(orig_output_args):
-        if node in orig_placeholders_set:
-            continue
         with gm.graph.inserting_after(subgraph_call):
             new_node = gm.graph.call_function(
                 operator.getitem, (subgraph_call, output_idx)
