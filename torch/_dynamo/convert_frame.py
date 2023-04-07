@@ -52,6 +52,7 @@ from .utils import (
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
+recompilations_log = torch._logging.getArtifactLogger(__name__, "recompilations")
 
 
 class Tracker:
@@ -210,10 +211,20 @@ def convert_frame_assert(
         increment_frame()
         code = frame.f_code
 
-        if code in input_codes and config.error_on_recompile:
-            raise exc.RecompileError(
-                f"Recompiled function {code.co_name} in {code.co_filename}"
+        if code in input_codes and (
+            recompilations_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
+        ):
+            message = (
+                f"Recompiling function {code.co_name} in {code.co_filename}",
+                f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
             )
+
+            if recompilations_log.isEnabledFor(logging.DEBUG):
+                recompilations_log.debug(message)
+
+            if config.error_on_recompile:
+                raise exc.RecompileError(message)
+
         input_codes.add(code)
         if code in output_codes:
             return None
