@@ -1817,13 +1817,15 @@ def _as_strided_scatter_meta(
     input_length = utils.compute_required_storage_length(
         input.size(), input.stride(), input.storage_offset()
     )
-    output_length = utils.compute_required_storage_length(size, stride, storage_offset)
+    required_view_length = utils.compute_required_storage_length(
+        size, stride, storage_offset
+    )
     utils.check(
-        input_length >= output_length,
+        input_length >= required_view_length,
         lambda: (
             f"as_strided_scatter: sizes {size}, strides {stride}, storage offset {storage_offset} "
             f" and itemsize {input.element_size()} requiring a storage size of "
-            f"{output_length * input.element_size()} are out of bounds "
+            f"{required_view_length * input.element_size()} are out of bounds "
             f"for storage of size {input_length * input.element_size()}"
         ),
     )
