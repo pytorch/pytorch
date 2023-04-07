@@ -245,6 +245,7 @@ def get_aten_preprocessor_flags():
         "-DCAFFE2_USE_LITE_PROTO",
         "-DATEN_CUDNN_ENABLED_FBXPLAT=0",
         "-DATEN_MKLDNN_ENABLED_FBXPLAT=0",
+        "-DATEN_MKLDNN_ACL_ENABLED_FBXPLAT=0",
         "-DATEN_NNPACK_ENABLED_FBXPLAT=0",
         "-DATEN_MKL_ENABLED_FBXPLAT=0",
         "-DATEN_MKL_SEQUENTIAL_FBXPLAT=0",
@@ -1042,6 +1043,9 @@ def define_buck_targets(
             "@AT_MKLDNN_ENABLED@",
             "ATEN_MKLDNN_ENABLED_FBXPLAT",
             "--replace",
+            "@AT_MKLDNN_ACL_ENABLED@",
+            "ATEN_MKLDNN_ACL_ENABLED_FBXPLAT",
+            "--replace",
             "@AT_MKL_ENABLED@",
             "ATEN_MKL_ENABLED_FBXPLAT",
             "--replace",
@@ -1679,7 +1683,6 @@ def define_buck_targets(
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
-            "-DKINETO_NEW_CLIENT_CONF",
         ],
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
@@ -1704,7 +1707,6 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
             "-DEDGE_PROFILER_USE_KINETO",
-            "-DKINETO_NEW_CLIENT_CONF",
         ],
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
@@ -1793,7 +1795,6 @@ def define_buck_targets(
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
-            "-DKINETO_NEW_CLIENT_CONF",
         ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],

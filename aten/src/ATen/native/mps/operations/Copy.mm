@@ -126,7 +126,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   size_t dst_tensor_nbytes = dst.nbytes();
 
   @autoreleasepool {
-    MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
+    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
 
     void* host_dst = dst.storage().data();
@@ -189,7 +189,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
   TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
 
   @autoreleasepool {
-    MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
+    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
     NSUInteger sourceOffset = 0;
 
