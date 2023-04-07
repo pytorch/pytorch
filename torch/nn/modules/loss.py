@@ -605,8 +605,8 @@ class BCELoss(_WeightedLoss):
 
         >>> m = nn.Sigmoid()
         >>> loss = nn.BCELoss()
-        >>> input = torch.randn(3, requires_grad=True)
-        >>> target = torch.empty(3).random_(2)
+        >>> input = torch.randn(3, 2, requires_grad=True)
+        >>> target = torch.rand(3, 2, requires_grad=False)
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
@@ -1711,7 +1711,7 @@ class CTCLoss(_Loss):
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,C)
         >>> # xdoctest: +SKIP("FIXME: error in doctest")
-        >>> input = torch.randn(T, C).log_softmax(2).detach().requires_grad_()
+        >>> input = torch.randn(T, C).log_softmax(1).detach().requires_grad_()
         >>> input_lengths = torch.tensor(T, dtype=torch.long)
         >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)

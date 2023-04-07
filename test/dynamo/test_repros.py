@@ -6,6 +6,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
+import functools
 import inspect
 import itertools
 import random
@@ -24,11 +25,7 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 
 import torch._functorch.config
-
-try:
-    from test_minifier import requires_cuda
-except ImportError:
-    from .test_minifier import requires_cuda
+import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
@@ -38,6 +35,16 @@ from torch.nn import functional as F
 
 
 _orig_module_call = torch.nn.Module.__call__
+
+# Custom operator that only supports CPU
+lib = torch.library.Library("test_sample", "DEF")
+lib.define("foo(Tensor self) -> Tensor")
+lib.impl("foo", torch.sin, "CPU")
+
+
+requires_cuda = functools.partial(
+    unittest.skipIf, not torch.cuda.is_available(), "requires cuda"
+)
 
 
 def is_fx_tracing_test() -> bool:
@@ -493,9 +500,9 @@ class PartialMaml(torch.nn.Module):
         logits = net(x_spt)
         loss = F.cross_entropy(logits, y_spt)
         grad = torch.autograd.grad(loss, net.parameters())
-        fast_weights = list(
-            map(lambda p: p[1] - self.update_lr * p[0], zip(grad, net.parameters()))
-        )
+        fast_weights = [
+            p[1] - self.update_lr * p[0] for p in zip(grad, net.parameters())
+        ]
 
         # this is the loss and accuracy before first update
         with torch.no_grad():
@@ -529,7 +536,7 @@ class ModelOutput(collections.OrderedDict):
 
     def __getitem__(self, k):
         if isinstance(k, str):
-            inner_dict = {k: v for (k, v) in self.items()}
+            inner_dict = dict(self.items())
             return inner_dict[k]
         else:
             return self.to_tuple()[k]
@@ -933,11 +940,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # idx should be 1 -> slicing off [1:] of 8 elem tensor
         self.assertEqual(list(out.shape), [7])
 
-        expected_ops = ifdyn(5, 4)
-        expected_frame = ifdyn(1, 2)
-
-        self.assertEqual(expected_ops, expected_ops)
-        self.assertEqual(expected_frame, expected_frame)
+        self.assertEqual(counter.op_count, 2)
+        self.assertEqual(counter.frame_count, 1)
 
         self.assertEqual(list(opt_fn(torch.tensor([4])).shape), [4])
 
@@ -1431,6 +1435,42 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    def test_nullcontext1(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x, ctx):
+            x = x.sin()
+            with ctx:
+                x = x.cos()
+            x = x.sin()
+            return x
+
+        y = torch.randn(10)
+        self.assertTrue(same(fn(y, contextlib.nullcontext()), y.sin().cos().sin()))
+
+    def test_nullcontext2(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x, ctx):
+            x = x.sin()
+            with ctx():
+                x = x.cos()
+            x = x.sin()
+            return x
+
+        y = torch.randn(10)
+        self.assertTrue(same(fn(y, contextlib.nullcontext), y.sin().cos().sin()))
+
+    def test_no_grad_inline(self):
+        @torch.no_grad()
+        def a(x):
+            return x.sin()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def b(x):
+            return a(x).cos()
+
+        y = torch.randn(10)
+        self.assertTrue(same(b(y), y.sin().cos()))
+
     # AssertionError: ABCMeta
     @unittest.expectedFailure
     def test_numpy_list(self):
@@ -1491,6 +1531,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.ops.aten.absolute(x)
 
         fn(torch.randn(3))
+
+    def test_hf_gelu_inline(self):
+        class GELUActivation(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.act = nn.functional.gelu
+
+            def forward(self, input):
+                return self.act(input)
+
+        @torch._dynamo.optimize("eager", nopython=True)
+        def fn(x):
+            return GELUActivation()(x)
+
+        y = torch.randn(10)
+        self.assertTrue(same(fn(y), nn.functional.gelu(y)))
+
+        @torch._dynamo.optimize("eager", nopython=True)
+        def fn_returns(x):
+            return GELUActivation(), x + 1
+
+        act, _ = fn_returns(y)
+        self.assertIsInstance(act, GELUActivation)
+        self.assertIs(act.act, nn.functional.gelu)
+        self.assertTrue(hasattr(act, "_buffers"))  # check that __init__ got called
 
     def test_torch_tensor_ops(self):
         def fn(x):
@@ -2158,7 +2223,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_output_aliases_intermediate(self):
         def f(x):
             intermediate = x.mul(2)
-            return intermediate.view(-1)
+            return intermediate.view(-1), intermediate
 
         opt_f = torch._dynamo.optimize("aot_eager")(f)
 
@@ -2166,10 +2231,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(4, requires_grad=b)
             out = f(x)
             out_test = opt_f(x)
-            self.assertEqual(out, out_test)
-            self.assertEqual(out.requires_grad, out_test.requires_grad)
-            self.assertEqual(out._is_view(), out_test._is_view())
-            self.assertEqual(out._base.requires_grad, out_test._base.requires_grad)
+            self.assertEqual(out[0], out_test[0])
+            self.assertEqual(out[1], out_test[1])
+            self.assertEqual(out[0].requires_grad, out_test[0].requires_grad)
+            self.assertEqual(out[1].requires_grad, out_test[1].requires_grad)
+            # test that the aliasing relationship of outputs is preserved
+            out[0].mul_(2)
+            out_test[0].mul_(2)
+            self.assertEqual(out[0], out_test[0])
+            self.assertEqual(out[1], out_test[1])
 
     def test_while_loop_graph_break(self):
         # Repro of tacotron2 cache_size_recompilation
@@ -2316,7 +2386,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertNoUnraisable(f)
 
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
             b = x.sin()
@@ -2337,7 +2406,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
 
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
             b = x.sin()
@@ -2350,19 +2418,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "input sum needs to be 3"):
             opt_fn(*args)
 
-    # TODO (tmanlaibaatar) handle data-dependent fstring in assert statement.
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
-    def test_rewrite_assert_with_fstring_msg(self):
-        def f(x):
-            b = x.sin()
-            assert x[0] == 3, f"First dim need to be {x[0]}"
-            return x.cos() + b
-
-        args = (torch.Tensor([3, 4, 5]),)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
-            exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
-
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
             b = x.sin()
@@ -2376,7 +2431,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
 
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
+    def test_rewrite_assert_with_non_string_msg(self):
+        def f(x):
+            b = x.sin()
+            assert x[0] == 2, x.size()
+            return x.cos() + b
+
+        torch._dynamo.utils.counters.clear()
+        args = torch.Tensor([3, 4, 5])
+        opt_f = torch._dynamo.optimize("eager")(f)
+        with self.assertRaisesRegex(AssertionError, "torch.Size"):
+            opt_f(args)
+        self.assertEqual(
+            torch._dynamo.utils.counters["unimplemented"][
+                "assert with non-string message"
+            ],
+            1,
+        )
+
     def test_rewrite_assert_noop(self):
         def f(x):
             b = x.sin()
@@ -2415,15 +2487,66 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(x2, y), opt_f(x2, y)))
         self.assertEqual(cnt.frame_count, 2)
 
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", False)
-    def test_not_rewrite_assert(self):
-        def f(x):
-            b = x.sin()
-            assert x[0] == 3
-            return x.cos() + b
+    def test_dict_subclass_contains(self):
+        # pattern from huggingface
+        class ClassInstantier(collections.OrderedDict):
+            pass
 
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
-            torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x, d):
+            if "key1" in d:
+                x = x + 2
+            if "key2" in d:
+                x = x + 4
+            x = x + 8
+            return x
+
+        result = f(torch.ones(8), ClassInstantier({"key1": torch.ones(8)}))
+        self.assertTrue(same(result, torch.full([8], 11.0)))
+
+        result = f(torch.ones(8), ClassInstantier({"key2": torch.ones(8)}))
+        self.assertTrue(same(result, torch.full([8], 13.0)))
+
+    def test_hf_classinstantier(self):
+        # hf activations.py
+        class ClassInstantier(collections.OrderedDict):
+            def __getitem__(self, key):
+                content = super().__getitem__(key)
+                cls, kwargs = content if isinstance(content, tuple) else (content, {})
+                return cls(**kwargs)
+
+        ACT2CLS = ClassInstantier(
+            {
+                "relu": (nn.ReLU, {"inplace": False}),
+                "tanh": nn.Tanh,
+            }
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x, act):
+            return ACT2CLS[act](x)
+
+        y = torch.randn(10)
+        self.assertTrue(same(f(y, "tanh"), torch.tanh(y)))
+        self.assertTrue(same(f(y, "relu"), torch.relu(y)))
+
+    def test_ephemeral_module(self):
+        # hf activations.py
+        class ReLUSquaredActivation(nn.Module):
+            def forward(self, input):
+                relu_applied = torch.nn.functional.relu(input)
+                squared = torch.square(relu_applied)
+                return squared
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            x = x + 0.2
+            x = ReLUSquaredActivation()(x)
+            x = x + 1
+            return x
+
+        y = torch.randn(10)
+        self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
@@ -2492,6 +2615,45 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
+
+    @torch._dynamo.config.patch("specialize_int", False)
+    def test_maybe_multiply_symint(self):
+        # https://github.com/pytorch/pytorch/issues/97346
+        from torch._functorch.aot_autograd import aot_module_simplified
+
+        def my_aot_compiler(gm, example_inputs):
+            def my_compiler(gm, example_inputs):
+                return gm.forward
+
+            # Invoke AOTAutograd
+            return aot_module_simplified(gm, example_inputs, fw_compiler=my_compiler)
+
+        def my_example(t1, t2, d):
+            out = torch.add(t1, t2, alpha=d)
+            return out
+
+        compiled_fn = torch.compile(backend=my_aot_compiler, dynamic=True)(my_example)
+
+        t1 = torch.arange(3, dtype=torch.float32).requires_grad_(True)
+        t2 = torch.arange(3, dtype=torch.float32).requires_grad_(True)
+
+        ra = compiled_fn(t1, t2, 5)
+        self.assertEqual(ra, torch.tensor([0.0, 6.0, 12.0]))
+
+        ra = compiled_fn(t1, t2, 6)
+        self.assertEqual(ra, torch.tensor([0.0, 7.0, 14.0]))
+
+    def test_graph_break_unsupported_fake(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(counter)
+        def f(x):
+            return torch.ops.test_sample.foo(x + 1) + 1
+
+        f(torch.randn(3))
+
+        self.assertEqual(counter.op_count, ifdyn(ifunspec(2, 3), 3))
+        self.assertEqual(counter.frame_count, ifdyn(ifunspec(2, 1), 1))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_implicit_guard(self):
@@ -2571,6 +2733,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
+
+    def test_iadd_graph_break(self):
+        def fn(x):
+            a = ()
+            x = torch.sin(x)
+            a += (x,)
+            return a
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
 
 
 if __name__ == "__main__":

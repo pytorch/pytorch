@@ -259,18 +259,7 @@ Reducer::Reducer(
 // be specified by calling `register_builtin_comm_hook` from Python API.
 
 Reducer::~Reducer() noexcept(false) {
-  // Remove all hooks on variables registered by this Reducer. This is necessary
-  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
-  // (from recoveries) will add their hooks to the original model, and those
-  // hooks will try to invoke methods on a deleted Reducer objects.
-  for (auto& hook : hooks_) {
-    auto& key = hook.first;
-    auto& grad_accumulator = hook.second;
-
-    TORCH_INTERNAL_ASSERT(
-        grad_accumulator->del_post_hook(key),
-        "Reducer attempts to delete a non-existing hook.");
-  }
+  remove_autograd_hooks();
 }
 
 bool Reducer::dynamic_graph_find_unused() {
@@ -348,33 +337,31 @@ void Reducer::check_grad_layout(
 }
 
 void Reducer::point_grads_to_bucket() {
-  for (const auto& bucket : buckets_) {
-    bool bucket_zeroed = false;
-    for (size_t variable_index = 0; variable_index < bucket.variables.size();
-         ++variable_index) {
-      const auto& bucket_index = variable_locators_[variable_index];
-      auto& bucket = buckets_[bucket_index.bucket_index];
-      auto& variable = bucket.variables[bucket_index.intra_bucket_index];
-      auto& bucket_view =
-          bucket.bucket_views_in[bucket_index.intra_bucket_index];
+  std::unordered_set<int> zeroed_buckets;
+  for (size_t variable_index = 0; variable_index < params_.size();
+       ++variable_index) {
+    const auto& bucket_index = variable_locators_[variable_index];
+    auto& bucket = buckets_[bucket_index.bucket_index];
+    if (zeroed_buckets.find(bucket_index.bucket_index) ==
+        zeroed_buckets.end()) {
+      bucket.gradients.zero_();
+      zeroed_buckets.insert(bucket_index.bucket_index);
+    }
+    auto& variable = bucket.variables[bucket_index.intra_bucket_index];
+    auto& bucket_view = bucket.bucket_views_out[bucket_index.intra_bucket_index];
 
-      runGradCallbackForVariable(variable, [&](auto& grad) {
-        if (!grad.defined()) {
-          // grad is None: assuming user called zero_grad(set_to_none=True)
-          if (!bucket_zeroed) {
-            bucket_view.zero_();
-            bucket_zeroed = true;
-          }
-          // point grad to bucket
-          grad = bucket_view;
-          // The grad is modified and need to be written back.
-          return true;
-        }
-        // Grad is not none
-        return false;
-      });
-    };
-  }
+    runGradCallbackForVariable(variable, [&](auto& grad) {
+      if (!grad.defined()) {
+        // grad is None: assuming user called zero_grad(set_to_none=True)
+        // point grad to bucket
+        grad = bucket_view;
+        // The grad is modified and need to be written back.
+        return true;
+      }
+      // Grad is not none
+      return false;
+    });
+  };
 }
 void Reducer::mark_variable_ready_dense(size_t variable_index) {
   const auto& bucket_index = variable_locators_[variable_index];
@@ -2267,6 +2254,22 @@ void verify_params_across_processes(
       }
     }
   }
+}
+
+void Reducer::remove_autograd_hooks() {
+  // Remove all hooks on variables registered by this Reducer. This is necessary
+  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
+  // (from recoveries) will add their hooks to the original model, and those
+  // hooks will try to invoke methods on a deleted Reducer objects.
+  for (auto& hook : hooks_) {
+    auto& key = hook.first;
+    auto& grad_accumulator = hook.second;
+
+    TORCH_INTERNAL_ASSERT(
+        grad_accumulator->del_post_hook(key),
+        "Reducer attempts to delete a non-existing hook.");
+  }
+  hooks_.clear();
 }
 
 } // namespace c10d

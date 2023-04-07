@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import traceback
 import types
+import unittest
 from copy import deepcopy
 from typing import Tuple
 from unittest.mock import patch
@@ -341,6 +343,20 @@ class Children(torch.nn.Module):
         return x
 
 
+class NamedChildren(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = torch.nn.Linear(10, 10)
+        self.l2 = torch.nn.ReLU()
+        self.l3 = torch.nn.Linear(10, 10)
+        self.l4 = torch.nn.ReLU()
+
+    def forward(self, x):
+        for _, block in self.named_children():
+            x = block(x)
+        return x
+
+
 class IntArg(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -450,7 +466,23 @@ class LazyModule(LazyModuleMixin, MaterializedModule):
         self.param = UninitializedParameter()
 
     def initialize_parameters(self, x):
+        # force graph break to ensure this was not inlined
+        torch._dynamo.graph_break()
         self.param.materialize(x.shape)
+
+
+class LazyMLP(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.LazyLinear(10)
+        self.relu1 = torch.nn.ReLU()
+        self.fc2 = torch.nn.LazyLinear(1)
+        self.relu2 = torch.nn.ReLU()
+
+    def forward(self, input):
+        x = self.relu1(self.fc1(input))
+        y = self.relu2(self.fc2(x))
+        return y
 
 
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
@@ -750,6 +782,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
+    test_named_children = make_test(NamedChildren())
     test_densenet = make_test(DenseNetBlocks())
     test_parameters1 = make_test(ParametersModule1())
     test_parameters2 = make_test(ParametersModule2())
@@ -949,7 +982,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
-    def test_lazy_module(self):
+    def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -959,7 +992,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             module(input)
 
-        opt_test_static_module = torch._dynamo.optimize(cnt)(test_static_module)
+        # test no graph break
+        opt_test_static_module = torch._dynamo.optimize(cnt, nopython=True)(
+            test_static_module
+        )
         opt_test_static_module()
 
         self.assertTrue(
@@ -999,7 +1035,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             return module(input)  # fully materialized
 
-        opt_test_torch_static = torch._dynamo.optimize(cnt)(test_torch_static)
+        # test no graph break
+        opt_test_torch_static = torch._dynamo.optimize(cnt, nopython=True)(
+            test_torch_static
+        )
         opt_test_torch_static()
         out = opt_test_torch_static()
 
@@ -1010,6 +1049,51 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             "Module should be transformed to an instance of BatchNorm3d.",
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
+
+    def test_lazy_module2(self):
+        # Test FX graph 'call_module' works well if argument is lazy module
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        # We should run compile mode firstly, otherwise the module
+        # would be initialized when running eager mode.
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_lazy_module3(self):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # move to cuda and second iteration
+        m = m.to("cuda")
+        x = x.to("cuda")
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_lazy_module4(self):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # input shape changed and second iteration
+        x = torch.rand([20, 20])
+        try:
+            opt_m(x)
+        except RuntimeError:
+            self.assertIn("must have same reduction dim", traceback.format_exc())
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -1290,7 +1374,55 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertTrue("check_obj_id(m._forward_hooks" in failure_reason)
+        self.assertTrue("___check_obj_id(L['m']._forward_hooks" in failure_reason)
+
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
+    def test_hooks_skip_guards(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return 2 * x + 1
+
+        m = TestModule()
+
+        def forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 1
+
+        handle = m.register_forward_hook(forward_hook)
+
+        def outer_func(tensor):
+            x = tensor * 2 + 1
+            y = m(x)
+            return y
+
+        inp = torch.tensor(1.0, requires_grad=True)
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_func = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn,
+            backend=cc,
+        )(outer_func)
+
+        m = TestModule()
+        handle = m.register_forward_hook(forward_hook)
+        failure_reason = None
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.op_count, 6)
+
+        # if we remove the hook, dynamo shouldn't notice
+        handle.remove()
+        self.assertNotEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+        self.assertEqual(cc.frame_count, 1)
 
 
 if __name__ == "__main__":

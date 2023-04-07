@@ -95,7 +95,7 @@ class SavePlanner(abc.ABC):
 
     SavePlanners are stateful objects that can be used to customize the whole save process.
 
-    SavePlanner acts as an access proxy to the state_dict, so any transfomation done to it
+    SavePlanner acts as an access proxy to the state_dict, so any transformation done to it
     will be visible to the whole process.
 
     A planner subclass can expect the following sequence of calls during save_state_dict:
@@ -115,7 +115,7 @@ class SavePlanner(abc.ABC):
     5) resolve_data - called multiple times on each rank
         Lookups a value on the `state_dict` for the storage layer to write.
 
-    Users are recomended to extend DefaultSavePlanner instead of this interface directly as
+    Users are recommended to extend DefaultSavePlanner instead of this interface directly as
     most changes can be expressed by changes in a single method.
 
     There are 3 usual patterns of extension:
@@ -248,7 +248,7 @@ class LoadPlanner:
 
     LoadPlanner are stateful objects that can be used to customize the whole load process.
 
-    LoadPlanner acts as an access proxy to the state_dict, so any transfomation done to it
+    LoadPlanner acts as an access proxy to the state_dict, so any transformation done to it
     will be visible to the whole process.
 
     A planner subclass can expect the following sequence of calls during load_state_dict:
@@ -268,7 +268,7 @@ class LoadPlanner:
     5) resolve_tensor and commit_tensor - called multiple times on each rank
         They are called in pair for each Tensor value in state_dict.
 
-    Users are recomended to extend DefaultLoadPlanner instead of this interface directly as
+    Users are recommended to extend DefaultLoadPlanner instead of this interface directly as
     most changes can be expressed by changes in a single method.
 
     There are two usual patterns of extension:
