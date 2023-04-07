@@ -289,7 +289,7 @@ def get_pr_stats() -> pd.DataFrame:
     runs = remove_irrelevant_failure_jobs(runs)
     runs = discard_weird_cases(runs)
 
-    pr_stats = get_pr_level_stats(runs)
+    return get_pr_level_stats(runs)
 
 def upload_stats(pr_stats):
     print(pr_stats)
