@@ -102,7 +102,7 @@ class StarDep(typing.NamedTuple):
         return self
 
     def numbytes_hint(self):
-        from .ir import MultiOutputLayout
+        from .ir import BufferList, MultiOutputLayout
 
         if self.name in V.graph.name_to_buffer:
             buf = V.graph.name_to_buffer[self.name]
@@ -110,7 +110,11 @@ class StarDep(typing.NamedTuple):
             buf = V.graph.graph_inputs[self.name]
         else:
             return 1
-        if hasattr(buf, "layout") and isinstance(buf.layout, MultiOutputLayout):
+        if (
+            hasattr(buf, "layout")
+            and isinstance(buf.layout, MultiOutputLayout)
+            or isinstance(buf, BufferList)
+        ):
             # NB: Too annoying to acquire, should only be used for instrumentation
             return 1
         return V.graph.sizevars.size_hint(

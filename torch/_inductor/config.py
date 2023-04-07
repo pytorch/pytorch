@@ -117,6 +117,7 @@ def decide_compile_threads():
     2. Set to 1 if it's win32 platform or it's a fbcode build
     3. decide by the number of CPU cores
     """
+    return 1
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
     elif sys.platform == "win32" or is_fbcode():
@@ -285,7 +286,7 @@ class trace:
     output_code = True
 
     # SVG figure showing post-fusion graph
-    graph_diagram = False
+    graph_diagram = True
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False

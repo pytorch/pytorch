@@ -1486,6 +1486,69 @@ class TritonKernel(Kernel):
         return TritonCSEVariable(*args, **kwargs)
 
 
+class ForeachKernel(Kernel):
+    overrides = TritonOverrides
+
+    def __init__(
+        self,
+    ):
+        super().__init__()
+        self.body = IndentedBuffer()
+
+    def load(self, code, name: str):
+        pass
+
+    def store(self, code, name: str):
+        pass
+
+    def codegen_kernel(self):
+        from triton import next_power_of_2
+
+        code = IndentedBuffer()
+
+        code.splice(
+            """
+                import triton
+                import triton.language as tl
+                from torch._inductor.ir import ReductionHint
+                from torch._inductor.ir import TileHint
+                from torch._inductor.utils import instance_descriptor
+            """
+        )
+        if config.benchmark_kernel:
+            code.splice(
+                """
+                    from torch._dynamo.testing import rand_strided
+                    from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+                    import torch
+                    from torch._inductor.triton_heuristics import grid
+                """
+            )
+
+        # argdefs, _, signature = self.args.python_argdefs()
+
+    def call_kernel(self, code, name: str):
+        _, call_args, _ = self.args.python_argdefs()
+        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+        for i in range(len(call_args)):
+            if V.graph.is_unspec_arg(call_args[i]):
+                call_args[i] = call_args[i] + ".item()"
+        grid = []
+        if V.graph.cpp_wrapper:
+            V.graph.wrapper_code.generate_kernel_call(
+                name, call_args, V.graph.scheduler.current_device.index
+            )
+        else:
+            # TODO: refactor generate_kernel_call
+            call_args_str = ", ".join(call_args)
+            stream_name = code.write_get_cuda_stream(
+                V.graph.scheduler.current_device.index
+            )
+            code.writeline(
+                f"{name}.run({call_args_str}, grid=grid({', '.join(grid)}), stream={stream_name})"
+            )
+
+
 class TritonScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
@@ -1752,6 +1815,18 @@ class TritonScheduling:
 
     def codegen_sync(self):
         V.graph.wrapper_code.writeline("torch.cuda.synchronize()")
+
+    def codegen_foreach(self, foreach_node):
+        """ """
+        kernel = ForeachKernel()
+
+        with kernel:
+            foreach_node.mark_run()
+            foreach_node.codegen()
+
+        src_code = kernel.codegen_kernel()
+        kernel_name = self.define_kernel(src_code, [foreach_node])
+        # self.scheduler.free_buffers()
 
     @staticmethod
     @functools.lru_cache(32)

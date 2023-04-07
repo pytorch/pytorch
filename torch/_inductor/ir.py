@@ -2003,7 +2003,7 @@ class BufferList(IRNode):
         self.name = V.graph.register_buffer(self)
         self.layouts = data.layouts
         self.buffers = [
-            ForeachOutputBuffer(self.name + f"_{i}", layout)
+            ForeachOutputBuffer(layout, self, i)
             for i, layout in enumerate(self.layouts)
         ]
         self.data = data
@@ -2110,7 +2110,47 @@ class BufferList(IRNode):
 
 
 class ForeachOutputBuffer(Buffer):
-    pass
+    def codegen(self, wrapper):
+        wrapper.writeline(f"{self.get_name()} = {self.input.get_name()}_{self.index}")
+
+    def __init__(self, layout, input, index: int):
+        super().__init__(None, layout)
+        self.input = input
+        self.name = V.graph.register_buffer(self)
+        self.index = index
+
+    def should_allocate(self):
+        return False
+
+    def simplify_and_reorder(self):
+        return (
+            (
+                self.get_size(),
+                (),
+            ),
+            None,
+        )
+
+    def get_read_writes(self):
+        return self.normalized_read_writes()
+
+    def get_reduction_type(self):
+        return None
+
+    @cache_on_self
+    def normalized_read_writes(self):
+        name = self.get_name()
+        indexer = self.layout.make_indexer()
+
+        def dummy(index, rindex):
+            assert len(rindex) == 0
+            return ops.store(name, indexer(index), "fake")
+
+        deps = dependencies.extract_read_writes(
+            dummy, self.get_size(), (), normalize=True
+        )
+        deps.reads = {dependencies.StarDep(self.input.get_name())}
+        return deps
 
 
 class InputBuffer(Buffer):

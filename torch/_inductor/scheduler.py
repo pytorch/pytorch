@@ -345,7 +345,20 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
 
 class ForeachKernelSchedulernode(BaseSchedulerNode):
-    pass
+    def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer):
+        super().__init__(scheduler, node)
+        self._body = lambda: None
+
+    def codegen(self):
+        try:
+            with V.kernel.set_current_node(self):
+                self._body()
+        except Exception:
+            log.fatal("Error in codegen for %s", self.node)
+            raise
+
+    def mark_run(self):
+        pass
 
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
@@ -362,7 +375,7 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.group = (node.get_device(), group_fn(self._sizes))
 
-        if self.is_template():
+        if self.is_template() or isinstance(node, ir.ForeachOutputBuffer):
             self.set_read_writes(node.normalized_read_writes())
         else:
             self.set_read_writes(
@@ -635,7 +648,9 @@ class Scheduler:
             ), "All nodes passed to scheduling must have an origin"
             if node.is_no_op():
                 self.nodes.append(NopKernelSchedulerNode(self, node))
-            elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
+            elif isinstance(
+                node, (ir.ComputedBuffer, ir.TemplateBuffer, ir.ForeachOutputBuffer)
+            ):
                 group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(SchedulerNode(self, node, group_fn))
             elif isinstance(node, ir.BufferList):
@@ -973,6 +988,10 @@ class Scheduler:
             or not config.epilogue_fusion
         ):
             return False
+        if isinstance(node1.node, ir.ForeachOutputBuffer) or isinstance(
+            node2.node, ir.ForeachOutputBuffer
+        ):
+            return False
 
         device = node1.get_device()
         if device != node2.get_device():
@@ -1220,6 +1239,8 @@ class Scheduler:
                 self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
                 self.codegen_extern_call(node)
+            elif isinstance(node, ForeachKernelSchedulernode):
+                self.get_backend(device).codegen_foreach(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 self.get_backend(device).codegen_nodes(node.get_nodes())
             else:
