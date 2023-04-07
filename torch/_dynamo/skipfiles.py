@@ -148,7 +148,7 @@ if HAS_PRIMS_REFS:
     }
 
 # Skip quantization patterns
-# TODO: Is there anyway to make this less brittle without circular dependencies?
+# TODO: How to make this less brittle without introducing circular dependencies?
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
 }

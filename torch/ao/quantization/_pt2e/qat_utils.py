@@ -22,16 +22,16 @@ class _ConvBnPattern(nn.Module):
         return x
 
 # TODO: delete
-class _ConvReLUPattern(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv = nn.Conv2d(1, 1, 1)
-        self.relu = nn.ReLU()
-    
-    def forward(self, x):
-        x = self.conv(x)
-        x = self.relu(x)
-        return x
+# class _ConvReLUPattern(nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#         self.conv = nn.Conv2d(1, 1, 1)
+#         self.relu = nn.ReLU()
+#
+#     def forward(self, x):
+#         x = self.conv(x)
+#         x = self.relu(x)
+#         return x
 
 class _FusedQATConvBnPattern(nn.Module):
     def __init__(self):
@@ -90,9 +90,11 @@ def _fuse_conv_bn_qat(m: GraphModule):
     Given a graph of decomposed aten ops, replace the (conv + bn) pattern with
     the fused QAT subgraph equivalent.
     """
+    m.graph.eliminate_dead_code()
+    m.recompile()
     example_inputs = (torch.randn(1, 1, 3, 3),)
     match_pattern = _get_aten_graph_module(_ConvBnPattern(), example_inputs)
-    replacement_pattern = _get_aten_graph_module(_ConvReLUPattern(), example_inputs)
-    #replacement_pattern = _get_aten_graph_module(_FusedQATConvBnPattern(), example_inputs)
+    replacement_pattern = _get_aten_graph_module(_FusedQATConvBnPattern(), example_inputs)
     replace_pattern(m, match_pattern, replacement_pattern)
+    m.recompile()
     return m
