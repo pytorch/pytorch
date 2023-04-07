@@ -2180,6 +2180,8 @@ class CommonTemplate:
             return (
                 a[:, :10, 0] + a[:, 10:, 0],
                 (a + 1)[:, :10, 0] + (a + 1)[:, 10:, 0],
+                a[:, -30:, 0],  # negative index out of range
+                a[:, :-30, 0],  # negative index out of range
             )
 
         self.common(
@@ -4785,6 +4787,18 @@ class CommonTemplate:
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1])
 
         self.common(fn, [torch.randn(55)], assert_equal=False)
+
+    def test_dropout_trivial_0(self):
+        def fn1(a):
+            return torch.nn.functional.dropout(a, 0.0, True) + a
+
+        self.common(fn1, [torch.randn(55)])
+
+    def test_dropout_trivial_1(self):
+        def fn2(a):
+            return torch.nn.functional.dropout(a, 1.0, True) + a
+
+        self.common(fn2, [torch.randn(55)])
 
     @config.patch({"triton.cudagraphs": True})
     def test_dropout(self):

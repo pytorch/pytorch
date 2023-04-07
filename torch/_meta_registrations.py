@@ -93,7 +93,8 @@ def meta_take(self, index, *, out=None):
 )
 @out_wrapper("values", "indices")
 def cummaxmin(self, dim):
-    values, indices = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+    values = torch.empty(self.shape, device=self.device, dtype=self.dtype)
+    indices = torch.empty(self.shape, device=self.device, dtype=torch.int64)
     if self.numel() != 0 and self.ndim != 0:
         # Checks that dim is within bounds
         maybe_wrap_dim(dim, self.ndim)

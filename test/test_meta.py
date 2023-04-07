@@ -888,8 +888,6 @@ meta_dispatch_skips = {
     aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},  # at::nonzero doesn't have a Meta function
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
-    aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
-    aten.cummin.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.linalg_lu_solve.default: {c32, c64, c128},
     aten.linalg_lu_solve.out: {c32, c64, c128},
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
