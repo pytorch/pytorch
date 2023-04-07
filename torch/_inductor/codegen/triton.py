@@ -77,7 +77,10 @@ def config_of(args):
             return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
-    divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
+    if config.triton.divisible_by_16 and not dynamo_config.dynamic_shapes:
+        divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
+    else:
+        divisible_by_16 = []
     return instance_descriptor(tuple(divisible_by_16), ())
 
 
@@ -661,6 +664,8 @@ class TritonKernel(Kernel):
         if needed.
         """
         if not (self.inside_reduction and config.triton.persistent_reductions):
+            return False
+        if dynamo_config.dynamic_shapes:
             return False
         threshold = {
             ReductionHint.INNER: 1024,
@@ -1463,7 +1468,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r":
                 grid.append(expr)
 
-        if V.graph.aot_mode:
+        if V.graph.cpp_wrapper:
             V.graph.wrapper_code.generate_kernel_call(
                 name, call_args, V.graph.scheduler.current_device.index
             )
@@ -1693,8 +1698,8 @@ class TritonScheduling:
 
     def define_kernel(self, src_code, node_schedule):
         wrapper = V.graph.wrapper_code
-        if src_code in wrapper.kernels:
-            kernel_name = wrapper.kernels[src_code]
+        if src_code in wrapper.src_to_kernel:
+            kernel_name = wrapper.src_to_kernel[src_code]
         else:
             fused_name = (
                 get_fused_kernel_name(node_schedule)
@@ -1705,7 +1710,8 @@ class TritonScheduling:
             kernel_name = "_".join(
                 ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
             )
-            wrapper.kernels[src_code] = kernel_name
+            # use the original src_code as the key
+            wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
 
@@ -1713,7 +1719,9 @@ class TritonScheduling:
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
 
-            _, _, kernel_path = get_code_path(src_code, "py", extra="")
+            basename, _, kernel_path = get_code_path(src_code, "py", extra="")
+            wrapper.kernel_to_hash[kernel_name] = basename
+
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline("async_compile.triton('''")
             compile_wrapper.splice(src_code, strip=True)
