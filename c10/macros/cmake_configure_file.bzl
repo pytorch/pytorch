@@ -1,20 +1,11 @@
+load(":cmake_configure_file_cmd.bzl", "cmake_configure_file_cmd")
+
 # Forked from header_template_rule. header_template_rule is not
 # compatible with our usage of select because its substitutions
 # attribute is a dict, and dicts may not be appended with select. We
 # get around this limitation by using a list as our substitutions.
 def _cmake_configure_file_impl(ctx):
-    command = ["cat $1"]
-    for definition in ctx.attr.definitions:
-        command.append(
-            "| sed 's@#cmakedefine {}@#define {}@'".format(
-                definition,
-                definition,
-            ),
-        )
-
-    # Replace any that remain with /* #undef FOO */.
-    command.append("| sed -r 's@#cmakedefine ([A-Z0-9_]+)@/* #undef \\1 */@'")
-    command.append("> $2")
+    command = cmake_configure_file_cmd("$1", ctx.attr.definitions, "$2")
 
     ctx.actions.run_shell(
         inputs = [ctx.file.src],
