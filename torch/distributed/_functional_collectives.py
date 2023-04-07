@@ -224,6 +224,33 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
 
     return out_tensor
 
+
+def _all_gather_into_tensor_coalesced(self, tag, rankset, group_size):
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, rankset, group_size)
+    assert group is not None
+
+    def mk_out_tensor(shard):
+        out_size = list(shard.size())
+        out_size[0] *= group_size
+        out_tensor = shard.new_empty(out_size)
+        assert out_tensor.is_contiguous()
+        return out_tensor
+
+    out_tensors = [mk_out_tensor(t) for t in self]
+    work_list = []
+    if self[0].is_cpu:
+        for shard, out_tensor in zip(self, out_tensors):
+            work = dist.all_gather(list(torch.chunk(out_tensor, group_size)), shard, group=group, async_op=True)
+            work_list.append(work)
+            _register_tensor_work(out_tensor, work, 1)
+    else:
+        work_list = c10d._all_gather_into_tensor_coalesced(self, out_tensors, group, async_op=True)
+        for out_tensor, work in zip(out_tensors, work_list):
+            _register_tensor_work(out_tensor, work, 1)
+
+    return out_tensors
+
+
 def _reduce_scatter_tensor(
     input: torch.Tensor,
     reduceOp: str,
@@ -436,6 +463,24 @@ def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TY
 
     return res
 
+def all_gather_into_tensor_coalesced(self: List[torch.Tensor], group: RANK_TYPES, tag: str = "") -> List[List[torch.Tensor]]:
+
+    tag, rankset, group_size = _expand_group(group, tag)
+    tensor_list = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(self, tag, rankset, group_size)  # type: ignore[attr-defined]
+
+    if _are_we_tracing():
+        return list(map(wait_tensor, tensor_list))
+    return list(map(_maybe_wrap_tensor, tensor_list))
+
+def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
+    def mk_out_tensor(shard):
+        out_size = list(shard.size())
+        out_size[0] *= group_size
+        out_tensor = shard.new_empty(out_size)
+        return out_tensor
+
+    return [mk_out_tensor(t) for t in self]
+
 
 c10_lib = torch.library.Library("c10d_functional", "DEF")
 c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
@@ -466,6 +511,7 @@ def _register_ops():
         "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
         "wait_tensor(Tensor self) -> Tensor",
         "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
+        "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
         "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
     ]
 
