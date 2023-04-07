@@ -16,7 +16,14 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import ceildiv, is_ones, is_zeros, sympy_product, use_triton_template
+from ..utils import (
+    ceildiv,
+    is_ones,
+    is_zeros,
+    pad_listlike,
+    sympy_product,
+    use_triton_template,
+)
 from ..virtualized import V
 from .mm_common import filtered_configs
 
@@ -291,7 +298,10 @@ def convolution(
         weight.get_size()
     )
     ndim = len(kernel_shape)
-    assert ndim == len(stride) == len(padding) == len(dilation) == len(output_padding)
+    stride = pad_listlike(stride, ndim)
+    padding = pad_listlike(padding, ndim)
+    dilation = pad_listlike(dilation, ndim)
+    output_padding = pad_listlike(output_padding, ndim)
 
     if (
         config.conv_1x1_as_mm
