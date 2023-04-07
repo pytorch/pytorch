@@ -57,8 +57,8 @@ if(NOT BUILD_CAFFE2 AND NOT BUILD_LITE_INTERPRETER)
   EXCLUDE(ATen_CORE_TEST_SRCS "${ATen_CORE_TEST_SRCS}" ${ATen_CORE_EXCLUDED_TEST_SRCS})
 endif()
 
-file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h")
-file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp")
+file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h" "privateuseone/*.h")
+file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp" "privateuseone/*.cpp")
 file(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 file(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
 file(GLOB cuda_nvrtc_stub_h "cuda/nvrtc_stub/*.h")
@@ -444,10 +444,17 @@ if(USE_CUDA AND NOT USE_ROCM)
       CUDA::cufft_static_nocallback
     )
    if(NOT BUILD_LAZY_CUDA_LINALG)
-     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-       CUDA::cusolver_static
-       ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-     )
+     if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
+       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+         CUDA::cusolver_static
+         ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
+       )
+     elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+         CUDA::cusolver_static
+         ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+       )
+     endif()
    endif()
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS

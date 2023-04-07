@@ -12,7 +12,7 @@ from torch import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
-from ..exc import unimplemented, Unsupported
+from ..exc import unimplemented, Unsupported, UserError, UserErrorType
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
@@ -26,7 +26,13 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable, EnumVariable
 from .dicts import ConstDictVariable
-from .lists import BaseListVariable, ListIteratorVariable, ListVariable, TupleVariable
+from .lists import (
+    BaseListVariable,
+    ListIteratorVariable,
+    ListVariable,
+    TupleIteratorVariable,
+    TupleVariable,
+)
 from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
 
@@ -577,6 +583,14 @@ class BuiltinVariable(VariableTracker):
                 ),
                 **options,
             )
+
+        if self.fn is round:
+            if len(args) > 0 and isinstance(args[0], SymNodeVariable):
+                raise UserError(
+                    UserErrorType.STANDARD_LIBRARY,
+                    "Calling round() on symbolic value is not supported. "
+                    "You can use floor() to implement this functionality",
+                )
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, *args):
@@ -732,7 +746,10 @@ class BuiltinVariable(VariableTracker):
         elif obj.has_unpack_var_sequence(tx):
             guards = set()
             if obj.source and not is_constant_source(obj.source):
-                guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+                if isinstance(obj, TupleIteratorVariable):
+                    guards.add(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
+                else:
+                    guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
@@ -1066,7 +1083,11 @@ class BuiltinVariable(VariableTracker):
                 self, obj
             )
 
-        unimplemented(f"type({obj})")
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "Can't call type() on generated custom object. "
+            "Please use __class__ instead",
+        )
 
     def call_reversed(self, tx, obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
@@ -1121,6 +1142,17 @@ class BuiltinVariable(VariableTracker):
             return variables.TupleVariable(
                 items, **VariableTracker.propagate(self, iterable, *args)
             )
+
+    # neg is a constant fold function, so we only get here if constant fold is not valid
+    def call_neg(self, tx, a):
+        if isinstance(a, SymNodeVariable):
+            return SymNodeVariable.create(
+                tx,
+                (operator.neg)(a.as_proxy()),
+                sym_num=None,
+            )
+        # None no-ops this handler and lets the driving function proceed
+        return None
 
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
