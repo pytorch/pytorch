@@ -342,7 +342,7 @@ class _World:
     Container class for c10d process group state.
     This is used during registration and lookup of PG state.
 
-    .. warning:: This is an experimental API inteded to expose the inner workings
+    .. warning:: This is an experimental API intended to expose the inner workings
        of c10d and is subject to change..
     """
     def __init__(self):
@@ -476,7 +476,7 @@ def _store_based_barrier(rank, store, timeout):
     """
     store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _world.group_count)
     store.add(store_key, 1)
-    logger.info("Added key: {} to store for rank: {}".format(store_key, rank))
+    logger.info("Added key: %s to store for rank: %s", store_key, rank)
 
     # Now wait for all workers to check in with the store.
     world_size = get_world_size()
@@ -496,9 +496,8 @@ def _store_based_barrier(rank, store, timeout):
         if timedelta(seconds=(time.time() - log_time)) > timedelta(seconds=10):
             logger.info(
                 "Waiting in store based barrier to initialize process group for "
-                "rank: {}, key: {} (world_size={}, worker_count={}, timeout={})".format(
-                    rank, store_key, world_size, worker_count, timeout
-                )
+                "rank: %s, key: %s (world_size=%s, worker_count=%s, timeout=%s)",
+                rank, store_key, world_size, worker_count, timeout
             )
             log_time = time.time()
 
@@ -1097,7 +1096,7 @@ def _new_process_group_helper(
         # Set sequence numbers for gloo and nccl backends.
         if backend_str in [Backend.GLOO, Backend.NCCL]:
             backend_class._set_sequence_number_for_group()
-        # If the type is a sublcass of ProcessGroup then return this process group immediately
+        # If the type is a subclass of ProcessGroup then return this process group immediately
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
         if issubclass(type(backend_class), ProcessGroup):
@@ -3716,7 +3715,8 @@ def new_subgroups(
         if rank in ranks_in_subgroup:
             cur_subgroup = subgroup
             logger.info(
-                "Rank {} is assigned to subgroup {}".format(rank, ranks_in_subgroup)
+                "Rank %s is assigned to subgroup %s",
+                rank, ranks_in_subgroup
             )
 
     return cur_subgroup, subgroups
@@ -3828,7 +3828,7 @@ def new_subgroups_by_enumeration(
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:
                 cur_subgroup = subgroup
-                logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
+                logger.info("Rank %s is assigned to subgroup %s", rank, ranks)
 
     return cur_subgroup, subgroups
 
