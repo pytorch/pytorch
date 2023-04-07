@@ -224,7 +224,7 @@ struct TORCH_PYTHON_API type_caster<c10::Scalar> {
  public:
   PYBIND11_TYPE_CASTER(
       c10::Scalar,
-      _("Union[Number, torch.SymInt, torch.SymFloat]"));
+      _("Union[Number, torch.SymInt, torch.SymFloat, torch.SymBool]"));
   bool load(py::handle src, bool);
 
   static py::handle cast(

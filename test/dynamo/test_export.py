@@ -2125,13 +2125,13 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(my_dyn_fn, x, constraints=[dynamic_dim(x, 0)])
 
-    @config.patch(dynamic_shapes=True)
+    @config.patch(dynamic_shapes=True, assume_static_by_default=False)
     def test_symbool(self):
         def f(x):
             a = torch.scalar_tensor(x.shape[0] > 4)
             return x.sin().sum() + a.sum()
 
-        gm, _  = torch._dynamo.export(f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic")
+        gm, _ = torch._dynamo.export(f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic")
         self.assertEqual(gm(torch.ones(3, 4)), f(torch.ones(3, 4)))
 
     @config.patch(dynamic_shapes=True)
