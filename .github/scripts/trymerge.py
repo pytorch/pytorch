@@ -1760,6 +1760,9 @@ def merge(
     initial_commit_sha = pr.last_commit()["oid"]
     print(f"Attempting merge of {initial_commit_sha}")
 
+    if "merging" not in pr.get_labels():
+        pr.add_numbered_label("merging")
+
     explainer = TryMergeExplainer(
         skip_mandatory_checks, pr.get_labels(), pr.pr_num, org, project, ignore_current
     )
@@ -1992,8 +1995,6 @@ def main() -> None:
         message += '\nIf those updates are intentional, please add "submodule" keyword to PR title/description.'
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
-    if "merging" not in pr.get_labels():
-        pr.add_numbered_label("merging")
     try:
         merge(
             args.pr_num,
