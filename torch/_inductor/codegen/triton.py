@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Dict, List, Set
+from typing import Dict, Iterable, List, Set
 
 import sympy
 
@@ -298,10 +298,12 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def rand(seed, offset, _):  # _ here to keep the contract identical to CPU rand op
+        offset = f"({offset}).to(tl.uint32)"
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
     def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
+        offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
 
     @staticmethod
@@ -527,12 +529,16 @@ class IterationRangesRoot(IterationRanges):
 
     def ranges_code(self):
         size = self.kernel.indexing_size_str(self.index, self.prefix)
-        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}"
+        index_dtype = self.kernel.index_dtype
+        convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
+        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}{convert}"
 
-    def pid_cache_lookup(self, key):
-        if key in self.pid_cache:
-            return self.pid_cache[key]
-        return key
+    def get_pid(self):
+        key = f"tl.program_id({self.index})"
+        pid = self.pid_cache.get(key, key)
+        if self.kernel.index_dtype != "tl.int32":
+            return f"{pid}.to({self.kernel.index_dtype})"
+        return pid
 
     def codegen_header(self, code):
         x = self.prefix
@@ -544,10 +550,9 @@ class IterationRangesRoot(IterationRanges):
                 f"{self.name} = {self.ranges_code()}",
             )
         else:
-            pid = self.pid_cache_lookup(f"tl.program_id({self.index})")
             code.writelines(
                 [
-                    f"{x}offset = {pid} * {x.upper()}BLOCK",
+                    f"{x}offset = {self.get_pid()} * {x.upper()}BLOCK",
                     f"{self.name} = {x}offset + {self.ranges_code()}",
                 ]
             )
@@ -626,6 +631,7 @@ class TritonKernel(Kernel):
     def __init__(
         self,
         *groups,
+        index_dtype,
         mutations=None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
@@ -645,6 +651,8 @@ class TritonKernel(Kernel):
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
+        self.index_dtype = index_dtype
+
         self.persistent_reduction = self.should_use_persistent_reduction()
         self.initialize_range_tree(pid_cache)
 
@@ -1140,6 +1148,7 @@ class TritonKernel(Kernel):
 
             if accumulator_index:
                 # argmax, argmin
+                idx_dtype = self.index_dtype
                 self.suffix.writelines(
                     [
                         f"{accumulator_index}_reduce = "
@@ -1651,6 +1660,62 @@ class TritonScheduling:
         else:
             return node.node.data.reduction_hint
 
+    @staticmethod
+    def can_use_32bit_indexing(numel: sympy.Expr, buffers: Iterable[ir.Buffer]) -> bool:
+        int_max = torch.iinfo(torch.int32).max
+        size_hint = V.graph.sizevars.size_hint
+        if size_hint(numel) > int_max:
+            return False
+
+        buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
+        if any(size_hint(size) > int_max for size in buf_sizes):
+            return False
+
+        # Only install guards for 32-bit indexing as there is no correctness
+        # issue with using 64-bit for everything
+        V.graph.sizevars.guard_leq(numel, int_max)
+        for size in buf_sizes:
+            V.graph.sizevars.guard_leq(size, int_max)
+        return True
+
+    @staticmethod
+    def select_index_dtype(node_schedule, numel, reduction_numel):
+        # Gather all used buffer names
+        buffer_names = set()
+        for node in node_schedule:
+            if not isinstance(node, scheduler.BaseSchedulerNode):
+                continue
+
+            buffer_names.update(node.get_names())
+            buffer_names.update(node.used_buffer_names())
+
+        # Get buffers objects
+        def _get_buffer(name: str) -> ir.Buffer:
+            if name in V.graph.name_to_buffer:
+                return V.graph.name_to_buffer[name]
+            elif name in V.graph.graph_inputs:
+                return V.graph.graph_inputs[name]
+            elif name in V.graph.constants:
+                data = V.graph.constants[name]
+                return ir.ConstantBuffer(
+                    name,
+                    ir.FixedLayout(
+                        data.device, data.dtype, *V.graph.static_sizes_strides(data)
+                    ),
+                )
+            raise RuntimeError(f"Failed to find buffer matching name {name}")
+
+        buffers = [_get_buffer(name) for name in buffer_names]
+
+        # In theory we can separately check xnumel and rnumel are <= int_max
+        # but some indexers do use the full linear index so we need to be
+        # conservative here.
+        total_numel = numel * reduction_numel
+
+        if TritonScheduling.can_use_32bit_indexing(total_numel, buffers):
+            return "tl.int32"
+        return "tl.int64"
+
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reductions = list(
@@ -1674,8 +1739,13 @@ class TritonScheduling:
             if hasattr(node, "get_mutations"):
                 mutations.update(node.get_mutations())
 
+        index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
+
         with TritonKernel(
-            *tiled_groups, reduction_hint=reduction_hint_val, mutations=mutations
+            *tiled_groups,
+            reduction_hint=reduction_hint_val,
+            mutations=mutations,
+            index_dtype=index_dtype,
         ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
