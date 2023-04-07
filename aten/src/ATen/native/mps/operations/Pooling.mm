@@ -359,6 +359,10 @@ Tensor mps_max_pool2d(const Tensor& input,
                       IntArrayRef padding,
                       IntArrayRef dilation,
                       bool ceil_mode) {
+  TORCH_WARN_ONCE("max_pool2d with `return_indices=False` on MPS is not infinitely differentiable.",
+                  " If you want to calculate higher order derivatives, e.g. second order,",
+                  " set `return_indices=True`.");
+
   Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
