@@ -1310,6 +1310,7 @@ class View(BaseView):
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
+        # Skip pointless views
         if V.graph.sizevars.maybe_guard_list_equals(old_size, new_size):
             return x
 
