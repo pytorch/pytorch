@@ -129,7 +129,7 @@ def _dtype_propagation(sub_graph: torch.fx.Graph):
                 opt_ctx.dtype = torch.int64
         elif _node.target == "load":
             opt_ctx.dtype = V.graph.get_dtype(_node.args[1])
-        if opt_ctx.dtype is not  None:
+        if opt_ctx.dtype is not None:
             data_type_logger(
                 f"for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}"
             )
