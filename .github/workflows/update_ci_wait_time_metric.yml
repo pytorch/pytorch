@@ -42,4 +42,4 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_UPDATE_SECRET_ACCESS_KEY }}
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
-          python3 .github/scripts/check_labels.py "${PR_NUM}"
+          python3 .github/scripts/compute_and_upload_ci_wait_time_metric.py
