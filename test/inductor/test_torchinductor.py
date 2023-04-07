@@ -2397,6 +2397,21 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_convolution3(self):
+        # Test stride or padding or dilation is 1 element list.
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(5, 6, [3, 3], stride=[1], padding=[0], dilation=[1]),
+            torch.nn.ReLU(),
+            ToTuple(),
+        )
+
+        self.common(
+            m,
+            (torch.randn([2, 5, 16, 16]),),
+            atol=6e-5,
+            rtol=0.001,
+        )
+
     def test_conv2d_channels_last(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv2d channels_last")
@@ -4587,10 +4602,52 @@ class CommonTemplate:
         def fn(x, ind, src):
             return torch.scatter(x, 0, ind, src)
 
-        self.common(
-            fn,
-            (torch.randn(196, 992), torch.randint(196, (1, 992)), torch.randn(1, 992)),
-        )
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                self.common(
+                    fn,
+                    [
+                        torch.randn(196, 992),
+                        torch.randint(196, (1, 992)),
+                        torch.randn(1, 992),
+                    ],
+                )
+
+    def test_scatter5(self):
+        def fn(a, dim, index, b, reduce):
+            a = a.clone()
+            a.scatter_(dim, index, b, reduce=reduce)
+            a1 = a + 1.0
+            a1.scatter_(dim, index, b, reduce=reduce)
+            return (a, a1)
+
+        for reduce in ["add", "multiply"]:
+            self.common(
+                fn,
+                [
+                    torch.ones((4, 5)),
+                    0,
+                    torch.tensor([[1], [2], [3]], dtype=torch.int64),
+                    torch.randn(4, 5),
+                    reduce,
+                ],
+            )
+
+    def test_scatter6(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b)
+
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                self.common(
+                    fn,
+                    [
+                        torch.randn(5, 8, 13),
+                        2,
+                        torch.tensor([[[3, 5, 7, 9]]]),
+                        0.8,  # src can be a scalar
+                    ],
+                )
 
     @unittest.skip("Flaky test, needs debugging")
     def test_scatter_add1(self):
@@ -4625,15 +4682,17 @@ class CommonTemplate:
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
 
-        self.common(
-            fn,
-            [
-                torch.randn(5, 29, 13),
-                2,
-                torch.tensor([[[3, 5, 7, 9]]]),
-                torch.randn(1, 1, 10),
-            ],
-        )
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                self.common(
+                    fn,
+                    [
+                        torch.randn(5, 29, 13),
+                        2,
+                        torch.tensor([[[3, 5, 7, 9]]]),
+                        torch.randn(1, 1, 10),
+                    ],
+                )
 
     def test_scatter_reduce1(self):
         def fn(a, dim, index, b):
@@ -4662,6 +4721,26 @@ class CommonTemplate:
                 torch.randn(2, 3),
             ],
         )
+
+    def test_scatter_reduce3(self):
+        def fn(a, dim, index, b, reduce):
+            a = a.clone()
+            a.scatter_reduce_(dim, index, b, reduce=reduce)
+            a1 = a + 1.0
+            a1.scatter_reduce_(dim, index, b, reduce=reduce)
+            return (a, a1)
+
+        for reduce in ["sum", "prod"]:
+            self.common(
+                fn,
+                [
+                    torch.ones((4, 5)),
+                    0,
+                    torch.tensor([[1], [2], [3]], dtype=torch.int64),
+                    torch.randn(4, 5),
+                    reduce,
+                ],
+            )
 
     # issue #1150
     def test_dense_mask_index(self):
