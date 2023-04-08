@@ -602,7 +602,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         tiny_config = triton_config_reduction(
             size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )
-        if config.max_autotune or config.max_autotune_pointwise:
+        if config.max_autotune or config.max_autotune_pointwise or True:
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:
             return cached_autotune([contiguous_config], meta=meta)
