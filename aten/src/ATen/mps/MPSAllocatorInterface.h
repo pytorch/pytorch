@@ -15,9 +15,9 @@ public:
   // see the comments in MPSAllocator.h for the description of these methods.
   virtual void emptyCache() const = 0;
   virtual ssize_t getUnalignedBufferSize(void* ptr) const = 0;
-  virtual IntArrayRef getBufferShape(void* ptr) const = 0;
+  virtual IntArrayRef getBufferShape(const void* ptr) const = 0;
   virtual void setBufferShape(void* ptr, const IntArrayRef& shape) const = 0;
-  virtual bool isSharedBuffer(void* ptr) const = 0;
+  virtual bool isSharedBuffer(const void* ptr) const = 0;
   virtual bool isSharedStorageSupported() const = 0;
   virtual c10::DataPtr allocScalarBufferWithValue(void* value, size_t size) const = 0;
   virtual void setLowWatermarkRatio(double ratio) const = 0;

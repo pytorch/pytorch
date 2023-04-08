@@ -255,13 +255,13 @@ public:
   // releases all the cached buffers and their associated heaps
   void emptyCache();
   // returns true if buffer was allocated from the shared pool
-  bool isSharedBuffer(void* ptr);
+  bool isSharedBuffer(const void* ptr);
   // get the requested unaligned size of an MTLBuffer
   ssize_t getUnalignedBufferSize(void* ptr);
   // set the shape of a base tensor from a view tensor
   void setBufferShape(void* ptr, const IntArrayRef& shape);
   // retrieve the shape of a base tensor from a view tensor
-  IntArrayRef getBufferShape(void* ptr);
+  IntArrayRef getBufferShape(const void* ptr);
   // allocate a buffer from a specialized pool to import CPU scalars into GPU
   id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
   // this indicates how far (in Megabytes) the current total allocations are from the
