@@ -425,6 +425,16 @@ def view_copy_dtype(self, dtype):
     return self.to(dtype).clone()
 
 
+@register_decomposition([aten.native_dropout])
+def native_dropout(input: Tensor, p: float, train: bool):
+    if not train or p == 0:
+        return (input, torch.ones_like(input, dtype=torch.bool))
+    if p == 1:
+        return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
+    # intentionally don't decompose to improve pattern matching
+    return NotImplemented
+
+
 """
 Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
@@ -432,7 +442,6 @@ turning them on and off via `config.fallback_random`.
 """
 extra_random_decomps = get_decompositions(
     [
-        aten.native_dropout,
         aten.cauchy,
         aten.cauchy_,
         aten.exponential,
