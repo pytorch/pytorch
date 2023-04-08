@@ -777,8 +777,12 @@ test_bazel() {
     # Test //c10/... without Google flags and logging libraries. The
     # :all_tests target in the subsequent Bazel invocation tests
     # //c10/... with the Google libraries.
+    #
+    # Note that for this command, we do not run
+    # //c10/test/macros:bazel_test because it is hard-coded to expect
+    # gflags and glog.
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
-      --no//c10:use_gflags --no//c10:use_glog //c10/...
+      --no//c10:use_gflags --no//c10:use_glog -- //c10/... -//c10/test/macros:bazel_test
 
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
   else
