@@ -25,7 +25,7 @@ from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, slowTest
 from torch.utils._python_dispatch import TorchDispatchMode
 
 try:
@@ -40,7 +40,6 @@ except unittest.SkipTest:
 
 
 vec_dtypes = test_torchinductor.vec_dtypes
-slow = test_torchinductor.slow
 run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
@@ -116,6 +115,19 @@ class CPUReproTests(TestCase):
         compiled_out = opt_fn(p0, p1)
         assert same(real_out, compiled_out)
 
+    def test_pow_cos(self):
+        # https://github.com/pytorch/pytorch/issues/98149
+        def fn(x):
+            t = x.pow(5)
+            return torch.cos(t)
+
+        x = torch.tensor([4], dtype=torch.uint8)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn(x)
+        real_out = fn(x)
+        compiled_out = opt_fn(x)
+        assert same(real_out, compiled_out)
+
     def test_reduce_with_masked(self):
         # https://github.com/pytorch/pytorch/issues/96484
         def fn(a, b):
@@ -165,6 +177,21 @@ class CPUReproTests(TestCase):
         fn(x2, y)
         fn_compiled([x3, y])
         assert same(x2, x3)
+
+    def test_int_div(self):
+        def fn(x, y):
+            s3 = x.size(1)
+            a = torch.zeros((1 + s3) // 2)
+            a += y
+            return a, s3
+
+        p0 = torch.randint(5, (1, 8))
+        p1 = torch.randn(1)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn(p0, p1)
+        real_out = fn(p0, p1)
+        compiled_out = opt_fn(p0, p1)
+        assert same(real_out, compiled_out)
 
     def test_no_op_squeeze(self):
         @torch._dynamo.optimize("inductor")
@@ -344,6 +371,9 @@ class CPUReproTests(TestCase):
             "randn",
             "isnan",
             "rand",
+            "bitwise_and",
+            "bitwise_or",
+            "bitwise_xor",
         ]
         union = {*cpp_vec_op_list, *diff}
         self.assertTrue(set(cpp_op_list).issubset(union))
@@ -438,7 +468,7 @@ class CPUReproTests(TestCase):
                 assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
-    @slow()
+    @slowTest
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
@@ -1005,7 +1035,7 @@ class CPUReproTests(TestCase):
             traced = make_fx(fn)(x1, x2)
             compiled = compile_fx_inner(traced, [x1, x2])
             assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-            assert metrics.generated_cpp_vec_kernel_count == 1
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
             torch._dynamo.reset()
             metrics.reset()
@@ -1059,11 +1089,11 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 x = torch.randn(64, 58, 28, 28)
                 opt_fn = torch._dynamo.optimize("inductor")(channel_shuffle)
-                same(channel_shuffle(x, 2), opt_fn(x, 2))
+                self.assertTrue(same(channel_shuffle(x, 2), opt_fn(x, 2)))
                 if simdlen != 1:
-                    assert metrics.generated_cpp_vec_kernel_count == 1
+                    assert metrics.generated_cpp_vec_kernel_count == 2
 
-    @slow()
+    @slowTest
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
@@ -1111,22 +1141,23 @@ class CPUReproTests(TestCase):
 
         for simdlen in (None, 256, 1):
             with config.patch({"cpp.simdlen": simdlen}):
-                for shape in (
-                    (7, 7),
-                    (8, 8),
-                    (9, 9),
-                    (16, 16),
-                    (17, 17),
-                    (32, 32),
-                    (33, 33),
-                ):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    x = torch.randn(shape)
-                    opt_fn = torch._dynamo.optimize("inductor")(fn)
-                    same(fn(x), opt_fn(x))
-                    if simdlen != 1:
-                        assert metrics.generated_cpp_vec_kernel_count == 1
+                for dtype in (torch.float, torch.bfloat16):
+                    for shape in (
+                        (7, 7),
+                        (8, 8),
+                        (9, 9),
+                        (16, 16),
+                        (17, 17),
+                        (32, 32),
+                        (33, 33),
+                    ):
+                        torch._dynamo.reset()
+                        metrics.reset()
+                        x = torch.randn(shape, dtype=dtype)
+                        opt_fn = torch._dynamo.optimize("inductor")(fn)
+                        self.assertTrue(same(fn(x), opt_fn(x)))
+                        if simdlen != 1:
+                            assert metrics.generated_cpp_vec_kernel_count == 2
 
     def test_transpose_non_contiguous(self):
         def fn(a):
@@ -1190,6 +1221,49 @@ class CPUReproTests(TestCase):
         with patch.object(GraphLowering, "run_node", run_node_alt):
             fn(torch.randn([8, 128]))
         self.assertGreater(len(strings), 3)
+
+    def test_vertical_sum_cpu_only(self):
+        def fn1(a):
+            return a.sum(dim=0)
+
+        def fn2(a):
+            return a.sum(dim=1)
+
+        metrics.reset()
+        x = torch.randn(100, 100)
+        opt_fn1 = torch._dynamo.optimize("inductor")(fn1)
+        self.assertTrue(same(fn1(x), opt_fn1(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+        metrics.reset()
+        x = torch.randn(100, 100, 100)
+        opt_fn2 = torch._dynamo.optimize("inductor")(fn2)
+        self.assertTrue(same(fn2(x), opt_fn2(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_transpose_vertical_sum_cpu_only(self):
+        def fn(a, b):
+            c = a * b
+            return c.sum(dim=1)
+
+        metrics.reset()
+        x = torch.randn(100, 50, 50)
+        y = torch.randn(100, 50, 50).transpose(1, 2)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x, y), opt_fn(x, y)))
+        assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_transpose_sum2d_cpu_only(self):
+        def fn(a, b):
+            c = a * b
+            return c.sum()
+
+        metrics.reset()
+        x = torch.randn(50, 50)
+        y = torch.randn(50, 50).transpose(0, 1)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x, y), opt_fn(x, y)))
+        assert metrics.generated_cpp_vec_kernel_count == 2
 
 
 if __name__ == "__main__":
