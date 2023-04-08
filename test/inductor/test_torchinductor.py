@@ -28,6 +28,7 @@ from torch._inductor.utils import run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -1310,6 +1311,98 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_large_tensor_reduction(self):
+        if not _has_sufficient_memory(self.device, 4.5 * 1024**3):  # 4.5 GiB
+            raise unittest.SkipTest("insufficient memory")
+
+        if self.device == "cpu":
+            raise unittest.SkipTest("Fails on CPU")
+
+        # Test 64-bit indexing works correctly
+        def fn(a):
+            return torch.max(a)
+
+        t = torch.ones(2**32, dtype=torch.int8, device=self.device)
+        t[-1] = 2
+
+        # self.common OOMs here because it copies inputs to check for mutations
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(t)
+        expect = torch.tensor(2, dtype=torch.int8, device=self.device)
+        self.assertEqual(actual, expect)
+
+    def test_large_broadcast_reduction(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Fails on CPU")
+
+        # Test 64-bit indexing works correctly when inputs are less than 32-bit
+        # but intermediate tensors require 64-bit indexing
+        def fn(a, b):
+            return torch.max(a + b)
+
+        t1 = torch.ones(1, 2**16, dtype=torch.int8, device=self.device)
+        t2 = torch.ones(2**16, 1, dtype=torch.int8, device=self.device)
+
+        t1[-1, -1] = 2
+        t2[-1, -1] = 2
+
+        # self.common OOMs here because it copies inputs to check for mutations
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(t1, t2)
+        expect = torch.tensor(4, dtype=torch.int8, device=self.device)
+        self.assertEqual(actual, expect)
+
+    def test_large_pointwise(self):
+        if not _has_sufficient_memory(self.device, 2 * (2**31 + 1)):
+            raise unittest.SkipTest("insufficient memory")
+
+        def fn(a):
+            return a + 1
+
+        t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(t)
+
+        # Can't use assertEqual as it expands broadcasted inputs
+        del t
+        if torch.device(self.device).type == "cuda":
+            torch.cuda.empty_cache()
+        self.assertTrue((actual == 2).all())
+
+    def test_large_offset_pointwise(self):
+        # Test 64-bit indexing is used when input views a tensor that can be
+        # indexed with 32-bit strides but the storage offset pushes it over
+        # INT_MAX
+        if not _has_sufficient_memory(self.device, (2**31 + 1) + (2**30 + 1)):
+            raise unittest.SkipTest("insufficient memory")
+
+        def fn(a):
+            return a + 4
+
+        t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
+        t[2**30 :] = 0
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(t[2**30 :])
+        self.assertTrue((actual == 4).all())
+
+    def test_large_strided_reduction(self):
+        # Test 64-bit indexing is used when input numel is less than INT_MAX
+        # but stride calculations go above INT_MAX
+        if not _has_sufficient_memory(self.device, 2**31 + 2):
+            raise unittest.SkipTest("insufficient memory")
+
+        def fn(a):
+            return torch.max(a)
+
+        storage = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
+        view = storage[::32]
+        view[-1] = 2
+
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(view)
+        expect = torch.tensor(2, dtype=torch.int8, device=self.device)
+        self.assertEqual(actual, expect)
+
     def test_softmax(self):
         def fn(a, b):
             return (torch.softmax(a + b, -1), torch.softmax(a, 0), torch.softmax(b, 1))
@@ -2180,6 +2273,8 @@ class CommonTemplate:
             return (
                 a[:, :10, 0] + a[:, 10:, 0],
                 (a + 1)[:, :10, 0] + (a + 1)[:, 10:, 0],
+                a[:, -30:, 0],  # negative index out of range
+                a[:, :-30, 0],  # negative index out of range
             )
 
         self.common(
@@ -4785,6 +4880,20 @@ class CommonTemplate:
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1])
 
         self.common(fn, [torch.randn(55)], assert_equal=False)
+
+    @config.patch({"lowmem_dropout": False})
+    def test_dropout_trivial_0(self):
+        def fn1(a):
+            return torch.nn.functional.dropout(a, 0.0, True) + a
+
+        self.common(fn1, [torch.randn(55)])
+
+    @config.patch({"lowmem_dropout": False})
+    def test_dropout_trivial_1(self):
+        def fn2(a):
+            return torch.nn.functional.dropout(a, 1.0, True) + a
+
+        self.common(fn2, [torch.randn(55)])
 
     @config.patch({"triton.cudagraphs": True})
     def test_dropout(self):
