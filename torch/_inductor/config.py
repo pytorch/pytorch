@@ -61,7 +61,9 @@ search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") ==
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 
-coordinate_descent_tuning = os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
+coordinate_descent_tuning = (
+    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
+)
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
@@ -93,6 +95,12 @@ comment_origin = False
 # Convert 1x1 convs into matmuls
 conv_1x1_as_mm = False
 
+# Enable split reductions for better utilization when the dimension
+# being reduced over is large (by splitting it)
+split_reductions = True
+
+# Only save random seed for backwards rather than full mask
+lowmem_dropout = False
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -163,6 +171,10 @@ class cpp:
     # set to torch.get_num_threads()
     threads = -1
 
+    # Do not generate loops when the condition doesn't hold, like:
+    # for(long i0=4096; i0<4096; i0+=1)
+    no_redundant_loops = True
+
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
     # For single-threaded workload, turning it on would incur a slight
@@ -193,7 +205,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = False
+    cudagraph_trees = not is_fbcode()
 
     # assertions not on the fast path, steady state
     fast_cudagraph_asserts = True
@@ -238,7 +250,12 @@ class triton:
     descriptive_names = "original_aten"
 
     # use alternate codegen for smaller reductions
-    persistent_reductions = os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
+    persistent_reductions = (
+        os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
+    )
+
+    # hint to Triton when arguments are divisible by 16
+    divisible_by_16 = True
 
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
@@ -254,7 +271,7 @@ class trace:
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
-    debug_log = True
+    debug_log = False
 
     # Save python logger call >=logging.INFO
     info_log = False

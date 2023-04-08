@@ -10,13 +10,14 @@ import os
 import os.path
 import re
 import threading
+from enum import auto, Enum
 from typing import List
 
 import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config
-from .codecache import cache_dir, cubin_cache_dir
+from .codecache import cache_dir, CudaKernelParamCache
 from .coordinate_descent_tuner import CoordescTuner
 
 from .ir import ReductionHint, TileHint
@@ -30,7 +31,6 @@ from .utils import (
     next_power_of_2,
     triton_config_to_hashable,
 )
-from enum import Enum, auto
 
 
 log = logging.getLogger(__name__)
@@ -47,11 +47,13 @@ else:
 
 DEBUG = False
 
+
 class HeuristicType(Enum):
     POINTWISE = auto()
     REDUCTION = auto()
     PERSISTENT_REDUCTION = auto()
     TEMPLATE = auto()
+
 
 class CachingAutotuner(KernelInterface):
     """
@@ -61,7 +63,9 @@ class CachingAutotuner(KernelInterface):
     configs, and does not rely on the Triton JIT.
     """
 
-    def __init__(self, fn, meta, configs, save_cache_hook, mutated_arg_names, heuristic_type):
+    def __init__(
+        self, fn, meta, configs, save_cache_hook, mutated_arg_names, heuristic_type
+    ):
         super().__init__()
         self.fn = fn
         self.meta = meta
@@ -84,7 +88,9 @@ class CachingAutotuner(KernelInterface):
                 str(self.meta.get("device", 0)),
             )
 
-        self.coordesc_tuner = CoordescTuner(is_mm=False, is_persistent_reduction=self.is_persistent_reduction())
+        self.coordesc_tuner = CoordescTuner(
+            is_mm=False, is_persistent_reduction=self.is_persistent_reduction()
+        )
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
@@ -157,8 +163,10 @@ class CachingAutotuner(KernelInterface):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
-        if config.triton.store_cubin:
-            launcher.kernel_name = self.fn.__name__
+        launcher.store_cubin = config.triton.store_cubin
+        # store this global varible to avoid the high overhead of reading it when calling run
+        if launcher.store_cubin:
+            launcher.fn = self.fn
             launcher.bin = binary
 
         return launcher
@@ -182,6 +190,7 @@ class CachingAutotuner(KernelInterface):
 
     def clone_args(self, *args):
         from .compile_fx import clone_preserve_strides
+
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
         # it leads to increase memory use
@@ -221,21 +230,12 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(self.launchers[0].config)
 
     def save_cuda_kernel(self, grid, stream, launcher):
-        from .codegen.wrapper import KernelParamCache
-
-        # Make sure kernel_name is enough for distiguishing kernels
-        assert config.triton.unique_kernel_names
-
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
             grid_x, grid_y, grid_z = grid
 
-        kernel_name = launcher.kernel_name
-        cubin_path = os.path.join(cubin_cache_dir(), f"{kernel_name}.cubin")
-        with open(cubin_path, "wb") as f:
-            f.write(launcher.bin.asm["cubin"])
-
+        key = launcher.fn.module.split(".")[-1]
         params = {
             "mangled_name": launcher.bin.metadata["name"],
             "grid_x": grid_x,
@@ -245,14 +245,7 @@ class CachingAutotuner(KernelInterface):
             "shared_mem": launcher.bin.shared,
             "stream": stream,
         }
-        with self.lock:
-            if KernelParamCache.cache.get(kernel_name, None):
-                assert (
-                    KernelParamCache.cache[kernel_name].get("mangled_name", None)
-                    == launcher.bin.metadata["name"]
-                )
-            else:
-                KernelParamCache.cache[kernel_name] = params
+        CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
 
     def is_persistent_reduction(self):
         return self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
@@ -264,13 +257,16 @@ class CachingAutotuner(KernelInterface):
 
         cloned_args = self.clone_args(*args)
         config2launcher = {launcher.config: launcher}
+
         def benchmark_one_config(config):
             with self.lock:
                 launcher = self._precompile_config(config, None)
             config2launcher[config] = launcher
             return self.bench(launcher, *cloned_args, **kwargs)[0]
 
-        best_config = self.coordesc_tuner.autotune(benchmark_one_config, launcher.config, None)
+        best_config = self.coordesc_tuner.autotune(
+            benchmark_one_config, launcher.config, None
+        )
         best_config.found_by_coordesc = True
 
         if self.save_cache_hook:
@@ -284,13 +280,18 @@ class CachingAutotuner(KernelInterface):
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid)
 
-        if not getattr(self.launchers[0].config, "found_by_coordesc", False) and config.coordinate_descent_tuning:
-            self.launchers = [self.coordinate_descent_tuning(self.launchers[0], *args, grid=grid)]
-
-        if config.triton.store_cubin:
-            self.save_cuda_kernel(grid, stream, self.launchers[0])
+        if (
+            not getattr(self.launchers[0].config, "found_by_coordesc", False)
+            and config.coordinate_descent_tuning
+        ):
+            self.launchers = [
+                self.coordinate_descent_tuning(self.launchers[0], *args, grid=grid)
+            ]
 
         (launcher,) = self.launchers
+        if launcher.store_cubin:
+            self.save_cuda_kernel(grid, stream, self.launchers[0])
+
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
@@ -342,6 +343,7 @@ class DebugAutotuner(CachingAutotuner):
     def __init__(self, *args, regex_filter="", **kwargs):
         self.regex_filter = regex_filter
         super().__init__(*args, **kwargs)
+        self.cached = None
 
     def run(self, *args, grid, stream):
         possible_names = _find_names(self)
@@ -351,17 +353,20 @@ class DebugAutotuner(CachingAutotuner):
         super().run(*args, grid=grid, stream=stream)
         (launcher,) = self.launchers
 
-        ms = self.bench(launcher, *args, grid=grid)[0]
-        num_in_out_ptrs = len(
-            [
-                arg_name
-                for arg_name in self.fn.arg_names
-                if arg_name.startswith("in_out_ptr")
-            ]
-        )
-        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
-        gb_per_s = num_gb / (ms / 1e3)
-
+        if self.cached is None:
+            ms = self.bench(launcher, *args, grid=grid)[0]
+            num_in_out_ptrs = len(
+                [
+                    arg_name
+                    for arg_name in self.fn.arg_names
+                    if arg_name.startswith("in_out_ptr")
+                ]
+            )
+            num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+            gb_per_s = num_gb / (ms / 1e3)
+            self.cached = (ms, num_gb, gb_per_s, kernel_name)
+        else:
+            ms, num_gb, gb_per_s, kernel_name = self.cached
         collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
         print(
             create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
@@ -400,15 +405,15 @@ def load_cached_autotuning(
         num_warps = best_config.pop("num_warps")
         num_stages = best_config.pop("num_stages")
         triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
-        triton_config.found_by_coordesc = True 
+        triton_config.found_by_coordesc = True
         return triton_config
 
     matching_configs = [
         cfg
         for cfg in configs
         if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
-           and cfg.num_warps == best_config.get("num_warps")
-           and cfg.num_stages == best_config.get("num_stages")
+        and cfg.num_warps == best_config.get("num_warps")
+        and cfg.num_stages == best_config.get("num_stages")
     ]
     if len(matching_configs) != 1:
         return None
@@ -439,13 +444,17 @@ def cached_autotune(
 
         def save_cache_hook(cfg, found_by_coordesc=False):
             with open(cache_filename, "w") as fd:
-                fd.write(json.dumps({
-                    **cfg.kwargs,
-                    "num_warps": cfg.num_warps,
-                    "num_stages": cfg.num_stages,
-                    "configs_hash": configs_hash,
-                    "found_by_coordesc": found_by_coordesc
-                }))
+                fd.write(
+                    json.dumps(
+                        {
+                            **cfg.kwargs,
+                            "num_warps": cfg.num_warps,
+                            "num_stages": cfg.num_stages,
+                            "configs_hash": configs_hash,
+                            "found_by_coordesc": found_by_coordesc,
+                        }
+                    )
+                )
             if DEBUG:
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
                 print(f"Save {type_str} tuning result to {cache_filename}")
@@ -637,12 +646,22 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     bs = max(256, min(numel // 128, 1024))
 
     if len(size_hints) == 1:
-        return cached_autotune([triton_config(size_hints, bs)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
+        return cached_autotune(
+            [triton_config(size_hints, bs)],
+            meta=meta,
+            heuristic_type=HeuristicType.POINTWISE,
+            filename=filename,
+        )
     if len(size_hints) == 2:
         if (
             not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
         ) and not (config.max_autotune or config.max_autotune_pointwise):
-            return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
+            return cached_autotune(
+                [triton_config(size_hints, 32, 32)],
+                meta=meta,
+                heuristic_type=HeuristicType.POINTWISE,
+                filename=filename,
+            )
         return cached_autotune(
             [
                 triton_config(size_hints, 32, 32),
@@ -658,7 +677,12 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
         )
     if len(size_hints) == 3:
         if not config.triton.autotune_pointwise:
-            return cached_autotune([triton_config(size_hints, 16, 16, 16)], meta=meta, heuristic_type=HeuristicType.POINTWISE, filename=filename)
+            return cached_autotune(
+                [triton_config(size_hints, 16, 16, 16)],
+                meta=meta,
+                heuristic_type=HeuristicType.POINTWISE,
+                filename=filename,
+            )
         return cached_autotune(
             [
                 triton_config(size_hints, 16, 16, 16),
@@ -691,16 +715,32 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:
-            return cached_autotune([contiguous_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
+            return cached_autotune(
+                [contiguous_config],
+                meta=meta,
+                heuristic_type=HeuristicType.REDUCTION,
+                filename=filename,
+            )
         elif reduction_hint == ReductionHint.OUTER:
-            return cached_autotune([outer_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
+            return cached_autotune(
+                [outer_config],
+                meta=meta,
+                heuristic_type=HeuristicType.REDUCTION,
+                filename=filename,
+            )
         elif reduction_hint == ReductionHint.OUTER_TINY:
-            return cached_autotune([tiny_config], meta=meta, heuristic_type=HeuristicType.REDUCTION, filename=filename)
+            return cached_autotune(
+                [tiny_config],
+                meta=meta,
+                heuristic_type=HeuristicType.REDUCTION,
+                filename=filename,
+            )
         if not config.triton.autotune_pointwise:
             return cached_autotune(
-                [triton_config_reduction(size_hints, 32, 128)], meta=meta,
+                [triton_config_reduction(size_hints, 32, 128)],
+                meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
-                filename=filename
+                filename=filename,
             )
         return cached_autotune(
             [
@@ -738,6 +778,10 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
             )
         ]
 
+    for c in configs:
+        # we don't need RBLOCK for persistent reduction
+        c.kwargs.pop("RBLOCK")
+
     return cached_autotune(
         configs,
         meta=meta,
@@ -751,7 +795,10 @@ def template(num_stages, num_warps, meta, filename=None):
     Compile a triton template
     """
     return cached_autotune(
-        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta, heuristic_type=HeuristicType.TEMPLATE, filename=filename
+        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
+        meta=meta,
+        heuristic_type=HeuristicType.TEMPLATE,
+        filename=filename,
     )
 
 

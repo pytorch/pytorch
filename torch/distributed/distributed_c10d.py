@@ -204,7 +204,7 @@ class Backend:
 
     def __new__(cls, name: str):
         if not isinstance(name, str):
-            raise ValueError("Backend name must be a string, but got: {}".format(name))
+            raise ValueError(f"Backend name must be a string, but got: {name}")
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
         if value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
@@ -342,7 +342,7 @@ class _World:
     Container class for c10d process group state.
     This is used during registration and lookup of PG state.
 
-    .. warning:: This is an experimental API inteded to expose the inner workings
+    .. warning:: This is an experimental API intended to expose the inner workings
        of c10d and is subject to change..
     """
     def __init__(self):
@@ -1096,7 +1096,7 @@ def _new_process_group_helper(
         # Set sequence numbers for gloo and nccl backends.
         if backend_str in [Backend.GLOO, Backend.NCCL]:
             backend_class._set_sequence_number_for_group()
-        # If the type is a sublcass of ProcessGroup then return this process group immediately
+        # If the type is a subclass of ProcessGroup then return this process group immediately
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
         if issubclass(type(backend_class), ProcessGroup):
@@ -2061,6 +2061,11 @@ def all_gather_object(object_list, obj, group=None):
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
 
+    .. warning::
+        Calling :func:`all_gather_object` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`all_gather` instead.
+
     Example::
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
@@ -2148,6 +2153,11 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    .. warning::
+        Calling :func:`gather_object` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`gather` instead.
 
     Example::
         >>> # xdoctest: +SKIP("need process group init")
@@ -2256,6 +2266,11 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
 
+    .. warning::
+        Calling :func:`broadcast_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`broadcast` instead.
+
     Example::
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
@@ -2351,6 +2366,11 @@ def scatter_object_list(
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    .. warning::
+        Calling :func:`scatter_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`scatter` instead.
 
     Example::
         >>> # xdoctest: +SKIP("need process group init")
@@ -3352,8 +3372,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
     if device_ids is not None:
         if get_backend(group) != Backend.NCCL:
             raise RuntimeError(
-                "Function argument device_ids not supported "
-                "for the selected backend {}".format(get_backend(group))
+                f"Function argument device_ids not supported for the selected backend {get_backend(group)}"
             )
         if isinstance(device_ids, list):
             opts.device_ids = device_ids
@@ -3821,9 +3840,7 @@ def new_subgroups_by_enumeration(
         for rank in ranks:
             if rank in rank_to_ranks_dict:
                 raise ValueError(
-                    "Rank {} has appeared in both subgroup {} and {}".format(
-                        rank, rank_to_ranks_dict[rank], ranks
-                    )
+                    f"Rank {rank} has appeared in both subgroup {rank_to_ranks_dict[rank]} and {ranks}"
                 )
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:

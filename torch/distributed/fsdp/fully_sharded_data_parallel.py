@@ -119,7 +119,7 @@ class OptimStateKeyType(Enum):
 
 class FullyShardedDataParallel(nn.Module, _FSDPState):
     """
-    A wrapper for sharding Module parameters across data parallel workers. This
+    A wrapper for sharding module parameters across data parallel workers. This
     is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from DeepSpeed_.
     FullyShardedDataParallel is commonly shortened to FSDP.
 
@@ -208,6 +208,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         not expose the sharded gradients with the unsharded parameters after
         forward. If you want to inspect the gradients, try
         :meth:`summon_full_params` with ``with_grads=True``.
+
+    .. warning::
+        FSDP replaces managed modules' parameters with ``torch.Tensor`` views
+        during forward and backward computation for autograd-related reasons.
+        If your module's forward relies on saved references to the parameters
+        instead of reacquiring the references each iteration, then it will not
+        see FSDP's newly created views, and autograd will not work correctly.
 
     Args:
         module (nn.Module):

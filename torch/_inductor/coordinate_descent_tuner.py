@@ -1,9 +1,12 @@
-import triton
-from typing import Optional, Callable
 import copy
+from typing import Callable, Optional
+
+import triton
+
 from .utils import triton_config_to_hashable
 
 DEBUG = True
+
 
 def get_field(config, name):
     if name == "num_warps":
@@ -12,6 +15,7 @@ def get_field(config, name):
         return config.num_stages
     else:
         return config.kwargs.get(name, None)
+
 
 def set_field(config, name, value):
     if name == "num_warps":
@@ -28,7 +32,7 @@ class CoordescTuner:
 
     TODO will it be necessary to tune multiple fields simultanuously.
 
-    
+
     TODO: what if both increasing and descreasing a field can improve perf.
           i.e., there are multiple local optima..
     """
@@ -60,17 +64,15 @@ class CoordescTuner:
             "XBLOCK",
             "YBLOCK",
             "ZBLOCK",
-
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",
             "BLOCK_K",
-
             "num_warps",
         ]
         if self.is_mm:
             out.append("num_stages")
-    
+
         # we should not tune RBLOCK for persistent reduction
         if not self.is_persistent_reduction:
             out.append("RBLOCK")
@@ -96,16 +98,23 @@ class CoordescTuner:
 
     @staticmethod
     def has_improvement(baseline, test):
-        threshold = 0.001 # 0.1%
+        threshold = 0.001  # 0.1%
         return test is not None and test < baseline * (1 - threshold)
 
-    def autotune(self, func: Callable[triton.Config, float], baseline_config: triton.Config, baseline_timing: Optional[float]=None) -> triton.Config:
+    def autotune(
+        self,
+        func: Callable[triton.Config, float],
+        baseline_config: triton.Config,
+        baseline_timing: Optional[float] = None,
+    ) -> triton.Config:
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
 
         if DEBUG:
             print("= Do coordinate descent tuning =")
-            print(f"Baseline Config {baseline_config}, baseline timing {baseline_timing}")
+            print(
+                f"Baseline Config {baseline_config}, baseline timing {baseline_timing}"
+            )
         improved = True
         best_config = baseline_config
         best_timing = baseline_timing
@@ -119,7 +128,7 @@ class CoordescTuner:
                 # some kernel don't have RBLOCK/YBLOCK/ZBLOCK. So cur_val may be None
                 if cur_val is None:
                     continue
-                
+
                 candidate_values = self.get_neighbour_values(name, cur_val)
                 assert len(candidate_values) > 0
 
@@ -134,15 +143,19 @@ class CoordescTuner:
                         if DEBUG:
                             print(f"Got exception {e}")
                         continue
-                    
+
                     if self.has_improvement(best_timing, candidate_timing):
                         improved = True
                         if DEBUG:
-                            print(f"Tune from {best_config} {best_timing} -> {candidate_config} {candidate_timing}")
+                            print(
+                                f"Tune from {best_config} {best_timing} -> {candidate_config} {candidate_timing}"
+                            )
                         best_timing = candidate_timing
                         best_config = candidate_config
-       
+
         if DEBUG:
-            print(f"Improve from {baseline_config} {baseline_timing} -> {best_config} {best_timing}, {baseline_timing / best_timing:.3f}x")
+            print(
+                f"Improve from {baseline_config} {baseline_timing} -> {best_config} {best_timing}, {baseline_timing / best_timing:.3f}x"  # noqa: B950 line too long
+            )
 
         return best_config
