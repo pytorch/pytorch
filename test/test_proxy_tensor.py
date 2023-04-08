@@ -1364,8 +1364,6 @@ symbolic_tensor_failures = {
     xfail('combinations', ''),
     xfail('count_nonzero', ''),  # Could not run 'aten::count_nonzero.dim_IntList' with arguments from the 'Meta' ba...
     xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
-    xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
-    xfail('cummin', ''),  # aten.cummin.default - couldn't find symbolic meta function/decomposition
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
@@ -1504,7 +1502,6 @@ symbolic_tensor_failures = {
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
     xfail('svd_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
-    xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('trapz', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('trapezoid', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition

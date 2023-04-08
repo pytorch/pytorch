@@ -1,4 +1,4 @@
-load(":cmake_configure_file_cmd.bzl", "cmake_configure_file_cmd")
+load(":cmake_configure_file/cmd.bzl", "cmake_configure_file_cmd")
 
 # Forked from header_template_rule. header_template_rule is not
 # compatible with our usage of select because its substitutions
