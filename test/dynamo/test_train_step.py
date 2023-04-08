@@ -9,18 +9,26 @@ import torch._dynamo.test_case
 from torch._dynamo.testing import same
 
 
+# class Seq(torch.nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#         self.layers = torch.nn.Sequential(
+#             torch.nn.Linear(10, 10),
+#             torch.nn.ReLU(),
+#             torch.nn.Linear(10, 10),
+#             torch.nn.Sigmoid(),
+#         )
+
+
+# def forward(self, x):
+# return self.layers(x)
 class Seq(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.layers = torch.nn.Sequential(
-            torch.nn.Linear(10, 10),
-            torch.nn.ReLU(),
-            torch.nn.Linear(10, 10),
-            torch.nn.Sigmoid(),
-        )
+        self.lay = torch.nn.Linear(10, 1)
 
     def forward(self, x):
-        return self.layers(x)
+        return self.lay(x)
 
 
 def init_weights(m):
@@ -112,7 +120,6 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             self.assertTrue(correct_params[name].grad is None)
             self.assertTrue(opt_params[name].grad is None)
 
-
     def test_adam_optimizer(self):
         model = Seq().cuda()
         model.apply(init_weights)
@@ -140,6 +147,8 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_optimizer = deepcopy(optimizer)
         inputs = [torch.randn((128, 10)).cuda()]
 
+        # warm up the eager one too, so it matches compile
+        # first_loss = train_step(model, optimizer, inputs)
         correct_loss = train_step(model, optimizer, inputs)
         correct_params = {
             name: param.clone().detach() for name, param in model.named_parameters()
@@ -154,6 +163,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         }
 
         self.assertTrue(same(correct_loss, opt_loss))
+        breakpoint()
         for name in correct_params:
             self.assertTrue(name in opt_params)
             self.assertTrue(same(correct_params[name], opt_params[name]))

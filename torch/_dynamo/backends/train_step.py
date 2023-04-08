@@ -23,7 +23,6 @@ def _rematerialize_optimizer(
 ):
     assert opt is not None
 
-
     # update opt.state with proxy tensors
     orig_states: Dict[str, Any] = copy(opt.state)
     if named_states:
@@ -76,6 +75,9 @@ def train_step_compiler(backend_compile_fn):
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
+        # OK whats going on dynamo? when i simplify to single-layer model, i get 2 variants of each name?
+        # (Pdb) p params.keys()
+        # dict_keys(['model_lay.weight', 'model_lay.bias', 'model.lay.weight', 'model.lay.bias'])
         params = {
             **dict(mod.named_parameters(remove_duplicate=False)),
             **dict(mod.named_buffers(remove_duplicate=False)),
@@ -83,13 +85,13 @@ def train_step_compiler(backend_compile_fn):
         params_flat, params_spec = pytree.tree_flatten(params)
         params_len = len(params_flat)
         fake_params_flat = fakeify_inputs(params_flat)
-        
+
         opt = mod.__optimizer_0
-       
+
 
         def functional_call(*lifted_args, **kwargs):
             """Call the dynamo graphmodule in a functional way safe for tracing
-               (lifts module parameters and optimizer states as inputs)
+            (lifts module parameters and optimizer states as inputs)
             """
 
             _params = lifted_args[:params_len]
@@ -115,26 +117,32 @@ def train_step_compiler(backend_compile_fn):
         # _ = functional_call(*fake_params_flat + fake_inputs)
         dev = params_flat[0].device
         # so we don't mutate the real params when running the warmup...
-        copied_params = [p.clone().detach() for p in params_flat]
+        # copied_params = [p.clone().detach() for p in params_flat]
         # running with fake inputs and fixing-up the opt states is hard, since the opt-states
         # get keyed off _mutated_ faketensor module params, which have diff ids than orig fake module params
-        real_inputs = [torch.randn(i.shape, dtype=i.dtype, device=dev) for i in fake_inputs]
-        _ = functional_call(*params_flat + real_inputs)
-        
+        # real_inputs = [
+        #     torch.randn(i.shape, dtype=i.dtype, device=dev) for i in fake_inputs
+        # ]
+        # print(f"compiled param0 {params_flat[0]}")
+        for fake_param in fake_params_flat:
+            print(f"{id(fake_param)}")
+        fake_mode.allow_non_fake_inputs = True
+        first_loss = functional_call(*fake_params_flat + fake_inputs)
+        fake_mode.allow_non_fake_inputs = False
+        # print(f"compiled param0 {params_flat[0]}, first_loss:  {first_loss}")
         # Convert the fake optimizer states to real
         for fake_param, state_dict in opt.state.items():
+            print(f"fake: {id(fake_param)}")
             for name, state in state_dict.items():
                 # # some of the states are singleton cpu tensors...
-                # if isinstance(state, FakeTensor):
-                #     # can we assume always init with zeros?
-                #     state_dict[name] = torch.zeros(state.shape, dtype=state.dtype, device=dev)
+                if isinstance(state, FakeTensor):
+                    # can we assume always init with zeros?
+                    state_dict[name] = torch.zeros(state.shape, dtype=state.dtype, device=dev)
                 state_dict[name].zero_()
-
-
         # Build a mapping to use for reparametrizing the optimizer during tracing
         named_states = {}
-        # for n, fake_p in pytree.tree_unflatten(fake_params_flat, params_spec).items():
-        for n, p in params.items():
+        for n, p in pytree.tree_unflatten(fake_params_flat, params_spec).items():
+        # for n, p in params.items():
             if p in opt.state:
                 named_states[n] = opt.state[p]  # type: ignore[index]
 
@@ -142,15 +150,14 @@ def train_step_compiler(backend_compile_fn):
         fake_named_states_flat = fakeify_inputs(named_states_flat)
         named_states_len = len(named_states_flat)
         full_fake_args = fake_params_flat + fake_named_states_flat + fake_inputs
-        
+
         """
         Step 2: Trace the full graph
         """
 
-
         def functional_call_2(*lifted_args, **kwargs):
             """Call the dynamo graphmodule in a functional way safe for tracing
-               (lifts module parameters and optimizer states as inputs)
+            (lifts module parameters and optimizer states as inputs)
             """
 
             _params = lifted_args[:params_len]
@@ -169,7 +176,6 @@ def train_step_compiler(backend_compile_fn):
                 )
             return out
 
-
         fx_g = make_fx(functional_call_2)(*full_fake_args)
         torch.set_grad_enabled(False)
         print("fx_g")
@@ -182,7 +188,6 @@ def train_step_compiler(backend_compile_fn):
         def retraced_f(*args):
             return Interpreter(fx_g).run(*args)
 
-        # not really sure why we need inference mode here
         with torch.inference_mode():
             functional_fx_g = make_fx(functionalize(retraced_f))(*full_fake_args)
 
