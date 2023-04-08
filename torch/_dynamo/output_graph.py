@@ -120,6 +120,9 @@ class GraphCompileReason:
     reason: str
     user_stack: List[traceback.FrameSummary]
 
+    # Indicates if this was a graph compile reason due to graph break.
+    graph_break: bool = True
+
 
 def _get_gen_rand_values_fn(random_calls):
     def _gen_rand_values():
@@ -511,12 +514,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
+        self, tx, partial_convert=False, reason: GraphCompileReason = None
     ):
         """
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
+        assert reason is not None
+
         from .eval_frame import disable
 
         self.partial_convert = partial_convert
