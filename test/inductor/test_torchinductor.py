@@ -4788,12 +4788,14 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(55)], assert_equal=False)
 
+    @config.patch({"lowmem_dropout": False})
     def test_dropout_trivial_0(self):
         def fn1(a):
             return torch.nn.functional.dropout(a, 0.0, True) + a
 
         self.common(fn1, [torch.randn(55)])
 
+    @config.patch({"lowmem_dropout": False})
     def test_dropout_trivial_1(self):
         def fn2(a):
             return torch.nn.functional.dropout(a, 1.0, True) + a
