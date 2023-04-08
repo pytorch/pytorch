@@ -52,7 +52,6 @@ from .source import (
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
-    LocalInputSource,
     LocalSource,
 )
 from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
@@ -928,6 +927,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def END_FINALLY(self, inst):
         tos = self.pop()
         assert tos is None
+
+    def POP_FINALLY(self, inst):
+        preserve_tos = inst.argval
+        if preserve_tos:
+            tos = self.pop()
+        assert self.pop() is None
+        if preserve_tos:
+            self.push(tos)
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -1829,7 +1836,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 k,
                 VariableBuilder(
                     self,
-                    LocalInputSource(k, code_options["co_varnames"].index(k))
+                    LocalSource(k)
                     if k in code_options["co_varnames"]
                     else LocalSource((k)),
                 )(f_locals[k]),
@@ -1968,7 +1975,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         log.debug("RETURN_VALUE triggered compile")
         self.output.compile_subgraph(
-            self, reason=GraphCompileReason("return_value", [self.frame_summary()])
+            self,
+            reason=GraphCompileReason(
+                "return_value", [self.frame_summary()], graph_break=False
+            ),
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 

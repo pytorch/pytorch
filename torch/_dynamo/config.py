@@ -131,6 +131,7 @@ skipfiles_inline_module_allowlist = {
     torch._refs,
     torch._prims,
     torch._decomp,
+    torch.utils._contextlib,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -200,7 +201,7 @@ skip_fsdp_guards = True
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
 # dynamo will not notice and will execute whichever version you first compiled.
-skip_nnmodule_hook_guards = False
+skip_nnmodule_hook_guards = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
