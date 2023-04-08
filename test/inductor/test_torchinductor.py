@@ -234,9 +234,12 @@ def clone_preserve_strides(x, copy_to_cuda=False):
     buffer = torch.as_strided(
         x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
     ).clone()
-    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+
     if copy_to_cuda:
-        out.to(device="cuda")
+        buffer.to(device="cuda")
+
+    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+
     return out
 
 
@@ -450,9 +453,18 @@ def check_model_cuda(
         def downcast_fn(x):
             if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
                 return x
-            return torch.empty_strided(
-                x.size(), x.stride(), device="cuda", dtype=torch.half
-            ).copy_(x)
+
+            buffer = (
+                torch.as_strided(
+                    x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
+                )
+                .to(torch.half)
+                .clone()
+                .to(device="cuda")
+            )
+            out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+
+            return out
 
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
