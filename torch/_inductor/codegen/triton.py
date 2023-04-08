@@ -1376,7 +1376,9 @@ class TritonKernel(Kernel):
         triton_meta["configs"] = [config_of(signature)]
 
         for tree in self.range_trees:
-            if tree.prefix != "r" or (self.inside_reduction and not self.persistent_reduction):
+            if tree.prefix != "r" or (
+                self.inside_reduction and not self.persistent_reduction
+            ):
                 argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
         if self.inside_reduction:
