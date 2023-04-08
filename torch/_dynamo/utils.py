@@ -270,7 +270,6 @@ def setup_compile_debug():
             inductor=logging.DEBUG,
             output_code=True,  # this is off by default
         )
-
         return add_file_handler()
 
     return contextlib.ExitStack()
@@ -560,7 +559,7 @@ def clone_input(x):
 
 
 def clone_inputs(example_inputs):
-    if isinstance(example_inputs, dict):
+    if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
             assert isinstance(value, torch.Tensor)
