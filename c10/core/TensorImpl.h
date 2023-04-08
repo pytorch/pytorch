@@ -1503,7 +1503,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         ", while tensor contains ",
         data_type_.name(),
         ". ");
-    return data_ptr_impl<T>();
+    return legacy_mutable_data_ptr_impl<T>();
   }
 
   /**
@@ -1512,7 +1512,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * check has_storage() and storage_initialized().
    */
   template <typename T>
-  inline T* data_ptr_impl() const {
+  inline T* mutable_data_ptr_impl() {
+    return legacy_mutable_data_ptr_impl<T>();
+  }
+
+ private:
+  // The real implementation of mutable_data_ptr_impl, but in a
+  // non-const method.
+  //
+  // TODO: move the implementation into mutable_data_ptr_impl() and
+  // delete this when data<T>() is no longer const.
+  template <typename T>
+  inline T* legacy_mutable_data_ptr_impl() const {
     TORCH_CHECK(
         has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
@@ -1525,6 +1536,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
   }
 
+ public:
   /**
    * Return a void* data pointer to the actual data which this tensor refers to.
    *
