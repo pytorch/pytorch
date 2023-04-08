@@ -14,7 +14,7 @@ class IMPSAllocator : public c10::Allocator {
 public:
   // see the comments in MPSAllocator.h for the description of these methods.
   virtual void emptyCache() const = 0;
-  virtual ssize_t getUnalignedBufferSize(void* ptr) const = 0;
+  virtual ssize_t getUnalignedBufferSize(const void* ptr) const = 0;
   virtual IntArrayRef getBufferShape(const void* ptr) const = 0;
   virtual void setBufferShape(const void* ptr, const IntArrayRef& shape) const = 0;
   virtual bool isSharedBuffer(const void* ptr) const = 0;
@@ -40,7 +40,7 @@ class IMpsAllocatorCallback {
     ALLOCATION_FAILED // buffer allocation failed
   };
   virtual ~IMpsAllocatorCallback() = default;
-  virtual void executeMPSAllocatorCallback(void* ptr, EventType event) = 0;
+  virtual void executeMPSAllocatorCallback(const void* ptr, EventType event) = 0;
 };
 
 // MPS allocator will execute every registered callback when a block of memory is freed.

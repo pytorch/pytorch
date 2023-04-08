@@ -270,7 +270,7 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   m_current_allocated_memory -= buffer_block->size;
 }
 
-BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(void* ptr) {
+BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(const void* ptr) {
   auto it = m_allocated_buffers.find(ptr);
   if (it == m_allocated_buffers.end()) {
     return nullptr;
@@ -484,7 +484,7 @@ id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size
   return buffer_block->buffer;
 }
 
-ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(void* ptr) {
+ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
@@ -516,7 +516,7 @@ IntArrayRef MPSHeapAllocatorImpl::getBufferShape(const void* ptr) {
   return IntArrayRef();
 }
 
-void MPSHeapAllocatorImpl::free(void* ptr) {
+void MPSHeapAllocatorImpl::free(const void* ptr) {
   BufferBlock* buffer_block = nullptr;
   {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
@@ -618,7 +618,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   void emptyCache() const override {
     _getAllocImpl().emptyCache();
   }
-  ssize_t getUnalignedBufferSize(void* ptr) const override {
+  ssize_t getUnalignedBufferSize(const void* ptr) const override {
     return _getAllocImpl().getUnalignedBufferSize(ptr);
   }
   IntArrayRef getBufferShape(const void* ptr) const override {
@@ -656,7 +656,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   bool m_has_unified_memory;
   uint32_t m_usage;
 
-  static void Delete(void* ptr) {
+  static void Delete(const void* ptr) {
     if (ptr) {
       _getAllocImpl().free(ptr);
     }
