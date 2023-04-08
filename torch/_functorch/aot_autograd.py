@@ -2311,6 +2311,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
+            def remove_unused_inputs(bw_module):
+                import torch.fx as fx
+                for node in tuple(bw_module.graph.nodes):
+                    if len(node.users) == 0 and node.op == 'placeholder':
+                        bw_module.graph.erase_node(node)
+                bw_module.recompile()
+            remove_unused_inputs(bw_module)
+
             fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
@@ -2433,6 +2441,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 and not CompiledFunction.metadata.requires_grad_info[i]
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+            ctx.set_materialize_grads(False)
 
             return tuple(raw_returns)
 
@@ -2514,7 +2523,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
-                    assert all(a is not None for a in all_args)
+
+                    # assert all(a is not None for a in all_args)
                     if aot_config.dynamic_shapes:
                         all_args_list = list(all_args)
                         CompiledFunction.compiled_bw = create_aot_dispatcher_function(
@@ -2531,13 +2541,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         context = disable_autocast_manager if disable_amp else nullcontext
                         with context(), track_graph_compiling(aot_config, "backward"):
                             CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                                bw_module, all_args
+                                bw_module, [a for a in all_args if a is not None]
                             )
 
                 ctx.maybe_clear_saved_tensors()
+                new_args = [a for a in all_args if a is not None]
                 out = call_func_with_args(
                     CompiledFunction.compiled_bw,
-                    all_args,
+                    new_args,
                     steal_args=True,
                     disable_amp=disable_amp,
                 )
