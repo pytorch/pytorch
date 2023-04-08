@@ -268,6 +268,7 @@ def setup_compile_debug():
             inductor=logging.DEBUG,
             output_code=True,  # this is off by default
         )
+
         return add_file_handler()
 
     return contextlib.ExitStack()

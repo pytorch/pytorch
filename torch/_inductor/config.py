@@ -264,7 +264,7 @@ class trace:
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
-    debug_log = False
+    debug_log = True
 
     # Save python logger call >=logging.INFO
     info_log = False
