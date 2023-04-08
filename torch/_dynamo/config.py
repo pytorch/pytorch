@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 import tempfile
+from enum import Enum
 from os.path import abspath, dirname
 
 import torch
@@ -67,6 +68,19 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
 # see [Note - on the state of mark_dynamic]
 assume_static_by_default = False
+
+
+class DYNAMIC_SHAPE_STRATEGY(Enum):
+    OFF = 1
+    # Only mark the failed dim as dynamic
+    FAILED_DIM_ONLY = 2
+    # Find all tensors in frame and mark them all dynamic if they fail
+    ALL_FAILED_IN_FRAME = 3
+    # Flip to assume_static_by_default = False
+    ALL = 4
+
+
+automatic_dynamic_shapes_strategy: DYNAMIC_SHAPE_STRATEGY = DYNAMIC_SHAPE_STRATEGY.OFF
 
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so
@@ -201,7 +215,7 @@ skip_fsdp_guards = True
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
 # dynamo will not notice and will execute whichever version you first compiled.
-skip_nnmodule_hook_guards = False
+skip_nnmodule_hook_guards = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True

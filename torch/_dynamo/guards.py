@@ -779,15 +779,18 @@ class CheckFunctionManager:
         code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        code = "      passing = True \n"
+        code = "      def __fail(code_part_id): \n"
+        code += "          code_part = part_map[code_part_id] \n"
+        code += "          code_part.scope = locals() \n"
+        code += "          code_part.scope['L'] = L \n"
+        code += "          code_part.scope['___check_tensors_verbose'] = ___check_tensors_verbose \n"
+        code += "          return code_part \n"
+        code += "      passing = True \n"
         for code_part in unique(code_parts):
             part_map[id(code_part)] = code_part
             code += f"      passing = {code_part.code} \n"
             code += "      if not passing: \n"
-            code += f"          code_part = part_map[{id(code_part)}] \n"
-            code += "          code_part.scope = locals() \n"
-            code += "          code_part.scope['___check_tensors_verbose'] = ___check_tensors_verbose \n"
-            code += "          return (False, code_part) \n"
+            code += f"          return (False, __fail({id(code_part)})) \n"
         code += "      return (True, None)"
         closure_vars = collections.OrderedDict(
             [

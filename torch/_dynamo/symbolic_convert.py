@@ -1839,8 +1839,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     tensor_at_k = f_locals[k]
                     assert isinstance(tensor_at_k, torch.Tensor)
                     torch._dynamo.mark_dynamic(tensor_at_k, dynamic_plan[k])
-                    breakpoint()
-                    
+
         self.symbolic_locals = collections.OrderedDict(
             (
                 k,

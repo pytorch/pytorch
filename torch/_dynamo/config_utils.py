@@ -2,12 +2,13 @@ import contextlib
 
 import pickle
 import unittest
+from enum import Enum
 from types import FunctionType, ModuleType
 from typing import Any, Dict, Set
 from unittest import mock
 
 # Types saved/loaded in configs
-CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict, Enum)
 
 
 def install_config_module(module):
@@ -35,7 +36,9 @@ def install_config_module(module):
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
-                assert value.__module__ == module.__name__
+                if issubclass(value, Enum):
+                    continue
+                assert value.__module__ == module.__name__, breakpoint()
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
                 visit(value, proxy, f"{name}.")

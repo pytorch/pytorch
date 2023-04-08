@@ -363,25 +363,38 @@ def first_real_inst_idx(code):
 # re-compilation code, source, and more, into a
 # plan for how to mark certain dims as dynamic.
 def dynamic_plan_from_code_part(code_part: Optional[CodePart], dynamic_plan):
-    from torch._dynamo.source import TensorPropertySource, TensorProperty
-    
-    if code_part is None:
-        return None
+    from torch._dynamo.source import TensorProperty, TensorPropertySource
 
-    if dynamic_plan is None:
-        dynamic_plan = {}
-        
-    if code_part.origin == "SHAPE_ENV":
-        source = code_part.source
-        # TODO: Expand to stride?
-        if isinstance(source, TensorPropertySource):
-            prop = source.prop
-            if prop == TensorProperty.SIZE:
-                inner_source = source.base
-                name = inner_source.local_name
-                if name not in dynamic_plan:
-                    dynamic_plan[name] = []
-                dynamic_plan[name].append(source.idx)
+    if (
+        code_part is None
+        or config.automatic_dynamic_shapes_strategy == config.DYNAMIC_SHAPE_STRATEGY.OFF
+    ):
+        return dynamic_plan
+
+    def add_dynamic_dim(code_part, strategy):
+        if code_part.origin == "SHAPE_ENV":
+            source = code_part.source
+            # TODO: Expand to stride?
+            if isinstance(source, TensorPropertySource):
+                prop = source.prop
+                if prop == TensorProperty.SIZE:
+                    inner_source = source.base
+                    name = inner_source.local_name
+                    if strategy == config.DYNAMIC_SHAPE_STRATEGY.ALL:
+                        config.assume_static_by_default = False
+                        return dynamic_plan
+                    if name not in dynamic_plan:
+                        dynamic_plan[name] = []
+                    if strategy == config.DYNAMIC_SHAPE_STRATEGY.FAILED_DIM_ONLY:
+                        dynamic_plan[name].append(source.idx)
+                    else:
+                        code_parts = code_part.scope["part_map"].values()
+                        for code_part in code_parts:
+                            add_dynamic_dim(
+                                code_part, config.DYNAMIC_SHAPE_STRATEGY.FAILED_DIM_ONLY
+                            )
+
+    add_dynamic_dim(code_part, config.automatic_dynamic_shapes_strategy)
     return dynamic_plan
     # if not config.dynamic_shapes or not code_part:
     # return None
@@ -389,15 +402,18 @@ def dynamic_plan_from_code_part(code_part: Optional[CodePart], dynamic_plan):
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size, code_part):
+    def catch_errors(frame, cache_size, code_part, dynamic_plan):
+        assert dynamic_plan is not None
+
         msg = f"Compiling {frame.f_code.co_name} {frame.f_code.co_filename} with cache_size {cache_size}."
         if code_part is not None:
             torch._dynamo.guards.guard_fail_hook(
                 hooks.guard_fail_fn, frame.f_code, code_part
             )
             msg += f" Due to guard failure {code_part.code} from guard {code_part.origin} and source {code_part.source}"
+            print(msg)
         log.debug(msg)
-        dynamic_plan = None
+
         dynamic_plan = dynamic_plan_from_code_part(code_part, dynamic_plan)
         if (
             # TODO: the first condition is not covered by any test

@@ -311,7 +311,7 @@ def _compile(
     export_constraints,
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
-    dynamic_plan = None,
+    dynamic_plan=None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts

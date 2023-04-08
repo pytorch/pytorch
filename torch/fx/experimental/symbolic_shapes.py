@@ -1360,7 +1360,7 @@ class ShapeGuardPrinter(StrPrinter):
 
 class LoggingShapeGuardPrinter(ShapeGuardPrinter):
     def __init__(self, var_to_sources):
-        super().__init__(var_to_sources, lambda n: n.name(), var_to_sources)
+        super().__init__(var_to_sources, lambda n: n.name(), var_to_sources, [])
 
 
 TLS = threading.local()
@@ -1472,17 +1472,14 @@ class ShapeEnv:
         # Reimplement the legacy behavior
         if constraint_dims is None:
             constraint_dims = [None] * dim
-        breakpoint()
         if dynamic_dims is None:
             dynamic_dims = []
             for i in range(dim):
-                breakpoint()
                 # NB: This is encapsulation breaking!  Legacy behavior was
                 # bad.
                 if _is_dim_dynamic(ex, i):
                     r = DimDynamic.DYNAMIC
                 elif self.assume_static_by_default:
-                    breakpoint()
                     r = DimDynamic.STATIC
                 else:
                     r = DimDynamic.DUCK
@@ -1798,7 +1795,6 @@ class ShapeEnv:
                             else:
                                 return "Did you really mean to mark this dimension as dynamic?"
 
-                        breakpoint()
                         record_constraint_violation(lambda: (
                             f"Could not validate constraint {constraint.render(source)} as "
                             f"{source.name()} is actually a non-atomic symbolic expression "
@@ -1940,13 +1936,12 @@ class ShapeEnv:
                     guard_sources.append(sources[0])
                     exprs.append(" <= ".join(bounds))
 
-        breakpoint()
         if constraint_violations:
             msgs = [f"  {i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
             msgs = "\n".join(msgs)
             raise ConstraintViolationError(f"Constraints violated!\n{msgs}")
-        
-        assert len(exprs) == len(guard_sources), breakpoint()
+
+        assert len(exprs) == len(guard_sources)
         return (exprs, guard_sources)
 
     def evaluate_guards_for_args(self, placeholders, args):
