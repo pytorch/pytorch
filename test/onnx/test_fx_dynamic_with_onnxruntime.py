@@ -12,31 +12,31 @@ from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-import onnx.reference
 import onnx_test_common
 
 import onnxruntime  # type: ignore[import]
 
 import torch
-import torchvision
-from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
+import torch.onnx
+from torch.onnx._internal import _beartype, diagnostics
 from torch.testing._internal import common_utils
 from torch.types import Number
 from torch.utils import _pytree as pytree
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
-_ONNXModelType = Union["onnx.ModelProto", bytes, str, io.BytesIO]
 _InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
 _OutputsType = Sequence[_NumericType]
 
 
 @_beartype.beartype
 def _run_ort(
-    onnx_model: _ONNXModelType, pytorch_inputs: _InputArgsType
+    export_output: torch.onnx.ExportOutput, pytorch_inputs: _InputArgsType
 ) -> _OutputsType:
+    buffer = io.BytesIO()
+    export_output.save(buffer)
     session = onnxruntime.InferenceSession(
-        onnx_model, providers=["CPUExecutionProvider"]
+        buffer.getvalue(), providers=["CPUExecutionProvider"]
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
     return session.run(
@@ -52,6 +52,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     atol: float = 1e-7,
     opset_version: int = 18,
     additional_test_inputs: Optional[Sequence[_InputArgsType]] = None,
+    input_mutation: bool = False,
     **input_kwargs,
 ):
     """Compare the results of PyTorch model with exported ONNX model
@@ -65,6 +66,9 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         additional_test_inputs (Optional[Sequence[_InputArgsType]], optional):
             Test the models with another dataset, which is designed for dynamic axes
             testing. Defaults to None.
+        input_mutation (bool, optional): Whether the model mutates its input.
+            `input_mutation` as `True` incurs extra overhead of cloning the inputs.
+            Defaults to False.
 
     """
 
@@ -81,7 +85,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
 
     @_beartype.beartype
     def compare_pytorch_onnx_with_ort(
-        onnx_model: Union["onnx.ModelProto", bytes],
+        export_output: torch.onnx.ExportOutput,
         model_input_args: _InputArgsType,
     ):
         # Inspect the model's signature. It will be used
@@ -91,17 +95,21 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         else:
             signature = inspect.signature(model)
 
+        if input_mutation:
+            ref_model_input_args = copy.deepcopy(model_input_args)
+        else:
+            ref_model_input_args = model_input_args
         # Bind args and kwargs to the model's signature to
         # flatten kwargs into positional args since ONNX
         # model cannot be called with kwargs.
-        bound = signature.bind(*model_input_args)
+        bound = signature.bind(*ref_model_input_args)
         # Fill optional inputs.
         bound.apply_defaults()
         assert not bound.kwargs
 
         pt_cloned_model = _try_clone_model(model)
         ref_outputs, _ = pytree.tree_flatten(pt_cloned_model(*model_input_args))
-        ort_outputs = _run_ort(onnx_model, bound.args)
+        ort_outputs = _run_ort(export_output, bound.args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(
                 ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
@@ -110,13 +118,15 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     # Feed args and kwargs into exporter.
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
-    onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
+
+    onnx_model = torch.onnx.dynamo_export(
         model,
         *input_args,
-        opset_version=opset_version,
-        use_binary_format=True,
-        enable_dynamic_axes=True,  # export models with dynamic shapes
         **input_kwargs,
+        export_options=torch.onnx.ExportOptions(
+            opset_version=opset_version,
+            dynamic_shapes=True,
+        ),
     )
 
     compare_pytorch_onnx_with_ort(onnx_model, input_args)
@@ -148,7 +158,11 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "typing.Union[float, int, str, bytes, typing.Sequence[float],"
         " typing.Sequence[int], torch.Tensor], as [None, None]:"
     )
+    # When the skip reason above is addressed, annotate this test with
+    # @skipIfNoTorchVision
     def test_shufflenet_v2_dynamic_axes(self):
+        import torchvision
+
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
         test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
@@ -194,6 +208,22 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
+        )
+
+    @unittest.skip(
+        "ORT flaky segfault: https://github.com/microsoft/onnx-script/issues/523"
+    )
+    def test_mutation(self):
+        class MutationModel(torch.nn.Module):
+            def forward(self, x):
+                x.view(3, 2, -1).add_(2.0)
+                return x
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            MutationModel(),
+            (torch.randn(12),),
+            additional_test_inputs=[(torch.randn(24),)],
+            input_mutation=True,
         )
 
     @unittest.skip("flaky test: https://github.com/microsoft/onnx-script/issues/523")
@@ -349,6 +379,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
+    @unittest.skip("ORT segfault")
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -377,6 +408,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(another_x,)],
         )
 
+    @unittest.skip("ORT segfault")
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):

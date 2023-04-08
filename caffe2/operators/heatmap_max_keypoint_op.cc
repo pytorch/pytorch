@@ -98,7 +98,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       ERArrXXf fmax = ERArrXXf::Zero(3, 3);
 
       // initialize fmax values of local 3x3 grid
-      // when 3x3 grid going out-of-bound, mirrowing around center
+      // when 3x3 grid going out-of-bound, mirroring around center
       for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
           int xx = x - 2 * (x + maxX >= heatmap_size) + 2 * (x + maxX < 0);
