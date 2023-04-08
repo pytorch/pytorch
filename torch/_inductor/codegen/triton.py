@@ -956,6 +956,10 @@ class TritonKernel(Kernel):
             if tree.prefix.upper() not in config.triton.max_block:
                 continue
             max_block = config.triton.max_block[tree.prefix.upper()]
+            # Optional optimization: if block divides numel exactly, we will
+            # never need to do a masked load to handle stragglers at the end.
+            # It's faster to avoid masking at all.  But it is sound to always
+            # mask.
             if V.graph.sizevars.maybe_guard_multiple_of(tree.numel, max_block):
                 mask_vars.discard(f"{tree.prefix}mask")
 
@@ -1842,6 +1846,12 @@ class TritonScheduling:
         ranked_tilings = [tiling for tiling, score in candidate_tiles.most_common()]
 
         if config.triton.max_tiles >= 3:
+            # Consider adding a third dimension of tiling, but only
+            # when a1 is a multiple of b1; otherwise, you have a lot
+            # of stragglers which is annoying to generate code for.
+            #
+            # NB: More than three max tiles is not enabled by default.
+
             # Add one 3D tiling choice
             for i in range(1, len(ranked_tilings)):
                 a0, a1 = ranked_tilings[0]

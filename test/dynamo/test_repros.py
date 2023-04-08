@@ -2743,7 +2743,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         from torch._dynamo.utils import counters
 
         counters.clear()
-        torch._dynamo.reset()
 
         def fn(input, mask):
             return XSoftmax.apply(input, mask, 1)
@@ -2765,12 +2764,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 6)
         self.assertEqual(dict(counters["frames"]), {"total": 2, "ok": 2})
         self.assertEqual(
             dict(counters["graph_break"]), {"autograd.Function with requires_grad": 1}
         )
+        self.assertEqual(cnt.op_count, 6)
+        self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
         counters.clear()
 
