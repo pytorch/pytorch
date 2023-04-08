@@ -75,8 +75,8 @@ fallback_random = False
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
-# fuse even in cases without common reads
-aggressive_fusion = False
+# Sets the maximum size of
+aggressive_fusion_max_size = 128
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64

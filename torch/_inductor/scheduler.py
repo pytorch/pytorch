@@ -7,6 +7,7 @@ import os
 import pprint
 import textwrap
 from typing import Dict, List, Optional, Set
+import math
 
 import sympy
 
@@ -910,7 +911,7 @@ class Scheduler:
         for node_grouping in buffer_names_grouping.values():
             check_all_pairs(node_grouping)
 
-        if config.aggressive_fusion:
+        if config.aggressive_fusion_max_size != 0:
             group_grouping = collections.defaultdict(list)
             for node in self.nodes:
                 group = getattr(node, "group", None)
@@ -973,8 +974,10 @@ class Scheduler:
             return False  # wrong device
 
         no_shared_data = self.score_fusion_memory(node1, node2) == 0
-        if no_shared_data and (
-            not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
+        small_fusion =  V.graph._get_read_write_buffers_sizes(node1) < config.aggressive_fusion_max_size and V.graph._get_read_write_buffers_sizes(node2) < config.aggressive_fusion_max_size
+
+        if no_shared_data and not small_fusion and (
+            node1.is_reduction() or node2.is_reduction()
         ):
             return False  # heuristic not needed for correctness
 
