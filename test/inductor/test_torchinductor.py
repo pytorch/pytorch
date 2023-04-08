@@ -6227,9 +6227,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             fns = ("first_arg", "store", "second_arg", "same_pm_one", "same_pp_one")
 
             for fn, ndims, dyn_shape in itertools.product(fns, (2, 3), (True, False)):
-                proc = subprocess.Popen([sys.executable, test_path, fn, str(ndims), str(dyn_shape)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                proc = subprocess.Popen(
+                    [sys.executable, test_path, fn, str(ndims), str(dyn_shape)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
                 stderr = proc.communicate()[1]
-                self.assertTrue(any("index out of bounds" in err.decode("utf-8") for err in stderr.splitlines()), f"{fn}, {ndims}, {dyn_shape}")
+                self.assertTrue(
+                    any(
+                        "index out of bounds" in err.decode("utf-8")
+                        for err in stderr.splitlines()
+                    ),
+                    f"{fn}, {ndims}, {dyn_shape}",
+                )
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:

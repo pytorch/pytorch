@@ -1729,9 +1729,11 @@ def meta_relu_(self):
 @register_meta(aten.index_put.default)
 def meta_index_put(self, indices, values, accumulate=False):
     out = meta_index_Tensor(self, indices)
-    check(utils.is_expandable_to(values.shape, out.shape),
-          lambda: f"shape mismatch: value tensor of shape {values.shape} "
-                  f"cannot be broadcast to indexing result of shape {out.shape}")
+    check(
+        utils.is_expandable_to(values.shape, out.shape),
+        lambda: f"shape mismatch: value tensor of shape {values.shape} "
+        f"cannot be broadcast to indexing result of shape {out.shape}",
+    )
     return torch.empty_like(self)
 
 
