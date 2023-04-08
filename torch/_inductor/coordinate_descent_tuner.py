@@ -37,10 +37,10 @@ class CoordescTuner:
           i.e., there are multiple local optima..
     """
 
-    def __init__(self, is_mm=False, is_persistent_reduction=False):
+    def __init__(self, is_mm=False, name="unknown"):
         self.is_mm = is_mm  # we will tune num_stages for mm
-        self.is_persistent_reduction = is_persistent_reduction
         self.cached_benchmark_results = {}
+        self.name = name
 
     def cache_benchmark_result(self, config, timing):
         self.cached_benchmark_results[triton_config_to_hashable(config)] = timing
@@ -64,6 +64,10 @@ class CoordescTuner:
             "XBLOCK",
             "YBLOCK",
             "ZBLOCK",
+            # NOTE: we should not tune RBLOCK for persistent reduction.
+            # We rely on the fact that persistent reduction's triton.Config
+            # does not have the RBLOCK field to guarantee that.
+            "RBLOCK",
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",
@@ -72,10 +76,6 @@ class CoordescTuner:
         ]
         if self.is_mm:
             out.append("num_stages")
-
-        # we should not tune RBLOCK for persistent reduction
-        if not self.is_persistent_reduction:
-            out.append("RBLOCK")
 
         return out
 
@@ -111,7 +111,7 @@ class CoordescTuner:
             baseline_timing = self.call_func(func, baseline_config)
 
         if DEBUG:
-            print("= Do coordinate descent tuning =")
+            print(f"= Do coordinate descent tuning for {self.name} =")
             print(
                 f"Baseline Config {baseline_config}, baseline timing {baseline_timing}"
             )

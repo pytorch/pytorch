@@ -88,9 +88,7 @@ class CachingAutotuner(KernelInterface):
                 str(self.meta.get("device", 0)),
             )
 
-        self.coordesc_tuner = CoordescTuner(
-            is_mm=False, is_persistent_reduction=self.is_persistent_reduction()
-        )
+        self.coordesc_tuner = CoordescTuner(is_mm=False, name=self.fn.__name__)
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
@@ -247,9 +245,6 @@ class CachingAutotuner(KernelInterface):
         }
         CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
 
-    def is_persistent_reduction(self):
-        return self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
-
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         if self.heuristic_type == HeuristicType.TEMPLATE:
             # skip triton template
@@ -264,6 +259,10 @@ class CachingAutotuner(KernelInterface):
             config2launcher[config] = launcher
             return self.bench(launcher, *cloned_args, **kwargs)[0]
 
+        assert not (
+            self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
+            and "RBLOCK" in launcher.config.kwargs
+        ), "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have RBLOCK"
         best_config = self.coordesc_tuner.autotune(
             benchmark_one_config, launcher.config, None
         )
