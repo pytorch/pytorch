@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from functools import wraps
-from typing import Any, Dict, List
+from typing import Any, List
 
 import numpy as np
 import torch
@@ -39,7 +39,7 @@ def with_comms(func):
         # make sure we set different random seeds for each rank
         # otherwise we dont need DDP / SPMD
         # (we would have the same parameters and inputs everywhere)
-        torch.manual_seed(torch.distributed.get_rank())
+        torch.manual_seed(self.rank)
         return func(self, *args, **kwargs)
 
     return wrapper
@@ -472,14 +472,13 @@ class TraceTrainStepTest(DTensorTestBase):
             mod(inp).sum().backward()
             return [p.grad for p in mod.parameters()]
 
-        rank = torch.distributed.get_rank()
-        inp = torch.randn(2, 10).cuda(rank)
+        inp = torch.randn(2, 10).cuda(self.rank)
         # FIXME(@mrshenli): remove manual seed once dist.compile can synchronize
         # module parameters.
         torch.manual_seed(0)
-        mod = nn.Linear(10, 10).cuda(rank)
+        mod = nn.Linear(10, 10).cuda(self.rank)
 
-        ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
         ddp_inp = deepcopy(inp)
 
         grads = train_step(mod, inp)
@@ -524,31 +523,54 @@ class TraceTrainStepTest(DTensorTestBase):
             mod(inp).sum().backward()
             opt.step()
 
-        rank = torch.distributed.get_rank()
         # FIXME(@mrshenli): remove manual seed once dist.compile can synchronize
         # module parameters.
         torch.manual_seed(1)
-        # FIXME(@mrshenli): gradients for bias is missing
-        mod = nn.Linear(10, 10, bias=True).cuda(rank)
+        mod = nn.Linear(10, 10, bias=True).cuda(self.rank)
         opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
-        inp = torch.randn(2, 10).cuda(rank)
+        inp = torch.randn(2, 10).cuda(self.rank)
 
-        ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
         ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.01, foreach=True)
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
 
     def _test_adam(self, *, foreach: bool, fused: bool):
-        @compile()
+        class AssertOverride(Override):
+            def __init__(self, outer):
+                self.outer = outer
+
+            def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+                return orig_submodule
+
+            def transform(
+                self,
+                gm: fx.GraphModule,
+                flat_state: List[torch.Tensor],
+            ) -> fx.Graph:
+                # check dedup is successful, where there should only be 1 allreduce
+                self.outer.assertEqual(
+                    len(
+                        [
+                            n
+                            for n in gm.graph.nodes
+                            if n.target == torch.ops.c10d_functional.all_reduce.default
+                        ]
+                    ),
+                    1,
+                )
+
+                return gm
+
+        @compile(module_override={nn.Linear: AssertOverride(self)})
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()
 
-        rank = torch.distributed.get_rank()
         # FIXME(@mrshenli): remove manual seed once dist.compile can synchronize
         # module parameters.
         torch.manual_seed(0)
         # FIXME(@mrshenli): gradients for bias is missing
-        mod = nn.Linear(10, 10, bias=False).cuda(rank)
+        mod = nn.Sequential(nn.Linear(10, 10, bias=False)).cuda(self.rank)
         opt = torch.optim.Adam(
             mod.parameters(),
             lr=0.01,
@@ -556,9 +578,9 @@ class TraceTrainStepTest(DTensorTestBase):
             fused=fused,
             capturable=True,
         )
-        inp = torch.randn(2, 10).cuda(rank)
+        inp = torch.randn(2, 10).cuda(self.rank)
 
-        ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
         ddp_opt = torch.optim.Adam(
             ddp_mod.parameters(), lr=0.01, foreach=foreach, fused=fused
         )
@@ -584,7 +606,9 @@ class TraceTrainStepTest(DTensorTestBase):
                 return DummyDDM()
 
             def transform(
-                self, gm: fx.GraphModule, schema_map: Dict[str, Schema]
+                self,
+                gm: fx.GraphModule,
+                flat_state: List[torch.Tensor],
             ) -> fx.Graph:
                 nonlocal transform_targets
                 for node in gm.graph.nodes:
@@ -610,11 +634,10 @@ class TraceTrainStepTest(DTensorTestBase):
             mod(inp).sum().backward()
             opt.step()
 
-        rank = torch.distributed.get_rank()
-        mod = DummyModel(self.world_size).cuda(rank)
+        mod = DummyModel(self.world_size).cuda(self.rank)
         opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=False)
         # FIXME: symbolic tracing treats bs=1 as constant, have to use bs > 1.
-        inp = torch.randn(4, 10).cuda(rank)
+        inp = torch.randn(4, 10).cuda(self.rank)
         train_step(mod, opt, inp)
 
         # checking transforms are indeed invoked.
@@ -660,6 +683,88 @@ class TraceTrainStepTest(DTensorTestBase):
         train_step(mod, opt, inp)
         self.assertEqual(id(gm), id(train_step.__dict__[COMPILED_OBJECT_KEY].gm))
         self.assertEqual(graph_optimization.call_count, 1)
+
+
+class CoverageTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 2
+
+    def _test_train_step(self, train_step, mod, *args):
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
+        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.01, foreach=True)
+
+        ddp_args = deepcopy(args)
+
+        # materialize optimizer states
+        mod(*args).sum().backward()
+        opt.step()
+        opt.zero_grad()
+
+        ddp_mod(*ddp_args).sum().backward()
+        ddp_opt.step()
+        ddp_opt.zero_grad()
+
+        # test parameter parity
+        train_step(mod, opt, *args)
+
+        ddp_mod(*ddp_args).sum().backward()
+        # FIXME(@mrshenli): DDP by default divides grads by world size, but
+        # torch.distributed.compile does not do that yet.
+        with torch.no_grad():
+            for p in ddp_mod.parameters():
+                p.grad *= self.world_size
+        ddp_opt.step()
+
+        for p1, p2 in zip(mod.parameters(), ddp_mod.parameters()):
+            self.assertEqual(p1, p2)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_log_softmax(self):
+        torch.manual_seed(0)
+
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        mod = nn.Sequential(
+            nn.Linear(10, 10),
+            nn.LogSoftmax(dim=1),
+        ).cuda(self.rank)
+        inp = torch.randn(2, 10).cuda(self.rank)
+        self._test_train_step(train_step, mod, inp)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_nll_loss(self):
+        class ModuleWithLoss(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = nn.Sequential(
+                    nn.Linear(10, 10),
+                    nn.LogSoftmax(dim=1),
+                )
+                self.lss = nn.NLLLoss()
+
+            def forward(self, x, tgt):
+                return self.lss(self.mod(x), tgt)
+
+        torch.manual_seed(0)
+        mod = ModuleWithLoss().cuda(self.rank)
+
+        @compile()
+        def train_step(mod, opt, inp, tgt):
+            mod(inp, tgt).backward()
+            opt.step()
+
+        inp = torch.randn(2, 10).to(self.rank)
+        tgt = torch.empty(2, dtype=torch.long).random_(0, 10).to(self.rank)
+
+        self._test_train_step(train_step, mod, inp, tgt)
 
 
 if __name__ == "__main__":
