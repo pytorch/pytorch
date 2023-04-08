@@ -1918,7 +1918,9 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
-        weight_idx = [ops.indirect_indexing(var_index, weight_size[0])] + [*idx[indices_ndim:]]
+        weight_idx = [ops.indirect_indexing(var_index, weight_size[0])] + [
+            *idx[indices_ndim:]
+        ]
         return weight_loader(weight_idx)
 
     return Pointwise.create(
@@ -2235,8 +2237,13 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     src_loader = src.make_loader() if isinstance(src, TensorBox) else None
 
     def output_indexer(idx):
+        # self is captured from the end of the function, so it may have 0 dim
+        shape = self.get_size()
+        ndim = len(shape)
         indirect_idx = list(idx)
-        indirect_idx[dim] = ops.indirect_indexing(index_loader(idx), self.get_size()[dim])
+        indirect_idx[dim] = ops.indirect_indexing(
+            index_loader(idx), 1 if ndim == 0 else shape[dim]
+        )
         return indirect_idx
 
     def fn(idx):
@@ -2318,7 +2325,9 @@ def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2
     def fn(idx):
         x = idx[-n:]
         b = idx[:-n]
-        return x_loader([*b, *[scale(i, s, size) for i, s, size in zip(x, scales, i_sizes)]])
+        return x_loader(
+            [*b, *[scale(i, s, size) for i, s, size in zip(x, scales, i_sizes)]]
+        )
 
     return Pointwise.create(
         device=x.get_device(),
@@ -2908,10 +2917,12 @@ def max_pool2d_with_indices_backward(
                 grad_index = [
                     *prefix,
                     ops.indirect_indexing(
-                        ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))), indices_size[-2]
+                        ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))),
+                        indices_size[-2],
                     ),
                     ops.indirect_indexing(
-                        ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))), indices_size[-1]
+                        ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))),
+                        indices_size[-1],
                     ),
                 ]
 
@@ -3348,12 +3359,14 @@ def avg_pool2d_backward(
                             ops.indirect_indexing(
                                 ops.minimum(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
-                                ), pooled_height
+                                ),
+                                pooled_height,
                             ),
                             ops.indirect_indexing(
                                 ops.minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
-                                ), pooled_width
+                                ),
+                                pooled_width,
                             ),
                         ]
                     ),

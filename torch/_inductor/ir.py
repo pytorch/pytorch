@@ -3987,7 +3987,9 @@ class LoopBodyBlock:
                 """
 
                 def set_indirect(new_var):
-                    self.body.replace_indirect(var, V.ops.indirect_indexing(new_var, size))
+                    self.body.replace_indirect(
+                        var, V.ops.indirect_indexing(new_var, size)
+                    )
 
                 var = self.body.add_indirect(size)
                 tracer.create_proxy(

@@ -997,15 +997,21 @@ class TritonKernel(Kernel):
             self._load_mask = prior
 
     def gen_assert_indirect_indexing(self, buffer, original_index, mask):
+        if mask == "None":
+            return
         body = self.current_node._body
         indirect_size = dict(zip(body.indirect_vars, body.indirect_max_sizes))
         indirect_name = body.indirect_new
         # Many indirect variables may be mapped to the same CSE'd variable
         var_size = {}
         for ind, size in indirect_size.items():
-            var_size.setdefault(indirect_name[ind], []).append(V.kernel.rename_indexing(size))
+            var_size.setdefault(indirect_name[ind], []).append(
+                V.kernel.rename_indexing(size)
+            )
 
-        indirect_vars = [s for s in original_index.free_symbols if s.name.startswith("tmp")]
+        indirect_vars = [
+            s for s in original_index.free_symbols if s.name.startswith("tmp")
+        ]
         for var in indirect_vars:
             sizes = var_size[var]
             if all(isinstance(s, sympy.Integer) for s in sizes):
@@ -1017,6 +1023,7 @@ class TritonKernel(Kernel):
                         return texpr(expr[0])
                     else:
                         return f"min({texpr(expr[0])}, {print_min(expr[1:])})"
+
                 size = print_min(sizes)
             cond_gt = f"0 <= {var}"
             cond_lt = f"{var} < {size}"
@@ -1025,8 +1032,12 @@ class TritonKernel(Kernel):
                 var_mask = f" | ~{var_mask}"
             else:
                 var_mask = ""
-            buffer.writeline(f'tl.device_assert({cond_gt}{var_mask}, f"index out of bounds: {cond_gt}")')
-            buffer.writeline(f'tl.device_assert({cond_lt}{var_mask}, f"index out of bounds: {cond_lt}")')
+            buffer.writeline(
+                f'tl.device_assert({cond_gt}{var_mask}, f"index out of bounds: {cond_gt}")'
+            )
+            buffer.writeline(
+                f'tl.device_assert({cond_lt}{var_mask}, f"index out of bounds: {cond_lt}")'
+            )
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
