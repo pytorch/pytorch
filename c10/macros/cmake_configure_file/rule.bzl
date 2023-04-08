@@ -1,20 +1,18 @@
-load(":cmake_configure_file/cmd.bzl", "cmake_configure_file_cmd")
-
 # Forked from header_template_rule. header_template_rule is not
 # compatible with our usage of select because its substitutions
 # attribute is a dict, and dicts may not be appended with select. We
 # get around this limitation by using a list as our substitutions.
 def _cmake_configure_file_impl(ctx):
-    command = cmake_configure_file_cmd("$1", ctx.attr.definitions, "$2")
-
-    ctx.actions.run_shell(
-        inputs = [ctx.file.src],
+    ctx.actions.run(
+        inputs = [
+            ctx.file.src,
+        ],
         outputs = [ctx.outputs.out],
-        command = " ".join(command),
+        executable = ctx.executable.tool,
         arguments = [
             ctx.file.src.path,
             ctx.outputs.out.path,
-        ],
+        ] + ctx.attr.definitions,
     )
     return [
         # create a provider which says that this
@@ -49,6 +47,12 @@ Args:
         "src": attr.label(
             mandatory = True,
             allow_single_file = True,
+        ),
+        "tool": attr.label(
+            default = Label(":cmake_configure_file/tool.py"),
+            executable = True,
+            allow_files = True,
+            cfg = "exec",
         ),
     },
     # output_to_genfiles is required for header files.

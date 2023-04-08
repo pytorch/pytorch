@@ -1,3 +1,14 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import subprocess
+import sys
+
+def main(template_path: str, output_path: str, definitions: list[str]) -> None:
+    subprocess.run(" ".join(cmake_configure_file_cmd(template_path, definitions, output_path)),
+                   check=True, shell=True)
+
 def cmake_configure_file_cmd(template_path, definitions, output_path):
     command = ["sed", "--regexp-extended"]
     for definition in definitions:
@@ -24,3 +35,7 @@ def cmake_configure_file_cmd(template_path, definitions, output_path):
     command.append("> {}".format(output_path))
 
     return command
+
+
+if __name__ == "__main__":
+    main(sys.argv[1], sys.argv[2], list(sys.argv[3:]))
