@@ -304,7 +304,7 @@ private:
   const id<MTLDevice> m_device;
   std::recursive_mutex m_mutex;
   // allocated buffers by device pointer
-  ska::flat_hash_map<void*, BufferBlock*> m_allocated_buffers;
+  ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
   // unallocated cached buffers larger than 1 MB
   BufferPool m_large_pool_shared, m_large_pool_private;
   // unallocated cached buffers 1 MB or smaller
