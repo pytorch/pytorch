@@ -7,6 +7,7 @@ import io
 import itertools
 import os
 import tempfile
+import unittest
 import warnings
 
 from typing import Any, Callable, Generator, Optional, Sequence, Tuple, Union
@@ -420,7 +421,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test("Flaky on dynamic shape")
+    @unittest.skip("Flaky on dynamic shape")
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x):
