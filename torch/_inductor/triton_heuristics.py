@@ -16,7 +16,7 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config
-from .codecache import cache_dir, cubin_cache_dir
+from .codecache import cache_dir, CudaKernelParamCache
 
 from .ir import ReductionHint, TileHint
 from .utils import (
@@ -138,8 +138,10 @@ class CachingAutotuner(KernelInterface):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
-        if config.triton.store_cubin:
-            launcher.kernel_name = self.fn.__name__
+        launcher.store_cubin = config.triton.store_cubin
+        # store this global varible to avoid the high overhead of reading it when calling run
+        if launcher.store_cubin:
+            launcher.fn = self.fn
             launcher.bin = binary
 
         return launcher
@@ -190,21 +192,12 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(self.launchers[0].config)
 
     def save_cuda_kernel(self, grid, stream, launcher):
-        from .codegen.wrapper import KernelParamCache
-
-        # Make sure kernel_name is enough for distiguishing kernels
-        assert config.triton.unique_kernel_names
-
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
             grid_x, grid_y, grid_z = grid
 
-        kernel_name = launcher.kernel_name
-        cubin_path = os.path.join(cubin_cache_dir(), f"{kernel_name}.cubin")
-        with open(cubin_path, "wb") as f:
-            f.write(launcher.bin.asm["cubin"])
-
+        key = launcher.fn.module.split(".")[-1]
         params = {
             "mangled_name": launcher.bin.metadata["name"],
             "grid_x": grid_x,
@@ -214,14 +207,7 @@ class CachingAutotuner(KernelInterface):
             "shared_mem": launcher.bin.shared,
             "stream": stream,
         }
-        with self.lock:
-            if KernelParamCache.cache.get(kernel_name, None):
-                assert (
-                    KernelParamCache.cache[kernel_name].get("mangled_name", None)
-                    == launcher.bin.metadata["name"]
-                )
-            else:
-                KernelParamCache.cache[kernel_name] = params
+        CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
 
     def run(self, *args, grid, stream):
         if len(self.launchers) != 1:
@@ -230,10 +216,10 @@ class CachingAutotuner(KernelInterface):
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid)
 
-        if config.triton.store_cubin:
+        (launcher,) = self.launchers
+        if launcher.store_cubin:
             self.save_cuda_kernel(grid, stream, self.launchers[0])
 
-        (launcher,) = self.launchers
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
@@ -285,6 +271,7 @@ class DebugAutotuner(CachingAutotuner):
     def __init__(self, *args, regex_filter="", **kwargs):
         self.regex_filter = regex_filter
         super().__init__(*args, **kwargs)
+        self.cached = None
 
     def run(self, *args, grid, stream):
         possible_names = _find_names(self)
@@ -294,17 +281,20 @@ class DebugAutotuner(CachingAutotuner):
         super().run(*args, grid=grid, stream=stream)
         (launcher,) = self.launchers
 
-        ms = self.bench(launcher, *args, grid=grid)[0]
-        num_in_out_ptrs = len(
-            [
-                arg_name
-                for arg_name in self.fn.arg_names
-                if arg_name.startswith("in_out_ptr")
-            ]
-        )
-        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
-        gb_per_s = num_gb / (ms / 1e3)
-
+        if self.cached is None:
+            ms = self.bench(launcher, *args, grid=grid)[0]
+            num_in_out_ptrs = len(
+                [
+                    arg_name
+                    for arg_name in self.fn.arg_names
+                    if arg_name.startswith("in_out_ptr")
+                ]
+            )
+            num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+            gb_per_s = num_gb / (ms / 1e3)
+            self.cached = (ms, num_gb, gb_per_s, kernel_name)
+        else:
+            ms, num_gb, gb_per_s, kernel_name = self.cached
         collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
         print(
             create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
@@ -658,6 +648,10 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
                 size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
             )
         ]
+
+    for c in configs:
+        # we don't need RBLOCK for persistent reduction
+        c.kwargs.pop("RBLOCK")
 
     return cached_autotune(
         configs,

@@ -86,7 +86,12 @@ class PersistentCache:
         if not torch.cuda.is_available():
             return
 
-        import triton
+        try:
+            import triton
+
+            triton_version = triton.__version__
+        except ModuleNotFoundError:
+            triton_version = None
 
         self.system = {
             "device": torch.cuda.get_device_properties(
@@ -94,7 +99,7 @@ class PersistentCache:
             ).name,
             "version": {
                 "cuda": torch.version.cuda,
-                "triton": triton.__version__,
+                "triton": triton_version,
             },
         }
         self.system["hash"] = hashlib.sha256(
@@ -510,7 +515,6 @@ def get_include_and_linking_paths(
         libs = ["c10", "torch", "torch_cpu", "torch_python"]
         if cuda:
             libs += ["c10_cuda", "cuda", "torch_cuda"]
-            ipaths += [f"{cpp_extension._TORCH_PATH}/../aten/src/"]
         else:
             libs += ["gomp"]
             macros = vec_isa.build_macro()
@@ -571,6 +575,28 @@ def cpp_compile_command(
             -o {output}
         """,
     ).strip()
+
+
+class CudaKernelParamCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def set(cls, key, params, cubin):
+        from filelock import FileLock
+
+        cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")
+        params["cubin_path"] = cubin_path
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            cls.cache[key] = params
+            with open(cubin_path, "wb") as f:
+                f.write(cubin)
+
+    @classmethod
+    def get(cls, key):
+        return cls.cache.get(key, None)
 
 
 class AotCodeCache:
