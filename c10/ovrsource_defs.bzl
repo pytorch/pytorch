@@ -52,7 +52,6 @@ def define_c10_ovrsource(name, is_mobile):
         public_preprocessor_flags = pp_flags,
         public_raw_headers = native.glob([
             "core/*.h",
-            "macros/*.h",
             "mobile/*.h",
             "test/util/*.h",  # some external tests use this
             "util/*.h",
@@ -72,10 +71,10 @@ def define_c10_ovrsource(name, is_mobile):
             ],
         }),
         exported_deps = [
-            ":ovrsource_c10_cmake_macros.h",
             "//arvr/third-party/gflags:gflags",
             "//third-party/glog:glog",
             "//third-party/fmt:fmt",
+            "//xplat/caffe2/c10/macros:macros",
         ],
     )
 
