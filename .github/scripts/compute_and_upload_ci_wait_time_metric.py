@@ -4,6 +4,7 @@ import rockset
 import pandas as pd
 import boto3 # type: ignore[import]
 from botocore.exceptions import ClientError  # type: ignore[import]
+from decimal import Decimal
 
 
 TABLE_NAME = "torchci-metrics-ci-wait-time"
@@ -326,10 +327,10 @@ def upload_stats(pr_stats):
             UpdateExpression="set pr_number = :p duration_mins = :d, start_time = :s, end_time = :e, num_commits = :n, week = :w",
             ExpressionAttributeValues={
                 ':p': row['pr_number'],
-                ':d': row['duration_mins'],
+                ':d': int(row['duration_mins']),
                 ':s': row['start_time'].isoformat(),
                 ':e': row['end_time'].isoformat(),
-                ':n': row['num_commits'],
+                ':n': int(row['num_commits']),
                 ':w': row['week'].isoformat(),
             },
             ReturnValues="UPDATED_NEW"
