@@ -204,7 +204,7 @@ class Backend:
 
     def __new__(cls, name: str):
         if not isinstance(name, str):
-            raise ValueError("Backend name must be a string, but got: {}".format(name))
+            raise ValueError(f"Backend name must be a string, but got: {name}")
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
         if value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
@@ -1042,6 +1042,9 @@ def _new_process_group_helper(
             backend_type = ProcessGroup.BackendType.MPI
             if not backend_class:
                 return GroupMember.NON_GROUP_MEMBER
+            # create new process group with accurate rank and size
+            if pg.rank() == -1 and pg.size() == -1:
+                pg = ProcessGroup(backend_prefix_store, backend_class.rank(), backend_class.size(), base_pg_options)
         elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
@@ -2061,6 +2064,11 @@ def all_gather_object(object_list, obj, group=None):
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
 
+    .. warning::
+        Calling :func:`all_gather_object` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`all_gather` instead.
+
     Example::
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
@@ -2148,6 +2156,11 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    .. warning::
+        Calling :func:`gather_object` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`gather` instead.
 
     Example::
         >>> # xdoctest: +SKIP("need process group init")
@@ -2256,6 +2269,11 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
 
+    .. warning::
+        Calling :func:`broadcast_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`broadcast` instead.
+
     Example::
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
@@ -2351,6 +2369,11 @@ def scatter_object_list(
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    .. warning::
+        Calling :func:`scatter_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`scatter` instead.
 
     Example::
         >>> # xdoctest: +SKIP("need process group init")
@@ -3352,8 +3375,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
     if device_ids is not None:
         if get_backend(group) != Backend.NCCL:
             raise RuntimeError(
-                "Function argument device_ids not supported "
-                "for the selected backend {}".format(get_backend(group))
+                f"Function argument device_ids not supported for the selected backend {get_backend(group)}"
             )
         if isinstance(device_ids, list):
             opts.device_ids = device_ids
@@ -3821,9 +3843,7 @@ def new_subgroups_by_enumeration(
         for rank in ranks:
             if rank in rank_to_ranks_dict:
                 raise ValueError(
-                    "Rank {} has appeared in both subgroup {} and {}".format(
-                        rank, rank_to_ranks_dict[rank], ranks
-                    )
+                    f"Rank {rank} has appeared in both subgroup {rank_to_ranks_dict[rank]} and {ranks}"
                 )
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:

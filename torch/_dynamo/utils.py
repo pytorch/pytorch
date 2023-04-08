@@ -23,9 +23,10 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 import torch._logging
+from torch._guards import detect_fake_mode  # noqa: F401
 from . import config
 
 try:
@@ -44,10 +45,12 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_map
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
+nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
+nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 
 log = logging.getLogger(__name__)
 
@@ -267,7 +270,6 @@ def setup_compile_debug():
             inductor=logging.DEBUG,
             output_code=True,  # this is off by default
         )
-
         return add_file_handler()
 
     return contextlib.ExitStack()
@@ -382,7 +384,9 @@ def is_typing(value):
     if sys.version_info < (3, 9):
         return isinstance(value, typing._GenericAlias)
     else:
-        return isinstance(value, typing._SpecialGenericAlias)
+        return isinstance(
+            value, (typing._SpecialGenericAlias, typing._UnionGenericAlias)
+        )
 
 
 def is_numpy_int_type(value):
@@ -555,7 +559,7 @@ def clone_input(x):
 
 
 def clone_inputs(example_inputs):
-    if isinstance(example_inputs, dict):
+    if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
             assert isinstance(value, torch.Tensor)
@@ -1316,23 +1320,6 @@ def assert_no_fake_params_or_buffers(gm):
         ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
-def fake_mode_from_tensors(inputs: List[Any]):
-    """
-    Takes a list of anything, unflattened is fine, returns a fake_mode
-    if any are fake. All fake modes on all fake tensors must be identical.
-    Returns None if no fake_mode is fine
-    """
-    flat_inputs, _ = tree_flatten(inputs)
-    fake_mode = None
-    for flat_input in flat_inputs:
-        if isinstance(flat_input, torch._subclasses.FakeTensor):
-            if fake_mode is None:
-                fake_mode = flat_input.fake_mode
-            else:
-                assert fake_mode is flat_input.fake_mode
-    return fake_mode
-
-
 def fqn(obj: Any):
     """
     Returns the fully qualified name of the object.
@@ -1453,3 +1440,45 @@ def format_graph_tabular(fn_name, gm):
 
 def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
+
+
+def nnmodule_has_hooks(
+    mod,
+    check_forward_hooks=False,
+    check_backward_hooks=False,
+    check_state_dict_hooks=False,
+):
+    """
+    Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
+    hooks executed during module.__call__, and state_dict hooks which are executed separately.
+    """
+    hook_dicts_to_check = []
+    check_all_hooks = (
+        not check_forward_hooks
+        and not check_backward_hooks
+        and not check_state_dict_hooks
+    )
+    if check_forward_hooks or check_all_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_forward_pre_hooks",
+                "_forward_hooks",
+            ]
+        )
+    if check_backward_hooks or check_all_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_backward_pre_hooks",
+                "_backward_hooks",
+            ]
+        )
+    if check_state_dict_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_state_dict_pre_hooks",
+                "_state_dict_hooks",
+                "_load_state_dict_pre_hooks",
+                "_load_state_dict_post_hooks",
+            ]
+        )
+    return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
