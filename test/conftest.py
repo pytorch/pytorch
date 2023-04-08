@@ -186,6 +186,8 @@ def pytest_report_teststatus(report, config):
     # Add the test time to the verbose output, unforunately I don't think this
     # includes setup or teardown
     pluggy_result = yield
+    if not isinstance(report, pytest.TestReport):
+        return
     outcome, letter, verbose = pluggy_result.get_result()
     if verbose:
         pluggy_result.force_result(
