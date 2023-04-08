@@ -1324,6 +1324,10 @@ def _lru_cache(fn, maxsize=None):
     wrapper.cache_info = fn_cache.cache_info  # type: ignore[attr-defined]
     return wrapper
 
+@dataclass(frozen=True)
+class ShapeGuardExprSources:
+    expr: str
+    sources: List[Source]
 
 class ShapeGuardPrinter(StrPrinter):
     def __init__(
@@ -1662,11 +1666,10 @@ class ShapeEnv:
         # just means there are no constraints
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
         _simplified=False
-    ) -> Tuple[List[str], List[Source]]:
+    ) -> Tuple[List[ShapeGuardExprSources]]:
 
         assert len(placeholders) == len(sources)
 
-        guard_sources = []
         # Expand optional inputs, or verify invariants are upheld
         if constraint_inputs is None:
             constraint_inputs = [
@@ -1845,9 +1848,10 @@ class ShapeEnv:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
-                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources, []).doprint(expr)
+                guard_sources = []
+                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources, guard_sources).doprint(expr)
                 guard_sources.append(source)
-                exprs.append(f"{source_ref(source)} == {sexpr}")
+                exprs.append(ShapeGuardExprSources(f"{source_ref(source)} == {sexpr}", guard_sources))
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only
@@ -1861,8 +1865,9 @@ class ShapeEnv:
                 continue
             g = self.simplify(g)
             try:
+                guard_sources = []
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources, guard_sources).doprint(g)
-                exprs.append(guard_expr)
+                exprs.append(ShapeGuardExprSources(guard_expr, guard_sources))
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
                 if len(g.free_symbols) == 1:
@@ -1933,16 +1938,14 @@ class ShapeEnv:
                 if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
                     bounds.append(str(r.upper))
                 if len(bounds) > 1:
-                    guard_sources.append(sources[0])
-                    exprs.append(" <= ".join(bounds))
+                    exprs.append(ShapeGuardExprSources(" <= ".join(bounds), sources))
 
         if constraint_violations:
             msgs = [f"  {i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
             msgs = "\n".join(msgs)
             raise ConstraintViolationError(f"Constraints violated!\n{msgs}")
 
-        assert len(exprs) == len(guard_sources)
-        return (exprs, guard_sources)
+        return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import LocalSource

@@ -72,12 +72,11 @@ assume_static_by_default = False
 
 class DYNAMIC_SHAPE_STRATEGY(Enum):
     OFF = 1
-    # Only mark the failed dim as dynamic
-    FAILED_DIM_ONLY = 2
     # Find all tensors in frame and mark them all dynamic if they fail
-    ALL_FAILED_IN_FRAME = 3
+    ALL_FAILED_IN_FRAME = 2
     # Flip to assume_static_by_default = False
-    ALL = 4
+    # TODO: Do we want this? Seems useful... but also would kinda rather this be a bool.
+    ALL = 3
 
 
 automatic_dynamic_shapes_strategy: DYNAMIC_SHAPE_STRATEGY = DYNAMIC_SHAPE_STRATEGY.OFF

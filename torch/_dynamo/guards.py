@@ -103,7 +103,7 @@ def strip_getattr_getitem(name):
 # Don't put anything on here you don't want laundered to the next frame
 @dataclasses.dataclass
 class CodePart:
-    source: Union[Source, List[Source]]  # Note: List of sources for tensor checks
+    source: List[Source]  # Note: List of sources for tensor checks and shape_env
     code: str
     origin: str
 
@@ -477,17 +477,17 @@ class GuardBuilder(GuardBuilderBase):
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
         constraint_inputs = [a.constraint_dims for a in fs]
-        (guards, guard_sources) = output_graph.shape_env.produce_guards(
+        guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
             constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
         )
         origin = guard.origin
-        for shape_guard, guard_source in zip(guards, guard_sources):
-            guard.origin = guard_source
-            self._produce_guard_code(guard, [shape_guard], shape_env=True)
-        guard.origin = origin
+        for shape_guard in guards:
+            self._produce_guard_code(
+                guard, [shape_guard.expr], shape_env=True, sources=shape_guard.sources
+            )
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -586,7 +586,12 @@ class GuardBuilder(GuardBuilderBase):
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
-        self, guard, code_list, provided_guarded_object=None, shape_env=False
+        self,
+        guard,
+        code_list,
+        provided_guarded_object=None,
+        shape_env=False,
+        sources=None,
     ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
@@ -605,7 +610,9 @@ class GuardBuilder(GuardBuilderBase):
         caller_fn = getframeinfo(caller)[2]
         del caller
         for code in code_list:
-            code_part = CodePart(guard.origin, code, caller_fn)
+            if sources is None:
+                sources = [guard.origin]
+            code_part = CodePart(sources, code, caller_fn)
             if shape_env:
                 self.shape_env_code.append(code_part)
             else:
@@ -768,7 +775,7 @@ class CheckFunctionManager:
                 source_a = guard.input_source_a
                 source_b = guard.input_source_b
                 code_part = CodePart(
-                    source_a,
+                    [source_a, source_b],
                     f"{source_a.name()} is {source_b.name()}",
                     "DuplicateInputs",
                 )

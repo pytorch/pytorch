@@ -371,33 +371,55 @@ def dynamic_plan_from_code_part(code_part: Optional[CodePart], dynamic_plan):
     ):
         return dynamic_plan
 
-    def add_dynamic_dim(code_part, strategy):
-        if code_part.origin == "SHAPE_ENV":
-            source = code_part.source
+    def is_dynamic_source_candidate(source):
+        if isinstance(source, TensorPropertySource):
+            prop = source.prop
             # TODO: Expand to stride?
-            if isinstance(source, TensorPropertySource):
-                prop = source.prop
-                if prop == TensorProperty.SIZE:
-                    inner_source = source.base
-                    name = inner_source.local_name
-                    if strategy == config.DYNAMIC_SHAPE_STRATEGY.ALL:
-                        config.assume_static_by_default = False
-                        return dynamic_plan
-                    if name not in dynamic_plan:
-                        dynamic_plan[name] = []
-                    if strategy == config.DYNAMIC_SHAPE_STRATEGY.FAILED_DIM_ONLY:
-                        dynamic_plan[name].append(source.idx)
-                    else:
-                        code_parts = code_part.scope["part_map"].values()
-                        for code_part in code_parts:
-                            add_dynamic_dim(
-                                code_part, config.DYNAMIC_SHAPE_STRATEGY.FAILED_DIM_ONLY
-                            )
+            if prop == TensorProperty.SIZE:
+                return True
+        return False
 
-    add_dynamic_dim(code_part, config.automatic_dynamic_shapes_strategy)
+    def is_dynamic_code_part_candidate(code_part):
+        if code_part.origin == "SHAPE_ENV":
+            sources = code_part.source
+            for source in sources:
+                if is_dynamic_source_candidate(source):
+                    return True
+        return False
+
+    def add_dynamic_dim(code_part):
+        if not code_part.source:
+            # Not all code has sources! Ex: __guarded_code.valid
+            return
+        for source in code_part.source:
+            if is_dynamic_source_candidate(source):
+                inner_source = source.base
+                name = inner_source.local_name
+                if name not in dynamic_plan:
+                    dynamic_plan[name] = []
+                dynamic_plan[name].append(source.idx)
+
+    def add_dynamic_dims(code_part, strategy):
+        # Determine if this code_part is a candidate for automatic dynamic
+        # marking. If the failed guard was not a shape_env size property guard,
+        # we do not proceed.
+        if not is_dynamic_code_part_candidate(code_part):
+            # The guard was not a candidate for automatic dynamic marking.
+            return
+        if strategy == config.DYNAMIC_SHAPE_STRATEGY.ALL:
+            # User defined strategy is to wholly go over to dynamic compilation.
+            config.assume_static_by_default = False
+            return
+        elif strategy == config.DYNAMIC_SHAPE_STRATEGY.ALL_FAILED_IN_FRAME:
+            code_parts = code_part.scope["part_map"].values()
+            for code_part in code_parts:
+                add_dynamic_dim(code_part)
+        else:
+            raise RuntimeError(f"Unknown dynamic dim strategy {strategy}")
+
+    # Take the failed code part, and add it as a dynamic dim
+    add_dynamic_dims(code_part, config.automatic_dynamic_shapes_strategy)
     return dynamic_plan
-    # if not config.dynamic_shapes or not code_part:
-    # return None
 
 
 def catch_errors_wrapper(callback, hooks: Hooks):
@@ -585,7 +607,7 @@ def explain(f, *args, **kwargs):
 
         op_count += len(ops)
         ops_per_graph.append(ops)
-        if gm.compile_subgraph_reason is not None:
+        if gm.compile_subgraph_reason.graph_break:
             break_reasons.append(gm.compile_subgraph_reason)
         return gm.forward
 
