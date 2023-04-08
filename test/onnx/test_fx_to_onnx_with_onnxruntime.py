@@ -417,6 +417,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
+    @pytorch_test_common.skip_min_ort_version(reason="SegFault", version="1.15")
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x):

@@ -175,6 +175,9 @@ def cpp_prefix():
 
 
 class CppPrinter(ExprPrinter):
+    def _print_Integer(self, expr):
+        return f"{int(expr)}L"
+
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
         x = self.paren(self.doprint(x))
