@@ -1,0 +1,13 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+cc_test(
+    name = "bazel_test",
+    srcs = [
+        "bazel_test.cpp",
+        "cmake_macros.h",
+    ],
+    deps = [
+        "//c10/macros",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
