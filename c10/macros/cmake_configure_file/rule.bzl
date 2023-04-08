@@ -5,11 +5,13 @@
 def _cmake_configure_file_impl(ctx):
     ctx.actions.run(
         inputs = [
+            ctx.executable.tool,
             ctx.file.src,
         ],
         outputs = [ctx.outputs.out],
-        executable = ctx.executable.tool,
+        executable = "python3",
         arguments = [
+            ctx.executable.tool.path,
             ctx.file.src.path,
             ctx.outputs.out.path,
         ] + ctx.attr.definitions,
