@@ -478,12 +478,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ):
-        if isinstance(args, VariableTracker):
-            self.output.guards.update(args.guards)
-            args = list(args.unpack_var_sequence(self))
-        if isinstance(kwargs, ConstDictVariable):
-            self.output.guards.update(kwargs.guards)
-            kwargs = dict(kwargs.items)
         assert isinstance(fn, VariableTracker)
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
