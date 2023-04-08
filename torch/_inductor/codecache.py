@@ -83,36 +83,59 @@ def cubin_cache_dir():
 
 class PersistentCache:
     def __init__(self):
-        self.local_cache_path = os.path.join(cache_dir(), "local_cache")
-        self.global_cache_path = config.global_cache_path
+        if not torch.cuda.is_available():
+            return
 
-        if torch.cuda.is_available():
-            self.dinfo = torch.cuda.get_device_properties(
+        try:
+            import triton
+
+            triton_version = triton.__version__
+        except ModuleNotFoundError:
+            triton_version = None
+
+        self.system = {
+            "device": torch.cuda.get_device_properties(
                 torch.cuda.current_device()
-            ).name
-            self.vinfo = torch.version.cuda
+            ).name,
+            "version": {
+                "cuda": torch.version.cuda,
+                "triton": triton_version,
+            },
+        }
+        self.system["hash"] = hashlib.sha256(
+            json.dumps(self.system, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
+        self.local_cache_path = os.path.join(cache_dir(), "cache")
+        self.global_cache_path = (
+            os.path.join(os.path.dirname(config.global_cache_dir), self.system["hash"])
+            if config.global_cache_dir is not None
+            else None
+        )
 
     def get_local_cache(self):
         if not os.path.isfile(self.local_cache_path):
             return {}
-        with open(self.local_cache_path, "r") as local_cache_file:
-            local_cache = json.load(local_cache_file)
-        return local_cache
+        with open(self.local_cache_path, "r") as local_cache_fp:
+            local_cache = json.load(local_cache_fp)
+        if local_cache["system"]["hash"] != self.system["hash"]:
+            os.remove(self.local_cache_path)
+            return {}
+        return local_cache["cache"]
 
     def update_local_cache(self, local_cache):
-        write_atomic(self.local_cache_path, json.dumps(local_cache, indent=4))
+        write_atomic(
+            self.local_cache_path,
+            json.dumps({"system": self.system, "cache": local_cache}, indent=4),
+        )
 
     @functools.lru_cache(None)
     def get_global_cache(self):
         if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
             return {}
-        with open(self.global_cache_path, "r") as global_cache_file:
-            global_cache = json.load(global_cache_file)
-        if self.dinfo not in global_cache:
-            global_cache[self.dinfo] = {}
-        if self.vinfo not in global_cache[self.dinfo]:
-            global_cache[self.dinfo][self.vinfo] = {}
-        return global_cache[self.dinfo][self.vinfo]
+        with open(self.global_cache_path, "r") as global_cache_fp:
+            global_cache = json.load(global_cache_fp)
+        return global_cache["cache"]
 
     def lookup(
         self,
@@ -133,7 +156,7 @@ class PersistentCache:
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
 
-        gc_log = partial(global_cache_log, self.dinfo, self.vinfo, name, inputs)
+        gc_log = partial(global_cache_log, self.system, name, inputs)
         timings = {}
 
         def check_cache(cache, callback=None):
@@ -492,7 +515,6 @@ def get_include_and_linking_paths(
         libs = ["c10", "torch", "torch_cpu", "torch_python"]
         if cuda:
             libs += ["c10_cuda", "cuda", "torch_cuda"]
-            ipaths += [f"{cpp_extension._TORCH_PATH}/../aten/src/"]
         else:
             libs += ["gomp"]
             macros = vec_isa.build_macro()
@@ -553,6 +575,28 @@ def cpp_compile_command(
             -o {output}
         """,
     ).strip()
+
+
+class CudaKernelParamCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def set(cls, key, params, cubin):
+        from filelock import FileLock
+
+        cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")
+        params["cubin_path"] = cubin_path
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            cls.cache[key] = params
+            with open(cubin_path, "wb") as f:
+                f.write(cubin)
+
+    @classmethod
+    def get(cls, key):
+        return cls.cache.get(key, None)
 
 
 class AotCodeCache:

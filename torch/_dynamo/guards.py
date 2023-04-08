@@ -1,5 +1,7 @@
 import builtins
 import collections
+import enum
+import importlib
 import itertools
 import logging
 import math
@@ -37,7 +39,6 @@ from .utils import (
     np,
     orig_code_map,
     tensor_always_has_static_shape,
-    tensor_static_reason_to_message,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -64,6 +65,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
+        ("__load_module", lambda name: importlib.import_module(name)),
     ]
 )
 
@@ -175,9 +177,10 @@ class GuardBuilder(GuardBuilderBase):
             name = guard.name
         base = strip_getattr_getitem(strip_function_call(name))
         if base not in self.argnames:
-            if re.match(r"^\d+$", base):
-                log.warning(f"invalid var name: {guard}")
-            self.argnames.append(base)
+            if re.match(r"[a-zA-Z0-9_]+", base):
+                if re.match(r"^\d+$", base):
+                    log.warning(f"invalid var name: {guard}")
+                self.argnames.append(base)
 
         return name
 
@@ -555,11 +558,6 @@ class GuardBuilder(GuardBuilderBase):
                     code.append(
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
-            else:
-                if not config.allow_ignore_mark_dynamic:
-                    assert not hasattr(
-                        value, "_dynamo_dynamic_indices"
-                    ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
 
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
@@ -600,7 +598,11 @@ class GuardBuilder(GuardBuilderBase):
             weakref.ref(type(guarded_object)) if guarded_object is not None else None
         )
         obj_ref = None
-        if hasattr(guarded_object.__class__, "__weakref__"):
+        # Not necessary to have weakref for Enum type, but there is a bug that
+        # makes hasattr(guarded_object.__class__, "__weakref__") return True.
+        if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
+            guarded_object, enum.Enum
+        ):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
