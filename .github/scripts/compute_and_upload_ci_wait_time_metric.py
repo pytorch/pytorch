@@ -319,12 +319,12 @@ def upload_stats(pr_stats):
 
     statsTable = dynamodb.Table(TABLE_NAME)
 
-    for index, row in pr_stats.iterrows():
+    for _, row in pr_stats.iterrows():
         statsTable.update_item(
             Key={
                 'dynamoKey': f"{row['week'].isoformat()}_{row['pr_number']}",
             },
-            UpdateExpression="set pr_number = :p duration_mins = :d, start_time = :s, end_time = :e, num_commits = :n, week = :w",
+            UpdateExpression="set pr_number=:p duration_mins=:d, start_time=:s, end_time=:e, num_commits=:n, week=:w",
             ExpressionAttributeValues={
                 ':p': row['pr_number'],
                 ':d': int(row['duration_mins']),
@@ -340,7 +340,10 @@ def upload_stats(pr_stats):
 
 
 def main() -> None:
+    print("Getting the PR's stats")
     pr_stats = get_pr_stats()
+
+    print("Uploading stats to dynamo")
     upload_stats(pr_stats)
 
 if __name__ == "__main__":
