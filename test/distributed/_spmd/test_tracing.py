@@ -766,6 +766,35 @@ class CoverageTest(DTensorTestBase):
 
         self._test_train_step(train_step, mod, inp, tgt)
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_replicated_embedding(self):
+        N, D, B = 10, 8, 2
+
+        class EmbeddingModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = nn.Embedding(N, D)
+                self.fc = nn.Linear(D, D)
+                self.softmax = nn.Softmax(dim=1)
+                self.lss = nn.NLLLoss()
+
+            def forward(self, ids, tgt):
+                return self.lss(self.softmax(self.fc(self.emb(ids))), tgt)
+
+        torch.manual_seed(0)
+        mod = EmbeddingModule().cuda(self.rank)
+
+        @compile()
+        def train_step(mod, opt, ids, tgt):
+            mod(ids, tgt).sum().backward()
+            opt.step()
+
+        ids = torch.randint(0, N, (B,)).cuda(self.rank)
+        tgt = torch.empty(B, dtype=torch.long).random_(0, D).to(self.rank)
+
+        self._test_train_step(train_step, mod, ids, tgt)
+
 
 if __name__ == "__main__":
     run_tests()
