@@ -553,7 +553,7 @@ class TraceTrainStepTest(DTensorTestBase):
                         [
                             n
                             for n in gm.graph.nodes
-                            if n.target == torch.ops.aten.all_reduce.default
+                            if n.target == torch.ops.c10d_functional.all_reduce.default
                         ]
                     ),
                     1,
@@ -732,7 +732,7 @@ class CoverageTest(DTensorTestBase):
         torch.manual_seed(0)
         mod = nn.Sequential(
             nn.Linear(10, 10),
-            nn.Softmax(dim=1),
+            nn.LogSoftmax(dim=1),
         ).cuda(self.rank)
         inp = torch.randn(20, 10).cuda(self.rank)
         self._test_train_step(mod, inp)
