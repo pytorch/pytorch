@@ -73,9 +73,8 @@ def replace_placeholder_name_and_target(
     function is undefined. This function only does minimal sanity check that the two
     modules have the same number of arguments.
 
-    Name conflicts, if discovered, between new names and existing node names in the
-    graph will be handled. Check the documentation of :func:`set_node_name` for more
-    details.
+    Name conflicts between new names and existing node names in the graph are handled.
+    Check the documentation of :func:`set_node_name` for more details.
 
     Raises:
         RuntimeError: If the two modules have different number of arguments.
