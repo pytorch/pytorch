@@ -480,7 +480,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     ):
         if isinstance(args, VariableTracker):
             self.output.guards.update(args.guards)
-            args = args.unpack_var_sequence(self)
+            args = list(args.unpack_var_sequence(self))
         if isinstance(kwargs, ConstDictVariable):
             self.output.guards.update(kwargs.guards)
             kwargs = dict(kwargs.items)
