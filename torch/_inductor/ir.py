@@ -1310,6 +1310,7 @@ class View(BaseView):
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
+        # Skip pointless views
         if V.graph.sizevars.maybe_guard_list_equals(old_size, new_size):
             return x
 
@@ -4183,18 +4184,15 @@ class AllGatherIntoTensor(CollectiveKernel):
 
 
 class ReduceScatterTensor(CollectiveKernel):
-    def __init__(self, layout, inputs, constant_args, reduce_op, scatter_dim):
+    def __init__(self, layout, inputs, constant_args, reduce_op):
         super().__init__(layout, inputs, constant_args)
         self.reduce_op = reduce_op
-        # TODO support dim
-        self.scatter_dim = scatter_dim
 
     @classmethod
     def create(
         cls,
         x: "TensorBox",
         reduce_op: str,
-        scatter_dim: int,
         tag: str,
         ranks: List[int],
         group_size: int,
@@ -4204,7 +4202,7 @@ class ReduceScatterTensor(CollectiveKernel):
         # is there a difference between literally using x.data.layout below, vs
         # creating a new one that has the same properties?
         new_size = x.get_size()
-        new_size[scatter_dim] /= group_size
+        new_size[0] /= group_size
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
 
         return ReduceScatterTensor(
@@ -4212,7 +4210,6 @@ class ReduceScatterTensor(CollectiveKernel):
             inputs=[x],
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
-            scatter_dim=scatter_dim,
         )
 
     def codegen_collective(self, wrapper, output_name, input_names):
