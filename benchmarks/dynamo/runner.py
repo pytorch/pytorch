@@ -73,6 +73,10 @@ TABLE = {
         "nvprims_nvfuser": "--training --backend=nvprims_nvfuser ",
         "inductor": "--training --inductor ",
         "inductor_no_cudagraphs": "--training --inductor --disable-cudagraphs ",
+        "inductor_max_autotune": "--training --inductor --inductor-compile-mode max-autotune ",
+        "inductor_max_autotune_no_cudagraphs": (
+            "--training --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
+        ),
     },
     "inference": {
         "aot_eager": "--inference --backend=aot_eager ",
@@ -83,6 +87,10 @@ TABLE = {
         "ts_nvfuser_cudagraphs": "--inference --backend=cudagraphs_ts ",
         "inductor": "--inference -n50 --inductor ",
         "inductor_no_cudagraphs": "--inference -n50 --inductor --disable-cudagraphs ",
+        "inductor_max_autotune": "--inference -n50 --inductor --inductor-compile-mode max-autotune ",
+        "inductor_max_autotune_no_cudagraphs": (
+            "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
+        ),
     },
 }
 

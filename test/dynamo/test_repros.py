@@ -2736,6 +2736,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
 
+    def test_batch_encoding_clone_inputs(self):
+        class BatchEncoding(dict):
+            """
+            Copied from test_tokenization
+            """
+
+            def __init__(
+                self,
+                data,
+            ):
+                super().__init__(data)
+
+            def __getattr__(self, item: str):
+                try:
+                    return self.data[item]
+                except KeyError as e:
+                    raise AttributeError from e
+
+        encoding = BatchEncoding({"key": torch.rand((1, 4))})
+        cloned_encoding = torch._dynamo.utils.clone_inputs(encoding)
+        self.assertTrue(type(cloned_encoding) is not dict)
+
     def test_iadd_graph_break(self):
         def fn(x):
             a = ()
@@ -2749,6 +2771,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_odict_get_item_index_name(self):
+        d = {float: torch.float32, np.float16: torch.float16}
+
+        @torch.compile
+        def f(x, y1, y2):
+            return torch.zeros(5, dtype=d[y1]), torch.zeros(5, dtype=d[y2])
+
+        f(torch.zeros(4), float, np.float16)
 
 
 if __name__ == "__main__":
