@@ -3,7 +3,8 @@ from unittest.mock import patch
 import torch
 
 import torch._dynamo.test_case
-import torch._dynamo.testing 
+import torch._dynamo.testing
+
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
@@ -34,14 +35,22 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             x = torch.randn([6])
             y = torch.randn([6])
             opt(x, y)
-        
+
             return cnt
-        
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes_strategy", torch._dynamo.config.DYNAMIC_SHAPE_STRATEGY.OFF)
+
+        @patch.object(
+            torch._dynamo.config,
+            "automatic_dynamic_shapes_strategy",
+            torch._dynamo.config.DYNAMIC_SHAPE_STRATEGY.OFF,
+        )
         def run_without_automatic():
             return run_foo_6_times_and_count_recompiles()
 
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes_strategy", torch._dynamo.config.DYNAMIC_SHAPE_STRATEGY.ALL_FAILED_IN_FRAME)
+        @patch.object(
+            torch._dynamo.config,
+            "automatic_dynamic_shapes_strategy",
+            torch._dynamo.config.DYNAMIC_SHAPE_STRATEGY.ALL_FAILED_IN_FRAME,
+        )
         def run_with_automatic():
             return run_foo_6_times_and_count_recompiles()
 
@@ -52,8 +61,3 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         with_automatic = run_with_automatic()
         self.assertEqual(with_automatic.frame_count, 2)
         self.assertEqual(with_automatic.op_count, 2)
-
-
-        
-
-

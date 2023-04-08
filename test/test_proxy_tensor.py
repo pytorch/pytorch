@@ -40,7 +40,7 @@ def strip_end(s, suffix):
 def show_guards(gm):
     names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
     return "\n".join(
-        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True, constraint_inputs=None)
+        [guard.expr for guard in gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True, constraint_inputs=None)]
     )
 
 
@@ -1223,7 +1223,7 @@ def forward(self, a_1):
         from torch._dynamo.source import LocalSource
         self.assertExpectedInline(
             str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")])),
-            """["L['a'].size()[0] == 2*L['b'].size()[0]", "L['a'].stride()[0] == 1", "L['a'].storage_offset() == 0", "L['b'].stride()[0] == 1", "L['b'].storage_offset() == 0", "2 <= L['b'].size()[0]"]"""  # noqa: B950
+            """[ShapeGuardExprSources(expr="L['a'].size()[0] == 2*L['b'].size()[0]", sources=[TensorPropertySource(base=LocalSource(local_name='b'), prop=<TensorProperty.SIZE: 0>, idx=0), TensorPropertySource(base=LocalSource(local_name='a'), prop=<TensorProperty.SIZE: 0>, idx=0)]), ShapeGuardExprSources(expr="L['a'].stride()[0] == 1", sources=[TensorPropertySource(base=LocalSource(local_name='a'), prop=<TensorProperty.STRIDE: 1>, idx=0)]), ShapeGuardExprSources(expr="L['a'].storage_offset() == 0", sources=[TensorPropertySource(base=LocalSource(local_name='a'), prop=<TensorProperty.STORAGE_OFFSET: 2>, idx=None)]), ShapeGuardExprSources(expr="L['b'].stride()[0] == 1", sources=[TensorPropertySource(base=LocalSource(local_name='b'), prop=<TensorProperty.STRIDE: 1>, idx=0)]), ShapeGuardExprSources(expr="L['b'].storage_offset() == 0", sources=[TensorPropertySource(base=LocalSource(local_name='b'), prop=<TensorProperty.STORAGE_OFFSET: 2>, idx=None)]), ShapeGuardExprSources(expr="2 <= L['b'].size()[0]", sources=[TensorPropertySource(base=LocalSource(local_name='b'), prop=<TensorProperty.SIZE: 0>, idx=0)])]"""  # noqa: B950
         )
 
     def test_sym_storage_offset(self):

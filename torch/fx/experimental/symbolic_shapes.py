@@ -1951,6 +1951,7 @@ class ShapeEnv:
         from torch._dynamo.source import LocalSource
         arg_names = [f"t{i}" for i in range(len(args))]
         guards = self.produce_guards(placeholders, [LocalSource(a) for a in arg_names])
+        guards = [guard.expr for guard in guards]
         if guards:
             code = " and ".join(guards)
             return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
