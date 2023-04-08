@@ -26,6 +26,7 @@ from torch.distributed.fsdp.wrap import (
     ModuleWrapPolicy,
     transformer_auto_wrap_policy,
 )
+from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -182,6 +183,94 @@ class TestFSDPMisc(FSDPTest):
             opt_local.zero_grad()
 
         dist.barrier()
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_optimizer_overlap(self):
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(10, 10)
+                self.b = nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return self.b(self.a(x + y))
+
+        from copy import deepcopy
+
+        model = MyModel().cuda()
+
+        model_overlap = deepcopy(model)
+        fsdp = FSDP(
+            model.cuda(),
+            auto_wrap_policy=always_wrap_policy,
+            use_orig_params=True,
+        )
+        fsdp_overlap = FSDP(
+            model_overlap.cuda(),
+            auto_wrap_policy=always_wrap_policy,
+            use_orig_params=True,
+        )
+        optim_cls = torch.optim.SGD
+        optim_kwargs = {"lr": 0.03}
+        _apply_optimizer_in_backward(
+            optimizer_class=optim_cls,
+            params=fsdp_overlap.parameters(),
+            optimizer_kwargs=optim_kwargs,
+        )
+        for p in fsdp_overlap.parameters():
+            assert hasattr(p, "_in_backward_optimizers")
+        optim = optim_cls(fsdp.parameters(), **optim_kwargs)
+
+        # Verify params initially equal
+        for p1, p2 in zip(fsdp.parameters(), fsdp_overlap.parameters()):
+            self.assertEqual(p1, p2)
+
+        with FSDP.summon_full_params(fsdp_overlap):
+            fsdp_overlap_prev_params = [
+                (n, p.clone()) for n, p in fsdp_overlap.named_parameters()
+            ]
+
+        for i in range(1):
+            inp = torch.randn(10, 10, device="cuda")
+            fsdp(inp, inp).sum().backward()
+
+            with torch.no_grad():
+                inp_clone = inp.clone()
+            fsdp_overlap(inp_clone, inp_clone).sum().backward()
+            optim.step()
+            optim.zero_grad()
+            # Verify parameters are different than prev iteration
+            with FSDP.summon_full_params(fsdp_overlap, with_grads=True):
+                for (n, p), (n_prev, p_prev) in zip(
+                    fsdp_overlap.named_parameters(), fsdp_overlap_prev_params
+                ):
+                    self.assertNotEqual(
+                        p, p_prev, f"{n_prev} Params at iter {i} same as previous iter!"
+                    )
+
+            # Verify overlap and non overlapped are the same
+            with FSDP.summon_full_params(fsdp_overlap):
+                with FSDP.summon_full_params(fsdp):
+                    for (n_overlap, p_overlap), (n, p) in zip(
+                        fsdp_overlap.named_parameters(), fsdp.named_parameters()
+                    ):
+                        self.assertEqual(
+                            p,
+                            p_overlap,
+                            f"Params not equal at iteration {i}: {n_overlap}",
+                        )
+                        self.assertEqual(
+                            None, p.grad, f"Expected param {n} grad to be None"
+                        )
+                        self.assertEqual(
+                            None,
+                            p_overlap.grad,
+                            f"Expected param {n_overlap} grad to be None",
+                        )
+
+                fsdp_overlap_prev_params = [
+                    p.clone() for p in fsdp_overlap.parameters()
+                ]
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])

@@ -809,6 +809,15 @@ def _post_backward_hook(
                 # Delay using sharded gradient views until after the
                 # reduce-scatter instead of immediately after resharding
                 handle._use_sharded_grad_views()
+                if handle._has_optim_in_backward:
+                    for orig_param in handle.flat_param._params:
+                        # checking grad for None also filters out params
+                        # that don't belong to this rank
+                        if orig_param.grad is not None and hasattr(orig_param, '_in_backward_optimizers'):
+                            for optim in orig_param._in_backward_optimizers:
+                                optim.step()
+                            orig_param.grad = None
+                    handle.flat_param.grad = None
 
 
 @no_type_check
@@ -910,6 +919,9 @@ def _post_backward_final_callback(
     root_state = state
 
     if root_state._sync_gradients:
+        # TODO: also waits for optimizer step to finish. This can be pushed to the next forward
+        # by recording an event for each individually wrapped FSDP module, and only waiting
+        # on that event in that FSDP module's pre forward.
         torch.cuda.current_stream().wait_stream(root_state._streams["post_backward"])
         if root_state.cpu_offload.offload_params:
             # Wait for non-blocking GPU -> CPU sharded gradient copies from the
