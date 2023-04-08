@@ -1,20 +1,27 @@
-import torch
 import sys
+
+import torch
+
 
 def first_arg(x, y):
     return x[y]
 
+
 def second_arg(x, y):
     return x[:, y]
+
 
 def same_pm_one(x, y):
     return x[y + 1, y - 1]
 
+
 def same_pp_one(x, y):
     return x[y + 1, y + 1]
 
+
 def store(x, y, z):
     x[y + 1, y + 1] = z
+
 
 if __name__ == "__main__":
     _, fn_name, dims, dyn_shape = sys.argv
