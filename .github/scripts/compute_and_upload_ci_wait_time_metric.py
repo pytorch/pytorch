@@ -320,21 +320,63 @@ def upload_stats(pr_stats):
     statsTable = dynamodb.Table(TABLE_NAME)
 
     for _, row in pr_stats.iterrows():
-        statsTable.update_item(
+        dynamoKey = f"{row['week'].isoformat()}_{row['pr_number']}"
+
+        # Check if stats table already has the row
+
+        record = statsTable.get_item(
             Key={
-                'dynamoKey': f"{row['week'].isoformat()}_{row['pr_number']}",
-            },
-            UpdateExpression="set pr_number=:p duration_mins=:d, start_time=:s, end_time=:e, num_commits=:n, week=:w",
-            ExpressionAttributeValues={
-                ':p': row['pr_number'],
-                ':d': int(row['duration_mins']),
-                ':s': row['start_time'].isoformat(),
-                ':e': row['end_time'].isoformat(),
-                ':n': int(row['num_commits']),
-                ':w': row['week'].isoformat(),
-            },
-            ReturnValues="UPDATED_NEW"
+                'dynamoKey': dynamoKey,
+            }
         )
+
+        # If record exists, update it
+        if 'Item' in record:
+            print("Updating record for dynamoKey: %s" % dynamoKey)
+            statsTable.update_item(
+                Key={
+                    'dynamoKey': dynamoKey,
+                },
+                UpdateExpression="set pr_number=:p duration_mins=:d, start_time=:s, end_time=:e, num_commits=:n, week=:w",
+                ExpressionAttributeValues={
+                    ':p': row['pr_number'],
+                    ':d': int(row['duration_mins']),
+                    ':s': row['start_time'].isoformat(),
+                    ':e': row['end_time'].isoformat(),
+                    ':n': int(row['num_commits']),
+                    ':w': row['week'].isoformat(),
+                }
+            )
+        else:
+            # If it doesn't, insert it
+            print("Inserting record for dynamoKey: %s" % dynamoKey)
+            statsTable.put_item(
+                Item={
+                    'dynamoKey': dynamoKey,
+                    'pr_number': row['pr_number'],
+                    'duration_mins': int(row['duration_mins']),
+                    'start_time': row['start_time'].isoformat(),
+                    'end_time': row['end_time'].isoformat(),
+                    'num_commits': int(row['num_commits']),
+                    'week': row['week'].isoformat(),
+                }
+            )
+
+        # statsTable.update_item(
+        #     Key={
+        #         'dynamoKey': f"{row['week'].isoformat()}_{row['pr_number']}",
+        #     },
+        #     UpdateExpression="set pr_number=:p duration_mins=:d, start_time=:s, end_time=:e, num_commits=:n, week=:w",
+        #     ExpressionAttributeValues={
+        #         ':p': row['pr_number'],
+        #         ':d': int(row['duration_mins']),
+        #         ':s': row['start_time'].isoformat(),
+        #         ':e': row['end_time'].isoformat(),
+        #         ':n': int(row['num_commits']),
+        #         ':w': row['week'].isoformat(),
+        #     },
+        #     ReturnValues="UPDATED_NEW"
+        # )
 
     print(f"Finished uploading data to {TABLE_NAME}")
 
