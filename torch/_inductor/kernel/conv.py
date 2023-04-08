@@ -383,7 +383,7 @@ def convolution(
                 )
             )
 
-    return autotune_select_algorithm(choices, args, layout)
+    return autotune_select_algorithm("convolution", choices, args, layout)
 
 
 @register_lowering(aten._convolution)
