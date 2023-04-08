@@ -775,12 +775,13 @@ class CoverageTest(DTensorTestBase):
             def __init__(self):
                 super().__init__()
                 self.emb = nn.Embedding(N, D)
+                self.norm = nn.LayerNorm(D, elementwise_affine=False)
                 self.fc = nn.Linear(D, D)
                 self.softmax = nn.Softmax(dim=1)
                 self.lss = nn.NLLLoss()
 
             def forward(self, ids, tgt):
-                return self.lss(self.softmax(self.fc(self.emb(ids))), tgt)
+                return self.lss(self.softmax(self.fc(self.norm(self.emb(ids)))), tgt)
 
         torch.manual_seed(0)
         mod = EmbeddingModule().cuda(self.rank)
