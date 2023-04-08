@@ -495,7 +495,7 @@ ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(void* ptr) {
   return -1;
 }
 
-void MPSHeapAllocatorImpl::setBufferShape(void* ptr, const IntArrayRef& shape) {
+void MPSHeapAllocatorImpl::setBufferShape(const void* ptr, const IntArrayRef& shape) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
@@ -624,7 +624,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   IntArrayRef getBufferShape(const void* ptr) const override {
     return _getAllocImpl().getBufferShape(ptr);
   }
-  void setBufferShape(void* ptr, const IntArrayRef& shape) const override {
+  void setBufferShape(const void* ptr, const IntArrayRef& shape) const override {
     _getAllocImpl().setBufferShape(ptr, shape);
   }
   size_t getTotalAllocatedMemory() const override {

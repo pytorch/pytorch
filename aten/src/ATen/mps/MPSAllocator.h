@@ -259,7 +259,7 @@ public:
   // get the requested unaligned size of an MTLBuffer
   ssize_t getUnalignedBufferSize(void* ptr);
   // set the shape of a base tensor from a view tensor
-  void setBufferShape(void* ptr, const IntArrayRef& shape);
+  void setBufferShape(const void* ptr, const IntArrayRef& shape);
   // retrieve the shape of a base tensor from a view tensor
   IntArrayRef getBufferShape(const void* ptr);
   // allocate a buffer from a specialized pool to import CPU scalars into GPU
