@@ -1,5 +1,5 @@
 #include <mutex>
-#include <ATen/core/GeneratorForPrivateuseone.h>
+#include <ATen/privateuseone/GeneratorForPrivateuseone.h>
 
 namespace at {
 
