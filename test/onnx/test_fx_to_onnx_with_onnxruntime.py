@@ -7,7 +7,6 @@ import io
 import itertools
 import os
 import tempfile
-import unittest
 import warnings
 
 from typing import Any, Callable, Generator, Optional, Sequence, Tuple, Union
@@ -171,6 +170,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             "test_fx_export", version=torch.__version__
         )
         self.opset_version = 18
+        self.ort_version = onnxruntime.__version__
 
     def tearDown(self):
         diagnostics.engine.dump(
@@ -223,9 +223,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, func, (tensor_x,), b=torch.tensor(5.0)
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "flaky test: https://github.com/microsoft/onnx-script/issues/523. Fixed in ORT==1.15"
-    )
+    @pytorch_test_common.skip_min_ort_version(reason="SegFault", version="1.15")
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
@@ -320,9 +318,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "flaky test: https://github.com/microsoft/onnx-script/issues/523. Fixed in ORT==1.15"
-    )
+    @pytorch_test_common.skip_min_ort_version(reason="SegFault", version="1.15")
     def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
             def forward(self, x, y):
@@ -421,7 +417,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
-    @unittest.skip("Flaky on dynamic shape")
+    @pytorch_test_common.skip_min_ort_version(reason="SegFault", version="1.15")
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x):
@@ -535,13 +531,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, model, (x,), additional_test_inputs=[(y,)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "1. flaky test: https://github.com/microsoft/onnx-script/issues/523. "
-        "Fixed in ORT==1.15"
-        "2. [ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while "
-        "running Concat node. Name:'Concat_203' Status Message: concat.cc:104 "
-        "PrepareForCompute Cannot concatenate scalars"
-    )
+    @pytorch_test_common.skip_min_ort_version(reason="SegFault", version="1.15")
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
         # Download pytorch model
@@ -563,7 +553,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_args=[],
             model_kwargs=inputs,
         ).export()
-
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
         ort_outputs = _run_ort(onnx_model, (input_ids, attention_mask))
         assert len(ref_outputs) == len(ort_outputs)
