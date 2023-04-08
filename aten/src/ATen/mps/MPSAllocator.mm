@@ -461,7 +461,7 @@ id<MTLBuffer> MPSHeapAllocatorImpl::malloc(size_t size, uint32_t usage) {
   return buffer_block ? buffer_block->buffer : nullptr;
 }
 
-bool MPSHeapAllocatorImpl::isSharedBuffer(void* ptr) {
+bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
@@ -609,7 +609,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     id<MTLBuffer> buf = _getAllocImpl().allocScalarBufferWithValue(value, size);
     return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
-  bool isSharedBuffer(void* ptr) const override {
+  bool isSharedBuffer(const void* ptr) const override {
     return _getAllocImpl().isSharedBuffer(ptr);
   }
   bool isSharedStorageSupported() const override {
