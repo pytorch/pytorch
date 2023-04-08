@@ -4524,7 +4524,7 @@ class CommonTemplate:
             )
 
         inp = torch.randn(4, 1)
-        # as_strided_scatter in inductor is only making a clone of input
+        # as_strided_scatter in prim is only making a clone of input
         # and doesn't copy from src, clone src to itself for testing
         src = inp[1].clone()
         # should not have any error with storage_offset
