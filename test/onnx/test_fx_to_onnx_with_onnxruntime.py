@@ -420,6 +420,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
+    @pytorch_test_common.skip_dynamic_fx_test("Flaky on dynamic shape")
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x):

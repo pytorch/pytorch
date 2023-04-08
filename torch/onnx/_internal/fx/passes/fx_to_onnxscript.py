@@ -226,8 +226,6 @@ def _fill_tensor_meta(
     if isinstance(expected_values, (list, tuple)) and not isinstance(
         onnxscript_values, (list, tuple)
     ):
-        # TODO(titaiwang): How to annotate type from sequence_type of ONNX?
-        # eg: aten_split
         return
 
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
@@ -240,7 +238,6 @@ def _fill_tensor_meta(
         onnxscript_value.shape = tuple(
             [dim if isinstance(dim, int) else None for dim in expected_value.size()]
         )
-        # TODO(titaiwang): This could break in terms of lacking of type_promotion now.
         onnxscript_value.dtype = expected_value.dtype
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
@@ -457,8 +454,6 @@ def _export_fx_node_to_onnxscript(
                 node_with_fixed_shape_args,
                 node_with_fixed_shape_kwargs,
             ) = _fill_in_default_kwargs(node_with_static_shape)
-            # TODO(titaiwang): Why some ops failed on op-level validation, but
-            # successfully exported?
             torch_args, torch_kwargs = op_validation.wrap_fx_args_as_torch_args(
                 node_with_fixed_shape_args, node_with_fixed_shape_kwargs
             )
