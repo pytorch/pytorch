@@ -395,7 +395,14 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         if config.assume_static_by_default:
             # We run with `dynamic`, but assume_static_by_default will produce the same number
             # of breaks as without dynamic, since no tensors were marked dyn.
-            self.assertEqual(cnt_dynamic.frame_count, steps)
+            if (
+                config.automatic_dynamic_shapes_strategy
+                != config.DYNAMIC_SHAPE_STRATEGY.OFF
+            ):
+                # 2 graphs, first static, 2nd compiled dynamic
+                self.assertEqual(cnt_dynamic.frame_count, 2)
+            else:
+                self.assertEqual(cnt_dynamic.frame_count, steps)
 
             torch._dynamo.reset()
             # Reset the counter
@@ -403,7 +410,14 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=False)(fn)
             for i in range(start, end):
                 opt_fn(torch.randn(i), torch.randn(i))
-            self.assertEqual(cnt_dynamic.frame_count, steps)
+            if (
+                config.automatic_dynamic_shapes_strategy
+                != config.DYNAMIC_SHAPE_STRATEGY.OFF
+            ):
+                # 2 graphs, first static, 2nd compiled dynamic
+                self.assertEqual(cnt_dynamic.frame_count, 2)
+            else:
+                self.assertEqual(cnt_dynamic.frame_count, steps)
         else:
             # just one graph
             self.assertEqual(cnt_dynamic.frame_count, 1)

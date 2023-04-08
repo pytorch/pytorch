@@ -305,7 +305,8 @@ static PyObject* profiler_start_hook = NULL;
 static PyObject* profiler_end_hook = NULL;
 static PyObject* guard_profiler_name_str = NULL; /* cached py str */
 
-size_t extra_index = -1;
+size_t cache_entry_extra_index = -1;
+size_t dynamic_plan_extra_index = -2;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
@@ -406,7 +407,8 @@ static inline PyObject* call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
     long cache_len,
-    PyObject* code_part) {
+    PyObject* code_part,
+    PyObject* plan) {
 
 #if IS_PYTHON_3_11_PLUS
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
@@ -416,7 +418,7 @@ static inline PyObject* call_callback(
   if (code_part == NULL) {
     code_part = Py_None;
   }
-  PyObject* args = Py_BuildValue("(OlO)", frame, cache_len, code_part);
+  PyObject* args = Py_BuildValue("(OlOO)", frame, cache_len, code_part, plan);
   if (args == NULL) {
     return NULL;
   }
@@ -459,13 +461,24 @@ static void destroy_cache_entry(CacheEntry* e) {
 
 inline static CacheEntry* get_extra(PyCodeObject* code) {
   CacheEntry* extra = NULL;
-  _PyCode_GetExtra((PyObject*)code, extra_index, (void*)&extra);
+  _PyCode_GetExtra((PyObject*)code, cache_entry_extra_index, (void*)&extra);
   return extra;
 }
 
 inline static void set_extra(PyCodeObject* code, CacheEntry* extra) {
   // TODO(jansel): would it be faster to bypass this?
-  _PyCode_SetExtra((PyObject*)code, extra_index, extra);
+  _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, extra);
+}
+
+inline static PyObject* get_plan(PyCodeObject* code) {
+  PyObject* extra = NULL;
+  _PyCode_GetExtra((PyObject*)code, dynamic_plan_extra_index, (void*)&extra);
+  return extra;
+}
+
+inline static void set_plan(PyCodeObject* code, PyObject* extra) {
+  // TODO(jansel): would it be faster to bypass this?
+  _PyCode_SetExtra((PyObject*)code, dynamic_plan_extra_index, extra);
 }
 
 inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
@@ -553,8 +566,8 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   PyObject* fail_code_part = PyTuple_GetItem(result, 1);
   Py_INCREF(fail_code_part);
   Py_DECREF(result);
-  *code_part = fail_code_part;
   PyObject* lookup_result = lookup(e->next, frame, e, index + 1, code_part);
+  *code_part = fail_code_part;
   return lookup_result;
 }
 
@@ -799,9 +812,14 @@ static PyObject* _custom_eval_frame(
 
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // that gets re-interpreted as a PyObject (which it is NOT!)
+  PyObject *plan = get_plan(frame->f_code);
+  if (plan == NULL) {
+    plan = PyDict_New();
+    set_plan(frame->f_code, plan);
+  }
   Py_XINCREF(code_part);
   PyObject* result =
-      call_callback(callback, frame, cache_size(extra), code_part);
+      call_callback(callback, frame, cache_size(extra), code_part, plan);
   Py_XDECREF(code_part);
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
@@ -909,7 +927,10 @@ static PyObject* reset_code(PyObject* dummy, PyObject* args) {
   }
 
   destroy_cache_entry(get_extra((PyCodeObject*)code));
+  PyObject* plan = get_plan((PyCodeObject*)code);
+  Py_XDECREF(plan);
   set_extra((PyCodeObject*)code, NULL);
+  set_plan((PyCodeObject*)code, NULL);
   Py_RETURN_NONE;
 }
 
@@ -1002,7 +1023,8 @@ static struct PyModuleDef _module = {
     _methods};
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
-  extra_index = _PyEval_RequestCodeExtraIndex(ignored);
+  cache_entry_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
+  dynamic_plan_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
 
   int result = PyThread_tss_create(&eval_frame_callback_key);
   CHECK(result == 0);

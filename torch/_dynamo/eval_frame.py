@@ -359,16 +359,84 @@ def first_real_inst_idx(code):
     raise RuntimeError("RESUME instruction not found in code")
 
 
+# Converts a CodePart structure, which carries our
+# re-compilation code, source, and more, into a
+# plan for how to mark certain dims as dynamic.
+def dynamic_plan_from_code_part(code_part: Optional[CodePart], dynamic_plan):
+    from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+    if (
+        code_part is None
+        or config.automatic_dynamic_shapes_strategy == config.DYNAMIC_SHAPE_STRATEGY.OFF
+    ):
+        return dynamic_plan
+
+    def is_dynamic_source_candidate(source):
+        if isinstance(source, TensorPropertySource):
+            prop = source.prop
+            # TODO: Expand to stride?
+            if prop == TensorProperty.SIZE:
+                return True
+        return False
+
+    def is_dynamic_code_part_candidate(code_part):
+        if code_part.origin == "SHAPE_ENV":
+            sources = code_part.source
+            for source in sources:
+                if is_dynamic_source_candidate(source):
+                    return True
+        return False
+
+    def add_dynamic_dim(code_part):
+        if not code_part.source:
+            # Not all code has sources! Ex: __guarded_code.valid
+            return
+        for source in code_part.source:
+            if is_dynamic_source_candidate(source):
+                inner_source = source.base
+                name = inner_source.local_name
+                if name not in dynamic_plan:
+                    dynamic_plan[name] = []
+                dynamic_plan[name].append(source.idx)
+
+    def add_dynamic_dims(code_part, strategy):
+        # Determine if this code_part is a candidate for automatic dynamic
+        # marking. If the failed guard was not a shape_env size property guard,
+        # we do not proceed.
+        if not is_dynamic_code_part_candidate(code_part):
+            # The guard was not a candidate for automatic dynamic marking.
+            return
+        if strategy == config.DYNAMIC_SHAPE_STRATEGY.ALL:
+            # User defined strategy is to wholly go over to dynamic compilation.
+            config.assume_static_by_default = False
+            return
+        elif strategy == config.DYNAMIC_SHAPE_STRATEGY.ALL_FAILED_IN_FRAME:
+            code_parts = code_part.scope["part_map"].values()
+            for code_part in code_parts:
+                add_dynamic_dim(code_part)
+        else:
+            raise RuntimeError(f"Unknown dynamic dim strategy {strategy}")
+
+    # Take the failed code part, and add it as a dynamic dim
+    add_dynamic_dims(code_part, config.automatic_dynamic_shapes_strategy)
+    return dynamic_plan
+
+
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size, code_part):
+    def catch_errors(frame, cache_size, code_part, dynamic_plan):
+        assert dynamic_plan is not None
+
         msg = f"Compiling {frame.f_code.co_name} {frame.f_code.co_filename} with cache_size {cache_size}."
         if code_part is not None:
             torch._dynamo.guards.guard_fail_hook(
                 hooks.guard_fail_fn, frame.f_code, code_part
             )
             msg += f" Due to guard failure {code_part.code} from guard {code_part.origin} and source {code_part.source}"
+            print(msg)
         log.debug(msg)
+
+        dynamic_plan = dynamic_plan_from_code_part(code_part, dynamic_plan)
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
@@ -394,10 +462,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         ddp_optimizer.compile_fn,
                         hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size, hooks)
+                    return hijacked_callback(frame, cache_size, hooks, dynamic_plan)
 
         with compile_lock:
-            return callback(frame, cache_size, hooks)
+            return callback(frame, cache_size, hooks, dynamic_plan)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors

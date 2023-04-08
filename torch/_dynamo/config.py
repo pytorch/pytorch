@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 import tempfile
+from enum import Enum
 from os.path import abspath, dirname
 
 import torch
@@ -67,6 +68,18 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
 # see [Note - on the state of mark_dynamic]
 assume_static_by_default = False
+
+
+class DYNAMIC_SHAPE_STRATEGY(Enum):
+    OFF = 1
+    # Find all tensors in frame and mark them all dynamic if they fail
+    ALL_FAILED_IN_FRAME = 2
+    # Flip to assume_static_by_default = False
+    # TODO: Do we want this? Seems useful... but also would kinda rather this be a bool.
+    ALL = 3
+
+
+automatic_dynamic_shapes_strategy: DYNAMIC_SHAPE_STRATEGY = DYNAMIC_SHAPE_STRATEGY.OFF
 
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so

@@ -40,7 +40,9 @@ ALL_DYNAMIC_XFAILS = {
 XFAIL_HITS = 0
 
 
-def make_dynamic_cls(cls, *, static_default=False):
+def make_dynamic_cls(
+    cls, *, static_default=False, automatic=config.DYNAMIC_SHAPE_STRATEGY.OFF
+):
     suffix = "_dynamic_shapes"
     if static_default:
         suffix += "_static_default"
@@ -49,6 +51,12 @@ def make_dynamic_cls(cls, *, static_default=False):
     if static_default:
         cls_prefix = f"StaticDefault{cls_prefix}"
 
+    if automatic != config.DYNAMIC_SHAPE_STRATEGY.OFF:
+        # Automatic only makes sense in this regime.
+        # Once Automatic works well end to end we can simplify this a bit.
+        assert static_default
+        cls_prefix = f"Automatic{cls_prefix}"
+
     test_class = make_test_cls_with_patches(
         cls,
         cls_prefix,
@@ -56,6 +64,7 @@ def make_dynamic_cls(cls, *, static_default=False):
         (config, "dynamic_shapes", True),
         (config, "assume_static_by_default", static_default),
         (config, "specialize_int", static_default),
+        (config, "automatic_dynamic_shapes_strategy", automatic),
     )
 
     xfail_tests = ALL_DYNAMIC_XFAILS.get(cls.__name__)
@@ -83,8 +92,13 @@ tests = [
 for test in tests:
     make_dynamic_cls(test)
     make_dynamic_cls(test, static_default=True)
+    make_dynamic_cls(
+        test,
+        static_default=True,
+        automatic=config.DYNAMIC_SHAPE_STRATEGY.ALL_FAILED_IN_FRAME,
+    )
 
-assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 2
+assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 3
 
 # Single config failures
 

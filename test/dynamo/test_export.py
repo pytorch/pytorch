@@ -2037,7 +2037,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(inp)
         self.assertEqual(dynamo_result, m(inp))
 
-    @config.patch(dynamic_shapes=True)
+    @config.patch(
+        dynamic_shapes=True,
+        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
+    )
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -2051,7 +2054,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
-    @config.patch(dynamic_shapes=True)
+    @config.patch(
+        dynamic_shapes=True,
+        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
+    )
     def test_export_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -2065,7 +2071,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
-    @config.patch(dynamic_shapes=True)
+    @config.patch(
+        dynamic_shapes=True,
+        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
+    )
     def test_export_no_raise_on_relationship(self):
         y = torch.randn([3, 3, 3])
 
@@ -2112,7 +2121,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
-    @config.patch(dynamic_shapes=True)
+    @config.patch(
+        dynamic_shapes=True,
+        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
+    )
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
 
@@ -2125,7 +2137,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(my_dyn_fn, x, constraints=[dynamic_dim(x, 0)])
 
-    @config.patch(dynamic_shapes=True)
+    @config.patch(
+        dynamic_shapes=True,
+        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
+    )
     def test_export_multi_dynamic_dim_constraint(self):
         x = torch.randn([3, 3, 3])
         y = torch.randn([2, 2, 2])
@@ -2260,7 +2275,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
 
-    @config.patch(dynamic_shapes=True)
+    @config.patch(
+        dynamic_shapes=True,
+        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
+    )
     def test_export_mark_dynamic_conflict_dynamic_dim(self):
         y = torch.randn([3, 3, 3])
 

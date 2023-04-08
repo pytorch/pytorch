@@ -103,7 +103,7 @@ def strip_getattr_getitem(name):
 # Don't put anything on here you don't want laundered to the next frame
 @dataclasses.dataclass
 class CodePart:
-    source: Union[Source, List[Source]]  # Note: List of sources for tensor checks
+    source: List[Source]  # Note: List of sources for tensor checks and shape_env
     code: str
     origin: str
 
@@ -483,8 +483,11 @@ class GuardBuilder(GuardBuilderBase):
             constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
         )
+        origin = guard.origin
         for shape_guard in guards:
-            self._produce_guard_code(guard, [shape_guard], shape_env=True)
+            self._produce_guard_code(
+                guard, [shape_guard.expr], shape_env=True, sources=shape_guard.sources
+            )
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -583,7 +586,12 @@ class GuardBuilder(GuardBuilderBase):
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
-        self, guard, code_list, provided_guarded_object=None, shape_env=False
+        self,
+        guard,
+        code_list,
+        provided_guarded_object=None,
+        shape_env=False,
+        sources=None,
     ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
@@ -602,7 +610,9 @@ class GuardBuilder(GuardBuilderBase):
         caller_fn = getframeinfo(caller)[2]
         del caller
         for code in code_list:
-            code_part = CodePart(guard.origin, code, caller_fn)
+            if sources is None:
+                sources = [guard.origin]
+            code_part = CodePart(sources, code, caller_fn)
             if shape_env:
                 self.shape_env_code.append(code_part)
             else:
@@ -765,7 +775,7 @@ class CheckFunctionManager:
                 source_a = guard.input_source_a
                 source_b = guard.input_source_b
                 code_part = CodePart(
-                    source_a,
+                    [source_a, source_b],
                     f"{source_a.name()} is {source_b.name()}",
                     "DuplicateInputs",
                 )
@@ -776,16 +786,6 @@ class CheckFunctionManager:
         code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        code = "      passing = True \n"
-        for code_part in unique(code_parts):
-            part_map[id(code_part)] = code_part
-            code += f"      passing = {code_part.code} \n"
-            code += "      if not passing: \n"
-            code += f"          code_part = part_map[{id(code_part)}] \n"
-            code += "          code_part.scope = locals() \n"
-            code += "          code_part.scope['___check_tensors_verbose'] = ___check_tensors_verbose \n"
-            code += "          return (False, code_part) \n"
-        code += "      return (True, None)"
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
@@ -797,6 +797,22 @@ class CheckFunctionManager:
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
+
+        code = "      def __fail(code_part_id): \n"
+        code += "          code_part = part_map[code_part_id] \n"
+        code += "          code_part.scope = locals() \n"
+        code += "          code_part.scope['L'] = L \n"
+        for key, value in closure_vars.items():
+            if callable(value):
+                code += f"          code_part.scope['{key}'] = {key} \n"
+        code += "          return code_part \n"
+        code += "      passing = True \n"
+        for code_part in unique(code_parts):
+            part_map[id(code_part)] = code_part
+            code += f"      passing = {code_part.code} \n"
+            code += "      if not passing: \n"
+            code += f"          return (False, __fail({id(code_part)})) \n"
+        code += "      return (True, None)"
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
     def guard_fn(L):
@@ -837,7 +853,7 @@ def guard_fail_hook(
     guard_fail_fn,
     code,
     code_part: CodePart,
-) -> None:
+) -> str:
     """
     called whenever a guard fails.
     """
@@ -856,6 +872,8 @@ def guard_fail_hook(
     guard_failures[code].append(reason)
     if guard_fail_fn:
         guard_fail_fn(GuardFail(reason, code))
+
+    return reason
 
 
 # TODO(voz): Rewrite this API, we don't use most of these,

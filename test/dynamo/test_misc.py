@@ -23,7 +23,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
-from torch._dynamo import bytecode_transformation, graph_break
+from torch._dynamo import bytecode_transformation, config, graph_break
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
@@ -4441,7 +4441,10 @@ def fn():
         dis.dis(fn)
         self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @config.patch(
+        dynamic_shapes=True,
+        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
+    )
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -4524,7 +4527,10 @@ def fn():
         ):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @config.patch(
+        dynamic_shapes=True,
+        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
+    )
     def test_raise_guard_partial_constraint_no_graph_break(self):
         y = torch.randn([3, 3, 3])
 
@@ -4824,7 +4830,7 @@ def fn():
             base_checker().check("Recompile Reasons").check("'forward'").check(
                 "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
             ).check(
-                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 4"
+                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
             ).run(
                 prof.report()
             )

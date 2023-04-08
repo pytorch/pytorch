@@ -12,7 +12,7 @@ import traceback
 from dataclasses import dataclass
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import cast, Dict, List, Optional, Set, Type, Union
+from typing import cast, Dict, List, Optional, Set, Type, Union, Tuple
 from enum import Enum
 
 import torch
@@ -1324,6 +1324,10 @@ def _lru_cache(fn, maxsize=None):
     wrapper.cache_info = fn_cache.cache_info  # type: ignore[attr-defined]
     return wrapper
 
+@dataclass(frozen=True)
+class ShapeGuardExprSources:
+    expr: str
+    sources: List[Source]
 
 class ShapeGuardPrinter(StrPrinter):
     def __init__(
@@ -1331,11 +1335,13 @@ class ShapeGuardPrinter(StrPrinter):
         symbol_to_source,
         source_ref,
         var_to_sources,
+        sources,
     ):
         super().__init__()
         self.symbol_to_source = symbol_to_source
         self.source_ref = source_ref
         self.var_to_sources = var_to_sources
+        self.sources = sources
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.Symbol), str(type(expr))
@@ -1351,12 +1357,14 @@ class ShapeGuardPrinter(StrPrinter):
             f"not in {repr_symbol_to_source()}.  If this assert is failing, it could be "
             "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
         )
-        return self.source_ref(self.symbol_to_source[expr][0])
+        source = self.symbol_to_source[expr][0]
+        self.sources.append(source)
+        return self.source_ref(source)
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPrinter):
     def __init__(self, var_to_sources):
-        super().__init__(var_to_sources, lambda n: n.name(), var_to_sources)
+        super().__init__(var_to_sources, lambda n: n.name(), var_to_sources, [])
 
 
 TLS = threading.local()
@@ -1658,7 +1666,8 @@ class ShapeEnv:
         # just means there are no constraints
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
         _simplified=False
-    ) -> List[str]:
+    ) -> Tuple[List[ShapeGuardExprSources]]:
+
         assert len(placeholders) == len(sources)
 
         # Expand optional inputs, or verify invariants are upheld
@@ -1839,8 +1848,10 @@ class ShapeEnv:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
-                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
-                exprs.append(f"{source_ref(source)} == {sexpr}")
+                guard_sources = []
+                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources, guard_sources).doprint(expr)
+                guard_sources.append(source)
+                exprs.append(ShapeGuardExprSources(f"{source_ref(source)} == {sexpr}", guard_sources))
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only
@@ -1854,8 +1865,9 @@ class ShapeEnv:
                 continue
             g = self.simplify(g)
             try:
-                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
-                exprs.append(guard_expr)
+                guard_sources = []
+                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources, guard_sources).doprint(g)
+                exprs.append(ShapeGuardExprSources(guard_expr, guard_sources))
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
                 if len(g.free_symbols) == 1:
@@ -1926,18 +1938,26 @@ class ShapeEnv:
                 if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
                     bounds.append(str(r.upper))
                 if len(bounds) > 1:
-                    exprs.append(" <= ".join(bounds))
+                    exprs.append(ShapeGuardExprSources(" <= ".join(bounds), sources))
 
         if constraint_violations:
-            msgs = [f"  {i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
-            msgs = "\n".join(msgs)
-            raise ConstraintViolationError(f"Constraints violated!\n{msgs}")
+            # TODO: Is this sound? On one hand, it looks like "no". On the other hand, if we are in automatic
+            # dynamic, we want agressive mark_dynamic combined with also lower value signal per constraint. Ex:
+            # it is fine if we mark something as dynamic but then ignore it because it became a constant, because
+            # in automatic dynamic, the value of the mark dynamic signal is far lower.
+            # TODO: Ban user specified mark_dynamic under this regime?
+            if torch._dynamo.config.automatic_dynamic_shapes_strategy == torch._dynamo.config.DYNAMIC_SHAPE_STRATEGY.OFF:
+                msgs = [f"  {i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
+                msgs = "\n".join(msgs)
+                raise ConstraintViolationError(f"Constraints violated!\n{msgs}")
+
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import LocalSource
         arg_names = [f"t{i}" for i in range(len(args))]
         guards = self.produce_guards(placeholders, [LocalSource(a) for a in arg_names])
+        guards = [guard.expr for guard in guards]
         if guards:
             code = " and ".join(guards)
             return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
