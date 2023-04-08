@@ -2037,7 +2037,8 @@ def main() -> None:
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
-    pr.remove_label(MERGE_IN_PROGRESS_LABEL)
+    finally:
+        pr.remove_label(MERGE_IN_PROGRESS_LABEL)
 
 
 if __name__ == "__main__":
