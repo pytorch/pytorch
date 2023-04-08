@@ -516,7 +516,7 @@ IntArrayRef MPSHeapAllocatorImpl::getBufferShape(const void* ptr) {
   return IntArrayRef();
 }
 
-void MPSHeapAllocatorImpl::free(const void* ptr) {
+void MPSHeapAllocatorImpl::free(void* ptr) {
   BufferBlock* buffer_block = nullptr;
   {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
@@ -656,7 +656,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   bool m_has_unified_memory;
   uint32_t m_usage;
 
-  static void Delete(const void* ptr) {
+  static void Delete(void* ptr) {
     if (ptr) {
       _getAllocImpl().free(ptr);
     }
