@@ -40,7 +40,7 @@ class IMpsAllocatorCallback {
     ALLOCATION_FAILED // buffer allocation failed
   };
   virtual ~IMpsAllocatorCallback() = default;
-  virtual void executeMPSAllocatorCallback(const void* ptr, EventType event) = 0;
+  virtual void executeMPSAllocatorCallback(void* ptr, EventType event) = 0;
 };
 
 // MPS allocator will execute every registered callback when a block of memory is freed.
