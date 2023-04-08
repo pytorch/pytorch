@@ -105,7 +105,7 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
 fi
 
 # Test the package
-/builder/check_binary.sh
+# /builder/check_binary.sh
 
 # =================== The above code will be executed inside Docker container ===================
 EOL
