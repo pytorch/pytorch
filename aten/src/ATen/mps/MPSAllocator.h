@@ -251,7 +251,7 @@ public:
   // interface exposed to at::Allocator
   id<MTLBuffer> malloc(size_t size, uint32_t usage);
   // frees a buffer and returns it into buffer pool
-  void free(const void* ptr);
+  void free(void* ptr);
   // releases all the cached buffers and their associated heaps
   void emptyCache();
   // returns true if buffer was allocated from the shared pool
