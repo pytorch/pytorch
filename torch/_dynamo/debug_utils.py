@@ -92,7 +92,8 @@ python_binary(
         cmd_split = BUCK_CMD_PREFIX + [self.cmd_line_path]
         if print_msg:
             log.warning(
-                f"Found an example that reproduces the error. Run this cmd to repro - {' '.join(cmd_split)}"
+                "Found an example that reproduces the error. Run this cmd to repro - %s",
+                " ".join(cmd_split),
             )
         return cmd_split
 

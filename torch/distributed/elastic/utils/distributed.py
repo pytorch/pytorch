@@ -77,7 +77,7 @@ def create_c10d_store(
             if str(e) == _ADDRESS_IN_USE:  # this will only happen on the server
                 if attempt < retries:
                     log.warning(
-                        f"port: {port} already in use, attempt: [{attempt}/{retries}]"
+                        "port: %s already in use, attempt: [%s/%s]", port, attempt, retries
                     )
                     attempt += 1
                 else:
