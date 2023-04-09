@@ -746,15 +746,6 @@ def mps_ops_modifier(ops):
         yield op
 
 def mps_ops_error_inputs_modifier(ops):
-    SKIPLIST = {
-        # TODO:
-        # These tests crash so we directly skip them.
-        # Remove this list once all the crashes are protected from triggered.
-        'amax': None,
-        'amin': None,
-        'index_select': None,
-    }
-
     # Error input samples do not take a dtype argument.
     XFAILLIST = {
         # Exceptions are not raised
@@ -784,6 +775,10 @@ def mps_ops_error_inputs_modifier(ops):
         'fft.hfft',
         'fft.irfft',
 
+        # MPS does not support tensor dimensions > 16
+        'amax',
+        'amin',
+
         # unimplemented
         'logcumsumexp',
     }
@@ -798,8 +793,6 @@ def mps_ops_error_inputs_modifier(ops):
         key = op.name + op.variant_test_name
         if key in XFAILLIST:
             addDecorator(op, DecorateInfo(unittest.expectedFailure))
-        if key in SKIPLIST:
-            addDecorator(op, DecorateInfo(unittest.skip))
         yield op
 
 # Same logic as test_cuda.py

@@ -622,6 +622,25 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   TORCH_CHECK(self.scalar_type() == output.scalar_type(),
               "index_select(): self and output must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
+  TORCH_CHECK(index.size(-1) == output.size(dim),
+              "index_select(): index and output must have the same size at `dim`th dimension, but got ",
+              index.size(-1),
+              " and ",
+              output.size(-1),
+              ".");
+
+  for (const auto i : irange(self.dim())) {
+    if (i == dim)
+      continue;
+    TORCH_CHECK(self.size(i) == output.size(i),
+                "index_select(): self and output must have the same dimensions except for `dim`th dimension, but got ",
+                self.size(i),
+                " and ",
+                output.size(i),
+                " at dimension ",
+                i,
+                ".");
+  }
 
   // Empty index
   if (num_indices == 0) {
