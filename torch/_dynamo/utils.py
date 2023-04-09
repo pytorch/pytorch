@@ -899,7 +899,7 @@ def same(
                     relax_numpy_equality=relax_numpy_equality,
                 )
             ):
-                log.error(f"Accuracy failed for key name {k}")
+                log.error("Accuracy failed for key name %s", k)
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
@@ -913,7 +913,7 @@ def same(
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
             if ref.dtype != res.dtype:
-                log.error(f"dtype mismatch {ref.dtype}, {res.dtype}")
+                log.error("dtype mismatch %s, %s", ref.dtype, res.dtype)
                 return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
@@ -936,7 +936,7 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                log.warning(f"Similarity score={score.cpu().detach().item()}")
+                log.warning("Similarity score=%s", score.cpu().detach().item())
             return score >= 0.99
         else:
             if not exact_dtype:
@@ -971,17 +971,19 @@ def same(
                     # import pdb; pdb.set_trace()
                 return passes_test
 
-            log.error(f"Accuracy failed: allclose not within tol={tol}")
+            log.error("Accuracy failed: allclose not within tol=%s", tol)
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
         r = ref == res
         if not r:
-            log.error(f"Accuracy failed ({type(ref)}): {ref} != {res}")
+            log.error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
         return r
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error(f"Accuracy failed (float): {ref} != {res} (within tol={tol})")
+            log.error(
+                "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
+            )
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality and not (
@@ -990,7 +992,7 @@ def same(
             ref = ref.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
-            log.error(f"Accuracy failed (numpy): {ref} != {res}")
+            log.error("Accuracy failed (numpy): %s != %s", ref, res)
         return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()

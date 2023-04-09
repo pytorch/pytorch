@@ -88,7 +88,7 @@ python_binary(
         target_file = os.path.join(self.subdir, "TARGETS")
         with open(target_file, "w") as fd:
             fd.write(self.build())
-        # log.warning(f"Wrote isolation TARGETS file at {target_file}")
+        # log.warning("Wrote isolation TARGETS file at %s", target_file)
         cmd_split = BUCK_CMD_PREFIX + [self.cmd_line_path]
         if print_msg:
             log.warning(
@@ -139,7 +139,7 @@ class NNModuleToString:
                 cant_convert.add(module)
 
         if len(cant_convert) > 0:
-            log.warning(f"We have not tested reprs of some modules - {cant_convert}")
+            log.warning("We have not tested reprs of some modules - %s", cant_convert)
         # TODO - Assuming that all modules can be safely repr'd. Check if that assumption is correct.
         return True
 
@@ -319,18 +319,20 @@ def dump_compiler_graph_state(gm, args, compiler_name):
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
-    log.warning(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
+    log.warning(
+        "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
+    )
     with open(file_name, "w") as fd:
         save_graph_repro(fd, gm, args, compiler_name)
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
     try:
         shutil.copyfile(file_name, repro_path)
-        log.warning(f"Copying repro file for convenience to {repro_path}")
+        log.warning("Copying repro file for convenience to %s", repro_path)
         if use_buck:
             BuckTargetWriter(file_name).write()
     except OSError:
-        log.warning(f"No write permissions for {repro_path}")
+        log.warning("No write permissions for %s", repro_path)
         pass
 
 
@@ -476,7 +478,7 @@ def get_minifier_repro_path():
 
 def helper_for_dump_minify(contents):
     minified_repro_path = get_minifier_repro_path()
-    log.warning(f"Writing minified repro to {minified_repro_path}")
+    log.warning("Writing minified repro to %s", minified_repro_path)
 
     if use_buck:
         BuckTargetWriter(minified_repro_path).write()
@@ -824,7 +826,9 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"minified_{len(gm.graph.nodes)}_nodes.py")
-    log.warning(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
+    log.warning(
+        "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
+    )
 
     model_str = NNModuleToString.convert(gm)
     with open(file_name, "w") as fd:
@@ -834,7 +838,7 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
             )
         )
     latest_repro = os.path.join(curdir, "repro.py")
-    log.warning(f"Copying {file_name} to {latest_repro} for convenience")
+    log.warning("Copying %s to %s for convenience", file_name, latest_repro)
 
     if use_buck:
         BuckTargetWriter(latest_repro).write()
