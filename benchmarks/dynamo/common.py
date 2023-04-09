@@ -2340,7 +2340,7 @@ def run(runner, args, original_dir=None):
                     import traceback
 
                     print(traceback.format_exc())
-                    logging.warning(f"{args.only} failed to load")
+                    logging.warning("%s failed to load", args.only)
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:

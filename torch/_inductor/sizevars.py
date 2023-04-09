@@ -317,7 +317,7 @@ class SizeVarAllocator:
         try:
             return int(out)
         except Exception:
-            log.warning(f"failed on: {out}")
+            log.warning("failed on: %s", out)
             raise
 
     def size_hints(self, exprs: List[Expr]) -> int:

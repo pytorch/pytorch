@@ -1555,7 +1555,7 @@ class CppVecKernelChecker(CppVecKernel):
 
     def disable_vec(self, msg=None):
         if schedule_log.isEnabledFor(logging.DEBUG):
-            schedule_log.debug(f"Disabled vectorization: {msg}")
+            schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
 
     def is_indirect_indexing(self, index: sympy.Expr):

@@ -184,7 +184,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
             self.set_closed()
             return True
         except BaseException as e:
-            log.warning(f"Shutdown failed. Error occurred: {str(e)}")
+            log.warning("Shutdown failed. Error occurred: %s", str(e))
             return False
 
 

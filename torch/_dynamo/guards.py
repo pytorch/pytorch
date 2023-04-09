@@ -178,7 +178,7 @@ class GuardBuilder(GuardBuilderBase):
         if base not in self.argnames:
             if re.match(r"[a-zA-Z0-9_]+", base):
                 if re.match(r"^\d+$", base):
-                    log.warning(f"invalid var name: {guard}")
+                    log.warning("invalid var name: %s", guard)
                 self.argnames.append(base)
 
         return name
