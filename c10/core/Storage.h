@@ -82,11 +82,15 @@ struct C10_API Storage {
   }
   // get() use here is to get const-correctness
 
-  void* data() const {
+  const void* data() const {
+    return storage_impl_->data();
+  }
+
+  void* mutable_data() const {
     return storage_impl_->mutable_data();
   }
 
-  at::DataPtr& data_ptr() {
+  at::DataPtr& mutable_data_ptr() {
     return storage_impl_->mutable_data_ptr();
   }
 
