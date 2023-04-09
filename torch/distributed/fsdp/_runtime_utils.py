@@ -549,7 +549,7 @@ def _root_pre_forward(
         # the perf with/without it.
         with torch.profiler.record_function("FullyShardedDataParallel._to_kwargs"):
             args_tuple, kwargs_tuple = _to_kwargs(
-                args, kwargs, state.compute_device.index, False
+                args, kwargs, state.compute_device, False
             )
         args = args_tuple[0]
         kwargs = kwargs_tuple[0]
