@@ -95,7 +95,7 @@ conv_1x1_as_mm = False
 split_reductions = True
 
 # Only save random seed for backwards rather than full mask
-lowmem_dropout = False
+lowmem_dropout = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -203,10 +203,10 @@ class triton:
     cudagraph_trees = not is_fbcode()
 
     # assertions not on the fast path, steady state
-    fast_cudagraph_asserts = True
+    slow_path_cudagraph_asserts = False
 
     # assertions on the fast path
-    slow_cudagraph_asserts = False
+    fast_path_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
