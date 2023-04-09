@@ -2548,6 +2548,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
 
+    def test_inplace_unsqueeze_input(self):
+        def backend(gm, example_inputs):
+            self.assertEqual(example_inputs[0].size(), torch.Size([3, 4]))
+            return gm
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x):
+            x.unsqueeze_(0)
+            return x + 1
+
+        inputs = [torch.randn(3, 4)]
+        self.assertEqual(fn(*inputs).size(), torch.Size([1, 3, 4]))
+        self.assertEqual(inputs[0].size(), torch.Size([1, 3, 4]))
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
         class Repro(torch.nn.Module):
