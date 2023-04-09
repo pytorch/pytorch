@@ -649,6 +649,10 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
             )
         ]
 
+    for c in configs:
+        # we don't need RBLOCK for persistent reduction
+        c.kwargs.pop("RBLOCK")
+
     return cached_autotune(
         configs,
         meta=meta,
