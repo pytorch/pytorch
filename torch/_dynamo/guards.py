@@ -103,7 +103,9 @@ def strip_getattr_getitem(name):
 # Don't put anything on here you don't want laundered to the next frame
 @dataclasses.dataclass
 class CodePart:
-    source: Optional[List[Source]]  # Note: List of sources for tensor checks and shape_env
+    source: Optional[
+        List[Source]
+    ]  # Note: List of sources for tensor checks and shape_env
     code: str
     origin: str
 
@@ -732,7 +734,7 @@ class CheckFunctionManager:
         code_parts = []
         code_parts.append(validation_code_part)
         code_parts += local_builder.code + global_builder.code
-        part_map : Dict[int, CodePart] = {}
+        part_map: Dict[int, CodePart] = {}
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
@@ -798,6 +800,32 @@ class CheckFunctionManager:
         )
         closure_vars.update(CLOSURE_VARS)
 
+        # Let's go over how this code works.
+        #
+        # 1) The cache entry structure in eval_frame.c is stored in the frame's extra field. Each cache_entry is a node
+        # in a linked list. Each cache entry represents a compiled frame with specializations. In order to know if
+        # a cache entry's compiled frame is valid for reuse, we need to invoke a function, check_fn,
+        # to compare current state against the specializations captured at compile time.
+        #
+        # 2) The function, check_fn, mentioned above, is defined by executing the function below, ___make_guard_fn
+        #
+        # 3) In this, this code is rather confusing, because it defines both ___make_guard_fn and the lambda it produces
+        # which becomes the check_fn.
+        #
+        # 4) Everything is `code` becomes the check_fn. We write it out by first defining a `__fail`, which
+        # given a code_part_id, the id() of a code_part, extract a code_part from the part_map and binds a scope
+        # to it. This is used later for evaluating the expression defined in code_part, if necessary. `__fail` is
+        # invoked if a specific sub expression of a guard is failed.
+        #
+        # 5) The sub expressions of guards are defined 1 per code_part. We iterate over the code_parts and produce
+        # code that (a) assigns the result of the expression to a variable named `passing` (b) checks if not passing,
+        # (c) and if not passing, returns __fail(code_part_id) with the id of the code_part used to produce the code.
+        # or (d) if passing, proceeds until we've run all the sub expressions through.
+        #
+        # 6) In the event that we re-enter frame evaluation having failed a guard, we return the code_part
+        # and pass it through to the frame evaluation callback. This is where downstream systems that handle guard
+        # failures hook in, like guard failure logging, or converting static shape failures to dynamic shapes (if
+        # the config is set).
         code = "      def __fail(code_part_id): \n"
         code += "          code_part = part_map[code_part_id] \n"
         code += "          code_part.scope = locals() \n"
