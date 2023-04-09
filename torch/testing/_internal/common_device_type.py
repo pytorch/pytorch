@@ -502,7 +502,7 @@ class CUDATestBase(DeviceTypeTestBase):
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
         t = torch.ones(1).cuda()
-        cls.no_magma = not torch.cuda.has_magma
+        cls.no_magma =  (torch.version.hip is not None) and (not torch.cuda.has_magma)
 
         # Determines if cuDNN is available and its version
         cls.no_cudnn = not torch.backends.cudnn.is_acceptable(t)
@@ -1225,9 +1225,9 @@ def skipCPUIfNoMkldnn(fn):
     return skipCPUIf(not torch.backends.mkldnn.is_available(), "PyTorch is built without mkldnn support")(fn)
 
 
-# Skips a test on CUDA if MAGMA is not available.
+# Skips a test on ROCM if MAGMA is not available; always run this test on (non-ROCM) CUDA
 def skipCUDAIfNoMagma(fn):
-    return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
+    return skipCUDAIf('no_magma', "no MAGMA library detected on ROCM")(skipCUDANonDefaultStreamIf(True)(fn))
 
 def has_cusolver():
     return not TEST_WITH_ROCM
