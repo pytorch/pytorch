@@ -676,7 +676,7 @@ def main(args):
     launcher = _Launcher()
     launcher.launch(args)
     for x in sorted(set(os.environ.keys()) - env_before):
-        logger.debug("{x}={os.environ[x]}")
+        logger.debug("%s=%s", x, os.environ[x])
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="This is a script for launching PyTorch inference on Intel(R) Xeon(R) Scalable "
