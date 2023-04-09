@@ -853,10 +853,10 @@ std::tuple<Tensor, Tensor> cummin(const Tensor& self, int64_t dim) {
 }
 
 Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor& indices, int64_t dim) {
-  if (input.numel() == 0) {
+  if (input.sym_numel() == 0) {
     return input;
   }
-  auto result = at::zeros(input.sizes(), input.options());
+  auto result = at::zeros_symint(input.sym_sizes(), input.options());
 
   // for composite compliance, use out-of-place variant of
   // `scatter_add` if `indices` or `grad` is a Tensor Subclass.
