@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import pathlib
 import subprocess
 import sys
 
-def main(template_path: str, output_path: str, definitions: list[str]) -> None:
+def main(argv: list[str]) -> None:
+    template_path = sys.argv[1]
+    output_path = pathlib.Path(sys.argv[2])
+    definitions = list(sys.argv[3:])
     subprocess.run(" ".join(cmake_configure_file_cmd(template_path, definitions, output_path)),
                    check=True, shell=True)
 
-def cmake_configure_file_cmd(template_path, definitions, output_path):
+def cmake_configure_file_cmd(template_path: str, definitions: list[str], output_path: pathlib.Path):
     command = ["sed", "--regexp-extended"]
     for definition in definitions:
         command.append(
@@ -36,4 +40,4 @@ def cmake_configure_file_cmd(template_path, definitions, output_path):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2], list(sys.argv[3:]))
+    main(sys.argv)
