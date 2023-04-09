@@ -9,6 +9,7 @@ import unittest
 from typing import Optional
 
 import numpy as np
+import packaging.version
 
 import torch
 from torch.autograd import function
@@ -150,6 +151,25 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
                 self.skip_this_opset = True
             if self.skip_this_opset and self.is_script:
                 raise unittest.SkipTest(f"Skip verify test for TorchScript. {reason}")
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_min_ort_version(reason: str, version: str):
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if (
+                packaging.version.parse(self.ort_version).release
+                < packaging.version.parse(version).release
+            ):
+                raise unittest.SkipTest(
+                    f"ONNX Runtime version: {version} is older than required version {version}. "
+                    f"Reason: {reason}."
+                )
             return func(self, *args, **kwargs)
 
         return wrapper
