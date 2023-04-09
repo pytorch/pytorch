@@ -173,7 +173,7 @@ static PyObject* THPStorage_pynew(
         uint8_t value = THPByteUtils_unpackReal(item.get());
         const auto& storage = THPStorage_Unpack(self);
         if (allocator == c10::GetDefaultCPUAllocator()) {
-          static_cast<uint8_t*>(storage.data())[i] = value;
+          static_cast<uint8_t*>(storage.mutable_data())[i] = value;
         } else {
           // TODO: this might be slow - consider batched updates?
           storage_set(storage, i, value);
@@ -236,7 +236,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
     }
 
     const auto& storage = THPStorage_Unpack(self);
-    auto data = static_cast<uint8_t*>(storage.data());
+    auto data = static_cast<uint8_t*>(storage.mutable_data());
 
     at::StorageImpl* old_storage_impl = storage.unsafeGetStorageImpl();
     c10::raw::intrusive_ptr::incref(old_storage_impl);

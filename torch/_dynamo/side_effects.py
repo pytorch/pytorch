@@ -366,6 +366,15 @@ class SideEffects:
                         )
                     elif name == "__call_nn_module_init":
                         pass  # handled in codegen_save_tempvars
+                    elif isinstance(value, variables.DeletedVariable):
+                        if isinstance(
+                            var.mutable_local, AttributeMutationExisting
+                        ) and hasattr(getattr(var, "value", None), name):
+                            cg.tx.output.update_co_names(name)
+                            cg(var.mutable_local.source)
+                            suffixes.append(
+                                [create_instruction("DELETE_ATTR", argval=name)]
+                            )
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
