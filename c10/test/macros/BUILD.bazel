@@ -1,13 +1,16 @@
-load("@rules_cc//cc:defs.bzl", "cc_test")
+load("//:tools/bazel.bzl", "rules")
+load(":build.bzl", "define_targets")
 
-cc_test(
+define_targets(rules = rules)
+
+sh_test(
     name = "bazel_test",
-    srcs = [
-        "bazel_test.cpp",
-        "cmake_macros.h",
-    ],
-    deps = [
-        "//c10/macros",
-        "@com_google_googletest//:gtest_main",
-    ],
+    srcs = [":cmake_macros_tester"],
+    env = {
+        "BUILD_SHARED_LIBS": "1",
+        "USE_GLOG": "1",
+        "USE_GFLAGS": "1",
+        "USE_NUMA": "0",
+        "USE_MSVC_STATIC_RUNTIME": "1",
+    },
 )

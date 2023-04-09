@@ -943,7 +943,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
       static_cast<int64_t>(std::ceil(
           static_cast<float>(sizes_and_strides_.size_at_unchecked(0)) *
           (1 + growthPct / 100))));
-  auto oldData = std::move(storage_.data_ptr());
+  auto oldData = std::move(storage_.mutable_data_ptr());
   auto oldSize = numel_;
   Resize(std::move(newCapacity));
   auto* newData = raw_mutable_data(data_type_);
@@ -993,7 +993,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
     return;
   }
   // Old data is discarded
-  storage_.data_ptr().clear();
+  storage_.mutable_data_ptr().clear();
   auto oldSize = numel_;
   SmallVector<int64_t, 5> oldDims(
       sizes_and_strides.begin(), sizes_and_strides.end());
