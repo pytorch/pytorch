@@ -4,6 +4,7 @@ import math
 
 import torch
 from ..._dynamo.utils import counters
+from .. import config
 from ..pattern_matcher import inference_graph, register_replacement, training_graph
 
 log = logging.getLogger(__name__)
@@ -137,9 +138,11 @@ def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
 
 
 # TODO(jansel): add more patterns based on what we see in real models
+# TODO(jansel): make these pattern work with lowmem_dropout=True
 
 
 @functools.lru_cache(None)
+@config.patch(lowmem_dropout=False)
 def _sfdp_init():
     from .joint_graph import patterns
 

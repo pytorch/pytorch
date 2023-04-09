@@ -14,7 +14,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestSDPAPatternRewriter(TestCase):
-    @config.patch(fallback_random=True)
+    @config.patch(fallback_random=True, lowmem_dropout=False)
     def _check_common(self, dot_prod_attention, args1=None, contains=True):
         tensor_shape = (4, 2, 16, 32)
         if args1 is None:
