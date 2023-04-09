@@ -195,7 +195,8 @@ class DDPOptimizer:
         # stash buckets for testing/debugging purposes
         self.buckets = buckets
         log.info(
-            f"DDPOptimizer used bucket cap {self.bucket_bytes_cap} and produced the following buckets:"
+            "DDPOptimizer used bucket cap %s and produced the following buckets:",
+            self.bucket_bytes_cap,
         )
         pretty_print_buckets(buckets)
 

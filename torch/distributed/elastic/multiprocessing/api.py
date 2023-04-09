@@ -536,7 +536,8 @@ class MultiprocessContext(PContext):
         for proc in self._pc.processes:
             if proc.is_alive():
                 log.warning(
-                    f"Unable to shutdown process {proc.pid} via {death_sig}, forcefully exiting via {_get_kill_signal()}"
+                    "Unable to shutdown process %s via %s, forcefully exiting via %s",
+                    proc.pid, death_sig, _get_kill_signal()
                 )
                 try:
                     os.kill(proc.pid, _get_kill_signal())
@@ -696,7 +697,7 @@ class SubprocessContext(PContext):
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
                 log.warning(
-                    f"Sending process {handler.proc.pid} closing signal {death_sig.name}"
+                    "Sending process %s closing signal %s", handler.proc.pid, death_sig.name
                 )
                 handler.close(death_sig=death_sig)
         end = time.monotonic() + timeout
@@ -713,7 +714,8 @@ class SubprocessContext(PContext):
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
                 log.warning(
-                    f"Unable to shutdown process {handler.proc.pid} via {death_sig}, forcefully exiting via {_get_kill_signal()}"
+                    "Unable to shutdown process %s via %s, forcefully exiting via %s",
+                    handler.proc.pid, death_sig, _get_kill_signal()
                 )
                 handler.close(death_sig=_get_kill_signal())
                 handler.proc.wait()

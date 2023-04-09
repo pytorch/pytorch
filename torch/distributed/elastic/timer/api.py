@@ -200,7 +200,7 @@ class TimerServer(abc.ABC):
                 reaped_worker_ids.add(worker_id)
             else:
                 log.error(
-                    f"Error reaping worker=[{worker_id}]. Will retry on next watchdog."
+                    "Error reaping worker=[%s]. Will retry on next watchdog.", worker_id
                 )
         self.clear_timers(reaped_worker_ids)
 

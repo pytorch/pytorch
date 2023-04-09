@@ -607,7 +607,7 @@ class MultiProcessTestCase(TestCase):
 
                 if parent_pipe.closed:
                     logger.info(
-                        f"Pipe closed for process {rank}, stopping event listener thread"
+                        "Pipe closed for process %s, stopping event listener thread", rank
                     )
                     return
 
@@ -657,7 +657,7 @@ class MultiProcessTestCase(TestCase):
             getattr(self, test_name)()
         except unittest.SkipTest as se:
             logger.info(
-                f"Process {self.rank} skipping test {test_name} for following reason: {str(se)}"
+                "Process %s skipping test %s for following reason: %s", self.rank, test_name, str(se)
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception as e:
@@ -687,7 +687,7 @@ class MultiProcessTestCase(TestCase):
                     pipes.append((i, pipe))
                 except ConnectionError as e:
                     logger.error(
-                        f"Encountered error while trying to get traceback for process {i}: {e}"
+                        "Encountered error while trying to get traceback for process %s: %s", i, e
                     )
 
         # Wait for results.
@@ -697,21 +697,21 @@ class MultiProcessTestCase(TestCase):
                 if pipe.poll(5):
                     if pipe.closed:
                         logger.info(
-                            f"Pipe closed for process {rank}, cannot retrieve traceback"
+                            "Pipe closed for process %s, cannot retrieve traceback", rank
                         )
                         continue
 
                     traceback = pipe.recv()
                     logger.error(
-                        f"Process {rank} timed out with traceback: \n\n{traceback}"
+                        "Process %s timed out with traceback: \n\n%s", rank, traceback
                     )
                 else:
                     logger.error(
-                        f"Could not retrieve traceback for timed out process: {rank}"
+                        "Could not retrieve traceback for timed out process: %s", rank
                     )
             except ConnectionError as e:
                 logger.error(
-                    f"Encountered error while trying to get traceback for process {rank}: {e}"
+                    "Encountered error while trying to get traceback for process %s: %s", rank, e
                 )
 
     def _join_processes(self, fn) -> None:
@@ -826,7 +826,7 @@ class MultiProcessTestCase(TestCase):
                     # is some follow-up needed. Instead just "pass" the test
                     # with an appropriate message.
                     logger.info(
-                        f"Skipping {self.id()} on sandcastle for the following reason: {skip.message}"
+                        "Skipping %s on sandcastle for the following reason: %s", self.id(), skip.message
                     )
                     return
                 else:
@@ -1086,7 +1086,7 @@ class MultiThreadedTestCase(TestCase):
             exc = exc_info[1]
             if isinstance(exc, unittest.SkipTest):
                 logger.info(
-                    f"Thread {rank} skipping test {fn} for following reason: {str(exc)}"
+                    "Thread %s skipping test %s for following reason: %s", rank, fn, str(exc)
                 )
                 if skip_code < 0:
                     skip_code = TEST_SKIPS["generic"].exit_code
@@ -1099,7 +1099,7 @@ class MultiThreadedTestCase(TestCase):
             elif isinstance(exc, Exception):
                 msg = "".join(traceback.format_exception(*exc_info))
                 logger.error(
-                    f"Caught exception: \n{msg} exiting thread {rank}"
+                    "Caught exception: \n%s exiting thread %s", msg, rank
                 )
                 error_msg += (
                     "Thread {} exited with exception:\n{}\n".format(rank, msg)
@@ -1118,7 +1118,7 @@ class MultiThreadedTestCase(TestCase):
                     if IS_SANDCASTLE:
                         # "pass" the test with an appropriate message.
                         logger.info(
-                            f"Skipping {fn} on sandcastle for the following reason: {skip.message}"
+                            "Skipping %s on sandcastle for the following reason: %s", fn, skip.message
                         )
                         return
                     else:

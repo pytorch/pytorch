@@ -71,7 +71,10 @@ def main() -> None:
 
     # Upload the file
     logging.info(
-        f"Uploading file {args.file} to s3 bucket: {bucket}, object name: {object_name}"
+        "Uploading file %s to s3 bucket: %s, object name: %s",
+        args.file,
+        bucket,
+        object_name,
     )
     if not args.dry_run:
         s3_client = boto3.client("s3")
