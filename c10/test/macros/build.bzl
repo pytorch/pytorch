@@ -3,6 +3,7 @@ def define_targets(rules):
         name = "cmake_macros_tester",
         srcs = ["cmake_macros_tester.cpp"],
         testonly = True,
+        tags = ["xplat"],
         deps = [
             "//c10",
             "@com_google_googletest//:gtest_main",
