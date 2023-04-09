@@ -808,7 +808,6 @@ class VariableBuilder:
         # ignore_subclass changes
         fake_tensor_value = None
         example_value = tensor_variable.proxy.node.meta["example_value"]
-        example_value = clone_input(example_value)
         if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             fake_tensor_value = example_value
 
