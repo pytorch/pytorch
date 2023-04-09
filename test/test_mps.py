@@ -81,7 +81,7 @@ def mps_ops_grad_modifier(ops):
         'scalar_tensor': [torch.float16, torch.float32],
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
-        'index_fill': [torch.float16, torch.float32], # missing `aten::_unique``
+        'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
 
         # Correctness issues
         'atanh': [torch.float32],
