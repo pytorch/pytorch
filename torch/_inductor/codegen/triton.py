@@ -1389,7 +1389,9 @@ class TritonKernel(Kernel):
         triton_meta["configs"] = [config_of(signature)]
 
         for tree in self.range_trees:
-            if tree.prefix != "r" or self.inside_reduction:
+            if tree.prefix != "r" or (
+                self.inside_reduction and not self.persistent_reduction
+            ):
                 argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
         if self.inside_reduction:
@@ -1446,6 +1448,12 @@ class TritonKernel(Kernel):
                     code.writeline(
                         f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}  # dynamic_shapes=False"
                     )
+
+            if tree.prefix == "r" and self.persistent_reduction:
+                # we generate a static RBLOCK for persistent reduction
+                hint = V.graph.sizevars.size_hint(tree.numel)
+                hint = next_power_of_2(hint)
+                code.writeline(f"RBLOCK: tl.constexpr = {hint}")
 
     def indexing_size_str(self, i=None, x=None):
         sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
