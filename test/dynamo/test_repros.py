@@ -2769,7 +2769,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             dict(counters["graph_break"]), {"autograd.Function with requires_grad": 1}
         )
-        if IS_MACOS:
+        if not IS_MACOS:
             # TODO(jansel): I have no idea why these are failing on mac...
             self.assertEqual(cnt.op_count, 6)
             self.assertEqual(cnt.frame_count, 1)
