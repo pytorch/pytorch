@@ -981,7 +981,9 @@ def same(
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error("Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol)
+            log.error(
+                "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
+            )
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality and not (

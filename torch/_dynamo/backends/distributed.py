@@ -309,7 +309,9 @@ class DDPOptimizer:
                         else:
                             new_args.append(arg)
 
-                    log.debug("run_node %s, %s got args %s", n.op, n.target, args_str(args))
+                    log.debug(
+                        "run_node %s, %s got args %s", n.op, n.target, args_str(args)
+                    )
                     assert isinstance(args, tuple)
                     assert isinstance(kwargs, dict)
 

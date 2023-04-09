@@ -319,7 +319,9 @@ def dump_compiler_graph_state(gm, args, compiler_name):
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
-    log.warning("Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name)
+    log.warning(
+        "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
+    )
     with open(file_name, "w") as fd:
         save_graph_repro(fd, gm, args, compiler_name)
     curdir = os.getcwd()
@@ -824,7 +826,9 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"minified_{len(gm.graph.nodes)}_nodes.py")
-    log.warning("Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name)
+    log.warning(
+        "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
+    )
 
     model_str = NNModuleToString.convert(gm)
     with open(file_name, "w") as fd:
