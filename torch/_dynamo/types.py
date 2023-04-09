@@ -32,7 +32,7 @@ class GuardFail(NamedTuple):
 class GuardFn(Protocol):
     closure_vars: OrderedDict[str, object]
     args: List[str]
-    code_parts: List[str]
+    code_parts: List["torch._dynamo.guards.CodePart"]
     verbose_code_parts: List[str]
     global_scope: Dict[str, object]
     guard_fail_fn: Optional[Callable[[GuardFail], None]]

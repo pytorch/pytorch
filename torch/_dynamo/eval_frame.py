@@ -362,7 +362,7 @@ def first_real_inst_idx(code):
 # Converts a CodePart structure, which carries our
 # re-compilation code, source, and more, into a
 # plan for how to mark certain dims as dynamic.
-def dynamic_plan_from_code_part(code_part: Optional[CodePart], dynamic_plan):
+def dynamic_plan_from_code_part(code_part, dynamic_plan):
     from torch._dynamo.source import TensorProperty, TensorPropertySource
 
     if (

@@ -103,7 +103,7 @@ def strip_getattr_getitem(name):
 # Don't put anything on here you don't want laundered to the next frame
 @dataclasses.dataclass
 class CodePart:
-    source: List[Source]  # Note: List of sources for tensor checks and shape_env
+    source: Optional[List[Source]]  # Note: List of sources for tensor checks and shape_env
     code: str
     origin: str
 
@@ -732,7 +732,7 @@ class CheckFunctionManager:
         code_parts = []
         code_parts.append(validation_code_part)
         code_parts += local_builder.code + global_builder.code
-        part_map = {}
+        part_map : Dict[int, CodePart] = {}
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names

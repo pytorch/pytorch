@@ -40,7 +40,7 @@ def strip_end(s, suffix):
 def show_guards(gm):
     names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
     return "\n".join(
-        [guard.expr for guard in gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True, constraint_inputs=None)]
+        [guard.expr for guard in gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True, constraint_inputs=None)]  # noqa: B950
     )
 
 
@@ -157,8 +157,8 @@ class TestGenericProxyTensor(TestCase):
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, a_1):
     ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
-    mm = torch.ops.aten.mm.default(a_1, ones);  a_1 = ones = None
-    return mm""")
+    matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
+    return matmul""")
 
 
     def test_make_fx_simple(self):
@@ -1222,7 +1222,7 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         from torch._dynamo.source import LocalSource
         self.assertExpectedInline(
-            str([guard.expr for guard in fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")])]),
+            str([guard.expr for guard in fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")])]),  # noqa: B950
             """["L['a'].size()[0] == 2*L['b'].size()[0]", "L['a'].stride()[0] == 1", "L['a'].storage_offset() == 0", "L['b'].stride()[0] == 1", "L['b'].storage_offset() == 0", "2 <= L['b'].size()[0]"]"""  # noqa: B950
         )
 
