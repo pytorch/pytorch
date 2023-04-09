@@ -11,11 +11,7 @@ import torch
 
 from .. import variables
 from ..allowed_functions import is_allowed, is_builtin_callable
-from ..bytecode_transformation import (
-    create_call_function,
-    create_instruction,
-    create_rot_n,
-)
+from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import istensor, istype, make_cell
@@ -366,7 +362,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         annotations,
         closure,
         closure_scope,
-        wraps_source=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -383,7 +378,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if closure is None:
             closure_scope = None
         self.closure_scope = closure_scope
-        self.wraps_source = wraps_source
 
     def self_args(self):
         return []
@@ -486,13 +480,4 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen(self.code)
         if sys.version_info < (3, 11):
             codegen(self.fn_name)
-        codegen.extend_output([create_instruction("MAKE_FUNCTION", arg=flags)])
-
-        if self.wraps_source:
-            codegen.load_import_from("functools", "wraps")
-            codegen(self.wraps_source)
-            codegen.extend_output(create_call_function(1, False))
-            codegen.extend_output(create_rot_n(2))
-            codegen.extend_output(create_call_function(1, False))
-
-        return []
+        return [create_instruction("MAKE_FUNCTION", arg=flags)]

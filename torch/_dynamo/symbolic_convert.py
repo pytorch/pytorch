@@ -1134,14 +1134,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.create_call_resume_at(self.next_instruction)
         )
 
-    def DELETE_ATTR(self, inst):
-        obj = self.pop()
-        self.output.guards.update(
-            BuiltinVariable(delattr)
-            .call_function(self, [obj, ConstantVariable(inst.argval)], {})
-            .guards
-        )
-
     def create_call_resume_at(self, offset):
         raise AssertionError(
             f"create_call_resume_at not overridden by subclass {type(self)}"
