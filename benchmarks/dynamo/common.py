@@ -1278,7 +1278,8 @@ class BenchmarkRunner:
             fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
         except Exception:
             log.warning(
-                f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
+                "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
+                name,
             )
             self.args.cosine = True
             fp64_outputs = None

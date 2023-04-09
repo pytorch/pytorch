@@ -852,7 +852,7 @@ class SimpleElasticAgent(ElasticAgent):
         role = spec.role
 
         log.info(
-            f"[{role}] starting workers for entrypoint: {spec.get_entrypoint_name()}"
+            "[%s] starting workers for entrypoint: %s", role, spec.get_entrypoint_name()
         )
 
         self._initialize_workers(self._worker_group)
@@ -925,7 +925,7 @@ class SimpleElasticAgent(ElasticAgent):
                 barrier_timeout=self._exit_barrier_timeout,
             )
             log.info(
-                f"Done waiting for other agents. Elapsed: {time.time() - start} seconds"
+                "Done waiting for other agents. Elapsed: %s seconds", time.time() - start
             )
         except SignalException as e:
             log.warning("Got termination signal: %s", e.sigval)

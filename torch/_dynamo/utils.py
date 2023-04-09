@@ -314,7 +314,7 @@ def write_record_to_file(filename, exec_record):
     try:
         if os.path.exists(filename):
             log.warning(
-                f"Unable to write execution record {filename}; file already exists."
+                "Unable to write execution record %s; file already exists.", filename
             )
         else:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -966,7 +966,10 @@ def same(
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log.error(
-                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
+                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s",
+                        res_error,
+                        ref_error,
+                        res.size(),
                     )
                     # import pdb; pdb.set_trace()
                 return passes_test

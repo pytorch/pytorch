@@ -135,7 +135,7 @@ class ErrorHandler:
             log.info("dumped error file to parent's %s", my_error_file)
         else:
             log.error(
-                f"no error file defined for parent, to copy child error file ({rootcause_error_file})"
+                "no error file defined for parent, to copy child error file (%s)", rootcause_error_file
             )
 
     def _rm(self, my_error_file):

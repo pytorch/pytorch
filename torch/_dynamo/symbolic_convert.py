@@ -371,7 +371,9 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     log.warning(
-                        f"Graph break: {excp} from user code at {user_stack_formatted}"
+                        "Graph break: %s from user code at %s",
+                        excp,
+                        user_stack_formatted,
                     )
 
                 excp.remove_from_stats()
@@ -2027,7 +2029,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             log.warning(
-                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {e}"
+                "%s %s %s %s %s",
+                func.get_filename(),
+                func.get_function(),
+                args,
+                kwargs,
+                e,
             )
             unimplemented("arg mismatch inlining")
 
