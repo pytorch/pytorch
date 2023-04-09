@@ -7,8 +7,8 @@ BertForQuestionAnswering,7
 BlenderbotSmallForCausalLM,7
 BlenderbotSmallForConditionalGeneration,7
 CamemBert,7
-DebertaForMaskedLM,55
-DebertaForQuestionAnswering,55
+DebertaForMaskedLM,52
+DebertaForQuestionAnswering,52
 DebertaV2ForMaskedLM,0
 DistilBertForMaskedLM,7
 DistilBertForQuestionAnswering,7
