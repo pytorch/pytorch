@@ -2563,6 +2563,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
 
+    def test_inplace_unsqueeze_input(self):
+        def backend(gm, example_inputs):
+            self.assertEqual(example_inputs[0].size(), torch.Size([3, 4]))
+            return gm
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x):
+            x.unsqueeze_(0)
+            return x + 1
+
+        inputs = [torch.randn(3, 4)]
+        self.assertEqual(fn(*inputs).size(), torch.Size([1, 3, 4]))
+        self.assertEqual(inputs[0].size(), torch.Size([1, 3, 4]))
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
         class Repro(torch.nn.Module):
@@ -2658,6 +2672,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         ra = compiled_fn(t1, t2, 6)
         self.assertEqual(ra, torch.tensor([0.0, 7.0, 14.0]))
+
+    def test_build_map_unpack_with_call(self):
+        def forward_with_cond_scale(x, t, cond_scale, self_cond, other1, other2):
+            return x.sin() + t + cond_scale + self_cond + other1 + other2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            d1 = dict(other1=5)
+            d2 = dict(other2=4)
+            text_cond = {**d1, **d2}
+            return forward_with_cond_scale(x, 1, cond_scale=2, self_cond=3, **text_cond)
+
+        self.assertTrue(same(fn(torch.ones(4)), torch.ones(4).sin() + 15))
 
     def test_graph_break_unsupported_fake(self):
         counter = torch._dynamo.testing.CompileCounter()
