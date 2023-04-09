@@ -972,7 +972,7 @@ if HAS_SYMPY:
 
             if len(denominator) > 0:
                 denominator_str = super()._print_Mul(sympy.Mul._from_args(denominator))
-                return f"div({numerator_str}, {denominator_str})"
+                return f"pydiv({numerator_str}, {denominator_str})"
 
             return numerator_str
 
@@ -1145,6 +1145,7 @@ class GuardCompiler:
         #     c) Generate the C++ source corresponding to this guard.
         #         - 'floordiv': applies the floor function after floating-point division
         #         - 'modi': implicitly converts the arguments to integer
+        #         - 'pydiv': implicitly converts the arguments to double, also returning a double
         cpp_code = f"""\
 #include <torch/python.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -1158,7 +1159,7 @@ static int64_t modi(int64_t dividend, int64_t divisor) {{
     return dividend % divisor;
 }}
 
-static double div(double dividend, double divisor) {{
+static double pydiv(double dividend, double divisor) {{
     return dividend / divisor;
 }}
 
