@@ -1072,7 +1072,7 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def large_mem_models(self):
+    def large_memory_models(self):
         return set()
 
     @property
@@ -1124,6 +1124,10 @@ class BenchmarkRunner:
                 or re.search("|".join(args.exclude), model_name, re.I)
                 or model_name in args.exclude_exact
                 or model_name in self.skip_models
+            ):
+                continue
+            if args.large_memory_models_only == (
+                model_name not in self.large_memory_models
             ):
                 continue
 
@@ -1522,6 +1526,11 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--exclude-exact", action="append", help="filter benchmarks with exact match"
+    )
+    parser.add_argument(
+        "--large-memory-models-only",
+        action="store_true",
+        help="Only run models that require over 24GB gpu memory. Useful for CI.",
     )
     parser.add_argument(
         "--total-partitions",
@@ -2118,10 +2127,9 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.very_slow_models)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
-        if torch.cuda.get_device_properties(0).total_memory < 25 * 2**30:
-            runner.skip_models.update(runner.large_mem_models)
-            if args.training:
-                runner.skip_models.add("hf_T5")
+        if torch.cuda.get_device_properties(0).total_memory > 25 * 2**30:
+            # On a GPU with smaller memory, runner.large_memory_models will be skipped
+            runner.large_memory_models.clear()
 
     if args.float16:
         # these give `INCORRECT - Variation in Eager runs itself` sometimes
@@ -2379,6 +2387,7 @@ def run(runner, args, original_dir=None):
             os.unlink(output_filename)
         if original_dir:
             os.chdir(original_dir)
+
         model_names = list(runner.iter_model_names(args))
         nmodels = len(model_names)
         for i, name in enumerate(model_names):

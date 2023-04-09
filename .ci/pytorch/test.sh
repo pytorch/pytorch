@@ -268,6 +268,10 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
 fi
 
+if [[ "${TEST_CONFIG}" == *large_memory_models_only* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--large-memory-models-only)
+fi
+
 if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes --dynamic-batch-only)
 fi
@@ -356,7 +360,7 @@ test_single_dynamo_benchmark() {
       "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
 
-    if [[ "${TEST_CONFIG}" == *inductor* ]] && [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
+    if [[ "${TEST_CONFIG}" == *inductor-skip-for-this-run* ]] && [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
       # Other jobs (e.g. periodic, cpu-accuracy) may have different set of expected models.
       if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
         expected_csv="${name}_${suite}_dynamic.csv"
@@ -949,6 +953,19 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     checkout_install_torchbench
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
+elif [[ "${TEST_CONFIG}" == *large_memory_models_only* ]]; then
+  install_torchaudio cuda
+  install_torchtext
+  install_torchvision
+  install_huggingface
+  install_timm
+  # checkout_install_torchbench
+
+  # These tests will run with --large-memory-models-only, so we only need one shard
+  # TODO: also do this for HF and TB
+  # test_dynamo_benchmark huggingface "$id"
+  test_dynamo_benchmark timm_models "$id"
+  # PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   test_inductor

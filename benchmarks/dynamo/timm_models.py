@@ -67,8 +67,6 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-SKIP = set()
-
 REQUIRE_HIGHER_TOLERANCE = {"botnet26t_256"}
 
 NONDETERMINISTIC = {
@@ -187,11 +185,7 @@ class TimmRunnner(BenchmarkRunner):
         self.model_names = sorted(TIMM_MODELS.keys())
 
     @property
-    def skip_models(self):
-        return SKIP
-
-    @property
-    def large_mem_models(self):
+    def large_memory_models(self):
         return REQUIRE_MORE_THAN_24GB
 
     def load_model(

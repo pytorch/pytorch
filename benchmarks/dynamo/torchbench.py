@@ -147,6 +147,7 @@ REQUIRE_COSINE_TOLERACE = {
 NONDETERMINISTIC = {
     # https://github.com/pytorch/pytorch/issues/98355
     "mobilenet_v3_large",
+    "vision_maskrcnn",  # eager variant
 }
 
 # These benchmarks took >600s on an i9-11900K CPU
@@ -240,7 +241,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return NONDETERMINISTIC
 
     @property
-    def large_mem_models(self):
+    def large_memory_models(self):
         return REQUIRE_MORE_THAN_24GB
 
     @property

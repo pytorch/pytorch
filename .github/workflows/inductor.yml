@@ -54,6 +54,8 @@ jobs:
       test-matrix: |
         { include: [
           { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "inductor_large_memory_models_only", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "inductor_large_memory_models_only_dynamic", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
         ]}
 
   linux-bionic-cuda11_8-py3_10-gcc7-inductor-test-gcp:
