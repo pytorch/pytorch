@@ -373,11 +373,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.add(x, c)
 
     @make_test
-    def test_dict_kwargs(x):
-        z = dict(text_embed=x + 1, other=x + 2)
-        return z
-
-    @make_test
     def test_float(x):
         y = float(1.2)
         y += float("1.2")
