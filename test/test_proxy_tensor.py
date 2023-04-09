@@ -1356,7 +1356,6 @@ symbolic_tensor_failures = {
     xfail('polar'),
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
-    skip('masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
     xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
@@ -1428,7 +1427,6 @@ symbolic_tensor_failures = {
     xfail('linalg.tensorsolve', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.vander', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
-    xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
     xfail('logdet', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition

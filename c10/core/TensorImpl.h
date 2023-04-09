@@ -1522,7 +1522,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
-    return static_cast<T*>(storage_.data()) + storage_offset_;
+    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
   }
 
   /**
@@ -1546,7 +1546,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Computing an offset into an empty tensor would be UB, since an empty
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
-    char* const data = static_cast<char*>(storage_.data());
+    char* const data = static_cast<char*>(storage_.mutable_data());
     if (data == nullptr) {
       return nullptr;
     }
@@ -1559,7 +1559,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* unsafe_data() const {
-    return static_cast<T*>(storage_.data()) + storage_offset_;
+    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
   }
 
   /**
@@ -1754,7 +1754,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         new_stride.size(),
         ")");
     const auto new_dim = new_size.size();
-
+    bool overflowed = false;
     sizes_and_strides_.set_sizes(new_size);
 
     if (new_dim > 0) {
@@ -1769,15 +1769,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             sizes_and_strides_.stride_at_unchecked(dim) = 1;
           } else {
             // Keep stride monotonically increasing to match NumPy.
-            sizes_and_strides_.stride_at_unchecked(dim) =
+            overflowed |= c10::mul_overflows(
+                sizes_and_strides_.stride_at_unchecked(dim + 1),
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
-                sizes_and_strides_.stride_at_unchecked(dim + 1);
+                    sizes_and_strides_.size_at_unchecked(dim + 1), 1),
+                std::addressof(sizes_and_strides_.stride_at_unchecked(dim)));
           }
         }
         if (dim == 0)
           break;
       }
+      TORCH_CHECK(!overflowed, "Stride calculation overflowed");
     }
 
     refresh_numel();
@@ -2145,7 +2147,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(
-          static_cast<char*>(storage_.data()) +
+          static_cast<char*>(storage_.mutable_data()) +
           storage_offset_ * meta.itemsize());
     } else {
       bool had_special_dtor = data_type_.placementDelete() != nullptr;
@@ -2161,7 +2163,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            (storage_.nbytes() >= (numel_ * data_type_.itemsize())))) {
         TORCH_INTERNAL_ASSERT(
             storage_offset_ == 0); // because we just reallocated
-        return storage_.data();
+        return storage_.mutable_data();
       }
       const Allocator* allocator = storage_.allocator();
       // Storage might have nullptr allocator in rare cases, for example, if
@@ -2180,7 +2182,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         auto data_ptr = allocator->allocate(numel_ * data_type_.itemsize());
         storage_.set_data_ptr_noswap(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
-        data_type_.placementNew()(storage_.data(), numel_);
+        data_type_.placementNew()(storage_.mutable_data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
         storage_.set_data_ptr_noswap(
@@ -2190,7 +2192,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_INTERNAL_ASSERT(
           storage_offset_ == 0); // because we just reallocated
       device_opt_ = storage_.device();
-      return storage_.data();
+      return storage_.mutable_data();
     }
   }
 
@@ -2203,7 +2205,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T* mutable_data() {
     if (storage_initialized() && data_type_.Match<T>()) {
-      return static_cast<T*>(storage_.data()) + storage_offset_;
+      return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
     // error in attempt to invoke TypeMeta::ctor()
@@ -2274,14 +2276,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         const auto dim_ = dim();
         sizes_and_strides_.resize(dim_);
         if (dim_ > 0) {
+          bool overflowed = false;
           const auto last_idx = dim_ - 1;
           sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
-            sizes_and_strides_.stride_at_unchecked(i) =
-                sizes_and_strides_.stride_at_unchecked(i + 1) *
+            overflowed |= c10::mul_overflows(
+                sizes_and_strides_.stride_at_unchecked(i + 1),
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1), 1);
+                    sizes_and_strides_.size_at_unchecked(i + 1), 1),
+                std::addressof(sizes_and_strides_.stride_at_unchecked(i)));
           }
+          TORCH_CHECK(!overflowed, "Stride calculation overflowed");
         }
         break;
       }
