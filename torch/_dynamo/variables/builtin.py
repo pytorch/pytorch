@@ -1087,6 +1087,9 @@ class BuiltinVariable(VariableTracker):
         elif isinstance(obj, variables.NNModuleVariable):
             obj.convert_to_unspecialized(tx)
 
+    def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
+        return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
+
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder
 

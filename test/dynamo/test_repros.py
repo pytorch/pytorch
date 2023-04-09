@@ -2683,6 +2683,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(fn(torch.ones(4)), torch.ones(4).sin() + 15))
 
+    def test_delattr(self):
+        class MyObj:
+            def __init__(self, a, b):
+                self.a = a
+                self.b = b
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, obj):
+            del obj.a
+            obj.c = x + 1
+            del obj.c
+            tmp = MyObj(x + 2, x + 3)
+            del tmp.b
+            return tmp
+
+        x = torch.zeros([])
+        obj1 = MyObj(x, x)
+        obj2 = fn(x, obj1)
+        self.assertFalse(hasattr(obj1, "a"))
+        self.assertFalse(hasattr(obj1, "c"))
+        self.assertFalse(hasattr(obj2, "b"))
+        self.assertEqual(obj1.b.item(), 0)
+        self.assertEqual(obj2.a.item(), 2)
+
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_implicit_guard(self):
         def f(x):

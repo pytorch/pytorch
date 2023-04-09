@@ -558,3 +558,7 @@ class NullVariable(VariableTracker):
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
         return [create_instruction("PUSH_NULL")]
+
+
+class DeletedVariable(VariableTracker):
+    """Marker used to implement delattr()"""
