@@ -149,7 +149,9 @@ class AttrSource(Source):
         assert self.base, "Can't construct an AttrSource without a valid base source"
         if "." in self.member:
             member_parts = self.member.split(".")
-            object.__setattr__(self, "base", AttrSource(self.base, ".".join(member_parts[:-1])))
+            object.__setattr__(
+                self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
+            )
             object.__setattr__(self, "member", member_parts[-1])
 
     def reconstruct(self, codegen):
@@ -234,15 +236,21 @@ class DefaultsSource(Source):
     _name: str = dataclasses.field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        assert self.base, "Base must be a valid source in order to properly track and guard this Defaults to its origin."
+        assert (
+            self.base
+        ), "Base must be a valid source in order to properly track and guard this Defaults to its origin."
         if self.is_kw:
             assert isinstance(self.idx_key, str)
             object.__setattr__(self, "field", "__kwdefaults__")
-            object.__setattr__(self, "_name", f"{self.base.name()}.{self.field}['{self.idx_key}']")
+            object.__setattr__(
+                self, "_name", f"{self.base.name()}.{self.field}['{self.idx_key}']"
+            )
         else:
             assert isinstance(self.idx_key, int)
             object.__setattr__(self, "field", "__defaults__")
-            object.__setattr__(self, "_name", f"{self.base.name()}.{self.field}[{self.idx_key}]")
+            object.__setattr__(
+                self, "_name", f"{self.base.name()}.{self.field}[{self.idx_key}]"
+            )
 
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
@@ -370,7 +378,11 @@ class ODictGetItemSource(Source):
         return self.base.guard_source()
 
     def name(self):
-        return f"___odict_getitem({self.base.name()}, {self.index!r})"
+        if isinstance(self.index, type):
+            rep = f'__load_module("{self.index.__module__}").{self.index.__qualname__}'
+            return f"___odict_getitem({self.base.name()}, {rep})"
+        else:
+            return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)
