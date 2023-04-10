@@ -260,7 +260,7 @@ struct TORCH_PYTHON_API type_caster<c10::SymFloat> {
 template <>
 struct TORCH_PYTHON_API type_caster<c10::SymBool> {
  public:
-  PYBIND11_TYPE_CASTER(c10::SymBool, _("bool"));
+  PYBIND11_TYPE_CASTER(c10::SymBool, _("Union[bool, torch.SymBool]"));
   bool load(py::handle src, bool);
 
   static py::handle cast(
