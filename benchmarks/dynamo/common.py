@@ -1126,7 +1126,7 @@ class BenchmarkRunner:
                 or model_name in self.skip_models
             ):
                 continue
-            if args.large_memory_models_only == (
+            if args.large_memory_models_only and (
                 model_name not in self.large_memory_models
             ):
                 continue
@@ -2127,9 +2127,8 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.very_slow_models)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
-        if torch.cuda.get_device_properties(0).total_memory > 25 * 2**30:
-            # On a GPU with smaller memory, runner.large_memory_models will be skipped
-            runner.large_memory_models.clear()
+        if torch.cuda.get_device_properties(0).total_memory < 25 * 2**30:
+            runner.skip_models.update(runner.large_memory_models)
 
     if args.float16:
         # these give `INCORRECT - Variation in Eager runs itself` sometimes
