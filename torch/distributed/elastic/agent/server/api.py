@@ -415,7 +415,7 @@ class ElasticAgent(abc.ABC):
       if group_result.is_failed():
         # workers failed
         failure = group_result.failures[0]
-        log.exception(f"worker 0 failed with exit code : {failure.exit_code}")
+        log.exception("worker 0 failed with exit code : %s", failure.exit_code)
       else:
         return group_result.return_values[0] # return rank 0's results
 
@@ -949,5 +949,6 @@ class SimpleElasticAgent(ElasticAgent):
             raise
         except Exception:
             log.exception(
-                f"Error waiting on exit barrier. Elapsed: {time.time() - start} seconds"
+                "Error waiting on exit barrier. Elapsed: %s seconds",
+                time.time() - start
             )

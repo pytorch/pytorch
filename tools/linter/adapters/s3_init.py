@@ -7,7 +7,6 @@ import platform
 import stat
 import subprocess
 import sys
-import textwrap
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -77,16 +76,14 @@ def check(binary_path: Path, reference_hash: str) -> bool:
         return True
 
     logging.warning(
-        textwrap.dedent(
-            f"""\
-            Found binary hash does not match reference!
+        """\
+Found binary hash does not match reference!
 
-            Found hash: {existing_binary_hash}
-            Reference hash: {reference_hash}
+Found hash: %s
+Reference hash: %s
 
-            Deleting {binary_path} just to be safe.
-            """
-        )
+Deleting %s just to be safe.
+""", existing_binary_hash, reference_hash, binary_path
     )
     if DRY_RUN:
         logging.critical(
