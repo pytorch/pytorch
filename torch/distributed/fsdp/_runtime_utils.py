@@ -816,6 +816,8 @@ def _post_backward_hook(
                         if orig_param.grad is not None and hasattr(orig_param, '_in_backward_optimizers'):
                             for optim in orig_param._in_backward_optimizers:
                                 optim.step()
+                            # Not sure if we need to do this. Setting entire
+                            # flat_param's grad to be None should be fine.
                             orig_param.grad = None
                     handle.flat_param.grad = None
 
