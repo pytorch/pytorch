@@ -52,6 +52,8 @@ from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
+from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental import proxy_tensor
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
@@ -99,6 +101,13 @@ class OptimizedModule(torch.nn.Module):
         super().__setattr__(name, value)
 
     def __call__(self, *args, **kwargs):
+        if hasattr(self._orig_mod, "_initialize_hook"):
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
+            assert len(kwargs) == 0
+            self._orig_mod._infer_parameters(self._orig_mod, args)
         return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
@@ -524,7 +533,7 @@ def explain(f, *args, **kwargs):
 
         op_count += len(ops)
         ops_per_graph.append(ops)
-        if gm.compile_subgraph_reason is not None:
+        if gm.compile_subgraph_reason.graph_break:
             break_reasons.append(gm.compile_subgraph_reason)
         return gm.forward
 
@@ -646,6 +655,7 @@ def export(
     graph = None
     out_guards = None
     graph_captured_input = None
+    example_fake_inputs = []
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
 
     def produce_matching(source_args, candidate_args):
@@ -691,6 +701,9 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
+        nonlocal example_fake_inputs
+        example_fake_inputs = example_inputs
+
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
             nonlocal graph_captured_input
@@ -710,7 +723,10 @@ def export(
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
-            hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
+            hooks=Hooks(
+                guard_export_fn=guard_export_print,
+                guard_fail_fn=None,
+            ),
             export=True,
             export_constraints=constraints,
             dynamic=(tracing_mode == "symbolic"),
@@ -774,12 +790,19 @@ def export(
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(
-            graph_with_interpreter,
-            decomposition_table=decomposition_table,
-            tracing_mode=tracing_mode,
-            _allow_non_fake_inputs=True,
-        )(*graph_captured_input)
+        fake_tensor_mode = null_context()
+        for val in example_fake_inputs:
+            if isinstance(val, FakeTensor):
+                fake_tensor_mode = val.fake_mode
+                break
+
+        with enable_python_dispatcher(), fake_tensor_mode:
+            graph = make_fx(
+                graph_with_interpreter,
+                decomposition_table=decomposition_table,
+                tracing_mode="real",
+                _allow_non_fake_inputs=True,
+            )(*example_fake_inputs)
 
     new_graph = ChangeInputOutputSignature(
         graph,
@@ -876,6 +899,10 @@ def export(
     )
 
     new_graph.recompile()
+
+    # TODO remove this once Executorch uses proper functionalization
+    new_graph._example_fake_inputs = example_fake_inputs
+    new_graph._matched_input_elements_positions = matched_input_elements_positions
 
     return (new_graph, out_guards)
 
