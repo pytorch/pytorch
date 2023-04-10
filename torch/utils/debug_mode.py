@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Union, List, Optional, Iterable
 from functools import partial
 
-__all__ = ["DebugMode",]
+__all__ = ["DebugMode", ]
 
 def embedding_check(func, args, kwargs):
     invalid_index_mask = args[0].shape[0] <= args[1]
@@ -79,7 +79,7 @@ def get_post_checks(check):
 def to_iterable(checks):
     if checks is None:
         return ()
-    if isinstance(checks, Callable):
+    if callable(checks):
         return (checks,)
     return tuple(checks)
 
@@ -91,13 +91,39 @@ def is_valid_check(check):
 
 
 class DebugMode(TorchDispatchMode):
+    r"""
+    ``DebugMode`` is a context manager that returns more comprehensive error messages
+    for certain set of operators and also allows for other checks like checking for extremal values
+    in the computation.
+
+    Besides the provided checks, user can pass their own checks to the debug mode, which will be run
+    before or after calling any torch operator.
+
+    Also, user can add a custom error handling for any uncaught exception from an operator.
+
+    Arguments:
+        checks: Checks to be run under DebugMode. Defaults to 'all' i.e. all availble checks.
+        pre_checks: Callable which are called before running the operator.
+            The callable should accept 3 arguments which are op, op_args and op_kwargs.
+        post_checks: Callable which are called after running the operator.
+            The callable should accept 4 arguments which are op, op_args, op_kwargs and result.
+        custom_error_handler: Callable which is called when any uncaught exception is thrown from
+            an operator. The callable should accept 4 arguments which are error, op, op_args and op_kwargs.
+
+    Example usage
+
+    .. code-block:: python
+        with DebugMode():
+            mod.sum().backward()
+
+    """
     def __init__(self,
                  checks: Union[str, List[str]] = 'all',  # Selection of checks provided by PyTorch
                  # Additional pre-checks (callables) user can pass
-                 # Arguments to the callable are op, args, kwargs
+                 # Arguments to the callable are op, op_args, op_kwargs
                  pre_checks: Optional[Union[Iterable[Callable], Callable]] = None,
                  # Additional post-checks (callables) user can pass
-                 # Arguments to the callable are op, args, kwargs, result
+                 # Arguments to the callable are op, op_args, op_kwargs, result
                  post_checks: Optional[Union[Iterable[Callable], Callable]] = None,
                  # custom_error_handler for an uncaught error
                  custom_error_handler: Optional[Callable] = None) -> None:
