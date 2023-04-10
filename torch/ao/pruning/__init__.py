@@ -4,8 +4,8 @@ from ._mappings import get_static_sparse_quantized_mapping
 
 # Sparsifier
 from .sparsifier.base_pruner import BasePruner
-from .sparsifier.weight_norm_sparsifier import WeightNormSparsifier
-from .sparsifier.nearly_diagonal_sparsifier import NearlyDiagonalSparsifier
+from .sparsifier.weight_norm_pruner import WeightNormPruner
+from .sparsifier.nearly_diagonal_pruner import NearlyDiagonalPruner
 
 # Scheduler
 from .scheduler.base_scheduler import BaseScheduler

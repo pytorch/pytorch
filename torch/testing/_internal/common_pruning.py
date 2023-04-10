@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-class ImplementedSparsifier(BasePruner):
+class ImplementedPruner(BasePruner):
     def __init__(self, **kwargs):
         super().__init__(defaults=kwargs)
 
