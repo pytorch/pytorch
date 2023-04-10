@@ -26,6 +26,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.distributed._spmd.graph_utils import (
     CommType,
     dump_graphs_to_files,
+    find_node,
     get_output,
     OP,
 )
@@ -863,3 +864,49 @@ def split_fused_optimizer(
         return _split_fused_adam(gm, optim_block, split_gradients)
     else:
         raise NotImplementedError("Only fused_adam is supported now")
+
+
+@graph_optimization_pass(run_after=("schedule_comm_wait", "remove_copy_from_optimizer"))
+def iter_move_grads_and_optimizers(
+    gm: IterGraphModule,
+    target_comm_node: str,
+    target_dest_node: str,
+) -> None:
+    """Function to extract a comm block and split out a new optimizer and step for it.
+    This subgraph is then moved to the forward graph.
+    """
+    for comm_block in get_all_comm_blocks(gm, "all_reduce"):
+        if comm_block.comm_node.name == target_comm_node:
+            break
+    else:
+        raise ValueError(f"Cannot find {target_comm_node}")
+
+    optim_blocks = get_all_fused_optimizer_blocks(gm, "_fused_adam")
+    for optim_block in optim_blocks:
+        optim_args = AdamArgs(*optim_block.optim.optim_node.args)
+        one_output = next(iter(comm_block.outputs))
+        if one_output in optim_args.grads:
+            break
+    else:
+        raise ValueError(f"{target_comm_node} is not used by any fused optimizer.")
+
+    move_optim, _ = split_fused_optimizer(gm, optim_block, comm_block.outputs)
+
+    # TODO(@fegin): Extract this logic as a generic find_all_descendants API.
+    output = get_output(gm.graph)
+    nodes = collections.deque([comm_block.comm_node, move_optim.step.add_node])
+    move_node_set = set()
+    while nodes:
+        node = nodes.popleft()
+        move_node_set.add(node)
+        for user in node.users:
+            if not isinstance(user, fx.Node):
+                continue
+            if user == output:
+                continue
+            nodes.append(user)
+    move_nodes = [node for node in gm.graph.nodes if node in move_node_set]
+
+    stop_node = find_node(gm.graph, lambda n: n.name == target_dest_node)[0]
+
+    gm.graph.move_to_next_iter_before(move_nodes, stop_node)
