@@ -1,5 +1,6 @@
 import builtins
 import collections
+import enum
 import importlib
 import itertools
 import logging
@@ -38,7 +39,6 @@ from .utils import (
     np,
     orig_code_map,
     tensor_always_has_static_shape,
-    tensor_static_reason_to_message,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -558,11 +558,6 @@ class GuardBuilder(GuardBuilderBase):
                     code.append(
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
-            else:
-                if not config.allow_ignore_mark_dynamic:
-                    assert not hasattr(
-                        value, "_dynamo_dynamic_indices"
-                    ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
 
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
@@ -603,7 +598,11 @@ class GuardBuilder(GuardBuilderBase):
             weakref.ref(type(guarded_object)) if guarded_object is not None else None
         )
         obj_ref = None
-        if hasattr(guarded_object.__class__, "__weakref__"):
+        # Not necessary to have weakref for Enum type, but there is a bug that
+        # makes hasattr(guarded_object.__class__, "__weakref__") return True.
+        if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
+            guarded_object, enum.Enum
+        ):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
