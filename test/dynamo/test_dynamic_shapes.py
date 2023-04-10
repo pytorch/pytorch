@@ -87,12 +87,8 @@ tests = [
 for test in tests:
     make_dynamic_cls(test)
     make_dynamic_cls(test, static_default=True)
-    make_dynamic_cls(
-        test,
-        static_default=True,
-    )
 
-assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 3
+assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 2
 
 # Single config failures
 
