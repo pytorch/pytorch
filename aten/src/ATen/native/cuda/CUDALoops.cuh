@@ -129,17 +129,22 @@ static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t da
 }
 
 template<int nt, int vt, typename func_t>
-C10_LAUNCH_BOUNDS_2(nt, 4)
+C10_LAUNCH_BOUNDS_2(nt, 2)
 __global__ void elementwise_kernel(int N, func_t f) {
-  int tid = threadIdx.x;
-  int nv = nt * vt;
-  int idx = nv * blockIdx.x + tid;
+  // vt is elements unroll per thread
+  int start_idx = vt * (threadIdx.x + blockIdx.x * blockDim.x);
+  int grid_stride = vt * (gridDim.x * blockDim.x);
+
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx < N) {
-      f(idx);
-      idx += nt;
-    }
+  for (int i = start_idx; i < N; i += grid_stride) {
+    # pragma unroll
+    for (int k = 0; k < vt; k++)
+      f(i+k);
+  }
+  if (N % vt != 0 && threadIdx.x == 0 && blockIdx.x == 0) {
+    f(N-1);
+    f(N-2);
+    f(N-3);
   }
 }
 
@@ -150,9 +155,23 @@ static void launch_legacy_kernel(int64_t N, const func_t& f) {
     return;
   }
   dim3 block(nt);
-  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  auto props = at::cuda::getCurrentDeviceProperties();
   auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+  int num_blocks_per_sm;
+  cudaOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks_per_sm,
+                                            elementwise_kernel<nt,vt,func_t>, block.x, 0);
+
+  if (num_blocks_per_sm > 0) {
+    dim3 grid(num_blocks_per_sm * props->multiProcessorCount);
+    elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+  } else {
+    // case where func_t couldnt be compiled to fit onto SMs for large block size
+    block.x = nt / 2;
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks_per_sm,
+                                            elementwise_kernel<nt/2,vt,func_t>, block.x, 0);
+    dim3 grid(num_blocks_per_sm * props->multiProcessorCount);
+    elementwise_kernel<nt/2, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -215,7 +234,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
     } else {
         auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
         constexpr int unroll_factor = sizeof(arg0_t) >= 4 ? 2 : 4;
-        launch_legacy_kernel<128,unroll_factor>(numel, [=]GPU_LAMBDA(int idx) {
+        launch_legacy_kernel<1024,unroll_factor>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
         *out = invoke(f, &data.data[1], &offsets.data[1], 1);
@@ -234,7 +253,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
         dtypes[i] = iter.dtype(i);
       }
       auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
-      launch_legacy_kernel<128, 4>(numel, [=]GPU_LAMBDA(int idx) {
+      launch_legacy_kernel<1024, 4>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];
         arg0_t result = invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
