@@ -13,7 +13,7 @@ from torch.distributed._spmd.graph_utils import (
 from torch.fx.graph import _PyTreeCodeGen, PythonCode
 from torch.fx.node import Argument
 from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, tree_map_only
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -486,7 +486,37 @@ class IterGraph(fx.Graph):
             ), f"The actual target node is None, {target_node}."
             actual_target_node.append(actual_node)
 
-    def node_update_arg(self, node: fx.Node, idx: int, arg: Argument) -> None:
+    def node_set_args(self, node: fx.Node, args: Tuple[Argument, ...]) -> None:
+        if self._freeze_cross_iter_movement:
+            node.args = args
+            return
+
+        setup_args = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.setup_graph), args
+        )
+        self._lookup_node(node, self.setup_graph).args = setup_args
+        cleanup_args = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.cleanup_graph), args
+        )
+        self._lookup_node(node, self.cleanup_graph).args = cleanup_args
+        node.args = args
+
+    def node_set_kwargs(self, node: fx.Node, kwargs: Dict[str, Argument]) -> None:
+        if self._freeze_cross_iter_movement:
+            node.kwargs = kwargs
+            return
+
+        setup_kwargs = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.setup_graph), kwargs
+        )
+        self._lookup_node(node, self.setup_graph).kwargs = setup_kwargs
+        cleanup_kwargs = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.cleanup_graph), kwargs
+        )
+        self._lookup_node(node, self.cleanup_graph).kwargs = cleanup_kwargs
+        node.kwargs = kwargs
+
+    def args(self, a : Tuple[Argument, ...]):
         if self._freeze_cross_iter_movement:
             node.update_arg(int, arg)
             return
