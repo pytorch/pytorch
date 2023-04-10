@@ -1669,7 +1669,7 @@ class ShapeEnv:
         self,
         placeholders,
         sources,
-        source_ref=lambda n: n.name(),
+        source_ref=lambda n, _: n.name(),
         *,
         # An input is either a SymInt (in which case you directly have
         # DimConstraint) or a Tensor (in which case you have a
