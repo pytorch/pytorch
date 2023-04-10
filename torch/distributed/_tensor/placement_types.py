@@ -27,9 +27,6 @@ class Placement:
         return isinstance(self, _Partial)
 
 
-import torch.distributed as dist
-
-
 class Shard(Placement):
     # shard placement, shard on a dim
     def __init__(self, dim):
@@ -59,9 +56,7 @@ class Shard(Placement):
         f"the number of devices in that dimension {num_chunks}"
 
         # chunk tensor over dimension `dim` into n slices with padding if necessary
-        tensor_list = list(
-            torch.chunk(tensor, num_chunks, dim=self.dim)
-        )
+        tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
         # compute the chunk size inline with ``torch.chunk``
         full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
 
@@ -87,7 +82,9 @@ class Shard(Placement):
 
         # Fill empty trunk with empty tensor
         num_empty_tensors = num_chunks - len(tensor_list)
-        device = torch.device(tensor.get_device() if torch.cuda.is_available() else "cpu")
+        device = torch.device(
+            tensor.get_device() if torch.cuda.is_available() else "cpu"
+        )
         empty_tensor = torch.tensor([], device=device)
         for _ in range(num_empty_tensors):
             tensor_list.append(empty_tensor)
@@ -99,9 +96,7 @@ class Shard(Placement):
                 if with_padding and pad_size == full_chunk_size:
                     shard_shape = list(tensor_list[0].shape)
                     shard_shape = [dim if dim >= self.dim else 0 for dim in shard_shape]
-                    shard = torch.zeros(
-                        shard_shape, device=device
-                    )
+                    shard = torch.zeros(shard_shape, device=device)
                 elif with_padding and pad_size > 0:
                     shard = self._pad_tensor(shard, pad_size)
                 shard = shard.contiguous() if contiguous else shard
@@ -133,7 +128,9 @@ class Shard(Placement):
         # Explicitly return an empty tensor. Otherwise, even if the
         # tensor is empty, the size won't be 0.
         if tensor.numel() == 0:
-            device = torch.device(tensor.get_device() if torch.cuda.is_available() else "cpu")
+            device = torch.device(
+                tensor.get_device() if torch.cuda.is_available() else "cpu"
+            )
             return torch.tensor([], device=device)
         else:
             return tensor
@@ -161,42 +158,26 @@ class Shard(Placement):
         assert (
             size_on_dim >= num_chunks
         ), f"Size to be sharded on dim {self.dim} must be at least as large as the number of devices in that dimension {num_chunks}"
-        
+
         # compute the chunk size inline with ``torch.chunk``
         full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
 
         # Compute chunk size for each chunk on the dimension.
         chunk_sizes = [
-            max(min(size_on_dim, full_chunk_size * (idx + 1)) - full_chunk_size * idx, 0)
+            max(
+                min(size_on_dim, full_chunk_size * (idx + 1)) - full_chunk_size * idx, 0
+            )
             for idx in range(num_chunks)
         ]
-        # Get idx start to pad
-        idx_start_to_pad = next(
-            (
-                idx
-                for idx, _ in enumerate(chunk_sizes)
-                if idx > 0 and chunk_sizes[idx] < chunk_sizes[idx - 1]
-            ),
-            -1,
-        )
-        # Compute pad size on each trunk
-        pad_sizes = [
-            full_chunk_size - chunk_size if idx >= idx_start_to_pad else 0
-            for idx, chunk_size in enumerate(chunk_sizes)
-        ]
-
         local_shard_size = chunk_sizes[rank]
 
-        
-        # split_size, pad_idx = divmod(size_on_dim, num_chunks)
-        # local_shard_size = (
-        #     split_size + 1 if pad_idx != 0 and rank < pad_idx else split_size
-        # )
         local_offset_on_dim = -1
         if return_offset:
+            # QQ: what would be the offset of an empty shard? -1?
             local_offset_on_dim = (
-                rank * split_size + pad_idx if rank >= pad_idx else rank
+                sum(chunk_sizes[:rank]) if local_shard_size != 0 else -1
             )
+
         return (local_shard_size, local_offset_on_dim)
 
     def _shard_tensor(
@@ -208,8 +189,6 @@ class Shard(Placement):
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
-        print(f"my_coordinate:{my_coordinate}")
-        print(f"num_chunks:{num_chunks}")
 
         if my_coordinate is None:
             # if rank is not part of mesh, we simply return an empty tensor
@@ -218,7 +197,6 @@ class Shard(Placement):
         scatter_list, _, pad_sizes = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
         )
-        print(f"scatter_list:{scatter_list}")
 
         output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
         mesh.scatter(output, scatter_list, mesh_dim=mesh_dim)
@@ -292,9 +270,7 @@ class Shard(Placement):
                     0,
                 )
             )
-        pad_sizes = [
-            full_trunk_size - chunk_size for chunk_size in chunks_sizes
-        ]
+        pad_sizes = [full_trunk_size - chunk_size for chunk_size in chunks_sizes]
         is_padded = not all(pad_size == 0 for pad_size in pad_sizes)
 
         pad_size = pad_sizes[my_coordinate[mesh_dim]]
@@ -447,9 +423,7 @@ class DTensorSpec:
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
         # fields to them,
         if self.tensor_meta is not None:
-            return hash(
-                (self.mesh, tuple(self.placements), self.tensor_meta.shape)
-            )
+            return hash((self.mesh, tuple(self.placements), self.tensor_meta.shape))
         else:
             return hash((self.mesh, tuple(self.placements)))
 
