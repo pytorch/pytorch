@@ -620,7 +620,12 @@ class Constraint:
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         lower, upper = builtins.max(lower, self._lower), builtins.min(upper, self._upper)
-        return Constraint(self.w_tensor, self.t_id, self.dim, StrictMinMaxConstraint(ValueRanges(lower=lower, upper=upper)))
+        return Constraint(
+            self.w_tensor,
+            self.t_id,
+            self.dim,
+            StrictMinMaxConstraint(ValueRanges(lower=lower, upper=upper))
+        )
 
     def __ge__(self, lower):
         return self._clone_with_range(lower=lower)
@@ -642,7 +647,7 @@ class Constraint:
         raise TypeError(
             f"Cannot determine truth value of Constraint. "
             "If you are trying to combine Constraints with logical connectives, "
-            "split it into multiple Constraints instead."
+            "you can specify them separately instead."
         )
 
 

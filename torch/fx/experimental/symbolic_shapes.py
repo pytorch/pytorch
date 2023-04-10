@@ -2256,7 +2256,6 @@ class ShapeEnv:
                 current_loc = TracingContext.get().loc_in_frame
                 # current_loc describes a line in the current frame
                 user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
-                guard = ShapeGuard(expr, user_stack)
                 expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
                 log.warning(f"Adding shape guard {expr} at \n{user_stack}")
             log.debug("SHAPE GUARD", stack_info=True)
