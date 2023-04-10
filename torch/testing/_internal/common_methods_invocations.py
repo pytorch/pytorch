@@ -12828,7 +12828,7 @@ op_db: List[OpInfo] = [
         aten_backward_name='elu_backward',
         ref=lambda x, alpha=1.0, inplace=False:
             np.maximum(0., x) + np.minimum(0., alpha * (np.exp(x) - 1)),
-        dtypes=floating_types_and(torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -13104,7 +13104,7 @@ op_db: List[OpInfo] = [
         aten_name="log_sigmoid",
         aten_backward_name='log_sigmoid_backward',
         ref=reference_logsigmoid,
-        dtypes=floating_types_and(torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_autograd=True,
         assert_autodiffed=False,
@@ -13202,7 +13202,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         'nn.functional.threshold',
         ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
-        dtypes=all_types_and(torch.bfloat16),
+        dtypes=all_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         inplace_variant=lambda x, threshold, value:
             torch.nn.functional.threshold(x, threshold, value, inplace=True),
