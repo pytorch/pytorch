@@ -57,8 +57,10 @@ constexpr bool use_msvc_static_runtime =
 auto parse_bool(std::string_view value) -> std::optional<bool> {
   if (value.length() == 1) {
     switch (value[0]) {
-      case '1': return true;
-      case '0': return false;
+      case '1':
+        return true;
+      case '0':
+        return false;
     }
   }
   return std::nullopt;
@@ -71,13 +73,15 @@ MATCHER_P(matches_arg_from_environment, name, "") {
 
   const char* value_string = std::getenv(name);
   if (value_string == nullptr) {
-    *result_listener << "You are required to set " << name << " in the environment.";
+    *result_listener << "You are required to set " << name
+                     << " in the environment.";
     return false;
   }
 
   std::optional<bool> value = parse_bool(value_string);
   if (!value.has_value()) {
-    *result_listener << "want 0 or 1 for environment variable; got " << name << "=" << value_string;
+    *result_listener << "want 0 or 1 for environment variable; got " << name
+                     << "=" << value_string;
     return false;
   }
 
@@ -85,11 +89,14 @@ MATCHER_P(matches_arg_from_environment, name, "") {
 }
 
 TEST(CMakeMacrosTest, GoldenTest) {
-  EXPECT_THAT(build_shared_libs, matches_arg_from_environment("BUILD_SHARED_LIBS"));
+  EXPECT_THAT(
+      build_shared_libs, matches_arg_from_environment("BUILD_SHARED_LIBS"));
   EXPECT_THAT(use_glog, matches_arg_from_environment("USE_GLOG"));
   EXPECT_THAT(use_gflags, matches_arg_from_environment("USE_GFLAGS"));
   EXPECT_THAT(use_numa, matches_arg_from_environment("USE_NUMA"));
-  EXPECT_THAT(use_msvc_static_runtime, matches_arg_from_environment("USE_MSVC_STATIC_RUNTIME"));
+  EXPECT_THAT(
+      use_msvc_static_runtime,
+      matches_arg_from_environment("USE_MSVC_STATIC_RUNTIME"));
 }
 
 } // namespace
