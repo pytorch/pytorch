@@ -454,7 +454,7 @@ def fuse_quantization(gm: torch.fx.GraphModule, example_inputs):
 
     # To store input shapes on the graph
     # Get shape by node.meta.get("tensor_meta").shape
-    fake_mode = fake_mode_from_tensors(example_inputs)
+    fake_mode = detect_fake_mode(example_inputs)
     ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
 
     # Fuse `dq - op (- post ops) - q` to quantized op
