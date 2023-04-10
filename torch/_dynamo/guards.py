@@ -685,7 +685,8 @@ class CheckFunctionManager:
 
             return {**left, **right}
 
-        def source_ref(source):
+        def source_ref(source, source_list):
+            source_list.append(source)
             guard_source = source.guard_source()
             if guard_source is GuardSource.CONSTANT:
                 # No need to track constants

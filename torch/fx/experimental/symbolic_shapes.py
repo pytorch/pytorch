@@ -1370,8 +1370,7 @@ class ShapeGuardPrinter(StrPrinter):
             "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
         )
         source = self.symbol_to_source[expr][0]
-        self.sources.append(source)
-        return self.source_ref(source)
+        return self.source_ref(source, self.sources)
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPrinter):
@@ -1864,8 +1863,7 @@ class ShapeEnv:
                     continue
                 guard_sources = []
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources, guard_sources).doprint(expr)
-                guard_sources.append(source)
-                exprs.append(ShapeGuardExprSources(f"{source_ref(source)} == {sexpr}", guard_sources))
+                exprs.append(ShapeGuardExprSources(f"{source_ref(source, guard_sources)} == {sexpr}", guard_sources))
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only
@@ -1944,7 +1942,8 @@ class ShapeEnv:
                 bounds = []
                 if r.lower != -sympy.oo:
                     bounds.append(str(r.lower))
-                bounds.append(source_ref(sources[0]))
+                guard_sources = []
+                bounds.append(source_ref(sources[0], guard_sources))
                 # NB: This looks like an off-by-one error but it's not: the
                 # upper bound may be sys.maxsize - 1 because we intentionally
                 # exclude sys.maxsize from our bounds to deal with direct
@@ -1955,14 +1954,13 @@ class ShapeEnv:
                 if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
                     bounds.append(str(r.upper))
                 if len(bounds) > 1:
-                    exprs.append(ShapeGuardExprSources(" <= ".join(bounds), sources))
+                    exprs.append(ShapeGuardExprSources(" <= ".join(bounds), guard_sources))
 
         if constraint_violations:
             raise_msgs = []
             warn_msgs = []
             for msg_fn in constraint_violations:
                 constraint, msg = msg_fn()
-                breakpoint()
                 if constraint.warn_only:
                     msg = f"  {len(warn_msgs) + 1}. {msg}"
                     warn_msgs.append(msg)
