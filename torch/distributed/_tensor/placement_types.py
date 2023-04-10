@@ -140,7 +140,9 @@ class Shard(Placement):
     ) -> torch.Tensor:
         gathered_list = torch.chunk(tensor, shard_count, dim=self.dim)
         gathered_list = [
-            self._unpad_tensor(gathered_tensor, pad_sizes[i]) if pad_sizes[i] > 0 else gathered_tensor
+            self._unpad_tensor(gathered_tensor, pad_sizes[i])
+            if pad_sizes[i] > 0
+            else gathered_tensor
             for i, gathered_tensor in enumerate(gathered_list)
         ]
         return torch.cat(gathered_list, dim=self.dim)
