@@ -202,7 +202,7 @@ class _StorageBase:
     def share_memory_(self):
         """Moves the storage to shared memory.
 
-        This is a no-op for storages already in shared memory and for CUDA
+        This is a no-op for storages already in shared memory and for CUDA or other dev
         storages, which do not need to be moved for sharing across processes.
         Storages in shared memory cannot be resized.
 
@@ -214,8 +214,8 @@ class _StorageBase:
         Returns: self
         """
         from torch.multiprocessing import get_sharing_strategy
-        if self.is_cuda:
-            pass  # CUDA doesn't use POSIX shared memory
+        if self.device.type != 'cpu':
+            pass  # share_memory_ only available on CPU
         elif get_sharing_strategy() == 'file_system':
             self._share_filename_cpu_()
         else:
@@ -227,7 +227,7 @@ class _StorageBase:
         """Creates a new storage in shared memory with the same data type"""
         from torch.multiprocessing import get_sharing_strategy
         device = torch.device(device)
-        if device.type == 'cuda':
+        if device.type != 'cpu':
             return cls(size, device=device)
         elif get_sharing_strategy() == 'file_system':
             return cls._new_using_filename_cpu(size)
