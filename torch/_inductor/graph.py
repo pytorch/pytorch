@@ -251,15 +251,7 @@ class GraphLowering(torch.fx.Interpreter):
         assert not self.aot_mode, "AOT compilation failed"
         log.debug("Set cpp_wrapper to False due to %s", cond)
 
-    def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
-        if isinstance(buffer, ir.ExternKernel):
-            if not getattr(buffer, "cpp_kernel", False):
-                self.disable_cpp_wrapper("ExternKernel")
-
     def register_buffer(self, buffer: ir.ComputedBuffer):
-        if self.cpp_wrapper:
-            self.check_buffer_for_cpp_wrapper(buffer)
-
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
