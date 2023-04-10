@@ -7,13 +7,13 @@ BertForQuestionAnswering,7
 BlenderbotSmallForCausalLM,7
 BlenderbotSmallForConditionalGeneration,7
 CamemBert,7
-DebertaForMaskedLM,55
-DebertaForQuestionAnswering,55
+DebertaForMaskedLM,52
+DebertaForQuestionAnswering,52
 DebertaV2ForMaskedLM,0
 DistilBertForMaskedLM,7
 DistilBertForQuestionAnswering,7
 DistillGPT2,7
-ElectraForCausalLM,11
+ElectraForCausalLM,7
 ElectraForQuestionAnswering,7
 GPT2ForSequenceClassification,9
 LayoutLMForMaskedLM,7
@@ -34,4 +34,4 @@ T5ForConditionalGeneration,7
 T5Small,7
 TrOCRForCausalLM,7
 XLNetLMHeadModel,7
-YituTechConvBert,11
+YituTechConvBert,7
