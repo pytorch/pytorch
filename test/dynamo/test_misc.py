@@ -1075,6 +1075,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertTrue(same(opt_fn(mod, x), fn(mod, x)))
 
+    def test_constant_getattr(self):
+        # https://github.com/pytorch/pytorch/issues/97480
+        def fn():
+            return getattr(None, "arg", 3)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        optimized_fn = torch._dynamo.optimize(cnt)(fn)
+        res = optimized_fn()
+        self.assertTrue(same(res, 3))
+
     def test_user_property(self):
         class MyConfig:
             @property
@@ -1162,6 +1172,26 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_inplace_resize_on_graph_input(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # graph break when calling resize_() on graph input
+        def f1(x):
+            x.resize_(6)
+            x.mul_(2)
+            return x
+
+        @torch.compile(backend=cnts)
+        def f2(x):
+            x.resize_(6)
+            x.mul_(2)
+            return x
+
+        x = torch.ones(4)
+        y = torch.ones(4)
+        self.assertTrue(same(f1(x).shape, f2(y).shape))
+        self.assertEqual(cnts.frame_count, 0)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -1554,6 +1584,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_typing_union_and_optional(self):
+        def fn(x):
+            a = torch.jit.annotate(typing.Dict[str, typing.Optional[torch.Tensor]], {})
+            b = torch.jit.annotate(
+                typing.Dict[str, typing.Union[torch.Tensor, None]], {}
+            )
+            return a, b, x + 1
+
+        x = torch.randn(3)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
@@ -3144,6 +3188,24 @@ def fn():
         false_sin = graph(torch.tensor(False), torch.tensor([0.5, 0.5]))
         self.assertTrue(same(torch.sin(torch.tensor([0.5, 0.5])), false_sin))
 
+    def test_enum_guards(self):
+        class MyEnum(enum.Enum):
+            FOO = 10
+            BAR = 20
+
+        def fn(x, y):
+            if y == MyEnum.FOO:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(3)
+        y = MyEnum.BAR
+        ref = fn(x, y)
+        opt_fn = torch.compile(backend="eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
     def test_disable_optimize(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
@@ -4404,6 +4466,21 @@ def fn():
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
+    def test_mark_static(self):
+        counter = CompileCounter()
+
+        def my_dyn_fn(x):
+            return x.cos()
+
+        y = torch.randn([3])
+        torch._dynamo.mark_static(y, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(y)
+
+        z = torch.randn([4])
+        torch._dynamo.optimize(counter)(my_dyn_fn)(z)
+
+        self.assertEqual(counter.frame_count, 2)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -4497,24 +4574,6 @@ def fn():
             return x * x
 
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-
-    @torch._dynamo.config.patch(dynamic_shapes=False)
-    def test_no_dynamic_shapes_mark_dynamic_illegal(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-        torch._dynamo.mark_dynamic(y, 0)
-        torch._dynamo.reset()
-        with self.assertRaisesRegex(
-            AssertionError,
-            "mark_dynamic usage with dynamic_shapes=False is not yet supported",
-        ):
-            torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_py_guards_mark_dynamic(self):
@@ -4796,6 +4855,14 @@ def fn():
         # strip_function_call should extract the object from the string.
         for name, expect_obj in test_case:
             self.assertEqual(strip_function_call(name), expect_obj)
+
+    def test_int_neg(self):
+        def int_neg(a, b):
+            x = a.shape[0]
+            y = b.shape[0]
+            return -x * -y * a * b
+
+        torch._dynamo.testing.standard_test(self, int_neg, 2)
 
 
 class CustomFunc1(torch.autograd.Function):
