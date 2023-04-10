@@ -374,7 +374,7 @@ inline Tensor wrap_tensor_node(
     for (size_t i = 0; i < tensor_node.degree(); ++i) {
       auto tensor_sizes = tensor_node.children(i).sizes();
       for (int64_t tensor_size : tensor_sizes) {
-        nt_sizes.data_ptr<int64_t>()[sizes_offset++] = tensor_size;
+        nt_sizes.mutable_data_ptr<int64_t>()[sizes_offset++] = tensor_size;
       }
     }
     options = nt_buffer.options().merge_in(options_);
