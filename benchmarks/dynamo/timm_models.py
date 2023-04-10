@@ -80,6 +80,11 @@ SKIP_TRAIN = {
     "eca_halonext26ts",
 }
 
+NONDETERMINISTIC = {
+    # https://github.com/pytorch/pytorch/issues/94066
+    "sebotnet33ts_256",
+}
+
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "cait_m36_384": 4,
 }

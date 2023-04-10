@@ -12,6 +12,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
+from .exc import unimplemented
 from .source import LocalSource, Source
 from .utils import object_new
 from .variables.base import VariableTracker
@@ -73,11 +74,18 @@ class SideEffects:
     store_attr_mutations: Dict[AttributeMutation, Dict[str, VariableTracker]]
     keepalive: List[Any]
 
-    def __init__(self, id_to_variable=None, store_attr_mutations=None, keepalive=None):
+    def __init__(
+        self,
+        id_to_variable=None,
+        store_attr_mutations=None,
+        keepalive=None,
+        save_for_backward=None,
+    ):
         super().__init__()
         self.id_to_variable = id_to_variable or collections.OrderedDict()
         self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
         self.keepalive = keepalive or []
+        self.save_for_backward = save_for_backward or []
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -85,6 +93,7 @@ class SideEffects:
         return (
             self.id_to_variable == other.id_to_variable
             and self.store_attr_mutations == other.store_attr_mutations
+            and self.save_for_backward == other.save_for_backward
         )
 
     def diff(self, other: "SideEffects") -> Optional[str]:
@@ -102,6 +111,8 @@ class SideEffects:
             if sk_sam != ok_sam:
                 return f"store_attr_mutations keys: {sk_sam} != {ok_sam}"
             return "store_attr_mutations: unknown diff"
+        elif self.save_for_backward != other.save_for_backward:
+            return "save_for_backward"
         else:
             return None
 
@@ -114,6 +125,7 @@ class SideEffects:
                 for k, v in self.store_attr_mutations.items()
             ),
             keepalive=list(self.keepalive),
+            save_for_backward=self.save_for_backward,
         )
 
     def apply(self, fn, cache=None, skip_fn=lambda _: False):
@@ -127,6 +139,9 @@ class SideEffects:
         self.store_attr_mutations = collections.OrderedDict(
             (k, VariableTracker.apply(fn, v, cache, skip_fn))
             for k, v in self.store_attr_mutations.items()
+        )
+        self.save_for_backward = VariableTracker.apply(
+            fn, self.save_for_backward, cache, skip_fn
         )
 
     def __contains__(self, item):
@@ -213,7 +228,10 @@ class SideEffects:
         variable_cls: Any,
         options,
     ):
-        obj = object_new(user_cls)
+        if user_cls is torch.autograd.function.FunctionCtx:
+            obj = torch.autograd.Function()
+        else:
+            obj = object_new(user_cls)
         variable = variable_cls(
             obj,
             mutable_local=AttributeMutationNew(None, cls_source),
@@ -249,6 +267,10 @@ class SideEffects:
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
+
+    def track_save_for_backward(self, ctx, args):
+        assert isinstance(ctx, variables.AutogradFunctionContextVariable)
+        self.save_for_backward.append((ctx, args))
 
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
@@ -303,7 +325,15 @@ class SideEffects:
                 if isinstance(var.mutable_local, AttributeMutationNew):
                     var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif isinstance(var.mutable_local, AttributeMutationNew):
-                cg.load_import_from(utils.__name__, "object_new")
+                if isinstance(var, variables.AutogradFunctionContextVariable):
+                    unimplemented("AutogradFunctionContextVariable escaped")
+                if "__call_nn_module_init" in self.store_attr_mutations.get(
+                    var.mutable_local, {}
+                ):
+                    assert isinstance(var, variables.UnspecializedNNModuleVariable)
+                    cg.load_import_from(utils.__name__, "nn_module_new")
+                else:
+                    cg.load_import_from(utils.__name__, "object_new")
                 cg(var.mutable_local.cls_source)
                 cg.extend_output(create_call_function(1, True))
                 cg.add_cache(var)
@@ -313,6 +343,20 @@ class SideEffects:
                 # subsequent usage should point to the original variable
                 cg(var.mutable_local.source)
                 cg.add_cache(var)
+
+        for ctx, args in self.save_for_backward:
+            cg(ctx.source)
+            cg.extend_output(
+                [create_instruction("LOAD_METHOD", argval="save_for_backward")]
+            )
+            for arg in args:
+                cg(arg)
+            cg.extend_output(
+                [
+                    *create_call_method(len(args)),
+                    create_instruction("POP_TOP"),
+                ]
+            )
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
@@ -358,6 +402,8 @@ class SideEffects:
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
                         )
+                    elif name == "__call_nn_module_init":
+                        pass  # handled in codegen_save_tempvars
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
@@ -371,4 +417,7 @@ class SideEffects:
             cg.extend_output(suffix)
 
     def is_empty(self):
-        return not any(map(self.is_modified, self.id_to_variable.values()))
+        return not (
+            any(map(self.is_modified, self.id_to_variable.values()))
+            or self.save_for_backward
+        )
