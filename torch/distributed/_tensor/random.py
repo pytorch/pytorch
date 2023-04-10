@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import math
+import warnings
 from typing import List
 
 import torch
@@ -235,10 +236,6 @@ def _get_rng_offset(device_mesh: DeviceMesh) -> int:
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
         `_get_rng_offset` still returns its GPU device's RNG offset.
     """
-    assert isinstance(
-        device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {device_mesh} was passed in."
-
     if device_mesh.device_type == "cuda":
         # source: https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         # last sizeof(int64_t) bytes are the offset
@@ -269,10 +266,6 @@ def _set_rng_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
         `_set_rng_offset` will not set its GPU device's generator offset.
     """
-    assert isinstance(
-        device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
-
     if device_mesh.get_coordinate() is not None:
         # the current rank is in mesh
         if device_mesh.device_type == "cuda":
@@ -304,9 +297,11 @@ def _calc_shard_linear_idx(shard_coord: List[int], shard_size: List[int]) -> int
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
-    assert isinstance(
-        device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
-
     # currently we only support correct RNG on cuda device
-    return device_mesh.device_type == "cuda"
+    if device_mesh.device_type == "cuda":
+        return True
+    else:
+        warnings.warn(
+            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh"
+        )
+        return False
