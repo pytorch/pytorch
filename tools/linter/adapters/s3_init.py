@@ -83,7 +83,10 @@ Found hash: %s
 Reference hash: %s
 
 Deleting %s just to be safe.
-""", existing_binary_hash, reference_hash, binary_path
+""",
+        existing_binary_hash,
+        reference_hash,
+        binary_path,
     )
     if DRY_RUN:
         logging.critical(
