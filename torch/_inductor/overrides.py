@@ -5,7 +5,6 @@ import weakref
 from typing import Optional
 
 import torch
-import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch import _prims
 from torch._dynamo.utils import detect_fake_mode
@@ -79,13 +78,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
-    # do mkldnn fusion(conv(linear)+unary(binary)
-    # This is skipped when dynamic shapes is enabled, as the resulting
-    # mkl packing ops don't support dynamic shapes.  Once they do support,
-    # you can remove this.  A good test case is wav2vec2, see
-    # https://github.com/pytorch/pytorch/issues/91719
-    if not dynamo_config.dynamic_shapes:
-        gm = mkldnn_fuse_fx(gm, example_inputs)
+    gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
 
 
