@@ -123,8 +123,7 @@ def set_pre_op_offset(spec: DTensorSpec) -> None:
         None
 
     .. warning::
-        Note that, current implementation does not consider DTensor's continguity and
-        requires the DTensor can be evenly sharded on all dimensions.
+        Note that, current implementation does not consider DTensor's continguity.
 
     Example:
         take a DTensor of shape [8, 16] as an example. Assume that the DTensor
@@ -159,21 +158,6 @@ def set_pre_op_offset(spec: DTensorSpec) -> None:
     dtensor_shape = spec.shape
     mesh = spec.mesh
     dim_map = spec.dim_map
-
-    # check if DTensor can be evenly sharded. If so, compute local tensor size
-    local_tensor_size = []
-    for tensor_dim, mesh_dim in enumerate(dim_map):
-        if mesh_dim >= 0:  # tensor_dim is sharded over mesh_dim
-            local_tensor_size.append(dtensor_shape[tensor_dim] // mesh.size(mesh_dim))
-
-            if dtensor_shape[tensor_dim] % mesh.size(mesh_dim) != 0:
-                raise RuntimeError(
-                    "DTensor is expected to be evenly sharded but cannot evenly shard",
-                    f"tensor dim {tensor_dim} on mesh dim {mesh_dim}\n",
-                    f"DTensor shape = {dtensor_shape}\nMesh shape = {mesh.mesh.size()}",
-                )
-        else:
-            local_tensor_size.append(dtensor_shape[tensor_dim])
 
     # Compute shard coordinate:
     # The coordinate on each tensor dim is a tuple (idx, range)
