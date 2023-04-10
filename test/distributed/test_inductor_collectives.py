@@ -37,12 +37,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             "group_size": self.world_size,
         }
 
-    @property
-    def world_size(self) -> int:
-        # hack: no matter whether we have 2 or 3 or 4 gpus, just run on 2
-        # works around issue with skipif<2 and workers with unpredictable #s gpu
-        return 2
-
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
@@ -56,9 +50,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             x = torch.matmul(a, b)
             y = torch.matmul(c, d)
             z = torch.cat((x, y))
-            ar = torch.ops.c10d_functional.all_reduce(z, "sum", tag, ranks, group_size)
+            ar = torch.ops.aten.all_reduce(z, "sum", tag, ranks, group_size)
             g = torch.matmul(e, f)
-            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            ar = torch.ops.aten.wait_tensor(ar)
             out = torch.add(ar, g.repeat(2, 1))
             return (out, )
 
@@ -89,12 +83,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             x = torch.matmul(a, b)
             y = torch.matmul(c, d)
             z = torch.cat((x, y))
-            ar = torch.ops.c10d_functional.all_reduce(z, "sum", tag, ranks, group_size)
+            ar = torch.ops.aten.all_reduce(z, "sum", tag, ranks, group_size)
             return ar
 
         def inductor_func(ar, e, f):
             g = torch.matmul(e, f)
-            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            ar = torch.ops.aten.wait_tensor(ar)
             out = torch.add(ar, g.repeat(2, 1))
             return (out, )
 
@@ -128,12 +122,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             x = torch.matmul(a, b)
             y = torch.matmul(c, d)
             z = torch.cat((x, y))
-            ar = torch.ops.c10d_functional.all_reduce(z, "sum", tag, ranks, group_size)
+            ar = torch.ops.aten.all_reduce(z, "sum", tag, ranks, group_size)
             return ar
 
         def eager_func(ar, e, f):
             g = torch.matmul(e, f)
-            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            ar = torch.ops.aten.wait_tensor(ar)
             out = torch.add(ar, g.repeat(2, 1))
             return (out, )
 
@@ -166,8 +160,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         def example(a, b, *, tag, ranks, group_size):
             c = torch.matmul(a, b)
-            ag = torch.ops.c10d_functional.all_gather_into_tensor(c, tag, ranks, group_size)
-            ag = torch.ops.c10d_functional.wait_tensor(ag)
+            ag = torch.ops.aten.all_gather_into_tensor(c, tag, ranks, group_size)
+            ag = torch.ops.aten.wait_tensor(ag)
             return (ag, )
 
         def compile(func, example_inputs):
@@ -194,10 +188,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     def test_reduce_scatter_tensor_inductor(self):
         def example(a, b, *, tag, ranks, group_size):
             c = torch.matmul(a, b)
-            ag = torch.ops.c10d_functional.reduce_scatter_tensor(
-                c, "sum", tag, ranks, group_size
+            ag = torch.ops.aten.reduce_scatter_tensor(
+                c, "sum", 0, tag, ranks, group_size
             )
-            ag = torch.ops.c10d_functional.wait_tensor(ag)
+            ag = torch.ops.aten.wait_tensor(ag)
             return (ag,)
 
         def compile(func, example_inputs):
@@ -234,8 +228,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         torch._inductor.config.debug = True
 
         def func(inp, *, tag, ranks, group_size):
-            ar = torch.ops.c10d_functional.all_reduce(inp, "sum", tag, ranks, group_size)
-            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            ar = torch.ops.aten.all_reduce(inp, "sum", tag, ranks, group_size)
+            ar = torch.ops.aten.wait_tensor(ar)
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
@@ -264,8 +258,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         def func(inp, *, tag, ranks, group_size):
             x = inp + 1
-            ar = torch.ops.c10d_functional.all_reduce(x, "sum", tag, ranks, group_size)
-            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            ar = torch.ops.aten.all_reduce(x, "sum", tag, ranks, group_size)
+            ar = torch.ops.aten.wait_tensor(ar)
             # ensure other is not incorrectly aliasing ar's buffer
             other = torch.ones_like(inp) + 22
             return ar, other
@@ -298,9 +292,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         def func(inp, *, tag, ranks, group_size):
             x = inp + 1
-            ar = torch.ops.c10d_functional.all_reduce(x, "sum", tag, ranks, group_size)
+            ar = torch.ops.aten.all_reduce(x, "sum", tag, ranks, group_size)
             y = x + 2
-            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            ar = torch.ops.aten.wait_tensor(ar)
             # ensure other is not incorrectly aliasing ar's buffer
             other = torch.ones_like(inp) + 22
             return ar, y, other
@@ -327,7 +321,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_trace_allreduce(self):
         def func(inp, *, tag, ranks, group_size):
-            ar = torch.ops.c10d_functional.all_reduce(inp, "sum", tag, ranks, group_size)
+            ar = torch.ops.aten.all_reduce(inp, "sum", tag, ranks, group_size)
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
@@ -346,7 +340,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         However, I wanted to at least see if it was possible to support it as a design goal.
         """
         def func(inp, *, tag, ranks, group_size):
-            ar = torch.ops.c10d_functional.all_reduce(inp, "sum", tag, ranks, group_size)
+            ar = torch.ops.aten.all_reduce(inp, "sum", tag, ranks, group_size)
             return ar
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
@@ -364,7 +358,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")
-        out = torch.ops.c10d_functional.all_reduce(x, "sum", **self.get_world_trs())
+        out = torch.ops.aten.all_reduce(x, "sum", **self.get_world_trs())
         assert x.size() == out.size()
 
 if __name__ == "__main__":

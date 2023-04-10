@@ -132,10 +132,10 @@ class ErrorHandler:
             # original error file contents and overwrite the error file.
             self._rm(my_error_file)
             self._write_error_file(my_error_file, json.dumps(rootcause_error))
-            log.info("dumped error file to parent's %s", my_error_file)
+            log.info(f"dumped error file to parent's {my_error_file}")
         else:
             log.error(
-                "no error file defined for parent, to copy child error file (%s)", rootcause_error_file
+                f"no error file defined for parent, to copy child error file ({rootcause_error_file})"
             )
 
     def _rm(self, my_error_file):

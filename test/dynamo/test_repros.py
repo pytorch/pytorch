@@ -32,7 +32,6 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
 from torch._dynamo.utils import ifdyn, ifunspec
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_MACOS
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -532,31 +531,6 @@ class PartialMaml(torch.nn.Module):
         return accs
 
 
-def softmax_backward_data(parent, grad_output, output, dim, self):
-    from torch import _softmax_backward_data
-
-    return _softmax_backward_data(grad_output, output, parent.dim, self.dtype)
-
-
-class XSoftmax(torch.autograd.Function):
-    # transformers.models.deberta.modeling_deberta.XSoftmax
-    @staticmethod
-    def forward(self, input, mask, dim):
-        self.dim = dim
-        rmask = ~(mask.to(torch.bool))
-        output = input.masked_fill(rmask, torch.tensor(torch.finfo(input.dtype).min))
-        output = torch.softmax(output, self.dim)
-        output.masked_fill_(rmask, 0)
-        self.save_for_backward(output, rmask)
-        return output
-
-    @staticmethod
-    def backward(self, grad_output):
-        (output, rmask) = self.saved_tensors
-        inputGrad = softmax_backward_data(self, grad_output, output, self.dim, output)
-        return inputGrad, None, None
-
-
 class ModelOutput(collections.OrderedDict):
     """based on file_utils.py in HuggingFace"""
 
@@ -923,7 +897,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
         # cant inline torch.autograd.Function means graph break
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 4)
         self.assertEqual(cnt.op_count, 10)
 
     def test_longformer_chunk(self):
@@ -2726,91 +2700,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
 
-    def test_hf_xsoftmax_inference(self):
-        def fn(input, mask):
-            return XSoftmax.apply(input + 1, mask, 1) + 2
-
-        fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
-
-        inputs = [
-            torch.randn(4, 10),
-            torch.randn(4, 10) < 0,
-        ]
-        expected = fn(*inputs)
-        actual = fn_opt(*inputs)
-        self.assertTrue(same(actual, expected))
-
-    def test_hf_xsoftmax_training(self):
-        from torch._dynamo.utils import counters
-
-        counters.clear()
-
-        def fn(input, mask):
-            return XSoftmax.apply(input, mask, 1)
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        fn_opt = torch.compile(fn, backend=cnt, fullgraph=False)
-
-        torch.manual_seed(1234)
-        inputs1 = [
-            torch.randn(4, 10, requires_grad=True),
-            torch.randn(4, 10) < 0,
-        ]
-        torch.manual_seed(1234)
-        inputs2 = [
-            torch.randn(4, 10, requires_grad=True),
-            torch.randn(4, 10) < 0,
-        ]
-
-        expected = fn(*inputs1)
-        actual = fn_opt(*inputs2)
-        self.assertTrue(same(actual, expected))
-        self.assertEqual(dict(counters["frames"]), {"total": 2, "ok": 2})
-        self.assertEqual(
-            dict(counters["graph_break"]), {"autograd.Function with requires_grad": 1}
-        )
-        if not IS_MACOS:
-            # TODO(jansel): I have no idea why these are failing on mac...
-            self.assertEqual(cnt.op_count, 6)
-            self.assertEqual(cnt.frame_count, 1)
-        cnt.clear()
-        counters.clear()
-
-        expected.sum().backward()
-        actual.sum().backward()
-        self.assertTrue(same(inputs1[0].grad, inputs2[0].grad))
-
-        # currently we don't capture the backwards frame
-        self.assertEqual(cnt.frame_count, 0)
-        self.assertEqual(cnt.op_count, 0)
-        self.assertEqual(dict(counters["frames"]), {})
-        self.assertEqual(dict(counters["graph_break"]), {})
-
-    def test_autograd_function_graph_break(self):
-        class MySin(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                torch._dynamo.graph_break()
-                ctx.save_for_backward(x)
-                return x.sin()
-
-            @staticmethod
-            def backward(ctx, gx):
-                (x,) = ctx.saved_tensors
-                return gx * x.cos()
-
-        x = torch.randn([], requires_grad=True)
-
-        @torch.compile(backend="eager")
-        def fn(x):
-            return MySin.apply(x)
-
-        y = fn(x)
-        self.assertEqual(y, x.sin())
-
-        (gx,) = torch.autograd.grad(y, x)
-        self.assertEqual(gx, x.cos())
-
     @torch._dynamo.config.patch("dynamic_shapes", True)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
@@ -2846,28 +2735,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
-
-    def test_batch_encoding_clone_inputs(self):
-        class BatchEncoding(dict):
-            """
-            Copied from test_tokenization
-            """
-
-            def __init__(
-                self,
-                data,
-            ):
-                super().__init__(data)
-
-            def __getattr__(self, item: str):
-                try:
-                    return self.data[item]
-                except KeyError as e:
-                    raise AttributeError from e
-
-        encoding = BatchEncoding({"key": torch.rand((1, 4))})
-        cloned_encoding = torch._dynamo.utils.clone_inputs(encoding)
-        self.assertTrue(type(cloned_encoding) is not dict)
 
     def test_iadd_graph_break(self):
         def fn(x):

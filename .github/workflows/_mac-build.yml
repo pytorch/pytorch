@@ -101,7 +101,6 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       # This option is used when cross-compiling arm64 from x86-64. Specifically, we need arm64 conda
       # environment even though the arch is x86-64
@@ -111,7 +110,6 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
           environment-file: ${{ inputs.environment-file }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Install macOS homebrew dependencies
         uses: nick-fields/retry@v2.8.2
@@ -166,12 +164,6 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
-
-          if [[ -n "$CONDA_ENV" ]]; then
-            # Use binaries under conda environment
-            export PATH="$CONDA_ENV/bin":$PATH
-          fi
-
           ${CONDA_RUN} .ci/pytorch/macos-build.sh
 
       - name: Archive artifacts into zip

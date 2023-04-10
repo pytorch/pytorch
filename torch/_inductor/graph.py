@@ -55,7 +55,7 @@ log = logging.getLogger(__name__)
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
-def supported_dtype_of_cpp_wrapper(dtype, cuda):
+def supported_dtype_of_cpp_wrapper(dtype):
     supported_dtype = {
         torch.float32,
         torch.float64,
@@ -68,9 +68,6 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.bfloat16,
         # torch.float16, # TODO: implement this
     }
-    if cuda:
-        supported_dtype.add(torch.float16)
-
     return dtype in supported_dtype
 
 
@@ -141,8 +138,8 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
-        cpp_wrapper=False,
         aot_mode=False,
+        cpp_wrapper=False,
     ):
         super().__init__(gm)
         self.extra_traceback = False  # we do our own error wrapping
@@ -172,8 +169,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
-        self.cpp_wrapper = cpp_wrapper
+        # TODO: aot_mode and cpp_wrapper are tangled now. Some refactoring is needed.
         self.aot_mode = aot_mode
+        self.cpp_wrapper = cpp_wrapper
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
@@ -181,7 +179,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            log.info("Using FallbackKernel: %s", name)
+            log.info(f"Using FallbackKernel: {name}")
 
     def add_device_idx(self, idx: Optional[int]):
         if idx is not None:
@@ -583,7 +581,12 @@ class GraphLowering(torch.fx.Interpreter):
     def get_single_device(self):
         return list(self.device_types)[0] if len(self.device_types) == 1 else None
 
-    def check_input_for_cpp_buffer(self, cuda):
+    def check_device_for_cpp_buffer(self):
+        device = self.get_single_device()
+        if self.get_single_device() is None:
+            self.disable_cpp_wrapper("device not CPU or CUDA")
+
+    def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
             dtype = None
             if isinstance(value, TensorBox):
@@ -591,33 +594,37 @@ class GraphLowering(torch.fx.Interpreter):
             elif isinstance(value, sympy.Symbol):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, cuda):
+            if not supported_dtype_of_cpp_wrapper(dtype):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):
         if self.constants:
             self.disable_cpp_wrapper("Constants")
 
-    def check_cpp_wrapper(self, cuda):
+    def check_cpp_wrapper(self):
         self.check_cpp_codegen_disabled()
         self.check_platform()
-        self.check_input_for_cpp_buffer(cuda)
+        self.check_device_for_cpp_buffer()
+        self.check_input_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
-        if self.cpp_wrapper:
+        if self.aot_mode:
             device = self.get_single_device()
-            assert device == "cpu" or device == "cuda"
-            cuda = device == "cuda"
-            self.check_cpp_wrapper(cuda)
-            # Re-check self.cpp_wrapper because it might be disabled due to failed checking
+            self.check_cpp_wrapper()
+            if device == "cpu":
+                self.wrapper_code = CppWrapperCodeGen()
+            else:
+                assert device == "cuda", "Non-supported device for AOT compilation"
+                self.wrapper_code = CudaWrapperCodeGen()
+        elif self.cpp_wrapper:
+            self.check_cpp_wrapper()
             if self.cpp_wrapper:
-                self.wrapper_code = (
-                    CudaWrapperCodeGen() if cuda else CppWrapperCodeGen()
-                )
-                return
-
-        self.wrapper_code = WrapperCodeGen()
+                self.wrapper_code = CppWrapperCodeGen()
+            else:
+                self.wrapper_code = WrapperCodeGen()
+        else:
+            self.wrapper_code = WrapperCodeGen()
 
     def codegen(self):
         from .scheduler import Scheduler
@@ -681,8 +688,8 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.debug("Output code written to: %s", mod.__file__)
-        output_code_log.debug("Output code: \n%s", code)
+        log.debug(f"Output code written to: {mod.__file__}")
+        output_code_log.debug(f"Output code: \n{code}")
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
@@ -694,7 +701,7 @@ class GraphLowering(torch.fx.Interpreter):
             from .codecache import AotCodeCache
 
             code, linemap = self.codegen()
-            output_code_log.debug("Output code: \n%s", code)
+            output_code_log.debug(f"Output code: \n{code}")
 
             libpath = AotCodeCache.compile(
                 code, cuda=(self.get_single_device() == "cuda")

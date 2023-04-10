@@ -186,9 +186,9 @@ def generate_models(model_directory_path: Path):
 
         # Some models may not compile anymore, so skip the ones
         # that already has pt file for them.
-        logger.info("Processing %s", torch_module_name)
+        logger.info(f"Processing {torch_module_name}")
         if model_exist(model_name, all_models):
-            logger.info("Model %s already exists, skipping", model_name)
+            logger.info(f"Model {model_name} already exists, skipping")
             continue
 
         script_module = torch.jit.script(a_module)
@@ -212,7 +212,7 @@ def generate_models(model_directory_path: Path):
 
         export_model_path = str(model_directory_path / (str(model_name) + ".ptl"))
         script_module._save_for_lite_interpreter(export_model_path)
-        logger.info("Generating model %s and it's save to %s", model_name, export_model_path)
+        logger.info(f"Generating model {model_name} and it's save to {export_model_path}")
 
 def main() -> None:
     model_directory_path = get_fixtures_path()

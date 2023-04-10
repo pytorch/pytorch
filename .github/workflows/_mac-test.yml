@@ -180,11 +180,6 @@ jobs:
           export PR_BODY="${PR_BODY//[\'\"]}"
           arch
 
-          if [[ -n "$CONDA_ENV" ]]; then
-            # Use binaries under conda environment
-            export PATH="$CONDA_ENV/bin":$PATH
-          fi
-
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
           ${CONDA_RUN} .ci/pytorch/macos-test.sh
 

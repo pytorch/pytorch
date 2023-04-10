@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _FILE_PREFIX = "_remote_module_"
 _TEMP_DIR = tempfile.TemporaryDirectory()
 INSTANTIATED_TEMPLATE_DIR_PATH = _TEMP_DIR.name
-logger.info("Created a temporary directory at %s", INSTANTIATED_TEMPLATE_DIR_PATH)
+logger.info(f"Created a temporary directory at {INSTANTIATED_TEMPLATE_DIR_PATH}")
 sys.path.append(INSTANTIATED_TEMPLATE_DIR_PATH)
 
 

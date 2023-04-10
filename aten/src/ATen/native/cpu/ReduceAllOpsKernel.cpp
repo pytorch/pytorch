@@ -7,7 +7,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
-#include <ATen/OpMathType.h>
 
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
@@ -27,7 +26,8 @@ inline void reduce_all_impl_vec(
     const scalar_t ident_v,
     func_t op,
     vec_func_t vop) {
-  using Vec = Vectorized<opmath_type<scalar_t>>;
+  // TODO: replace vec_scalar_t with at::opmath_type when float16 specialization is done.
+  using Vec = Vectorized<vec_scalar_t<scalar_t>>;
   const int64_t input_numel = input.numel();
   auto input_data = input.data_ptr<scalar_t>();
   // NOTE: parallel_reduce not support bool type
@@ -79,7 +79,8 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
       [=](int64_t a, int64_t b) -> int64_t { return min_impl(a, b); });
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "min_all", [&] {
-      using Vec = Vectorized<opmath_type<scalar_t>>;
+      // TODO: replace vec_scalar_t with at::opmath_type when float16 specialization is done.
+      using Vec = Vectorized<vec_scalar_t<scalar_t>>;
       reduce_all_impl_vec<scalar_t>(result, input, upper_bound<scalar_t>(),
         [=] (scalar_t a , scalar_t b) -> scalar_t { return min_impl(a, b); },
         [=](Vec a, Vec b) -> Vec { return minimum(a, b); });
@@ -104,7 +105,8 @@ static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
       [=](int64_t a, int64_t b) -> int64_t { return max_impl(a, b); });
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "max_all", [&] {
-      using Vec = Vectorized<opmath_type<scalar_t>>;
+      // TODO: replace vec_scalar_t with at::opmath_type when float16 specialization is done.
+      using Vec = Vectorized<vec_scalar_t<scalar_t>>;
       reduce_all_impl_vec<scalar_t>(result, input, lower_bound<scalar_t>(),
         [=] (scalar_t a , scalar_t b) -> scalar_t { return max_impl(a, b); },
         [=](Vec a, Vec b) -> Vec { return maximum(a, b); });
@@ -147,7 +149,8 @@ inline void reduce_all_impl_vec_two_outputs(
     func_t reduce_acc_func,
     vec_func_t1 reduce_chunk_func1,
     vec_func_t2 reduce_chunk_func2) {
-  using Vec = Vectorized<opmath_type<scalar_t>>;
+  // TODO: replace vec_scalar_t with at::opmath_type when float16 specialization is done.
+  using Vec = Vectorized<vec_scalar_t<scalar_t>>;
   using scalar_t_pair = std::pair<scalar_t, scalar_t>;
   const int64_t input_numel = input.numel();
   auto input_data = input.data_ptr<scalar_t>();
@@ -200,7 +203,8 @@ static void aminmax_allreduce_kernel(
     );
   } else {
     AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "aminmax_cpu", [&] {
-      using Vec = Vectorized<opmath_type<scalar_t>>;
+      // TODO: replace vec_scalar_t with at::opmath_type when float16 specialization is done.
+      using Vec = Vectorized<vec_scalar_t<scalar_t>>;
       using scalar_t_pair = std::pair<scalar_t, scalar_t>;
       reduce_all_impl_vec_two_outputs<scalar_t>(
         min_result,

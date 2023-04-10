@@ -682,11 +682,6 @@ def permute(x, dims):
 def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    dim_size = x.get_size()[dim]
-    if start < -dim_size:
-        start = 0
-    if end < -dim_size:
-        end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
@@ -729,7 +724,6 @@ def roll(a, shifts, dims=tuple()):
         return roll(first_dim_rolled, tail_shifts, tail_dims)
 
     (dim,) = dims
-    # TODO: Avoid guarding on shape here
     size = V.graph.sizevars.guard_static_shape(a.get_size()[dim])
     start = (size - shifts[0]) % size
     a_loader = a.make_loader()
@@ -799,8 +793,6 @@ def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
-        # TODO: We don't have to guard on sizes per se, but the number
-        # of splits must stay constant
         sizes = V.graph.sizevars.guard_static_shape(sizes)
     if isinstance(sizes, (int, sympy.Integer)):
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
@@ -857,7 +849,6 @@ def _validate_dim(x, dim, offset=0):
 @register_lowering(aten.glu)
 def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
-    # TODO: don't guard on static shape here
     new_len = V.graph.sizevars.guard_static_shape(x.get_size()[dim]) // 2
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
@@ -1098,16 +1089,15 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
-    assert train and p not in (0, 1), "inference should have been handled as a decomp"
-    if config.fallback_random:
+    assert (
+        config.fallback_random
+    ), "this should be handled in decomps unless config.fallback_random"
+    if train:
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
         )
-    else:
-        bool_mask = gt(rand_like(x), p)
-        bool_mask.realize()
-        res = mul(mul(bool_mask, x), float(1.0 / (1.0 - p)))
-        return res, bool_mask
+
+    return x, ones_like(x, dtype=torch.bool)
 
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
@@ -1789,9 +1779,9 @@ def constant_like(fill_value):
 
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
 ones_like = create_tensor_like(tensor_constructor(1))
-zeros_like = create_tensor_like(tensor_constructor(0))
-rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
-randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
+if not config.fallback_random:
+    rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+    randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
 
 
 def new_constant(fill_value):
@@ -3799,7 +3789,7 @@ register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 register_pointwise(aten.le, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, override_return_dtype=torch.bool)
 register_pointwise(aten.ge, override_return_dtype=torch.bool)
-gt = register_pointwise(aten.gt, override_return_dtype=torch.bool)
+register_pointwise(aten.gt, override_return_dtype=torch.bool)
 register_pointwise(aten.eq, override_return_dtype=torch.bool)
 register_pointwise(aten.ne, override_return_dtype=torch.bool)
 logical_and = register_pointwise(
@@ -3894,28 +3884,28 @@ def _realize(x):
 try:
     import torch.distributed._functional_collectives
 
-    c10d_functional = torch.ops.c10d_functional
-
-    @register_lowering(c10d_functional.wait_tensor)
+    @register_lowering(aten.wait_tensor)
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
 
-    @register_lowering(c10d_functional.all_reduce)
+    @register_lowering(aten.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
         )
 
-    @register_lowering(c10d_functional.all_gather_into_tensor)
+    @register_lowering(aten.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
         )
 
-    @register_lowering(c10d_functional.reduce_scatter_tensor)
-    def reduce_scatter_tensor(input, reduce_op, tag, ranks, group_size):
+    @register_lowering(aten.reduce_scatter_tensor)
+    def reduce_scatter_tensor(input, reduce_op, scatter_dim, tag, ranks, group_size):
         return TensorBox.create(
-            ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
+            ir.ReduceScatterTensor.create(
+                input, reduce_op, scatter_dim, tag, ranks, group_size
+            )
         )
 
 except ImportError:

@@ -71,10 +71,7 @@ def main() -> None:
 
     # Upload the file
     logging.info(
-        "Uploading file %s to s3 bucket: %s, object name: %s",
-        args.file,
-        bucket,
-        object_name,
+        f"Uploading file {args.file} to s3 bucket: {bucket}, object name: {object_name}"
     )
     if not args.dry_run:
         s3_client = boto3.client("s3")
@@ -82,7 +79,7 @@ def main() -> None:
 
     # Update hash in repo
     hash_of_new_binary = compute_file_sha256(args.file)
-    logging.info("Computed new hash for binary %s", hash_of_new_binary)
+    logging.info(f"Computed new hash for binary {hash_of_new_binary}")
 
     linter_config["hash"] = hash_of_new_binary
     config_dump = json.dumps(config, indent=4, sort_keys=True)
