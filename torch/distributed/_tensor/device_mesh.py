@@ -147,7 +147,7 @@ class DeviceMesh(object):
             ), f"Default PG backend: {world_backend} not supporting CUDA!"
             if not default_initialized:
                 # automatically set the current cuda device base on num of gpu devices available in each host
-                # NOTE: This device selection would only work for homogenous hardware.
+                # NOTE: This device selection would only work for homogeneous hardware.
                 torch.cuda.set_device(get_rank() % torch.cuda.device_count())
         else:
             raise RuntimeError(
@@ -236,9 +236,8 @@ class DeviceMesh(object):
             raise RuntimeError("DeviceMesh process groups not initialized!")
         return self._dim_groups
 
-    # pyre-fixme[3]: Return type must be annotated.
-    def size(self, dim: int = 0):
-        return self.mesh.size(dim)
+    def size(self, dim: Optional[int] = None) -> int:
+        return self.mesh.numel() if dim is None else self.mesh.size(dim)
 
     @property
     def ndim(self) -> int:
