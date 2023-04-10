@@ -172,7 +172,7 @@ class ReenterWith:
                 create_instruction("CALL_FUNCTION", arg=len(load_args)),
                 create_instruction("SETUP_WITH", target=with_cleanup_start),
                 create_instruction("POP_TOP"),
-            ]
+            ], None
         elif sys.version_info < (3, 11):
             with_except_start = create_instruction("WITH_EXCEPT_START")
             pop_top_after_with_except_start = create_instruction("POP_TOP")
@@ -205,7 +205,7 @@ class ReenterWith:
                 create_instruction("CALL_FUNCTION", arg=len(load_args)),
                 create_instruction("SETUP_WITH", target=with_except_start),
                 create_instruction("POP_TOP"),
-            ]
+            ], None
         else:
             pop_top_after_with_except_start = create_instruction("POP_TOP")
             cleanup_complete_jump_target = create_instruction("NOP")
@@ -271,12 +271,13 @@ class ReenterWith:
                 *create_call_function(len(load_args), True),
                 create_instruction("BEFORE_WITH"),
                 exn_tab_1_begin,  # POP_TOP
-            ]
+            ], exn_tab_1_target
 
 
 @dataclasses.dataclass
 class ResumeFunctionMetadata:
     code: types.CodeType
+    block_target_offset_remap: Dict[int, int] = None
     instructions: List[Instruction] = None
 
 
@@ -299,6 +300,7 @@ class ContinueExecutionCache:
         code,
         lineno,
         offset: int,
+        setup_fn_target_offsets: List[int],
         nstack: int,
         argnames: List[str],
         setup_fns: List[ReenterWith],
@@ -312,12 +314,14 @@ class ContinueExecutionCache:
         assert code.co_flags & CO_OPTIMIZED
         if code in ContinueExecutionCache.generated_code_metadata:
             return cls.generate_based_on_original_code_object(
-                code, lineno, offset, nstack, argnames, setup_fns, null_idxes
+                code, lineno, offset, setup_fn_target_offsets, nstack, argnames, setup_fns, null_idxes
             )
 
         meta = ResumeFunctionMetadata(code)
+        new_target_inst_remap = {}
 
         def update(instructions: List[Instruction], code_options: Dict[str, Any]):
+            nonlocal new_target_inst_remap
             meta.instructions = copy.deepcopy(instructions)
 
             args = [f"___stack{i}" for i in range(nstack)]
@@ -354,6 +358,8 @@ class ContinueExecutionCache:
 
             cleanup = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
+            hook_target_offsets = {fn.stack_index: setup_fn_target_offsets[i] for i, fn in enumerate(setup_fns)}
+            exn_tab_remap = {}
             null_idxes_i = 0
             for i in range(nstack):
                 while (
@@ -364,7 +370,15 @@ class ContinueExecutionCache:
                     null_idxes_i += 1
                 prefix.append(create_instruction("LOAD_FAST", argval=f"___stack{i}"))
                 if i in hooks:
-                    prefix.extend(hooks.pop(i)(code_options, cleanup))
+                    hook = hooks.pop(i)
+                    hook_insts, exn_target = hook(code_options, cleanup)
+                    prefix.extend(hook_insts)
+                    if sys.version_info >= (3, 11):
+                        hook_target_offset = hook_target_offsets.pop(i)
+                        (old_hook_target,) = [i for i in instructions if i.offset == hook_target_offset]
+                        new_target_inst_remap[exn_target] = hook_target_offset
+                        exn_tab_remap[old_hook_target] = exn_target
+
             assert not hooks
 
             prefix.append(create_jump_absolute(target))
@@ -380,11 +394,22 @@ class ContinueExecutionCache:
                 prefix.extend(cleanup)
                 prefix.extend(cls.unreachable_codes(code_options))
 
+            # remap original instructions' exception table entries
+            if exn_tab_remap:
+                assert sys.version_info >= (3, 11)
+                for inst in instructions:
+                    if inst.exn_tab_entry and inst.exn_tab_entry.target in exn_tab_remap:
+                        inst.exn_tab_entry.target = exn_tab_remap[inst.exn_tab_entry.target]
+
             # TODO(jansel): add dead code elimination here
             instructions[:] = prefix + instructions
 
         new_code = transform_code_object(code, update)
-        breakpoint()
+        if new_target_inst_remap:
+            assert sys.version_info >= (3, 11)
+            meta.block_target_offset_remap = {}
+            for inst, old_offset in new_target_inst_remap.items():
+                meta.block_target_offset_remap[inst.offset] = old_offset
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
         return new_code
 
@@ -397,7 +422,7 @@ class ContinueExecutionCache:
         ]
 
     @classmethod
-    def generate_based_on_original_code_object(cls, code, lineno, offset: int, *args):
+    def generate_based_on_original_code_object(cls, code, lineno, offset: int, setup_fn_target_offsets: List[int], *args):
         """
         This handles the case of generating a resume into code generated
         to resume something else.  We want to always generate starting
@@ -426,7 +451,9 @@ class ContinueExecutionCache:
             new_offset = new_target.offset
 
         transform_code_object(code, find_new_offset)
-        return ContinueExecutionCache.lookup(meta.code, lineno, new_offset, *args)
+        if meta.block_target_offset_remap:
+            setup_fn_target_offsets = tuple(meta.block_target_offset_remap[n] if n in meta.block_target_offset_remap else n for n in setup_fn_target_offsets)
+        return ContinueExecutionCache.lookup(meta.code, lineno, new_offset, setup_fn_target_offsets, *args)
 
 
 """

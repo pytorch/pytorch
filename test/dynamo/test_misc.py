@@ -3189,6 +3189,24 @@ def fn():
         false_sin = graph(torch.tensor(False), torch.tensor([0.5, 0.5]))
         self.assertTrue(same(torch.sin(torch.tensor([0.5, 0.5])), false_sin))
 
+    def test_enum_guards(self):
+        class MyEnum(enum.Enum):
+            FOO = 10
+            BAR = 20
+
+        def fn(x, y):
+            if y == MyEnum.FOO:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(3)
+        y = MyEnum.BAR
+        ref = fn(x, y)
+        opt_fn = torch.compile(backend="eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
     def test_disable_optimize(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
@@ -4519,41 +4537,50 @@ def fn():
     @skipIfNotPy311
     def test_compute_exception_table_nested(self):
         insts = []
-        for _ in range(10):
+        for _ in range(20):
             insts.append(bytecode_transformation.create_instruction("NOP"))
-        insts[8].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[0], insts[9], insts[0], 0, True
+        insts[10].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[1], insts[10], insts[0], 0, True
         )
         insts[0].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[0], insts[0], insts[1], 0, True
+            insts[1], insts[1], insts[1], 0, True
         )
         insts[1].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[0], insts[2], insts[2], 0, True
+            insts[1], insts[3], insts[2], 0, True
         )
         insts[5].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[4], insts[6], insts[3], 0, True
+            insts[5], insts[7], insts[3], 0, True
         )
         insts[9].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[9], insts[9], insts[4], 0, True
+            insts[10], insts[10], insts[4], 0, True
         )
         insts[7].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[7], insts[9], insts[5], 0, True
+            insts[8], insts[10], insts[5], 0, True
+        )
+        insts[14].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[13], insts[17], insts[6], 0, True
+        )
+        insts[16].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[15], insts[16], insts[7], 0, True
         )
         bytecode_transformation.update_offsets(insts)
         tab = bytecode_transformation.compute_exception_table(insts)
         expected = [
-            (0, 0, 1),
-            (1, 2, 2),
-            (3, 3, 0),
-            (4, 6, 3),
-            (7, 8, 5),
-            (9, 9, 4),
+            (1, 1, 1),
+            (2, 3, 2),
+            (4, 4, 0),
+            (5, 7, 3),
+            (8, 9, 5),
+            (10, 10, 4),
+            (13, 14, 6),
+            (15, 16, 7),
+            (17, 17, 6),
         ]
         self.assertEquals(len(tab), len(expected))
-        for entry, exp in zip(insts, expected):
-            self.assertEquals(entry.start, expected[0] * 2)
-            self.assertEquals(entry.end, expected[1] * 2)
-            self.assertEquals(entry.target, expected[2] * 2)
+        for entry, exp in zip(tab, expected):
+            self.assertEquals(entry.start, exp[0] * 2)
+            self.assertEquals(entry.end, exp[1] * 2)
+            self.assertEquals(entry.target, exp[2] * 2)
 
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict

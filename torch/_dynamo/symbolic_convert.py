@@ -371,7 +371,9 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     log.warning(
-                        f"Graph break: {excp} from user code at {user_stack_formatted}"
+                        "Graph break: %s from user code at %s",
+                        excp,
+                        user_stack_formatted,
                     )
 
                 excp.remove_from_stats()
@@ -558,7 +560,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.next_instruction = None
         if inst.starts_line and self.lineno != inst.starts_line:
             self.lineno = inst.starts_line
-            log.debug(f"TRACE starts_line {self.f_code.co_filename}:{self.lineno}")
+            log.debug("TRACE starts_line %s:%s", self.f_code.co_filename, self.lineno)
 
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
@@ -1970,6 +1972,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.f_code,
             self.lineno,
             inst.offset,
+            tuple(b.target.offset for b in self.block_stack),
             stack_len,
             argnames,
             tuple(b.resume_fn() for b in self.block_stack),
@@ -2051,7 +2054,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             log.warning(
-                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {e}"
+                "%s %s %s %s %s",
+                func.get_filename(),
+                func.get_function(),
+                args,
+                kwargs,
+                e,
             )
             unimplemented("arg mismatch inlining")
 
@@ -2068,7 +2076,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # with a single alias
         if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
-        log.debug(f"INLINING {code}{suffix}")
+        log.debug("INLINING %s%s", code, suffix)
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
@@ -2087,7 +2095,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug(msg)
             raise Unsupported(msg) from e
         except Exception as e:
-            log.debug(f"FAILED INLINING {code}")
+            log.debug("FAILED INLINING %s", code)
             raise
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
@@ -2096,7 +2104,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
-        log.debug(f"DONE INLINING {code}")
+        log.debug("DONE INLINING %s", code)
 
         if is_generator(code):
             assert isinstance(tracer, InliningGeneratorInstructionTranslator)

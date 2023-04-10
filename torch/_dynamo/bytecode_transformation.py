@@ -544,11 +544,9 @@ def compute_exception_table(
     """Compute pythonic exception table from instructions with exn_tab_entry's"""
     exn_dict = {}
     indexof = {id(inst): i for i, inst, in enumerate(instructions)}
-    print("\n".join(list(map(str, instructions))))
 
     for inst in instructions:
         if inst.exn_tab_entry:
-            print("!!!", inst)
             start = _get_instruction_front(
                 instructions, indexof[id(inst.exn_tab_entry.start)]
             ).offset
@@ -581,11 +579,22 @@ def compute_exception_table(
                 exn_tab.append(
                     ExceptionTableEntry(max(key[0], nexti), key[1], *exn_dict[key])
                 )
-                nexti = key[1] + 1
+                nexti = key[1] + 2
 
     for key in keys_sorted:
-        pass
-    exn_tab = [ExceptionTableEntry(*key, *exn_dict[key]) for key in keys_sorted]
+        while key_stack and key_stack[-1][1] < key[0]:
+            pop()
+        if key_stack:
+            assert key_stack[-1][0] <= key[0] <= key[1] <= key_stack[-1][1]
+            left = max(nexti, key_stack[-1][0])
+            if left < key[0]:
+                exn_tab.append(
+                    ExceptionTableEntry(left, key[0] - 2, *exn_dict[key_stack[-1]])
+                )
+            nexti = key[0]
+        key_stack.append(key)
+    while key_stack:
+        pop()
     check_exception_table(exn_tab)
     return exn_tab
 
