@@ -52,7 +52,7 @@ class TransformationTest(DTensorTestBase):
     def _init(self, batch_size, layers, dim, foreach: bool = True, fused: bool = False):
         torch.manual_seed(0)
         model = DummyModel(layers, dim).cuda()
-        ddp_model = DDP(deepcopy(model), device_ids=[dist.get_rank()])
+        ddp_model = DDP(deepcopy(model), device_ids=[self.rank])
         optim = torch.optim.Adam(
             model.parameters(), lr=0.01, foreach=foreach, fused=fused, capturable=True
         )
@@ -132,14 +132,9 @@ class TransformationTest(DTensorTestBase):
             model(batch).sum().backward()
             return [p.grad for p in model.parameters()]
 
-        model, optim, _, _ = self._init(batch_size, layers, dim)
-        for _ in range(num_iters):
-            batch = torch.randn(batch_size, dim).cuda()
-            out = train_step(model, optim, batch)
-
-            # TODO: using _test_tran_step_with_ddp_without_optim_step()
-            # does not work because some mismatched accuracy. Need to
-            # debug the issue.
+        self._test_tran_step_with_ddp_without_optim_step(
+            train_step, num_iters, batch_size, layers, dim
+        )
 
     @skip_if_lt_x_gpu(2)
     @with_comms
