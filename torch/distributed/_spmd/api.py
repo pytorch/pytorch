@@ -27,6 +27,7 @@ import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch import fx
+from torch._subclasses import FakeTensorMode
 from torch.distributed._spmd.distribute import (
     _convert_to_distributed,
     distribute,
@@ -232,7 +233,10 @@ def _dtensor_expand(
             inps.append(torch.empty(0))
             schemas.append(shard_schema)
 
-    return _convert_to_distributed(gm, inps, schemas, _allow_partial=False)[0]
+    with FakeTensorMode(allow_non_fake_inputs=True):
+        fake_inps = [torch.empty_like(inp) for inp in inps]
+
+    return _convert_to_distributed(gm, fake_inps, schemas, _allow_partial=False)[0]
 
 
 @contextmanager
