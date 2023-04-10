@@ -1,8 +1,8 @@
 import torch
 
-from .base_pruner import BasePruner
+from . import base_pruner
 
-class NearlyDiagonalPruner(BasePruner):
+class NearlyDiagonalPruner(base_pruner.BasePruner):
     r"""Nearly Diagonal Pruner
 
     This pruner creates a nearly diagonal mask to be applied to the weight matrix.
