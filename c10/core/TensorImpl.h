@@ -1550,7 +1550,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline const void* data() const {
-    return mutable_data_impl();
+    return data_impl<decltype(*this)>{}(*this, &Storage::data);
   }
 
   /**
@@ -1564,31 +1564,55 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline void* mutable_data() {
-    return mutable_data_impl();
+    return data_impl<decltype(*this)>{}(*this, &Storage::mutable_data);
   }
 
  private:
-  // Templated implementation of data() and mutable_data().
+  // Shared implementation of data() and mutable_data() regardless of
+  // constness.
   //
-  // We are able to pull this off because unsafeGetStorageImpl() is a
-  // const method that returns a non-const StorageImpl.
-  void* mutable_data_impl() const {
-    TORCH_CHECK(
-        has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
-    TORCH_CHECK(
-        dtype_initialized(),
-        "Cannot access data pointer of Tensor that doesn't have initialized dtype "
-        "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
-    // Computing an offset into an empty tensor would be UB, since an empty
-    // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
-    // is UB.  So we skip the offset computation in this case.
-    char* const data = static_cast<char*>(storage_.mutable_data());
-    if (data == nullptr) {
-      return nullptr;
+  // Implementation notes:
+  //  * The main trick we employ here is to create a static method
+  //    that is templated on TensorImpl. This lets us write a single
+  //    body that can be used for both const and non-const methods.
+  //  * The second main trick is to use a dependent template that
+  //    carries the constness of the tensor and can apply it to
+  //    additional types.
+  template <typename Self>
+  struct data_impl {
+    static_assert(std::is_same<
+                  std::remove_const_t<std::remove_reference_t<Self>>,
+                  TensorImpl>::value);
+    // Carries the constness of the TensorImpl and can apply it to additional
+    // types.
+    template <typename T>
+    using MaybeConstT = std::conditional_t<
+        std::is_const<std::remove_reference_t<Self>>::value,
+        const T,
+        T>;
+
+    MaybeConstT<void>* operator()(
+        Self& self,
+        MaybeConstT<void>* (Storage::*data_accessor)() const) const {
+      TORCH_CHECK(
+          self.has_storage(),
+          "Cannot access data pointer of Tensor that doesn't have storage");
+      TORCH_CHECK(
+          self.dtype_initialized(),
+          "Cannot access data pointer of Tensor that doesn't have initialized dtype "
+          "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
+      // Computing an offset into an empty tensor would be UB, since an empty
+      // tensor's storage will be nullptr, and adding a nonzero offset to
+      // nullptr is UB.  So we skip the offset computation in this case.
+      auto* data =
+          static_cast<MaybeConstT<char>*>((self.storage_.*data_accessor)());
+      if (data == nullptr) {
+        return nullptr;
+      }
+      return static_cast<MaybeConstT<void>*>(
+          data + self.data_type_.itemsize() * self.storage_offset_);
     }
-    return static_cast<void*>(data + data_type_.itemsize() * storage_offset_);
-  }
+  };
 
  public:
   /**
