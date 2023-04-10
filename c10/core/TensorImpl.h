@@ -1496,17 +1496,42 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for you; this class is available from 'Tensor'.
    */
   template <typename T>
-  inline T* data() const {
+  const T* data_dtype_initialized() const {
+    return data_dtype_initialized_impl<const T>(*this, &Storage::data);
+  }
+
+  /**
+   * Return a mutable typed data pointer to the actual data which this
+   * tensor refers to. This checks that the requested type (from the
+   * template parameter) matches the internal type of the tensor.
+   *
+   * It is invalid to call data() on a dtype-uninitialized tensor, even if
+   * the size is 0.
+   *
+   * WARNING: If a tensor is not contiguous, you MUST use strides when
+   * performing index calculations to determine the location of elements in
+   * the tensor.  We recommend using 'TensorAccessor' to handle this computation
+   * for you; this class is available from 'Tensor'.
+   */
+  template <typename T>
+  T* mutable_data_dtype_initialized() {
+    return data_dtype_initialized_impl<T>(*this, &Storage::mutable_data);
+  }
+
+ private:
+  template <typename T, typename TensorImpl, typename StorageDataAccessor>
+  static T* data_dtype_initialized_impl(TensorImpl& tensor, const StorageDataAccessor& data_accessor) {
     TORCH_CHECK(
-        data_type_.Match<T>(),
+        tensor.data_type_.template Match<T>(),
         "Tensor type mismatch, caller expects elements to be ",
         caffe2::TypeMeta::TypeName<T>(),
         ", while tensor contains ",
-        data_type_.name(),
+        tensor.data_type_.name(),
         ". ");
-    return legacy_mutable_data_ptr_impl<T>();
+    return data_ptr_impl<T>(tensor, data_accessor);
   }
 
+ public:
   /**
    * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
    * does not do a type check. Unlike the untemplated data(), does
@@ -1514,27 +1539,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data_ptr_impl() {
-    return legacy_mutable_data_ptr_impl<T>();
+    return data_ptr_impl<T>(*this, &Storage::mutable_data);
   }
 
  private:
-  // The real implementation of mutable_data_ptr_impl, but in a
-  // non-const method.
-  //
-  // TODO: move the implementation into mutable_data_ptr_impl() and
-  // delete this when data<T>() is no longer const.
-  template <typename T>
-  inline T* legacy_mutable_data_ptr_impl() const {
+  // The real implementation of mutable_data_ptr_impl, templated over
+  // whether or not the tensor is const.
+  template <typename T, typename TensorImpl, typename StorageDataAccessor>
+    static T* data_ptr_impl(TensorImpl& tensor, const StorageDataAccessor& data_accessor) {
     TORCH_CHECK(
-        has_storage(),
+        tensor.has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
     TORCH_CHECK(
-        storage_initialized(),
+        tensor.storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
-    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
+    return static_cast<T*>((tensor.storage_.*data_accessor)()) + tensor.storage_offset_;
   }
 
  public:
