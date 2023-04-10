@@ -784,6 +784,14 @@ class BuiltinVariable(VariableTracker):
             )
         )
 
+    def call_callable(self, tx, arg):
+        from .functions import BaseUserFunctionVariable
+
+        if isinstance(
+            arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
+        ):
+            return variables.ConstantVariable(True).add_options(arg)
+
     @staticmethod
     def call_dict_helper(tx, user_cls, arg, **options):
         if arg is None:
@@ -1066,6 +1074,9 @@ class BuiltinVariable(VariableTracker):
             )
         elif isinstance(obj, variables.NNModuleVariable):
             obj.convert_to_unspecialized(tx)
+
+    def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
+        return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder
