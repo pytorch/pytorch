@@ -1,12 +1,13 @@
 import contextlib
 import copy
-from typing import Callable, Tuple, Generator, Dict, Optional
+from typing import Callable, Tuple, Generator, Dict, Optional, List
 from unittest.mock import patch
 import dataclasses
 
 import torch
 import weakref
 import torch._dynamo as torchdynamo
+from torch._dynamo.eval_frame import Constraint
 from torch._decomp import core_aten_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.utils import stateless
@@ -162,8 +163,19 @@ def _aot_capture(mod, flat_args):
         assert len(ret) != 0, "Cannot find mutation destination."
         return ret
 
+    mutation = [
+        (
+            "copy_",
+            output_node.args[0][k].name,
+            find_mutation_destinations(graph_module, param_list[i][1]),
+        )
+        for k, i in enumerate(mutated_input_indices)
+    ]
     assert out_spec is not None
-    return graph_module, out_spec
+    return graph_module, mutation, out_spec
+
+    assert out_spec is not None
+    return graph_module, mutated_input_indices, out_spec
 
 
 
@@ -175,21 +187,18 @@ def _aot_capture(mod, flat_args):
     allow_rnn=True,
     verbose=True,
 )
-def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
+def do_not_use_experimental_export(f: Callable, args: Tuple, constraints: List[Constraint]=None):
     """
     This prototype is under heavy development. Pls don't use it if you are
     not part of PyTorch 2.0 Export team.
     """
-    if training:
-        NotImplementedError("training mode is not supported yet")
-
     flattened_args, in_spec = pytree.tree_flatten(args)
     # Doing it twice so that if graph_module accidentally modifies the input
     # we still get the same original input.
     original_flat_args = tuple(flattened_args)
     flat_args = tuple(flattened_args)
 
-    graph_module, guards = torchdynamo.export(f, *args, aten_graph=False)
+    graph_module, guards = torchdynamo.export(f, *args, aten_graph=False, constraints=constraints)
     # TODO (tmanlaibaatar) do sth with guards?
     graph_module, out_spec = _aot_capture(graph_module, flat_args)
     return ExportedProgram(fw_module=graph_module, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)
@@ -230,5 +239,4 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
 #     ]
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
-    from torch._dynamo.eval_frame import Constraint
     return Constraint(weakref.ref(t), id(t), index, StrictMinMaxConstraint(ValueRanges(lower=2, upper=sympy.oo)))

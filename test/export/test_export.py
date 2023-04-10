@@ -83,8 +83,7 @@ class TestExport(TestCase):
 
         inp = (torch.ones(6, 4),)
         exported_program = do_not_use_experimental_export(foo, inp)
-        output = exported_program.fw_module(torch.ones(6, 4))
-        self.assertEqual(output[1], foo(torch.ones(6, 4)))
+        self.assertEqual(exported_program(torch.ones(6, 4)), foo(torch.ones(6, 4)))
 
 
 
