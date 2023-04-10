@@ -15,7 +15,6 @@ import math
 import operator
 import os
 import pstats
-import re
 import sys
 import textwrap
 import time
@@ -24,9 +23,10 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 import torch._logging
+from torch._guards import detect_fake_mode  # noqa: F401
 from . import config
 
 try:
@@ -45,10 +45,12 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_map
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
+nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
+nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 
 log = logging.getLogger(__name__)
 
@@ -260,7 +262,6 @@ graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 def setup_compile_debug():
     compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
-    exitstack = contextlib.ExitStack()
 
     if compile_debug:
         torch._logging.set_logs(
@@ -269,11 +270,9 @@ def setup_compile_debug():
             inductor=logging.DEBUG,
             output_code=True,  # this is off by default
         )
+        return add_file_handler()
 
-        debug_file_handler = add_file_handler()
-        exitstack.callback(lambda: log.removeHandler(debug_file_handler))
-
-    return exitstack
+    return contextlib.ExitStack()
 
 
 def reset_graph_break_dup_checker():
@@ -285,11 +284,25 @@ def add_file_handler():
     if not os.path.exists(log_path):
         os.makedirs(log_path)
 
-    log_file = logging.FileHandler(os.path.join(log_path, "debug.log"))
-    log_file.setLevel(logging.DEBUG)
+    log_file_handler = logging.FileHandler(os.path.join(log_path, "debug.log"))
     logger = logging.getLogger("torch._dynamo")
-    logger.addHandler(log_file)
-    return log_file
+    logger.addHandler(log_file_handler)
+
+    exitstack = contextlib.ExitStack()
+    exitstack.callback(lambda: logger.removeHandler(log_file_handler))
+    return exitstack
+
+
+def setup_log_file():
+    exitstack = contextlib.ExitStack()
+    if config.log_file_name is not None:
+        log_file_handler = logging.FileHandler(config.log_file_name)
+        for logger in logging.get_loggers():
+            logger.addHandler(log_file_handler)
+            exitstack.callback(lambda: logger.removeHandler(log_file_handler))
+        return exitstack
+
+    return exitstack
 
 
 def gen_record_file_name(exc, code):
@@ -371,7 +384,9 @@ def is_typing(value):
     if sys.version_info < (3, 9):
         return isinstance(value, typing._GenericAlias)
     else:
-        return isinstance(value, typing._SpecialGenericAlias)
+        return isinstance(
+            value, (typing._SpecialGenericAlias, typing._UnionGenericAlias)
+        )
 
 
 def is_numpy_int_type(value):
@@ -544,7 +559,7 @@ def clone_input(x):
 
 
 def clone_inputs(example_inputs):
-    if isinstance(example_inputs, dict):
+    if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
             assert isinstance(value, torch.Tensor)
@@ -762,6 +777,12 @@ tuple_iterator_len = tuple_iterator.__length_hint__
 object_new = object.__new__
 
 
+def nn_module_new(cls):
+    obj = object_new(cls)
+    torch.nn.Module.__init__(obj)
+    return obj
+
+
 def product(it):
     return functools.reduce(operator.mul, it, 1)
 
@@ -772,7 +793,11 @@ def tuple_iterator_getitem(it, index):
 
 
 def enum_repr(value):
-    return str(value)
+    enum_name = str(value)
+
+    name, val = enum_name.split(".")
+    local_name = f'L["{name}"].{val}'
+    return local_name
 
 
 def dict_param_key_ids(value):
@@ -797,19 +822,6 @@ def dict_const_keys_repr(const_keys):
 
 def global_key_name(key):
     return f"__dict_key_{id(key)}"
-
-
-def rename_implicit(v):
-    """
-    Usage of inline comprehensions generates a implicit ".0" variable that
-    trips up guard generation.  This renames these variables in guards.
-    """
-    m = re.match(r"^[.](\d+)$", v)
-    if m:
-        assert v == ".0", f"currently only .0 supported: {v}"
-        # to support .1 etc see guards.py and _eval_frame.c
-        return f"___implicit{m.group(1)}"
-    return v
 
 
 from torch._subclasses import (  # noqa: F401
@@ -1035,6 +1047,10 @@ orig_code_map = ExactWeakKeyDictionary()
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures = collections.defaultdict(list)
 
+# keep record of compiled code, if we are in "error if recompile"
+# to track code that dynamo has compiled previously
+seen_code_map = ExactWeakKeyDictionary()
+
 
 class CompileProfiler:
     """Utility for profiling how and what dynamo would compile.
@@ -1169,14 +1185,16 @@ def get_fake_value(node, tx):
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
 
-        if not is_lazy_module(nnmodule):
-            nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
+            nnmodule._infer_parameters(nnmodule, args)
 
-    if op == "call_module" and is_lazy_module(nnmodule):
-        assert nnmodule is not None
-        # In the case of a lazy module, we want to run
-        # the pre-hooks which initialize it
-        nnmodule(*args, **kwargs)
+        # no matter it's lazy module or not, we should copy to fake mode.
+        nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+
     try:
         with tx.fake_mode, enable_python_dispatcher():
             return wrap_fake_exception(
@@ -1302,23 +1320,6 @@ def assert_no_fake_params_or_buffers(gm):
         ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
-def fake_mode_from_tensors(inputs: List[Any]):
-    """
-    Takes a list of anything, unflattened is fine, returns a fake_mode
-    if any are fake. All fake modes on all fake tensors must be identical.
-    Returns None if no fake_mode is fine
-    """
-    flat_inputs, _ = tree_flatten(inputs)
-    fake_mode = None
-    for flat_input in flat_inputs:
-        if isinstance(flat_input, torch._subclasses.FakeTensor):
-            if fake_mode is None:
-                fake_mode = flat_input.fake_mode
-            else:
-                assert fake_mode is flat_input.fake_mode
-    return fake_mode
-
-
 def fqn(obj: Any):
     """
     Returns the fully qualified name of the object.
@@ -1439,3 +1440,45 @@ def format_graph_tabular(fn_name, gm):
 
 def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
+
+
+def nnmodule_has_hooks(
+    mod,
+    check_forward_hooks=False,
+    check_backward_hooks=False,
+    check_state_dict_hooks=False,
+):
+    """
+    Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
+    hooks executed during module.__call__, and state_dict hooks which are executed separately.
+    """
+    hook_dicts_to_check = []
+    check_all_hooks = (
+        not check_forward_hooks
+        and not check_backward_hooks
+        and not check_state_dict_hooks
+    )
+    if check_forward_hooks or check_all_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_forward_pre_hooks",
+                "_forward_hooks",
+            ]
+        )
+    if check_backward_hooks or check_all_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_backward_pre_hooks",
+                "_backward_hooks",
+            ]
+        )
+    if check_state_dict_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_state_dict_pre_hooks",
+                "_state_dict_hooks",
+                "_load_state_dict_pre_hooks",
+                "_load_state_dict_post_hooks",
+            ]
+        )
+    return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
