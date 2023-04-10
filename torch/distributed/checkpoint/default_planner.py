@@ -409,7 +409,7 @@ def _validate_global_plan(
             # Compute the volume
             if not _check_box_bounds(value.size, chunk0):
                 logger.warning(
-                    """
+                    f"""
                         key:%s has out of bounds chunk:
                         tensor-size:%s chunk: %s
                     """, key, value.size, chunk0
@@ -429,7 +429,7 @@ def _validate_global_plan(
         tensor_volume = reduce(operator.mul, value.size, 1)
         if chunks_volume != tensor_volume:
             logger.warning(
-                """
+                f"""
                     key:%s invalid fill tensor-volume:
                     %s chunks-volume: %s
                 """, key, tensor_volume, chunks_volume
