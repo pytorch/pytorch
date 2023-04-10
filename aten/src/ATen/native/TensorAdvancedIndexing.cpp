@@ -1585,7 +1585,7 @@ void _scatter_via_index_put(
       {mut_out_contig.dim()},
       TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
     std::memcpy(
-      coord_strides.data_ptr(),
+      coord_strides.mutable_data_ptr(),
       mut_out_contig_strides.data(),
       coord_strides.nbytes());
     coord_strides = coord_strides.to(mut_out_contig.device());
