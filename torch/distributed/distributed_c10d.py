@@ -326,6 +326,58 @@ class _reduce_op:
 reduce_op = _reduce_op()
 
 
+class P2POp:
+    """
+    A class to build point-to-point operations for ``batch_isend_irecv``.
+
+    This class builds the type of P2P operation, communication buffer, peer rank,
+    Process Group group, and tag. Instances of this class will be passed to
+    ``batch_isend_irecv`` for point-to-point communications.
+
+    Args:
+        op (Callable): A function to send data to or receive data from a peer process.
+            The type of ``op`` is either ``torch.distributed.isend`` or
+            ``torch.distributed.irecv``.
+        tensor (Tensor): Tensor to send or receive.
+        peer (int): Destination or source rank.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        tag (int, optional): Tag to match send with recv.
+    """
+
+    def __init__(self, op, tensor, peer, group=None, tag=0):
+        self.op = op
+        self.tensor = tensor
+        self.peer = peer
+        self.group = group
+        self.tag = tag
+
+    def __new__(cls, op, tensor, peer, group=None, tag=0):
+        _check_op(op)
+        _check_single_tensor(tensor, "tensor")
+        return object.__new__(cls)
+
+
+class CollOp:
+    """
+    A class to capture collective operations.
+
+    Args:
+        op (Callable): A collective function, e.g. ``torch.distributed.all_reduce``.
+        tensor (Tensor): Tensor to operate on.
+        dst_tensor (Tensor, optional): Provided when source and destinaton tensors are not the same.
+        redop_or_root: Store reduce operation or root rank.
+        async_op (bool, optional): Whether this op should be an async op
+    """
+
+    def __init__(self, op, tensor, dst_tensor=None, redop_or_root=None, async_op=False):
+        self.op = op
+        self.tensor = tensor
+        self.dst_tensor = dst_tensor
+        self.redop_or_root = redop_or_root
+        self.async_op = async_op
+
+
 # DO NOT USE THESE FIELDS DIRECTLY.
 # Use them through the _world object to make sure the _world override mechanism
 _pg_map: Dict[ProcessGroup, Tuple[str, Optional[Store]]] = {}
@@ -336,6 +388,7 @@ _pg_backend_config: Dict[ProcessGroup, str] = {}
 _group_count = 0
 _tags_to_pg: Dict[str, List[ProcessGroup]] = {}
 _pg_to_tag: Dict[ProcessGroup, str] = {}
+_pg_coalesce_state: Dict[ProcessGroup, List[Union[CollOp, P2POp]]] = {}
 
 class _World:
     """
@@ -427,6 +480,11 @@ class _World:
     def pg_to_tag(self) -> Dict[ProcessGroup, str]:
         global _pg_to_tag
         return _pg_to_tag
+
+    @property
+    def pg_coalesce_state(self) -> Dict[ProcessGroup, List[Union[CollOp, P2POp]]]:
+        global _pg_coalesce_state
+        return _pg_coalesce_state
 
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
@@ -1186,6 +1244,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _world.pg_backend_config.clear()
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
+        _world.pg_coalesce_state.clear()
 
         # when process group doesn't have an explicit name (only WORLD (default)
         # process group can have an explicit name), we use global _world.group_count
@@ -1201,6 +1260,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
+        del _world.pg_coalesce_state[pg]
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -1412,47 +1472,63 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
         return src
 
 
-class P2POp:
+@contextlib.contextmanager
+def _coalescing_manager(group: Optional[ProcessGroup] = None, device: Optional[torch.device] = None, reqs: Optional[List] = None):
     """
-    A class to build point-to-point operations for ``batch_isend_irecv``.
-
-    This class builds the type of P2P operation, communication buffer, peer rank,
-    Process Group group, and tag. Instances of this class will be passed to
-    ``batch_isend_irecv`` for point-to-point communications.
+    A context manager used to coalesce collectives or P2P operations when possible.
 
     Args:
-        op (Callable): A function to send data to or receive data from a peer process.
-            The type of ``op`` is either ``torch.distributed.isend`` or
-            ``torch.distributed.irecv``.
-        tensor (Tensor): Tensor to send or receive.
-        peer (int): Destination or source rank.
-        group (ProcessGroup, optional): The process group to work on. If None,
+        group (`ProcessGroup`, optional): The process group to work on. If None,
             the default process group will be used.
-        tag (int, optional): Tag to match send with recv.
+        device (`torch.device`, optional): Default is None, set to a device if there isn't a `**_coalesced` implementation
+            by the backend.
+        reqs (`List`, optional): if provided, put created `Work` items in the `reqs` list. If `async_op` is False, no
+            item will be put in the list. The number of created `Work` items may vary by backend.
+
+    Examples:
+        >>> # xdoctest: +SKIP("no rank")
+        >>> reqs = []
+        >>> with _coalescing_manager(reqs=reqs):
+        >>>     for i in range(num_coll):
+        >>>         dist.all_reduce(tensors[i], async_op=True)
+        >>> for req in reqs:
+        >>>     req.wait()
     """
-
-    def __init__(self, op, tensor, peer, group=None, tag=0):
-        self.op = op
-        self.tensor = tensor
-        self.peer = peer
-        self.group = group
-        self.tag = tag
-
-    def __new__(cls, op, tensor, peer, group=None, tag=0):
-        _check_op(op)
-        _check_single_tensor(tensor, "tensor")
-        return object.__new__(cls)
-
-
-@contextlib.contextmanager
-def _coalescing_manager(group, device, reqs):
     if group is None:
         group = _get_default_group()
-    group._start_coalescing(device)
+    op_list = _world.pg_coalesce_state.setdefault(group, [])
+    if op_list:
+        raise RuntimeError("ProcessGroup has non-empty op list at the start of coalescing")
+    if device:
+        group._start_coalescing(device)
     try:
         yield
     finally:
-        group._end_coalescing(device, reqs)
+        op_list = _world.pg_coalesce_state.pop(group)
+        fast_path = False
+
+        if op_list:
+            op0 = op_list[0].op
+            # Try "Fast Path" if available
+            # Currently available:
+            # - allreduce_coalesced
+            if op0 == all_reduce:
+                fast_path = True
+                tensors = []
+                for op in op_list:
+                    tensors.append(op.tensor)
+                opts = AllreduceCoalescedOptions()
+                opts.reduceOp = op_list[0].redop_or_root
+                work = group.allreduce_coalesced(tensors, opts)
+                async_op = op_list[0].async_op
+                if async_op and reqs is not None:
+                    reqs.append(work)
+                else:
+                    work.wait()
+
+        if not fast_path:
+            # Old style of letting each coll inside the context manager to call into C++ counterpart via python binding
+            group._end_coalescing(device, reqs)
 
 
 def batch_isend_irecv(p2p_op_list):
@@ -1739,10 +1815,15 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     opts = AllreduceOptions()
     opts.reduceOp = op
     if group is None:
-        default_pg = _get_default_group()
-        work = default_pg.allreduce([tensor], opts)
-    else:
-        work = group.allreduce([tensor], opts)
+        group = _get_default_group()
+
+    if group in _world.pg_coalesce_state.keys():
+        # We are in coalescing context, do not issue single operation, just append a collective representation
+        coll = CollOp(all_reduce, tensor, None, op, async_op)
+        _world.pg_coalesce_state[group].append(coll)
+        return
+
+    work = group.allreduce([tensor], opts)
 
     if async_op:
         return work
