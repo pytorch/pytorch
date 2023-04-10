@@ -13975,7 +13975,6 @@ op_db: List[OpInfo] = [
                    ref=np_sinc_with_fp16_as_fp32,
                    aliases=('special.sinc',),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    handles_large_floats=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
