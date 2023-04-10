@@ -330,7 +330,7 @@ index_select_add(
     auto numel = add_indices.numel();
 
     Tensor src_fp32 = at::empty({ddim}, src.options().dtype(at::kFloat));
-    auto* src_data_fp32 = src_fp32.data_ptr<float>();
+    auto* src_data_fp32 = src_fp32.mutable_data_ptr<float>();
 
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 =
@@ -603,7 +603,7 @@ index_select_scale_add(
     }
 
     Tensor scale_fp32 = at::empty(scale.sizes(), scale.options().dtype(at::kFloat));
-    auto* scale_data_fp32 = scale_fp32.data_ptr<float>();
+    auto* scale_data_fp32 = scale_fp32.mutable_data_ptr<float>();
 
 #if defined(USE_FBGEMM)
     bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
