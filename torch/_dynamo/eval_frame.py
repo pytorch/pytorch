@@ -369,7 +369,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):
-            log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
+            log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
