@@ -34,9 +34,11 @@ class ParallelMode(ABC):
     @abstractmethod
     def transform_and_compile(self, gm: GraphModule) -> GraphModule:
         """
-        Transform a distributed graph with a set of graph transformation
-        and optimization passes for each parallel mode. The returned result
-        should be a parallel executable graph.
+        Transform and compile a distributed graph with a set of graph
+        transformation and optimization passes for each parallel mode.
+
+        The returned result should be a compiled executable graph in
+        the distributed environment.
         """
         # TODO: add more necessary arguments to this interface.
         raise NotImplementedError()
@@ -51,7 +53,7 @@ class DTensorFallbackMode(ParallelMode):
 
     def __init__(self, custom_passes: Callable[[GraphModule], GraphModule] = None):
         self._placements_override: Dict[int, List[Placement]] = {}
-        self._gm_passes: Callable = custom_passes
+        self._gm_passes: Callable[[GraphModule], GraphModule] = custom_passes
 
     def partition(
         self,
@@ -105,7 +107,8 @@ class DTensorFallbackMode(ParallelMode):
 
     def transform_and_compile(self, gm: GraphModule) -> GraphModule:
         """
-        Transform a distributed graph with a set of graph transformation
+        Transform and compile a distributed graph with a set of graph transformation
         and optimization passes for the dtensor fallback parallel mode.
         """
+        # TODO: move the trasnformation passed to this function
         raise NotImplementedError()
