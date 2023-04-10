@@ -640,12 +640,13 @@ class Reduction(Loops):
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
 
-        _, (_, reduction_vars), _ = dependencies.index_vars_squeeze(
+        _, (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
             r.get_size(), r.get_reduction_size()
         )
         num_outer = 0
         num_inner = 0
         for i in indices:
+            i = V.graph.sizevars.simplify_with_ranges(i, ranges)
             strides = V.graph.sizevars.stride_hints(i, reduction_vars)
             outer = all([s > 1 for s in strides])
             if outer:
