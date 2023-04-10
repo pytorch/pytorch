@@ -189,22 +189,32 @@ def launch_agent(
 
     logger.info(
         "Starting elastic_operator with launch configs:\n"
-        "  entrypoint       : %s\n"
-        "  min_nodes        : %s\n"
-        "  max_nodes        : %s\n"
-        "  nproc_per_node   : %s\n"
-        "  run_id           : %s\n"
-        "  rdzv_backend     : %s\n"
-        "  rdzv_endpoint    : %s\n"
-        "  rdzv_configs     : %s\n"
-        "  max_restarts     : %s\n"
-        "  monitor_interval : %s\n"
-        "  log_dir          : %s\n"
-        "  metrics_cfg      : %s\n",
-        entrypoint_name, config.min_nodes, config.max_nodes,
-        config.nproc_per_node, config.run_id, config.rdzv_backend,
-        config.rdzv_endpoint, config.rdzv_configs, config.max_restarts,
-        config.monitor_interval, config.log_dir, config.metrics_cfg
+        "  entrypoint       : %(entrypoint)s\n"
+        "  min_nodes        : %(min_nodes)s\n"
+        "  max_nodes        : %(max_nodes)s\n"
+        "  nproc_per_node   : %(nproc_per_node)s\n"
+        "  run_id           : %(run_id)s\n"
+        "  rdzv_backend     : %(rdzv_backend)s\n"
+        "  rdzv_endpoint    : %(rdzv_endpoint)s\n"
+        "  rdzv_configs     : %(rdzv_configs)s\n"
+        "  max_restarts     : %(max_restarts)s\n"
+        "  monitor_interval : %(monitor_interval)s\n"
+        "  log_dir          : %(log_dir)s\n"
+        "  metrics_cfg      : %(metrics_cfg)s\n",
+        {
+            "entrypoint": entrypoint_name,
+            "min_nodes": config.min_nodes,
+            "max_nodes": config.max_nodes,
+            "nproc_per_node": config.nproc_per_node,
+            "run_id": config.run_id,
+            "rdzv_backend": config.rdzv_backend,
+            "rdzv_endpoint": config.rdzv_endpoint,
+            "rdzv_configs": config.rdzv_configs,
+            "max_restarts": config.max_restarts,
+            "monitor_interval": config.monitor_interval,
+            "log_dir": config.log_dir,
+            "metrics_cfg": config.metrics_cfg
+        }
     )
 
     rdzv_parameters = RendezvousParameters(

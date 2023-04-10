@@ -564,24 +564,30 @@ class SimpleElasticAgent(ElasticAgent):
         restart_count = spec.max_restarts - self._remaining_restarts
 
         log.info(
-            "[%s] Rendezvous complete for workers. Result:\n"
-            "  restart_count=%s\n"
-            "  master_addr=%s\n"
-            "  master_port=%s\n"
-            "  group_rank=%s\n"
-            "  group_world_size=%s\n"
-            "  local_ranks=%s\n"
-            "  role_ranks=%s\n"
-            "  global_ranks=%s\n"
-            "  role_world_sizes=%s\n"
-            "  global_world_sizes=%s\n",
-            spec.role, restart_count, master_addr, master_port,
-            group_rank, group_world_size,
-            [worker.local_rank for worker in workers],
-            [worker.role_rank for worker in workers],
-            [worker.global_rank for worker in workers],
-            [worker.role_world_size for worker in workers],
-            [worker.world_size for worker in workers]
+            "[%(role)s] Rendezvous complete for workers. Result:\n"
+            "  restart_count=%(restart_count)s\n"
+            "  master_addr=%(master_addr)s\n"
+            "  master_port=%(master_port)s\n"
+            "  group_rank=%(group_rank)s\n"
+            "  group_world_size=%(group_world_size)s\n"
+            "  local_ranks=%(local_ranks)s\n"
+            "  role_ranks=%(role_ranks)s\n"
+            "  global_ranks=%(global_ranks)s\n"
+            "  role_world_sizes=%(role_world_sizes)s\n"
+            "  global_world_sizes=%(global_world_sizes)s\n",
+            {
+                "role": spec.role,
+                "restart_count": restart_count,
+                "master_addr": master_addr,
+                "master_port": master_port,
+                "group_rank": group_rank,
+                "group_world_size": group_world_size,
+                "local_ranks": [worker.local_rank for worker in workers],
+                "role_ranks": [worker.role_rank for worker in workers],
+                "global_ranks": [worker.global_rank for worker in workers],
+                "role_world_sizes": [worker.role_world_size for worker in workers],
+                "global_world_sizes": [worker.world_size for worker in workers]
+            }
         )
 
     def _get_ranks(
