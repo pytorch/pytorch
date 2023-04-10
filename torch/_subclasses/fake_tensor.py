@@ -1161,6 +1161,9 @@ class FakeTensorMode(TorchDispatchMode):
             func, converter, args, kwargs
         )
 
+        # TODO: write this comment
+        flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
+
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
         # Because each operation is run in order, we can trace out and support
