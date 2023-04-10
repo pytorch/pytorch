@@ -72,7 +72,7 @@ class Shard(Placement):
                 for idx, _ in enumerate(chunk_sizes)
                 if idx > 0 and chunk_sizes[idx] < chunk_sizes[idx - 1]
             ),
-            -1,
+            0,
         )
         # Compute pad size on each trunk
         pad_sizes = [
@@ -136,11 +136,11 @@ class Shard(Placement):
             return tensor
 
     def _unpad_concat_tensor(
-        self, tensor: torch.Tensor, padding_idx: int, pad_sizes: List[int], shard_count: int
+        self, tensor: torch.Tensor, pad_sizes: List[int], shard_count: int
     ) -> torch.Tensor:
         gathered_list = torch.chunk(tensor, shard_count, dim=self.dim)
         gathered_list = [
-            self._unpad_tensor(gathered_tensor) if pad_sizes[i] > 0 else gathered_tensor
+            self._unpad_tensor(gathered_tensor, pad_sizes[i]) if pad_sizes[i] > 0 else gathered_tensor
             for i, gathered_tensor in enumerate(gathered_list)
         ]
         return torch.cat(gathered_list, dim=self.dim)
