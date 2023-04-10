@@ -4,7 +4,7 @@ from typing import Callable, Optional, Tuple, Union
 import torch
 import torch.nn.functional as F
 
-from .base_sparsifier import BaseSparsifier
+from .base_pruner import BasePruner
 
 __all__ = ["WeightNormSparsifier"]
 
@@ -13,7 +13,7 @@ def _flat_idx_to_2d(idx, shape):
     cols = idx % shape[1]
     return rows, cols
 
-class WeightNormSparsifier(BaseSparsifier):
+class WeightNormSparsifier(BasePruner):
     r"""Weight-Norm Sparsifier
 
     This sparsifier computes the norm of every sparse block and "zeroes-out" the

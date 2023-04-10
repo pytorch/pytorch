@@ -7,7 +7,7 @@ import re
 
 import torch
 from torch import nn
-from torch.ao.pruning import BaseSparsifier, WeightNormSparsifier, FakeSparsity, NearlyDiagonalSparsifier
+from torch.ao.pruning import BasePruner, WeightNormSparsifier, FakeSparsity, NearlyDiagonalSparsifier
 from torch.nn.utils.parametrize import is_parametrized
 
 from torch.testing._internal.common_utils import TestCase
@@ -16,10 +16,10 @@ from torch.testing._internal.common_pruning import SimpleLinear, MockSparseLinea
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 
-class TestBaseSparsifier(TestCase):
+class TestBasePruner(TestCase):
     def test_constructor(self):
         # Cannot instantiate the abstract base
-        self.assertRaises(TypeError, BaseSparsifier)
+        self.assertRaises(TypeError, BasePruner)
         # Can instantiate the model with no configs
         model = SimpleLinear()
         sparsifier = ImplementedSparsifier(test=3)

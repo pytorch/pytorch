@@ -3,7 +3,7 @@ from ._mappings import get_dynamic_sparse_quantized_mapping
 from ._mappings import get_static_sparse_quantized_mapping
 
 # Sparsifier
-from .sparsifier.base_sparsifier import BaseSparsifier
+from .sparsifier.base_pruner import BasePruner
 from .sparsifier.weight_norm_sparsifier import WeightNormSparsifier
 from .sparsifier.nearly_diagonal_sparsifier import NearlyDiagonalSparsifier
 
