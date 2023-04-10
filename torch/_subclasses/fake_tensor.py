@@ -1161,7 +1161,8 @@ class FakeTensorMode(TorchDispatchMode):
             func, converter, args, kwargs
         )
 
-        # TODO: write this comment
+        # Recompute flat_arg_fake_tensors here again in case some of the inputs
+        # were real tensors and fakified in validate_and_convert_non_fake_tensors
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
 
         # The current constant handling only support tracing systems
