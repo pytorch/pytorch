@@ -17,12 +17,16 @@ from typing import (
     Union,
 )
 
+from functorch import make_fx
+
 import torch
 import torch.distributed as dist
+
+# We need to import _functional_collectives to trigger op registration
+import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
 
-from functorch import make_fx
 from torch import fx
 from torch.distributed._spmd.distribute import (
     _convert_to_distributed,
@@ -381,8 +385,8 @@ FOREACH_DECOMP_TABLE = {
 
 
 DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
-    aten.all_reduce.default,
-    aten.wait_tensor.default,
+    torch.ops.c10d_functional.all_reduce.default,
+    torch.ops.c10d_functional.wait_tensor.default,
 }
 
 
