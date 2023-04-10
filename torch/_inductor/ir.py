@@ -2253,7 +2253,9 @@ class ComputedBuffer(Buffer):
         except Exception:
             if config.debug:
                 log.warning(
-                    f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+                    "Did not simplify complex index:\n%s\n%s",
+                    dict(zip(index_vars, sizes)),
+                    memory_addrs,
                 )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]

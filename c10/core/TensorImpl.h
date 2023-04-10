@@ -1545,7 +1545,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   struct data_dtype_initialized_impl {
     static_assert(std::is_same<
                   std::remove_const_t<std::remove_reference_t<Self>>,
-                  TensorImpl>::value);
+                  TensorImpl>::value,
+                  "Self must be TensorImpl.");
 
     template <typename U>
     using MaybeConstT = std::conditional_t<
@@ -1587,7 +1588,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   struct data_ptr_impl {
     static_assert(std::is_same<
                   std::remove_const_t<std::remove_reference_t<Self>>,
-                  TensorImpl>::value);
+                  TensorImpl>::value,
+                  "Self must be TensorImpl.");
 
     template <typename U>
     using MaybeConstT = std::conditional_t<
@@ -1651,7 +1653,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   struct data_impl {
     static_assert(std::is_same<
                   std::remove_const_t<std::remove_reference_t<Self>>,
-                  TensorImpl>::value);
+                  TensorImpl>::value,
+                  "Self must be TensorImpl.");
     // Carries the constness of the TensorImpl and can apply it to additional
     // types.
     template <typename T>
