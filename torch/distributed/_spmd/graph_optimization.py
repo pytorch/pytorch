@@ -593,11 +593,13 @@ class FusedAdamBlock:
             assert (
                 optim_getitem != self.optim_node
             ), f"Cannot find the getitem node for {self.optim_node}"
-            output_list.extend([self.optim_node] * len(self.optim_node.args[0]))
+            output_list.extend(
+                [self.optim_node] * len(cast(List[fx.Node], self.optim_node.args[0]))
+            )
             for updated_arg in optim_getitem.users:
                 assert (
                     updated_arg.target == operator.getitem
-                ), f"Unexpected node target {update_arg.target}."
+                ), f"Unexpected node target {updated_arg.target}."
                 idx = updated_arg.args[1]
                 output_copy = next(iter(updated_arg.users))
                 assert str(output_copy.target).startswith(
@@ -634,7 +636,7 @@ class ForeachAddBlock:
         # Assuming the corrsesponding output nodes are not created yet.
         graph = self.add_node.graph
         with graph.inserting_after(self.add_node):
-            for i, arg in enumerate(self.add_node.args[0]):
+            for i, arg in enumerate(cast(Tuple[Any, ...], self.add_node.args[0])):
                 with graph.inserting_after(self.add_node):
                     updated_arg = graph.call_function(
                         operator.getitem, (self.add_node, i)
@@ -646,12 +648,14 @@ class ForeachAddBlock:
 
     def populate_outputs(self):
         # Populate the existing output lists from the graph.
-        self.outputs = [self.add_node for _ in self.add_node.args[0]]
+        self.outputs = [
+            self.add_node for _ in cast(Tuple[Any, ...], self.add_node.args[0])
+        ]
         for updated_arg in self.add_node.users:
             assert (
                 updated_arg.target == operator.getitem
-            ), f"Unexpected node target {update_arg.target}"
-            idx = updated_arg.args[1]
+            ), f"Unexpected node target {updated_arg.target}"
+            idx = cast(int, updated_arg.args[1])
             output_copy = next(iter(updated_arg.users))
             assert str(output_copy.target).startswith(
                 "aten.copy_"
@@ -762,7 +766,7 @@ def _split_fused_adam(
         old_step_getitem = old_step_output.args[1]
         assert "getitem" in str(
             old_step_getitem.target
-        ), f"The copy getitem is {old_ste_getitem.target}, expect operator.getitem"
+        ), f"The copy getitem is {old_step_getitem.target}, expect operator.getitem"
         old_step_idx = old_step_getitem.args[1]
         orig_step_indices[group_idx].append(old_step_idx)
 
@@ -792,7 +796,11 @@ def _split_fused_adam(
         with gm.graph.inserting_after(orig_optim_block.optim.optim_node):
             assert orig_step_indices[group_idx], orig_step_indices
             for idx in orig_step_indices[group_idx]:
-                step_args.append(orig_optim_block.step.add_node.args[0][idx])
+                step_args.append(
+                    cast(Tuple[fx.Node, ...], orig_optim_block.step.add_node.args[0])[
+                        idx
+                    ]
+                )
                 assert step_args, step_args
                 orig_step_outputs.append(orig_optim_block.step.outputs[idx])
             step = gm.graph.call_function(
@@ -850,7 +858,7 @@ def _split_fused_adam(
     # This is not required but calling this for consistency.
     gm.graph.eliminate_dead_code()
 
-    return result
+    return result[0], result[1]
 
 
 def split_fused_optimizer(

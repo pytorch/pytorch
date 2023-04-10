@@ -5,7 +5,6 @@ from copy import deepcopy
 from functools import wraps
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from torch._inductor.utils import has_triton
 from torch.distributed._spmd.api import compile
@@ -209,12 +208,10 @@ class TransformationTest(DTensorTestBase):
             gm = IterGraphModule(gm)
             remove_copy_from_optimizer(gm)
             opt_block = get_all_fused_optimizer_blocks(gm, "_fused_adam")[0]
-            gradients = set(
-                [
-                    opt_block.optim.optim_node.args[1][1],
-                    opt_block.optim.optim_node.args[1][2],
-                ]
-            )
+            gradients = {
+                opt_block.optim.optim_node.args[1][1],
+                opt_block.optim.optim_node.args[1][2],
+            }
             split_fused_optimizer(gm, opt_block, gradients)
             gm.graph.eliminate_dead_code()
             gm.recompile()
