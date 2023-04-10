@@ -22,7 +22,7 @@ sparse_defaults = {
     "zeros_per_block": 4,
 }
 
-def _get_model_and_sparsifier_and_sparse_config(qconfig=None):
+def _get_model_and_pruner_and_sparse_config(qconfig=None):
     model = nn.Sequential(
         nn.Linear(4, 4),  # 0
         nn.ReLU(),
@@ -37,7 +37,7 @@ def _get_model_and_sparsifier_and_sparse_config(qconfig=None):
         model[4].qconfig = qconfig
         model[5].qconfig = qconfig
 
-    sparsifier = pruning.WeightNormSparsifier(**sparse_defaults)
+    pruner = pruning.WeightNormPruner(**sparse_defaults)
 
     sparse_config = [
         {
@@ -48,7 +48,7 @@ def _get_model_and_sparsifier_and_sparse_config(qconfig=None):
         },
         {"tensor_fqn": "0.weight"},
     ]
-    return model, sparsifier, sparse_config
+    return model, pruner, sparse_config
 
 def _squash_mask_calibrate_and_convert(model, sparsifier, input):
     sparsifier.step()
