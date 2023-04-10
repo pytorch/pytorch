@@ -11,10 +11,14 @@ from torch.fx import GraphModule
 
 
 class ParallelMode(ABC):
-    """Basic Parallel Mode interface."""
+    """
+    Basic Parallel Mode interface. Each parallelism pattern should implement
+    this interface to describe how to partition and compile the graph in the
+    spmd compiler.
+    """
 
     @abstractmethod
-    def expand(
+    def partition(
         self,
         gm: GraphModule,
         params_and_buffers: Dict[str, Any],
@@ -22,31 +26,34 @@ class ParallelMode(ABC):
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
     ) -> GraphModule:
-        """expand a single device graph to a distributed graph."""
+        """
+        Partition a single device graph to a distributed graph.
+        """
         raise NotImplementedError()
 
     @abstractmethod
-    def optimize(self, gm: GraphModule) -> GraphModule:
-        """optimize a distributed graph with a set of optimization passes"""
+    def transform_and_compile(self, gm: GraphModule) -> GraphModule:
+        """
+        Transform a distributed graph with a set of graph transformation
+        and optimization passes for each parallel mode. The returned result
+        should be a parallel executable graph.
+        """
         # TODO: add more necessary arguments to this interface.
-        raise NotImplementedError()
-
-    def configure_optimization_passes(self, _: List[Callable]) -> None:
-        """a way to configure optimization passes per parallel mode"""
         raise NotImplementedError()
 
 
 class DTensorFallbackMode(ParallelMode):
-    """The DTensor fallback parallel mode. It's replicating the parameters
+    """
+    The DTensor fallback parallel mode. It's replicating the parameters
     and shard the inputs to represent DDP like behavior, it's currently
     a transitent mode before we move to the new data parallel expansion.
     """
 
-    def __init__(self):
+    def __init__(self, custom_passes: Callable[[GraphModule], GraphModule] = None):
         self._placements_override: Dict[int, List[Placement]] = {}
-        self._optimization_passes: List[Callable] = []
+        self._gm_passes: Callable = custom_passes
 
-    def expand(
+    def partition(
         self,
         gm: GraphModule,
         params_and_buffers: Dict[str, Any],
@@ -96,6 +103,9 @@ class DTensorFallbackMode(ParallelMode):
 
         return _convert_to_distributed(gm, inps, schemas, _allow_partial=False)
 
-    def optimize(self, gm: GraphModule) -> GraphModule:
-        """optimize a distributed graph with a set of optimization passes"""
+    def transform_and_compile(self, gm: GraphModule) -> GraphModule:
+        """
+        Transform a distributed graph with a set of graph transformation
+        and optimization passes for the dtensor fallback parallel mode.
+        """
         raise NotImplementedError()

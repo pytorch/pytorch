@@ -72,6 +72,7 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        if: ${{ !contains(matrix.runner, 'gcp.a100') }}
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -284,9 +285,7 @@ jobs:
       # As both the root cause and recovery path are unclear, let's take the runner out of
       # service so that it doesn't get any more jobs
       - name: Check NVIDIA driver installation step
-        if:
-          failure() &&
-          ((steps.install-nvidia-driver.conclusion && steps.install-nvidia-driver.conclusion == 'failure') || (contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')))
+        if: failure() && steps.install-nvidia-driver.outcome && steps.install-nvidia-driver.outcome != 'skipped'
         shell: bash
         env:
           RUNNER_WORKSPACE: ${{ runner.workspace }}
@@ -295,10 +294,58 @@ jobs:
           set -x
 
           nvidia-smi
+          # NB: Surprisingly, nvidia-smi command returns successfully with return code 0 even in
+          # the case where the driver has already crashed as it still can get the driver version
+          # and some basic information like the bus ID.  However, the rest of the information
+          # would be missing (ERR!), for example:
+          #
+          # +-----------------------------------------------------------------------------+
+          # | NVIDIA-SMI 525.89.02    Driver Version: 525.89.02    CUDA Version: 12.0     |
+          # |-------------------------------+----------------------+----------------------+
+          # | GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+          # | Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+          # |                               |                      |               MIG M. |
+          # |===============================+======================+======================|
+          # |   0  ERR!                Off  | 00000000:00:1E.0 Off |                 ERR! |
+          # |ERR!  ERR! ERR!    ERR! / ERR! |   4184MiB / 23028MiB |    ERR!      Default |
+          # |                               |                      |                 ERR! |
+          # +-------------------------------+----------------------+----------------------+
+          #
+          # +-----------------------------------------------------------------------------+
+          # | Processes:                                                                  |
+          # |  GPU   GI   CI        PID   Type   Process name                  GPU Memory |
+          # |        ID   ID                                                   Usage      |
+          # |=============================================================================|
+          # +-----------------------------------------------------------------------------+
+          #
+          # This should be reported as a failure instead as it will guarantee to fail when
+          # Docker tries to run with --gpus all
+          #
+          # So, the correct check here is to query one of the missing piece of info like
+          # GPU name, so that the command can fail accordingly
+          nvidia-smi --query-gpu=gpu_name --format=csv,noheader --id=0
           NVIDIA_SMI_STATUS=$?
 
           # These are acceptable return code from nvidia-smi as copied from setup-nvidia GitHub action
           if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
             echo "NVIDIA driver installation has failed, shutting down the runner..."
+            .github/scripts/stop_runner_service.sh
+          fi
+
+          # For runner with multiple GPUs, we also want to confirm that the number of GPUs are the
+          # power of 2, i.e. 1, 2, 4, or 8. This is to avoid flaky test issue when one GPU fails
+          # https://github.com/pytorch/test-infra/issues/4000
+          GPU_COUNT=$(nvidia-smi --list-gpus | wc -l)
+          NVIDIA_SMI_STATUS=$?
+
+          # These are acceptable return code from nvidia-smi as copied from setup-nvidia GitHub action
+          if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
+            echo "NVIDIA driver installation has failed, shutting down the runner..."
+            .github/scripts/stop_runner_service.sh
+          fi
+
+          # Check the GPU count to be a power of 2
+          if [ "$GPU_COUNT" -le 8 ] && [ "$GPU_COUNT" -ne 1 ] && [ "$GPU_COUNT" -ne 2 ] && [ "$GPU_COUNT" -ne 4 ] && [ "$GPU_COUNT" -ne 8 ]; then
+            echo "NVIDIA driver detects $GPU_COUNT GPUs. The runner has a broken GPU, shutting it down..."
             .github/scripts/stop_runner_service.sh
           fi
