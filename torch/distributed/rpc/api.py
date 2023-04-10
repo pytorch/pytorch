@@ -483,7 +483,7 @@ except TypeError:
 # This is for the fact that pybind11 generates the parameter
 # `self` as type `rpc.PyRRef`, so a `:inherited-members:`
 # under `.. autoclass:: RRef` does not work.
-# we have to do the following process to replacee `rpc.PyRRef` with `rpc.RRef`.
+# we have to do the following process to replace `rpc.PyRRef` with `rpc.RRef`.
 #
 def method_factory(method_name, docstring):
     def method(self, *args, **kwargs):
