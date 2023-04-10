@@ -97,7 +97,7 @@ class PackedConv2d(nn.Conv2d):
     def __init__(
         self,
         conv: nn.Module,
-        input_size: list,
+        input_size: Optional[list],
     ):
         super().__init__(
             conv.in_channels,
@@ -251,7 +251,7 @@ class ConvBinary2d(nn.Conv2d):
 
 
 class PackedLinearFP32(nn.Linear):
-    def __init__(self, linear: nn.Module, input_size: list):
+    def __init__(self, linear: nn.Module, input_size: Optional[list]):
         super().__init__(
             linear.in_features,
             linear.out_features,
@@ -279,7 +279,7 @@ class PackedLinearFP32(nn.Linear):
 
 
 class PackedLinearBF16(nn.Linear):
-    def __init__(self, linear: nn.Module, input_size: list):
+    def __init__(self, linear: nn.Module, input_size: Optional[list]):
         super().__init__(
             linear.in_features,
             linear.out_features,
@@ -452,7 +452,9 @@ def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: Optional[l
     )
 
 
-def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str, input_size: list):
+def fused_conv_binary_eval(
+    conv: nn.Module, binary_op_name: str, input_size: Optional[list]
+):
     assert not (conv.training), "Fusion only for eval!"
     return ConvBinary2d(
         conv,
