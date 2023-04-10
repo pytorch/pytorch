@@ -74,13 +74,13 @@ class Shard(Placement):
             ),
             0,
         )
-        # Compute pad size on each trunk
+        # Compute pad size on each chunk
         pad_sizes = [
             full_chunk_size - chunk_size if idx >= idx_start_to_pad else 0
             for idx, chunk_size in enumerate(chunk_sizes)
         ]
 
-        # Fill empty trunk with empty tensor
+        # Fill empty chunk with empty tensor
         num_empty_tensors = num_chunks - len(tensor_list)
         device = torch.device(
             tensor.get_device() if torch.cuda.is_available() else "cpu"
@@ -94,9 +94,7 @@ class Shard(Placement):
             for shard, pad_size in zip(tensor_list, pad_sizes):
                 # Fill the empty tensor with zeroes with padding.
                 if with_padding and pad_size == full_chunk_size:
-                    shard_shape = list(tensor_list[0].shape)
-                    shard_shape = [dim if dim >= self.dim else 0 for dim in shard_shape]
-                    shard = torch.zeros(shard_shape, device=device)
+                    shard = self._pad_tensor(shard, pad_size, tensor_list[0])
                 elif with_padding and pad_size > 0:
                     shard = self._pad_tensor(shard, pad_size)
                 shard = shard.contiguous() if contiguous else shard
@@ -109,10 +107,19 @@ class Shard(Placement):
         self,
         tensor: torch.Tensor,
         pad_size: int,
+        reference_tensor: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        pad = [0, 0] * (tensor.ndim - self.dim)
-        pad[-1] = pad_size
-        return torch.nn.functional.pad(tensor, pad)
+        if tensor.numel() == 0:
+            device = torch.device(
+                tensor.get_device() if torch.cuda.is_available() else "cpu"
+            )
+            shard_size = list(reference_tensor.shape)
+            shard_size = [dim if dim >= self.dim else 0 for dim in shard_size]
+            return torch.zeros(shard_size, device=device)
+        else:
+            pad = [0, 0] * (tensor.ndim - self.dim)
+            pad[-1] = pad_size
+            return torch.nn.functional.pad(tensor, pad)
 
     def _unpad_tensor(
         self,
@@ -262,17 +269,14 @@ class Shard(Placement):
             my_coordinate is not None
         ), "Rank if not part of mesh"  # TODO: figure out behavior here
         # check if it needs to pad input tensor before all_gather
-        full_trunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
-        chunks_sizes = []
-        for idx in range(num_chunks):
-            chunks_sizes.append(
-                max(
-                    min(size[self.dim], full_trunk_size * (idx + 1))
-                    - full_trunk_size * idx,
-                    0,
-                )
+        full_chunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
+        chunk_sizes = [
+            max(
+                min(size[self.dim], full_chunk_size * (idx + 1)) - full_chunk_size * idx, 0
             )
-        pad_sizes = [full_trunk_size - chunk_size for chunk_size in chunks_sizes]
+            for idx in range(num_chunks)
+        ]
+        pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
         is_padded = not all(pad_size == 0 for pad_size in pad_sizes)
 
         pad_size = pad_sizes[my_coordinate[mesh_dim]]
