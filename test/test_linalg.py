@@ -7443,8 +7443,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch.backends.cuda.preferred_linalg_library('cusolver')
         out1 = torch.linalg.inv(x)
 
-        torch.backends.cuda.preferred_linalg_library('magma')
-        out2 = torch.linalg.inv(x)
+        if torch.cuda.has_magma:
+            torch.backends.cuda.preferred_linalg_library('magma')
+            out2 = torch.linalg.inv(x)
+        else:
+            out2 = out1
 
         torch.backends.cuda.preferred_linalg_library('default')
         # Although linalg preferred flags doesn't affect CPU currently,
