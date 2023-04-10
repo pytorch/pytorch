@@ -587,7 +587,7 @@ class PatternMatcherPass:
                         break
                     m = entry.pattern.match(node)
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
-                        log.warning(f"{node}{node.args} {m} {entry.pattern}")
+                        log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
                     if m and entry.extra_check(m):
                         count += 1
                         entry.apply(m, graph, node)
@@ -874,6 +874,7 @@ def cat_slice_cat(match, cat_input, size, dim=1):
         cat_2 = torch.ops.aten.cat.default([add_26, primals_217, slice2], 1)
     """
     first, *rest = cat_input
+    # Optimization is optional, because we can just not fold the cat
     if V.graph.sizevars.maybe_guard_leq(size, first.get_size()[dim]):
         # fold 2 cats into 1 cat
         return L[aten.cat](
