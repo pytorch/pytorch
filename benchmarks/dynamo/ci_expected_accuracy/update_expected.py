@@ -90,19 +90,21 @@ def download_artifacts_and_extract_csvs(urls):
             for phase in ("training", "inference"):
                 name = f"test/test-reports/{phase}_{subsuite}.csv"
                 df = pd.read_csv(artifact.open(name))
-                dataframes[(suite, phase, shard)] = df
+                prev_df = dataframes.get((suite, phase), None)
+
+                dataframes[(suite, phase)] = (
+                    pd.concat([prev_df, df]) if prev_df is not None else df
+                )
+
     except urllib.error.HTTPError:
         print(f"Unable to download {url}, perhaps the CI job isn't finished?")
     return dataframes
 
 
 def write_filtered_csvs(root_path, dataframes):
-    for (suite, phase, shard), df in dataframes.items():
+    for (suite, phase), df in dataframes.items():
         suite_fn = normalize_suite_filename(suite)
-        if "timm" in suite:
-            out_fn = os.path.join(root_path, f"{phase}_{suite_fn}{shard - 1}.csv")
-        else:
-            out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
+        out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
         df.to_csv(out_fn, index=False, columns=["name", "graph_breaks"])
 
 
