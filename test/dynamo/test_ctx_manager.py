@@ -16,6 +16,19 @@ from torch.testing._internal.common_cuda import (
 )
 
 
+class CutomizedCtxManager:
+    def __init__(self, mode):
+        self.prev = torch.is_grad_enabled()
+        torch._C._set_grad_enabled(mode)
+        self.mode = mode
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        torch._C._set_grad_enabled(self.prev)
+
+
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_no_grad(self):
         def fn1(a, b):
@@ -543,3 +556,40 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.torch.float16)
+
+    def test_generic_context_manager(self):
+        def fn(x):
+            with CutomizedCtxManager(True):
+                if torch.is_grad_enabled():
+                    x = x + 2
+                x = torch.relu(x)
+            return x
+
+        with torch.no_grad():
+            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1)
+
+        with torch.enable_grad():
+            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1)
+
+    def test_generic_context_manager_with_graph_break(self):
+        def fn(x):
+            with CutomizedCtxManager(True):
+                if torch.is_grad_enabled():
+                    x = x + 2
+                torch._dynamo.graph_break()
+                x = torch.relu(x)
+            return x
+
+        x = torch.rand(2, 3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
+
+        with torch.no_grad():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+
+        with torch.enable_grad():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))

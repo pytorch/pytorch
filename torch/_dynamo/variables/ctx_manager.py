@@ -66,19 +66,21 @@ class ContextWrappingVariable(VariableTracker):
 
 class GenericContextWrappingVariable(ContextWrappingVariable):
     def __init__(self, target_values, initial_values=None, **kwargs):
+        cm_obj = kwargs.pop("cm_obj", None)
+        assert cm_obj is not None
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.cm_obj = cm_obj
 
     def enter(self, tx):
         options = VariableTracker.propagate(self)
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__enter__")
         )
-        cm_obj = self.target_values[0]
         return variables.UserMethodVariable(
-            cm_obj.__enter__.__func__,
-            variables.UserDefinedObjectVariable(cm_obj, **options),
+            self.cm_obj.__enter__.__func__,
+            variables.UserDefinedObjectVariable(self.cm_obj, **options),
             **options,
         ).call_function(tx, [], {})
 
@@ -87,10 +89,9 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__exit__")
         )
-        cm_obj = self.target_values[0]
         return variables.UserMethodVariable(
-            cm_obj.__exit__.__func__,
-            variables.UserDefinedObjectVariable(cm_obj, **options),
+            self.cm_obj.__exit__.__func__,
+            variables.UserDefinedObjectVariable(self.cm_obj, **options),
             **options,
         ).call_function(
             tx,
@@ -101,6 +102,12 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
             ],
             {},
         )
+
+    def module_name(self):
+        return self.cm_obj.__module__
+
+    def fn_name(self):
+        return self.cm_obj.__class__.__name__
 
 
 class GradModeVariable(ContextWrappingVariable):
