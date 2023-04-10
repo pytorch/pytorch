@@ -269,5 +269,4 @@ def _register_unary_fusion():
 
 
 def _mkldnn_fusion_init():
-    if torch._C.has_mkldnn:
-        _register_unary_fusion()
+    _register_unary_fusion()
