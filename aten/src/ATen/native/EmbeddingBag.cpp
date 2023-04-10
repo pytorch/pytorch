@@ -226,7 +226,7 @@ index_select_add(
       if (offsets.numel() > 0) {
         std::memcpy(
             offsets_include_last.data(),
-            offsets.data_ptr<index_t>(),
+            offsets.const_data_ptr<index_t>(),
             sizeof(index_t) * offsets.numel());
       }
       offsets_include_last[offsets.numel()] = select_indices.numel();
@@ -405,7 +405,7 @@ index_select_add(const Tensor &select_indices,
       if (offsets.numel() > 0) {
         std::memcpy(
             offsets_include_last.data(),
-            offsets.data_ptr<index_t>(),
+            offsets.const_data_ptr<index_t>(),
             sizeof(index_t) * offsets.numel());
       }
       offsets_include_last[offsets.numel()] = select_indices.numel();
@@ -596,7 +596,7 @@ index_select_scale_add(
       offsets_include_last.resize(offsets.numel() + 1);
       std::memcpy(
           offsets_include_last.data(),
-          offsets.data_ptr<index_t>(),
+          offsets.const_data_ptr<index_t>(),
           sizeof(index_t) * offsets.numel());
       offsets_include_last[offsets.numel()] = select_indices.numel();
       offsets_data = offsets_include_last.data();
@@ -786,7 +786,7 @@ index_select_scale_add(const Tensor &select_indices,
       offsets_include_last.resize(offsets.numel() + 1);
       std::memcpy(
           offsets_include_last.data(),
-          offsets.data_ptr<index_t>(),
+          offsets.const_data_ptr<index_t>(),
           sizeof(index_t) * offsets.numel());
       offsets_include_last[offsets.numel()] = select_indices.numel();
       offsets_data = offsets_include_last.data();
