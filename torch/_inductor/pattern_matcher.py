@@ -284,6 +284,7 @@ class CallFunction(PatternExpr):
         This is used when we are matching a pattern with multiple outputs.
         There is a partial match (stored in ctx) and we want to walk
         this pattern to find a connection to an already-matched node.
+
         Yields candidate nodes that `self._match` might like.
         """
         if self in ctx.pattern_to_node:
@@ -464,8 +465,9 @@ def register_replacement(
 ):
     """
     Create a replacement rule based on example functions that get traced
-    to create patterns.  This supports both training an inference when
+    to create patterns.  This supports both training and inference when
     run on a joint foward+backward graph.
+
     Args:
         search_fn: traced to give original pattern
         replace_fn: traced to give replacement graph
@@ -478,6 +480,7 @@ def register_replacement(
         """
         Often shapes get burned into the pattern, so our initial match ran with
         `ignore_types=(int, ...)`.
+
         Recheck the match with the correct shapes.
         """
         args = list(
