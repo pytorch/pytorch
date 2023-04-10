@@ -51,7 +51,7 @@ class FXGraphModuleExporter(torch.onnx._internal.exporter.Exporter, abc.ABC):
 
         # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes.
         # The pass added nodes with static shape into original node metadata:
-        # node.meta["static_shape"]: torch.fx.Node
+        # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
         if self.options.op_level_debug:
             module = passes.ShapeInferenceWithFakeTensor(module).run(*fx_module_args)
 

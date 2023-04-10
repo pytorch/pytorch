@@ -21,8 +21,8 @@ class ShapeInferenceWithFakeTensor(_pass.Transform):
 
         # NOTE(titaiwang): Usually fx graph should have all the node meta value we need,
         # so we don't have to run FakeTensorProp to fill in node meta values. However, this
-        # is used to validate op-level debugging when we only have symbolic shapes in
-        # graph
+        # is used to fill in static shapes, which are needed by op-level debugging,
+        # when we only have symbolic shapes in graph
 
         # Use this FakeTensorMode to
         # 1. convert nn.Parameter's in nn.Module to FakeTensor
@@ -60,7 +60,7 @@ class FakeTensorPropGetStaticShapes(torch.fx.Interpreter):
     """
     This is heavily referenced from torch.fx.passes.fake_tensor_prop.FakeTensorProp
     The only difference is that FakeTensorPropGetStaticShapes supports int/float/bool in
-    node.meta["val"]
+    node.meta["static_shape"]
 
     Args:
          module (GraphModule): The module to be executed

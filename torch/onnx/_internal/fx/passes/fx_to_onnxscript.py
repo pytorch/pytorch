@@ -6,6 +6,7 @@ import operator
 
 import re
 import types
+import warnings
 from types import FunctionType
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -462,12 +463,25 @@ def _export_fx_node_to_onnxscript(
                 node_with_fixed_shape_args,
                 node_with_fixed_shape_kwargs,
             ) = _fill_in_default_kwargs(node)
-            torch_args, torch_kwargs = op_validation.wrap_fx_args_as_torch_args(
-                node_with_fixed_shape_args, node_with_fixed_shape_kwargs
-            )
-            op_validation.validate_op_between_ort_torch(
-                node, symbolic_fn, torch_args, torch_kwargs
-            )
+            try:
+                torch_args, torch_kwargs = op_validation.wrap_fx_args_as_torch_args(
+                    node_with_fixed_shape_args, node_with_fixed_shape_kwargs
+                )
+            except ValueError as value_error:
+                warnings.warn(
+                    f"\nFound unsupported input types on PyTorch Op {node.target} with "
+                    f"ValueError: \n{value_error}.\n"
+                )
+                diagnostic = diagnostics.export_context().inflight_diagnostic()
+                diagnostic.with_additional_message(
+                    f"### Op level debug fails due to unsupported input types\n"
+                    f"{diagnostics.decorator.format_exception_in_markdown(value_error)}"
+                )
+                diagnostic.level = diagnostics.levels.ERROR
+            else:
+                op_validation.validate_op_between_ort_torch(
+                    node, symbolic_fn, torch_args, torch_kwargs
+                )
         fx_name_to_onnxscript_value[node.name] = output
     elif node.op == "output":
         if isinstance(node.args[0], torch.fx.Node):
