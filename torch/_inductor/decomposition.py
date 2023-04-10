@@ -41,8 +41,14 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
-            log.warning(f"duplicate decomp: {ops}")
+            log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten._unsafe_view.default)
+def _unsafe_view(self, size):
+    # this makes pattern matching easier
+    return self.view(size)
 
 
 @register_decomposition([aten.clamp])
