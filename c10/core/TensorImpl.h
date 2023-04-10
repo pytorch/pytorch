@@ -29,6 +29,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <type_traits>
 #include <utility>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -1503,7 +1504,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         ", while tensor contains ",
         data_type_.name(),
         ". ");
-    return data_ptr_impl<T>();
+    return legacy_mutable_data_ptr_impl<T>();
   }
 
   /**
@@ -1512,7 +1513,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * check has_storage() and storage_initialized().
    */
   template <typename T>
-  inline T* data_ptr_impl() const {
+  inline T* mutable_data_ptr_impl() {
+    return legacy_mutable_data_ptr_impl<T>();
+  }
+
+ private:
+  // The real implementation of mutable_data_ptr_impl, but in a
+  // non-const method.
+  //
+  // TODO: move the implementation into mutable_data_ptr_impl() and
+  // delete this when data<T>() is no longer const.
+  template <typename T>
+  inline T* legacy_mutable_data_ptr_impl() const {
     TORCH_CHECK(
         has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
@@ -1525,8 +1537,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
   }
 
+ public:
   /**
-   * Return a void* data pointer to the actual data which this tensor refers to.
+   * Return a const void* data pointer to the actual data which this
+   * tensor refers to.
    *
    * It is invalid to call data() on a dtype-uninitialized tensor, even if the
    * size is 0.
@@ -1535,7 +1549,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * assume that itemsize() * numel() is sufficient to compute the bytes that
    * can be validly read from this tensor.
    */
-  inline void* data() const {
+  inline const void* data() const {
+    return mutable_data_impl();
+  }
+
+  /**
+   * Return a void* data pointer to the actual data which this tensor refers to.
+   *
+   * It is invalid to call mutable_data() on a dtype-uninitialized
+   * tensor, even if the size is 0.
+   *
+   * WARNING: The data pointed to by this tensor may not contiguous; do NOT
+   * assume that itemsize() * numel() is sufficient to compute the bytes that
+   * can be validly read from this tensor.
+   */
+  inline void* mutable_data() {
+    return mutable_data_impl();
+  }
+
+ private:
+  // Templated implementation of data() and mutable_data().
+  //
+  // We are able to pull this off because unsafeGetStorageImpl() is a
+  // const method that returns a non-const StorageImpl.
+  void* mutable_data_impl() const {
     TORCH_CHECK(
         has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
@@ -1553,6 +1590,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return static_cast<void*>(data + data_type_.itemsize() * storage_offset_);
   }
 
+ public:
   /**
    * Like data<T>(), but performs no checks.  You are responsible for ensuring
    * that all invariants required by data() are upheld here.
