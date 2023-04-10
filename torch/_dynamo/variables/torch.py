@@ -836,10 +836,11 @@ class TorchHigherOrderOperator(VariableTracker):
             # Setup the subgraph we're going to capture into
             tx.output.graph = torch.fx.Graph()
             tx.output.graphargs = []
-            tx.output.name_to_input.clear()
+            tx.output.input_name_to_proxy.clear()
 
             args = []
             # One argument to graph per sub_args
+            # TODO (awgu): Do we need to de-dup here?
             for a in sub_args:
                 if isinstance(a, TensorVariable):
                     tx.output.create_graph_input(a.as_proxy().node.name)
