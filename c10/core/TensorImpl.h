@@ -1550,7 +1550,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline const void* data() const {
-    return mutable_data_impl<decltype(*this)>{}(*this, &Storage::data);
+    return data_impl<decltype(*this)>{}(*this, &Storage::data);
   }
 
   /**
@@ -1564,7 +1564,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline void* mutable_data() {
-    return mutable_data_impl<decltype(*this)>{}(*this, &Storage::mutable_data);
+    return data_impl<decltype(*this)>{}(*this, &Storage::mutable_data);
   }
 
  private:
@@ -1579,7 +1579,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //    carries the constness of the tensor and can apply it to
   //    additional types.
   template <typename Self>
-  struct mutable_data_impl {
+  struct data_impl {
     static_assert(std::is_same<
                   std::remove_const_t<std::remove_reference_t<Self>>,
                   TensorImpl>::value);
