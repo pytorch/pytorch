@@ -4,7 +4,11 @@ These functions should NOT be directly invoked outside of `passes` package.
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, Optional
+import collections
+
+import re
+
+from typing import Callable, Dict, Optional, Tuple
 
 import torch.fx
 import torch.fx.traceback as fx_traceback
@@ -28,38 +32,52 @@ def wrap_graph_module_for_node_meta_preservation(
     return wrapped
 
 
+def _get_node_base_name(node_name: str) -> Tuple[str, Optional[int]]:
+    pattern = r"(.*)\.(\d+)"
+    match = re.match(pattern, node_name)
+    if match is not None:
+        base_name, count_str = match.groups()
+        return base_name, int(count_str)
+    return node_name, None
+
+
 @_beartype.beartype
 def set_node_name(
     node: torch.fx.Node,
     new_name: str,
-    name_to_node_cache: Optional[Dict[str, torch.fx.Node]] = None,
+    name_to_node_cache: Dict[str, torch.fx.Node],
 ):
     """Safely set the unique name of a node.
 
     If the new name is already taken by another node, the name of the other node will be
-    updated to be "{new_name}.1". This function will recursively update the names until
-    there is no conflict.
+    updated. If `new_name` is a string of format f"{base_name}.{count}", where `count`
+    is an integer, the other node will be renamed as f"{base_name}.{count+1}". If not,
+    the other node will be renamed as "{new_name}.1". This function will iteratively
+    update the names until there is no conflict.
 
-    To avoid recomputing the name_to_node_cache, it can be provided as an argument. If
-    provided, the caller is responsible for ensuring the cache is accurate and in sync
-    with the owning module of the node.
+    ``name_to_node_cache`` is required as an argument to avoid recomputation. The caller
+    is responsible for ensuring the cache is accurate and in sync with the owning module
+    of the node. The values in the cache will be updated accordingly.
 
     Args:
         node: The node to update.
         new_name: The new name to use.
-        name_to_node_cache: A cache of node names to nodes. If not provided, this
-            function will build the cache from the owning module of the node.
+        name_to_node_cache: A cache of node names to nodes.
     """
     module = node.graph.owning_module
-    name_to_node_cache = name_to_node_cache or {
-        _node.name: _node for _node in module.graph.nodes
-    }
+    node_name_to_set = collections.deque([(node, new_name)])
 
-    if new_name in name_to_node_cache and name_to_node_cache[new_name] != node:
-        set_node_name(name_to_node_cache[new_name], f"{new_name}.1")
-
-    node.name = new_name
-    name_to_node_cache[new_name] = node
+    while node_name_to_set:
+        node, new_name = node_name_to_set.pop()
+        if new_name in name_to_node_cache and name_to_node_cache[new_name] != node:
+            base_name, postfix_count = _get_node_base_name(new_name)
+            if postfix_count is None:
+                postfix_count = 0
+            node_name_to_set.append(
+                (name_to_node_cache[new_name], f"{base_name}.{postfix_count + 1}")
+            )
+        node.name = new_name
+        name_to_node_cache[new_name] = node
 
 
 @_beartype.beartype

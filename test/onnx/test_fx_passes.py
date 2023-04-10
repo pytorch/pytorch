@@ -23,12 +23,35 @@ class TestFxPasses(common_utils.TestCase):
         base_name = "tensor"
         nodes = list(gm.graph.nodes)
         for i, node in enumerate(nodes[1:]):
-            post_fix = f".{1}"
-            node.name = f"{base_name}{post_fix*i}"
+            if i == 0:
+                node.name = base_name
+            else:
+                node.name = f"{base_name}.{i}"
 
         # Run `set_node_name` and verify that the names are correct.
-        pass_utils.set_node_name(nodes[0], base_name)
+        name_to_node = {node.name: node for node in gm.graph.nodes}
+        pass_utils.set_node_name(nodes[0], base_name, name_to_node)
         assert nodes[0].name == base_name, f"Expected {base_name}, got {nodes[0].name}"
+        assert len({node.name for node in nodes}) == len(
+            nodes
+        ), f"Expected all names to be unique, got {nodes}"
+
+    def test_set_node_name_succeeds_when_no_name_collisions(self):
+        def func(x, y, z):
+            return x + y + z
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = torch.randn(3)
+        gm, _ = torch._dynamo.export(func, x, y, z)
+        torch._dynamo.reset()
+
+        # Run `set_node_name` and verify that the names are correct.
+        new_name = "some_tensor"
+        nodes = list(gm.graph.nodes)
+        name_to_node = {node.name: node for node in nodes}
+        pass_utils.set_node_name(nodes[1], new_name, name_to_node)
+        assert nodes[1].name == new_name, f"Expected {new_name}, got {nodes[0].name}"
         assert len({node.name for node in nodes}) == len(
             nodes
         ), f"Expected all names to be unique, got {nodes}"
