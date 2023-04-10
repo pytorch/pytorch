@@ -409,7 +409,11 @@ class DimDynamic(Enum):
 # eager code with StrictMinMaxConstraint will keep working in the future!
 
 @dataclass(frozen=True)
-class StrictMinMaxConstraint:
+class Constraint:
+    warn_only : bool
+
+@dataclass(frozen=True)
+class StrictMinMaxConstraint(Constraint):
     """
     For clients: the size at this dimension must be within 'vr' (which
     specifies a lower and upper bound, inclusive-inclusive) AND it
@@ -434,8 +438,9 @@ class StrictMinMaxConstraint:
         # TODO: better printing for -oo and oo
         return f"{self.vr.lower} <= {source.name()} <= {self.vr.upper}"
 
+
 @dataclass(frozen=True)
-class RelaxedUnspecConstraint:
+class RelaxedUnspecConstraint(Constraint):
     """
     For clients: no explicit constraint; constraint is whatever is implicitly
     inferred by guards from tracing.
@@ -1806,6 +1811,7 @@ class ShapeEnv:
                                 return "Did you really mean to mark this dimension as dynamic?"
 
                         record_constraint_violation(lambda: (
+                            constraint,
                             f"Could not validate constraint {constraint.render(source)} as "
                             f"{source.name()} is actually a non-atomic symbolic expression "
                             f"{s}.  {hint()}"
@@ -1817,6 +1823,7 @@ class ShapeEnv:
                 input_guards.append((source, s))
                 if constraint is not None:
                     record_constraint_violation(lambda: (
+                        constraint,
                         f"Could not validate constraint {constraint.render(source)} as "
                         f"{source.name()} was inferred to be constant.  For more information "
                         # TODO: fold this into TORCH_LOGS
@@ -1884,6 +1891,7 @@ class ShapeEnv:
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
                             record_constraint_violation(lambda: (
+                                c,
                                 f"Could not validate (strict) constraint {c.render(source)} as "
                                 f"we generated a guard on this size variable: {guard_expr}.  Guard "
                                 f"was allocated at:\n{tb}"
@@ -1920,8 +1928,10 @@ class ShapeEnv:
                         # originally.  Otherwise, should only assert that
                         # vr is superset of c_vr
                         if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
+                            constraint = c.render(sources[0])
                             record_constraint_violation(lambda: (
-                                f"Could not validate constraint {c.render(sources[0])} as "
+                                constraint,
+                                f"Could not validate constraint {constraint} as "
                                 f"we actually inferred the valid range to be [{vr.lower}, {vr.upper}]."
                                 "This is actually supposed to be impossible to "
                                 "trigger right now as we do not refine ranges; maybe you called "
@@ -1948,15 +1958,22 @@ class ShapeEnv:
                     exprs.append(ShapeGuardExprSources(" <= ".join(bounds), sources))
 
         if constraint_violations:
-            # TODO: Is this sound? On one hand, it looks like "no". On the other hand, if we are in automatic
-            # dynamic, we want agressive mark_dynamic combined with also lower value signal per constraint. Ex:
-            # it is fine if we mark something as dynamic but then ignore it because it became a constant, because
-            # in automatic dynamic, the value of the mark dynamic signal is far lower.
-            # TODO: Ban user specified mark_dynamic under this regime?
-            if torch._dynamo.config.automatic_dynamic_shapes_strategy == torch._dynamo.config.DYNAMIC_SHAPE_STRATEGY.OFF:
-                msgs = [f"  {i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
-                msgs = "\n".join(msgs)
-                raise ConstraintViolationError(f"Constraints violated!\n{msgs}")
+            raise_msgs = []
+            warn_msgs = []
+            for msg_fn in constraint_violations:
+                constraint, msg = msg_fn()
+                breakpoint()
+                if constraint.warn_only:
+                    msg = f"  {len(warn_msgs) + 1}. {msg}"
+                    warn_msgs.append(msg)
+                else:
+                    msg = f"  {len(raise_msgs) + 1}. {msg}"
+                    raise_msgs.append(msg)
+
+            if len(raise_msgs) > 0:
+                raise ConstraintViolationError(f"Constraints violated!\n Erroring constraints: \n {raise_msgs} \n Warning only constraints: \n {warn_msgs}")
+            else:
+                log.debug(f"Warning only constraints violated \n {warn_msgs}")
 
         return exprs
 

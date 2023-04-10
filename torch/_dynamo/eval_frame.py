@@ -365,10 +365,7 @@ def first_real_inst_idx(code):
 def dynamic_plan_from_code_part(code_part, dynamic_plan):
     from torch._dynamo.source import TensorProperty, TensorPropertySource
 
-    if (
-        code_part is None
-        or config.automatic_dynamic_shapes_strategy == config.DYNAMIC_SHAPE_STRATEGY.OFF
-    ):
+    if code_part is None or not config.automatic_dynamic_shapes:
         return
 
     def is_dynamic_source_candidate(source):
@@ -396,30 +393,19 @@ def dynamic_plan_from_code_part(code_part, dynamic_plan):
                 inner_source = source.base
                 name = inner_source.local_name
                 if name not in dynamic_plan:
-                    dynamic_plan[name] = []
-                dynamic_plan[name].append(source.idx)
+                    dynamic_plan[name] = set()
+                dynamic_plan[name].add(source.idx)
 
-    def add_dynamic_dims(code_part, strategy):
-        # Determine if this code_part is a candidate for automatic dynamic
-        # marking. If the failed guard was not a shape_env size property guard,
-        # we do not proceed.
-        if not is_dynamic_code_part_candidate(code_part):
-            # The guard was not a candidate for automatic dynamic marking.
-            return
-        if strategy == config.DYNAMIC_SHAPE_STRATEGY.ALL:
-            # User defined strategy is to wholly go over to dynamic compilation.
-            config.assume_static_by_default = False
-            return
-        elif strategy == config.DYNAMIC_SHAPE_STRATEGY.ALL_FAILED_IN_FRAME:
-            code_parts = code_part.scope["part_list"]
-            for code_part in code_parts:
-                add_dynamic_dim(code_part)
-        else:
-            raise RuntimeError(f"Unknown dynamic dim strategy {strategy}")
-
-    # Take the failed code part, and add it as a dynamic dim
-    add_dynamic_dims(code_part, config.automatic_dynamic_shapes_strategy)
-    return
+    # Determine if this code_part is a candidate for automatic dynamic
+    # marking. If the failed guard was not a shape_env size property guard,
+    # we do not proceed.
+    if not is_dynamic_code_part_candidate(code_part):
+        # The guard was not a candidate for automatic dynamic marking.
+        return
+    code_parts = code_part.scope["part_list"]
+    for code_part in code_parts:
+        # Take the failed code part, and add it as a dynamic dim
+        add_dynamic_dim(code_part)
 
 
 def catch_errors_wrapper(callback, hooks: Hooks):

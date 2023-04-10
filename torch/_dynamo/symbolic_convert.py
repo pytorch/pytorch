@@ -1808,7 +1808,13 @@ class InstructionTranslator(InstructionTranslatorBase):
     ):
         super().__init__(
             output=OutputGraph(
-                f_globals, code_options, compiler_fn, self, export, export_constraints
+                f_globals,
+                code_options,
+                compiler_fn,
+                self,
+                export,
+                export_constraints,
+                dynamic_plan,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -1821,7 +1827,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
             export=export,
         )
-        self.dynamic_plan = dynamic_plan
         self.one_graph: bool = one_graph
         self.export = export
         self.mutated_closure_cell_contents = mutated_closure_cell_contents
@@ -1832,13 +1837,6 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
-
-        if config.dynamic_shapes and dynamic_plan:
-            for k in vars:
-                if k in dynamic_plan:
-                    tensor_at_k = f_locals[k]
-                    assert isinstance(tensor_at_k, torch.Tensor)
-                    torch._dynamo.mark_dynamic(tensor_at_k, dynamic_plan[k])
 
         self.symbolic_locals = collections.OrderedDict(
             (

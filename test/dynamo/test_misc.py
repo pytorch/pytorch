@@ -4011,6 +4011,7 @@ def fn():
             root_tx=None,
             export=False,
             export_constraints=None,
+            dynamic_plan=None,
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
@@ -4443,7 +4444,7 @@ def fn():
 
     @config.patch(
         dynamic_shapes=True,
-        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
+        automatic_dynamic_shapes=False,
     )
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -4529,7 +4530,7 @@ def fn():
 
     @config.patch(
         dynamic_shapes=True,
-        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
+        automatic_dynamic_shapes=False,
     )
     def test_raise_guard_partial_constraint_no_graph_break(self):
         y = torch.randn([3, 3, 3])

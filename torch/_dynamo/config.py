@@ -2,7 +2,6 @@ import logging
 import os
 import sys
 import tempfile
-from enum import Enum
 from os.path import abspath, dirname
 
 import torch
@@ -70,18 +69,11 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 assume_static_by_default = True
 
 
-class DYNAMIC_SHAPE_STRATEGY(Enum):
-    OFF = 1
-    # Find all failed tensors in frame and mark them all dynamic if they fail
-    ALL_FAILED_IN_FRAME = 2
-    # Flip to assume_static_by_default = False
-    # TODO: Do we want this? Seems useful... but also would kinda rather this be a bool.
-    ALL = 3
-
-
-automatic_dynamic_shapes_strategy: DYNAMIC_SHAPE_STRATEGY = (
-    DYNAMIC_SHAPE_STRATEGY.ALL_FAILED_IN_FRAME
-)
+# This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
+# with assume_static_by_default=True.
+# With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
+# any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
+automatic_dynamic_shapes = True
 
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so

@@ -1166,10 +1166,19 @@ def wrap_to_fake_tensor_and_record(
         if tx.fake_mode.shape_env is not None:
             dynamic_dims = []
             constraint_dims = []
+            automatic_marked_dims = set()
+            if isinstance(source, LocalSource):
+                dynamic_plan = tx.output.dynamic_plan
+                local_name = source.local_name
+                if dynamic_plan and local_name in dynamic_plan:
+                    automatic_marked_dims = dynamic_plan[local_name]
+
             for i in range(e.dim()):
                 # NB: mark dynamic has precedence over static
                 marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
                 marked_static = i in getattr(e, "_dynamo_static_indices", set())
+                # NB: Any user markings have precedence over automatic
+                automatic_dynamic = i in automatic_marked_dims
 
                 # We will process constraints first, as they will imply that we
                 # have a dynamic dimension
@@ -1177,7 +1186,9 @@ def wrap_to_fake_tensor_and_record(
                 constraint = dim2constraint.get(i)
                 if constraint is None:
                     if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                        constraint = RelaxedUnspecConstraint()
+                        constraint = RelaxedUnspecConstraint(warn_only=False)
+                    elif automatic_dynamic:
+                        constraint = RelaxedUnspecConstraint(warn_only=True)
                 constraint_dims.append(constraint)
 
                 # Now, figure out if the dim is dynamic/duck/static

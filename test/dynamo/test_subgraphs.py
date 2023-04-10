@@ -395,10 +395,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         if config.assume_static_by_default:
             # We run with `dynamic`, but assume_static_by_default will produce the same number
             # of breaks as without dynamic, since no tensors were marked dyn.
-            if (
-                config.automatic_dynamic_shapes_strategy
-                != config.DYNAMIC_SHAPE_STRATEGY.OFF
-            ):
+            if config.automatic_dynamic_shapes:
                 # 2 graphs, first static, 2nd compiled dynamic
                 self.assertEqual(cnt_dynamic.frame_count, 2)
             else:

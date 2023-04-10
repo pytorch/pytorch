@@ -197,12 +197,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         root_tx,
         export: bool,
         export_constraints,
+        dynamic_plan,
     ):
         super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
         self.export = export
         self.export_constraints = export_constraints
+        self.dynamic_plan = dynamic_plan
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(

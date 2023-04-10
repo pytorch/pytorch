@@ -2039,7 +2039,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     @config.patch(
         dynamic_shapes=True,
-        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
     )
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -2056,7 +2055,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     @config.patch(
         dynamic_shapes=True,
-        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
     )
     def test_export_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -2073,7 +2071,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     @config.patch(
         dynamic_shapes=True,
-        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
     )
     def test_export_no_raise_on_relationship(self):
         y = torch.randn([3, 3, 3])
@@ -2123,7 +2120,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     @config.patch(
         dynamic_shapes=True,
-        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
     )
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
@@ -2139,7 +2135,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     @config.patch(
         dynamic_shapes=True,
-        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
     )
     def test_export_multi_dynamic_dim_constraint(self):
         x = torch.randn([3, 3, 3])
@@ -2277,7 +2272,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     @config.patch(
         dynamic_shapes=True,
-        automatic_dynamic_shapes_strategy=config.DYNAMIC_SHAPE_STRATEGY.OFF,
     )
     def test_export_mark_dynamic_conflict_dynamic_dim(self):
         y = torch.randn([3, 3, 3])

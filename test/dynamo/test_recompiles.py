@@ -41,16 +41,16 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         @patch.object(
             torch._dynamo.config,
-            "automatic_dynamic_shapes_strategy",
-            torch._dynamo.config.DYNAMIC_SHAPE_STRATEGY.OFF,
+            "automatic_dynamic_shapes",
+            False,
         )
         def run_without_automatic():
             return run_foo_6_times_and_count_recompiles()
 
         @patch.object(
             torch._dynamo.config,
-            "automatic_dynamic_shapes_strategy",
-            torch._dynamo.config.DYNAMIC_SHAPE_STRATEGY.ALL_FAILED_IN_FRAME,
+            "automatic_dynamic_shapes",
+            True,
         )
         def run_with_automatic():
             return run_foo_6_times_and_count_recompiles()

@@ -291,6 +291,7 @@ test_failures = {
     # The following tests do not support dynamic shapes yet:
     #
     "test_cudnn_rnn_dynamic_shapes": TestFailure(("cuda",)),
+    "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
