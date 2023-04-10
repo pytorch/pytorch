@@ -106,6 +106,9 @@ class CodePart:
     A CodePart represents a code string and bookeeping information accumulated at guard creation time.
     CodeParts are used to make up the check_fn we use for guards. A collection of CodeParts is kept on each
     guard cache entry, and is passed into the subsequent eval_frame callback upon guard failure.
+
+    Note: This object's uniqueness is dictated by the code str. For a given code str, all other parts
+    must be identical.
     """
 
     source: Optional[

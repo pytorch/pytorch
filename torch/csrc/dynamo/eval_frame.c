@@ -415,6 +415,8 @@ static inline PyObject* call_callback(
 #else
   PyFrameObject* frame = _frame;
 #endif
+  // A null code_part is 100% valid - it will be the case when we have never seen a frame before, and there
+  // were no guards to run.
   if (code_part == NULL) {
     code_part = Py_None;
   }
@@ -567,6 +569,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   Py_INCREF(fail_code_part);
   Py_DECREF(result);
   PyObject* lookup_result = lookup(e->next, frame, e, index + 1, code_part);
+  // NULL is valid here, we ensure we never send a null to the callback when we call_callback
   *code_part = fail_code_part;
   return lookup_result;
 }

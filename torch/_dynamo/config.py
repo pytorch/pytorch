@@ -79,7 +79,9 @@ class DYNAMIC_SHAPE_STRATEGY(Enum):
     ALL = 3
 
 
-automatic_dynamic_shapes_strategy: DYNAMIC_SHAPE_STRATEGY = DYNAMIC_SHAPE_STRATEGY.OFF
+automatic_dynamic_shapes_strategy: DYNAMIC_SHAPE_STRATEGY = (
+    DYNAMIC_SHAPE_STRATEGY.ALL_FAILED_IN_FRAME
+)
 
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so
