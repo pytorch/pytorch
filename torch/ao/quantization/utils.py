@@ -5,12 +5,13 @@ import functools
 import warnings
 from collections import OrderedDict
 from inspect import getfullargspec, signature
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union, List
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
 from torch.fx import Node
 from torch.nn.utils.parametrize import is_parametrized
+import itertools
 
 NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
 NodePattern.__module__ = "torch.ao.quantization.utils"
@@ -681,3 +682,23 @@ __all__ = [
     "determine_qparams",
     "validate_qmin_qmax",
 ]
+
+conv_add_pattern_list: List[Any] = []
+conv_add_relu_optioins = itertools.product(
+    [torch.ops.aten.add.Tensor, torch.ops.aten.add_.Tensor],  # add op
+    [torch.ops.aten.relu.default, torch.ops.aten.relu_.default],  # relu op
+)
+for add_op, relu_op in conv_add_relu_optioins:
+    conv_add_pattern_list.append(
+        (relu_op, (add_op, torch.ops.aten.convolution.default, MatchAllNode))  # noqa: E131
+    )
+    conv_add_pattern_list.append(
+        (relu_op, (add_op, MatchAllNode, torch.ops.aten.convolution.default))  # noqa: E131
+    )
+for add_op in [torch.ops.aten.add.Tensor, torch.ops.aten.add_.Tensor]:
+    conv_add_pattern_list.append(
+        (add_op, torch.ops.aten.convolution.default, MatchAllNode)  # noqa: E131
+    )
+    conv_add_pattern_list.append(
+        (add_op, MatchAllNode, torch.ops.aten.convolution.default)  # noqa: E131
+    )
