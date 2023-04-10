@@ -690,7 +690,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
   inline namespace CPU_CAPABILITY {                                                 \
   void op##_kernel(TensorIteratorBase& iter) {                                      \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
       constexpr int64_t grain_size = 2048;                                          \
       iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                     \
     });                                                                             \
@@ -703,7 +703,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
   inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
         constexpr int64_t grain_size = 2048;                                                     \
         iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                                \
     });                                                                                          \
