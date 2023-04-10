@@ -11,7 +11,7 @@ void check_type(const TensorBase& tensor, ScalarType type, std::string_view type
       tensor.scalar_type() == type
       || (isQIntType(tensor.scalar_type())
           && toUnderlying(tensor.scalar_type()) == type),
-      "expected scalar type ", type_name, " but found ", scalar_type());
+      "expected scalar type ", type_name, " but found ", tensor.scalar_type());
 }
 
 #define DEFINE_CAST(T, name)                                         \

@@ -1498,7 +1498,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   const T* data_dtype_initialized() const {
     return data_dtype_initialized_impl<T, decltype(*this)>()(
-        *this, &Storage::data);
+        *this, &TensorImpl::data_ptr_impl<T>);
   }
 
   /**
@@ -1517,7 +1517,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   T* mutable_data_dtype_initialized() {
     return data_dtype_initialized_impl<T, decltype(*this)>()(
-        *this, &Storage::mutable_data);
+        *this, &TensorImpl::mutable_data_ptr_impl<T>);
   }
 
  private:
@@ -1553,9 +1553,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         const U,
         U>;
 
+    template <typename DataPtrImplAccessor>
     MaybeConstT<T>* operator()(
         Self& self,
-        MaybeConstT<void>* (Storage::*data_accessor)() const) {
+        const DataPtrImplAccessor& data_ptr_impl_accessor) {
       TORCH_CHECK(
           self.data_type_.template Match<T>(),
           "Tensor type mismatch, caller expects elements to be ",
@@ -1563,7 +1564,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           ", while tensor contains ",
           self.data_type_.name(),
           ". ");
-      return data_ptr_impl<T, Self>()(self, data_accessor);
+      return (self.*data_ptr_impl_accessor)();
     }
   };
 
@@ -1574,8 +1575,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * check has_storage() and storage_initialized().
    */
   template <typename T>
+  inline const T* data_ptr_impl() const {
+    return data_ptr_impl_impl<T, decltype(*this)>()(*this, &Storage::data);
+  }
+
+  /**
+   * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
+   * does not do a type check. Unlike the untemplated data(), does
+   * check has_storage() and storage_initialized().
+   */
+  template <typename T>
   inline T* mutable_data_ptr_impl() {
-    return data_ptr_impl<T, decltype(*this)>()(*this, &Storage::mutable_data);
+    return data_ptr_impl_impl<T, decltype(*this)>()(
+        *this, &Storage::mutable_data);
   }
 
  private:
@@ -1584,7 +1596,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // See NOTE [ Template over constness of this ].
   template <typename T, typename Self>
-  struct data_ptr_impl {
+  struct data_ptr_impl_impl {
     static_assert(std::is_same<
                   std::remove_const_t<std::remove_reference_t<Self>>,
                   TensorImpl>::value);
