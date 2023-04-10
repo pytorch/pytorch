@@ -5,6 +5,7 @@ import inspect
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type
 
 import torch._ops
+import torch.fx
 
 import torch.onnx
 import torch.onnx._internal.fx.function_dispatcher as function_dispatcher
@@ -57,7 +58,7 @@ def _assert_identical_pytree_spec(
         raise ValueError(f"{error_message}\nExpect {spec1}.\nActual {spec2}.")
 
 
-class BindInputStep(exporter.InputFormatStep):
+class BindInputStep:
     """Bind the input arguments to the model signature."""
 
     def __init__(self, model_signature: inspect.Signature):
@@ -93,7 +94,7 @@ class BindInputStep(exporter.InputFormatStep):
         return (), bound.arguments
 
 
-class MergeKwargsIntoArgsStep(exporter.InputFormatStep):
+class MergeKwargsIntoArgsStep:
     """Merge the input kwargs into the input args."""
 
     def format(
@@ -111,7 +112,7 @@ class MergeKwargsIntoArgsStep(exporter.InputFormatStep):
         return tuple(model_args) + tuple(model_kwargs.values()), {}
 
 
-class RemoveNoneInputStep(exporter.InputFormatStep):
+class RemoveNoneInputStep:
     """Remove `None` from arguments.
 
     This format step assumes ``model_kwargs`` is empty. It also assumes ``model_args``
@@ -137,7 +138,7 @@ class RemoveNoneInputStep(exporter.InputFormatStep):
         return tuple(arg for arg in model_args if arg is not None), {}
 
 
-class FlattenInputWithTreeSpecValidationStep(exporter.InputFormatStep):
+class FlattenInputWithTreeSpecValidationStep:
     """Flatten nested collection types and return a flat list of elements.
 
     ONNX can't represent collection types (e.g., dictionary, tuple of tuple of tensor,
@@ -179,7 +180,7 @@ class FlattenInputWithTreeSpecValidationStep(exporter.InputFormatStep):
         return flattened_args, {}
 
 
-class FlattenOutputStep(exporter.OutputFormatStep):
+class FlattenOutputStep:
     """Flatten nested collection types and return a flat list of elements.
 
     ONNX can't represent collection types (e.g., dictionary, tuple of tuple of tensor,
@@ -199,7 +200,7 @@ class FlattenOutputStep(exporter.OutputFormatStep):
         return flattened_outputs
 
 
-class FlattenOutputWithTreeSpecValidationStep(exporter.OutputFormatStep):
+class FlattenOutputWithTreeSpecValidationStep:
     """Same as ``FlattenOutputStep``, with additional `TreeSpec` validation.
 
     This class stores the `SpecTree` output produced when `format` was called the first
@@ -296,11 +297,27 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
         fx_module_args: Sequence[Any],
     ) -> torch.onnx.ExportOutput:
         # Apply decomposition table to the input graph.
-        decomposed_module = passes.Decompose(
+        module = passes.Decompose(
             fx_module,
             self.decomposition_table,
             enable_dynamic_axes=self.options.dynamic_shapes,
         ).run(*fx_module_args)
+
+        # ONNX does not support views and mutations.
+        # Functionalize to get a semantically equivalent graph without mutations.
+        module = passes.Functionalize(
+            module, enable_dynamic_axes=self.options.dynamic_shapes
+        ).run(*fx_module_args)
+        # Input mutations are detected and distilled after `Functionalize` pass.
+        # Remove them since ONNX inference does not need them.
+        module = passes.RemoveInputMutation(module).run(*fx_module_args)
+
+        # Run ShapeInferenceWithFakeTensor  to get static shape of nodes for op_level_debug purposes.
+        # The pass added nodes with static shape into original node metadata:
+        # node.meta["node_with_static_shape"]: torch.fx.Node
+        # TODO(titaiwang): refactor the pass to stop relying on Transformer.transform()
+        if self.options.op_level_debug:
+            module = passes.ShapeInferenceWithFakeTensor(module).run(*fx_module_args)
 
         # We want to pass list of ints and floats to TorchScript graph correctly
         # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
@@ -308,9 +325,7 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
         # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
         # with FakeTensorMode.
         with torch.utils._mode_utils.no_dispatch():
-            onnxscript_graph = passes.export_fx_to_onnxscript(
-                decomposed_module, self.options
-            )
+            onnxscript_graph = passes.export_fx_to_onnxscript(module, self.options)
             # ONNX does not support None inputs. During graph building, all None inputs
             # are removed. Here we register this step to input formatter.
             self._apply_input_format_step(

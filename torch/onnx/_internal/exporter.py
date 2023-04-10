@@ -56,8 +56,7 @@ class ExportOptions:
 
     op_level_debug: Optional[bool] = None
     """Whether to export the model with op-level debug information by evaluating
-    ops through ONNX Runtime. Note: ``op_level_debug`` is not supported when
-    ``dynamic_shapes`` is ``True``."""
+    ops through ONNX Runtime."""
 
     logger: Optional[logging.Logger] = None
     """The logger for the ONNX exporter to use. Defaults to creating a child
@@ -101,13 +100,6 @@ class ResolvedExportOptions:
         self.logger = resolve(
             options.logger, lambda: logging.getLogger().getChild("torch.onnx")
         )
-
-        if self.dynamic_shapes and self.op_level_debug:
-            raise RuntimeError(
-                "Both ExportOptions.op_level_debug and ExportOptions.dynamic_shapes "
-                + "are True but these options are mutually exclusive. Please set only "
-                + "one of them to True.",
-            )
 
         for key in dir(options):
             if not key.startswith("_"):  # skip private attributes
@@ -165,8 +157,8 @@ class ProtobufExportOutputSerializer:
 
 
 # TODO(bowbao): Add diagnostics for IO formatters.
-class InputFormatStep(abc.ABC):
-    @abc.abstractmethod
+@runtime_checkable
+class InputFormatStep(Protocol):
     def format(
         self, args: Sequence[Any], kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
@@ -248,8 +240,8 @@ class InputFormatter:
         return args
 
 
-class OutputFormatStep(abc.ABC):
-    @abc.abstractmethod
+@runtime_checkable
+class OutputFormatStep(Protocol):
     def format(self, model_outputs: Any) -> Any:
         ...
 
