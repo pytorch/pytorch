@@ -5,10 +5,9 @@ import weakref
 from typing import Optional
 
 import torch
-import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch import _prims
-from torch._dynamo.utils import fake_mode_from_tensors
+from torch._dynamo.utils import detect_fake_mode
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -31,15 +30,7 @@ class AutogradMonkeypatch(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if not kwargs:
             kwargs = {}
-        if func in replacements and not (
-            (
-                config.fallback_random
-                and replacements[func] in replacements_using_triton_random
-            )
-            or (is_cpu_device(args) and func in fallback_cpu_random)
-        ):
-            return replacements[func](*args, **kwargs)
-        return func(*args, **kwargs)
+        return replace_fn(func)(*args, **kwargs)
 
 
 patch_functions = AutogradMonkeypatch
@@ -47,30 +38,28 @@ patch_functions = AutogradMonkeypatch
 
 def replace_fx(gm: torch.fx.GraphModule, example_inputs):
     # Sometimes patch_functions() misses things already in the graph
-    is_cpu = is_cpu_device(example_inputs)
+    changed = 0
 
     for node in reversed(list(gm.graph.nodes)):
-        if node.op == "call_function" and node.target in replacements:
-            if (
-                config.fallback_random
-                and replacements[node.target] in replacements_using_triton_random
-            ) or (is_cpu and node.target in fallback_cpu_random):
-                continue
+        if node.op == "call_function" and replace_fn(node.target) is not node.target:
             with gm.graph.inserting_before(node):
                 node.replace_all_uses_with(
                     gm.graph.call_function(
-                        replacements[node.target], node.args, node.kwargs
+                        replace_fn(node.target), node.args, node.kwargs
                     )
                 )
             gm.graph.erase_node(node)
-    gm.graph.lint()
-    gm.recompile()
+            changed += 1
+
+    if changed:
+        gm.graph.lint()
+        gm.recompile()
     return gm
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = is_cpu_device(example_inputs)
-    fake_mode = fake_mode_from_tensors(example_inputs)
+    fake_mode = detect_fake_mode(example_inputs)
 
     gm = sink_cat_after_pointwise(gm)
     if config.permute_fusion and not is_cpu:
@@ -88,13 +77,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
-    # do mkldnn fusion(conv(linear)+unary(binary)
-    # This is skipped when dynamic shapes is enabled, as the resulting
-    # mkl packing ops don't support dynamic shapes.  Once they do support,
-    # you can remove this.  A good test case is wav2vec2, see
-    # https://github.com/pytorch/pytorch/issues/91719
-    if not dynamo_config.dynamic_shapes:
-        gm = mkldnn_fuse_fx(gm, example_inputs)
+    gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
 
 
@@ -971,9 +954,13 @@ def rand_like(x, **kwargs):
     return philox_rand_like(x, seed, offset).to(kwargs.get("dtype", torch.float32))
 
 
-replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
-# Keep track of any replacement functions that use triton random,
-# so they can be avoided when fallback_random is set
-replacements_using_triton_random = {lowmem_dropout, rand_like}
-
-fallback_cpu_random = {torch.nn.functional.dropout}
+def replace_fn(fn):
+    """
+    Perform any applicable replacements on `fn`
+    """
+    if config.fallback_random:
+        return fn
+    if config.lowmem_dropout and fn is torch.nn.functional.dropout:
+        return lowmem_dropout
+    replacements = {torch.rand_like: rand_like}
+    return replacements.get(fn, fn)
