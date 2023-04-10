@@ -459,7 +459,6 @@ def convert_outplace_to_inplace(gm: torch.fx.GraphModule):
 
 
 def _mkldnn_fusion_init():
-    if torch._C.has_mkldnn:
-        _register_unary_fusion()
-        _register_binary_unary_fusion()
-        _register_binary_fusion()
+    _register_unary_fusion()
+    _register_binary_unary_fusion()
+    _register_binary_fusion()

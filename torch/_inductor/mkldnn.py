@@ -24,7 +24,7 @@ class PackedConv2d(nn.Conv2d):
     def __init__(
         self,
         conv: nn.Module,
-        input_size: list,
+        input_size: Optional[list],
     ):
         super().__init__(
             conv.in_channels,
@@ -91,7 +91,7 @@ class PackedConv2d(nn.Conv2d):
 
 
 class PackedLinearFP32(nn.Linear):
-    def __init__(self, linear: nn.Module, input_size: list):
+    def __init__(self, linear: nn.Module, input_size: Optional[list]):
         super().__init__(
             linear.in_features,
             linear.out_features,
@@ -119,7 +119,7 @@ class PackedLinearFP32(nn.Linear):
 
 
 class PackedLinearBF16(nn.Linear):
-    def __init__(self, linear: nn.Module, input_size: list):
+    def __init__(self, linear: nn.Module, input_size: Optional[list]):
         super().__init__(
             linear.in_features,
             linear.out_features,
@@ -160,7 +160,7 @@ class PackedConvTranspose2d(nn.ConvTranspose2d):
     def __init__(
         self,
         conv_transpose: nn.Module,
-        input_size: list,
+        input_size: Optional[list],
     ):
         super().__init__(
             conv_transpose.in_channels,
@@ -246,7 +246,7 @@ def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: Optional[l
     return PackedConvTranspose2d(conv_transpose, input_size)
 
 
-def packed_linear_eval(linear: nn.Module, input_size: list):
+def packed_linear_eval(linear: nn.Module, input_size: Optional[list]):
     assert not (linear.training), "Fusion only for eval!"
     if linear.weight.dtype == torch.bfloat16:
         return PackedLinearBF16(linear, input_size)

@@ -90,21 +90,6 @@ def has_bf16_support():
     return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
 
 
-def requires_decomp(fn):
-    """Decorator to disable test if a decomp is missing"""
-
-    def wrap_test(test):
-        @functools.wraps(test)
-        def maybe_test(*args, **kwargs):
-            if len(get_decompositions([fn])) == 0:
-                raise unittest.SkipTest(f"requires decomp for {fn.__name__}")
-            return test(*args, **kwargs)
-
-        return maybe_test
-
-    return wrap_test
-
-
 class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls):

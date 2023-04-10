@@ -24,8 +24,6 @@ from ..pattern_matcher import (
 )
 from ..virtualized import V
 
-from .mkldnn_fusion import _mkldnn_fusion_init, convert_outplace_to_inplace
-
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
@@ -40,10 +38,14 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
-        _mkldnn_fusion_init()
+        if torch._C.has_mkldnn:
+            from .mkldnn_fusion import _mkldnn_fusion_init, convert_outplace_to_inplace
+
+            _mkldnn_fusion_init()
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
-        gm = convert_outplace_to_inplace(gm)
+        if torch._C.has_mkldnn:
+            gm = convert_outplace_to_inplace(gm)
     gm.graph.lint()
 
 
