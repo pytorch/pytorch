@@ -2293,6 +2293,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::device.with_index(str type, int index) -> Device"),
+        device_with_index,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::percentFormat(str self, ...) -> str"),
         [](Stack& stack) {
           size_t num_inputs = pop(stack).toInt();
@@ -2421,6 +2426,24 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           } else {
             push(stack, a.name());
           }
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::nbytes(Tensor a) -> int"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          const auto nbytes = static_cast<int64_t>(a.nbytes());
+          push(stack, nbytes);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::itemsize(Tensor a) -> int"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          const auto itemsize = static_cast<int64_t>(a.itemsize());
+          push(stack, itemsize);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
