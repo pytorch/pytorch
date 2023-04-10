@@ -12,7 +12,7 @@ from sympy import Expr
 
 from torch._dynamo.utils import dynamo_timed
 from .. import codecache, config, ir
-from ..codecache import cubin_cache_dir
+from ..codecache import CudaKernelParamCache
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
@@ -56,21 +56,6 @@ def is_float(s: str):
     except ValueError:
         return False
     return True
-
-
-class KernelParamCache:
-    cache = dict()
-
-    def __init__(self):
-        self.prev_cache = None
-
-    def __enter__(self):
-        self.prev_cache = KernelParamCache.cache
-        KernelParamCache.cache = dict()
-
-    def __exit__(self, *args):
-        KernelParamCache.cache.clear()
-        KernelParamCache.cache = self.prev_cache
 
 
 class MemoryPlanningState:
@@ -207,7 +192,8 @@ class WrapperCodeGen(CodeGen):
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
-        self.kernels = {}
+        self.src_to_kernel = {}
+        self.kernel_to_hash = {}
         self.lines = []
         self.need_seed = False
         self.declare = ""
@@ -489,23 +475,29 @@ class WrapperCodeGen(CodeGen):
         for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
             code.writeline(f"{self.declare}{sym} = {pexpr(expr)}")
 
-    def codegen_sizevar(self, x: Expr) -> str:
+    def codegen_python_sizevar(self, x: Expr) -> str:
         return pexpr(V.graph.sizevars.simplify(x))
 
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        parts = list(map(self.codegen_sizevar, shape))
+    def codegen_sizevar(self, x: Expr) -> str:
+        return self.codegen_python_sizevar(x)
+
+    def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        parts = list(map(self.codegen_python_sizevar, shape))
         if len(parts) == 0:
             return "()"
         if len(parts) == 1:
             return f"({parts[0]}, )"
         return f"({', '.join(parts)})"
 
+    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        return self.codegen_python_shape_tuple(shape)
+
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
                 f"{name} = rand_strided("
-                f"{self.codegen_shape_tuple(shape)}, "
-                f"{self.codegen_shape_tuple(stride)}, "
+                f"{self.codegen_python_shape_tuple(shape)}, "
+                f"{self.codegen_python_shape_tuple(stride)}, "
                 f"device='{device}', dtype={dtype})"
             )
 
@@ -720,6 +712,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.size = "sizes()"
         self.stride = "strides()"
         self.call_func_name = "inductor_cpp_entry"
+        self.cuda = False
 
     def seed(self):
         """
@@ -830,9 +823,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         warning_all_flag = codecache.get_warning_all_flag()
         cpp_flags = codecache.cpp_flags()
         ipaths, lpaths, libs, macros = codecache.get_include_and_linking_paths(
-            vec_isa=codecache.pick_vec_isa()
+            vec_isa=codecache.pick_vec_isa(),
+            cuda=self.cuda,
         )
-        optimization_flags = codecache.optimization_flags()
+        optimization_flags = codecache.optimization_flags(cuda=self.cuda)
         use_custom_generated_macros = codecache.use_custom_generated_macros()
 
         extra_cflags = f"{cpp_flags} {optimization_flags} {warning_all_flag} {macros} {use_custom_generated_macros}"
@@ -964,27 +958,35 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
     def __init__(self):
         super().__init__()
-        self.kernel_callsite_id = 0
-        self.arg_var_id = 0
+        self.kernel_callsite_id = count()
+        self.arg_var_id = count()
+        self.cuda = True
 
     def write_prefix(self):
         self.prefix.splice(
             """
             #include <ATen/ATen.h>
-            #include <ATen/cuda/CUDAContext.h>
-            #include <ATen/cuda/Exceptions.h>
-            #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+            #include <c10/util/Exception.h>
             #include <c10/cuda/CUDAGuard.h>
 
-            CUfunction loadKernel(const std::string &filePath, const std::string &funcName) {
+            #define AT_CUDA_DRIVER_CHECK_OVERRIDE(EXPR)                                     \
+            do {                                                                            \
+                CUresult __err = EXPR;                                                      \
+                if (__err != CUDA_SUCCESS) {                                                \
+                    AT_ERROR("CUDA driver error: ", static_cast<int>(__err));               \
+                }                                                                           \
+            } while (0)
+
+            static inline CUfunction loadKernel(const std::string &filePath,
+                    const std::string &funcName) {
                 CUmodule mod;
                 CUfunction func;
-                AT_CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
-                AT_CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleLoad(&mod, filePath.c_str()));
+                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 return func;
             }
 
-            void launchKernel(
+            static inline void launchKernel(
                     CUfunction func,
                     int gridX,
                     int gridY,
@@ -993,7 +995,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int sharedMemBytes,
                     void* args[],
                     int device_index) {
-                AT_CUDA_DRIVER_CHECK(cuLaunchKernel(
+                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
                     func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
                     at::cuda::getCurrentCUDAStream(device_index), args, nullptr));
             }
@@ -1005,19 +1007,15 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
     def generate(self):
         self.prefix.writeline("\n")
-        for kernel in self.kernels.values():
+        for kernel in self.src_to_kernel.values():
             self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
         self.prefix.writeline("\n")
         return super().generate()
 
-    def generate_load_kernel(self, name: str = None):
-        params = KernelParamCache.cache.get(name, None)
-        assert (
-            params is not None
-        ), "cuda kernel parameters should already exist at this moment"
+    def generate_load_kernel(self, name, params):
         mangled_name = params.get("mangled_name", None)
         assert mangled_name is not None, "missing mangled_name"
-        cubin_path = os.path.join(cubin_cache_dir(), f"{name}.cubin")
+        cubin_path = params.get("cubin_path", None)
         assert os.path.exists(
             cubin_path
         ), "cubin file should already exist at this moment"
@@ -1032,7 +1030,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         # TODO: only works for constant now, need type info
         new_args = []
         for arg in call_args:
-            var_name = f"var_{self.arg_var_id}"
+            var_name = f"var_{next(self.arg_var_id)}"
             if is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
             elif is_float(arg):
@@ -1042,27 +1040,29 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
                 )
             new_args.append(f"&{var_name}")
-            self.arg_var_id += 1
 
         return ", ".join(new_args)
 
     def generate_kernel_call(self, name, call_args, device_index):
-        params = KernelParamCache.cache.get(name, None)
+        params = CudaKernelParamCache.get(self.kernel_to_hash.get(name, None))
         assert (
             params is not None
         ), "cuda kernel parameters should already exist at this moment"
-        grid_x = params.get("grid_x", None)
-        grid_y = params.get("grid_y", None)
-        grid_z = params.get("grid_z", None)
-        num_warps = params.get("num_warps", None)
-        shared_mem = params.get("shared_mem", None)
 
-        self.generate_load_kernel(name)
+        self.generate_load_kernel(name, params)
 
         call_args = self.generate_args_decl(call_args)
-        args_name = f"kernel_args_{self.kernel_callsite_id}"
-        self.kernel_callsite_id += 1
-        self.writeline(f"void* {args_name}[] = {{{call_args}}};")
+        kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
+        self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
         self.writeline(
-            f"launchKernel({name}, {grid_x}, {grid_y}, {grid_z}, {num_warps}, {shared_mem}, {args_name}, {device_index});"
+            "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
+                name,
+                params["grid_x"],
+                params["grid_y"],
+                params["grid_z"],
+                params["num_warps"],
+                params["shared_mem"],
+                kernel_args_var,
+                device_index,
+            )
         )
