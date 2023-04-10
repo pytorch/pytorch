@@ -469,7 +469,7 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
 }
 
 void rsqrt_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "rsqrt_cpu", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
