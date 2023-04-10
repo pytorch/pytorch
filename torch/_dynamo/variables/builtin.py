@@ -558,7 +558,9 @@ class BuiltinVariable(VariableTracker):
             except TypeError as exc:
                 if not has_constant_handler:
                     log.warning(
-                        f"incorrect arg count {handler} {exc} and no constant handler"
+                        "incorrect arg count %s %s and no constant handler",
+                        handler,
+                        exc,
                     )
                 handler = None
 
@@ -583,6 +585,14 @@ class BuiltinVariable(VariableTracker):
                 ),
                 **options,
             )
+
+        if self.fn is round:
+            if len(args) > 0 and isinstance(args[0], SymNodeVariable):
+                raise UserError(
+                    UserErrorType.STANDARD_LIBRARY,
+                    "Calling round() on symbolic value is not supported. "
+                    "You can use floor() to implement this functionality",
+                )
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, *args):
@@ -1044,7 +1054,7 @@ class BuiltinVariable(VariableTracker):
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
-        if isinstance(obj, (variables.BlackHoleVariable, variables.DataClassVariable)):
+        if isinstance(obj, variables.DataClassVariable):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
