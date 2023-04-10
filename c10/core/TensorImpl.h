@@ -1497,7 +1497,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   const T* data_dtype_initialized() const {
-    return data_dtype_initialized_impl<const T>(*this, &Storage::data);
+    return data_dtype_initialized_impl<T, decltype(*this)>()(
+        *this, &Storage::data);
   }
 
   /**
@@ -1515,21 +1516,56 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   T* mutable_data_dtype_initialized() {
-    return data_dtype_initialized_impl<T>(*this, &Storage::mutable_data);
+    return data_dtype_initialized_impl<T, decltype(*this)>()(
+        *this, &Storage::mutable_data);
   }
 
  private:
-  template <typename T, typename TensorImpl, typename StorageDataAccessor>
-  static T* data_dtype_initialized_impl(TensorImpl& tensor, const StorageDataAccessor& data_accessor) {
-    TORCH_CHECK(
-        tensor.data_type_.template Match<T>(),
-        "Tensor type mismatch, caller expects elements to be ",
-        caffe2::TypeMeta::TypeName<T>(),
-        ", while tensor contains ",
-        tensor.data_type_.name(),
-        ". ");
-    return data_ptr_impl<T>(tensor, data_accessor);
-  }
+  // NOTE [ Template over constness of this ]
+  //
+  // We're using a trick a few places in this file to share the
+  // implementation between const and non-const methods. C++ doesn't
+  // let you template over the const qualifier on a method, but you
+  // can template over the constness of the class's argument in a
+  // static method.
+  //
+  // Implementation notes:
+  //  * The main trick we employ here is to create a static method
+  //    that is templated on TensorImpl. This lets us write a single
+  //    body that can be used for both const and non-const methods.
+  //  * The second main trick is to use a dependent template that
+  //    carries the constness of the tensor and can apply it to
+  //    additional types.
+
+  // Shared implementation of data_dtype_initialized() and
+  // mutable_data_dtype_initialized() regardless of constness.
+  //
+  // See NOTE [ Template over constness of this ].
+  template <typename T, typename Self>
+  struct data_dtype_initialized_impl {
+    static_assert(std::is_same<
+                  std::remove_const_t<std::remove_reference_t<Self>>,
+                  TensorImpl>::value);
+
+    template <typename U>
+    using MaybeConstT = std::conditional_t<
+        std::is_const<std::remove_reference_t<Self>>::value,
+        const U,
+        U>;
+
+    MaybeConstT<T>* operator()(
+        Self& self,
+        MaybeConstT<void>* (Storage::*data_accessor)() const) {
+      TORCH_CHECK(
+          self.data_type_.template Match<T>(),
+          "Tensor type mismatch, caller expects elements to be ",
+          caffe2::TypeMeta::TypeName<T>(),
+          ", while tensor contains ",
+          self.data_type_.name(),
+          ". ");
+      return data_ptr_impl<T, Self>()(self, data_accessor);
+    }
+  };
 
  public:
   /**
@@ -1539,25 +1575,42 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data_ptr_impl() {
-    return data_ptr_impl<T>(*this, &Storage::mutable_data);
+    return data_ptr_impl<T, decltype(*this)>()(*this, &Storage::mutable_data);
   }
 
  private:
-  // The real implementation of mutable_data_ptr_impl, templated over
-  // whether or not the tensor is const.
-  template <typename T, typename TensorImpl, typename StorageDataAccessor>
-    static T* data_ptr_impl(TensorImpl& tensor, const StorageDataAccessor& data_accessor) {
-    TORCH_CHECK(
-        tensor.has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
-    TORCH_CHECK(
-        tensor.storage_initialized(),
-        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
-        "mutable_data() or raw_mutable_data() to actually allocate memory.");
-    // Caller does the type check.
-    return static_cast<T*>((tensor.storage_.*data_accessor)()) + tensor.storage_offset_;
-  }
+  // Shared implementation of data_ptr_impl() and
+  // mutable_data_ptr_impl() regardless of constness.
+  //
+  // See NOTE [ Template over constness of this ].
+  template <typename T, typename Self>
+  struct data_ptr_impl {
+    static_assert(std::is_same<
+                  std::remove_const_t<std::remove_reference_t<Self>>,
+                  TensorImpl>::value);
+
+    template <typename U>
+    using MaybeConstT = std::conditional_t<
+        std::is_const<std::remove_reference_t<Self>>::value,
+        const U,
+        U>;
+
+    MaybeConstT<T>* operator()(
+        Self& self,
+        MaybeConstT<void>* (Storage::*data_accessor)() const) {
+      TORCH_CHECK(
+          self.has_storage(),
+          "Cannot access data pointer of Tensor that doesn't have storage");
+      TORCH_CHECK(
+          self.storage_initialized(),
+          "The tensor has a non-zero number of elements, but its data is not allocated yet. "
+          "Caffe2 uses a lazy allocation, so you will need to call "
+          "mutable_data() or raw_mutable_data() to actually allocate memory.");
+      // Caller does the type check.
+      return static_cast<MaybeConstT<T>*>((self.storage_.*data_accessor)()) +
+          self.storage_offset_;
+    }
+  };
 
  public:
   /**
@@ -1572,7 +1625,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline const void* data() const {
-    return mutable_data_impl();
+    return data_impl<decltype(*this)>{}(*this, &Storage::data);
   }
 
   /**
@@ -1586,31 +1639,49 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline void* mutable_data() {
-    return mutable_data_impl();
+    return data_impl<decltype(*this)>{}(*this, &Storage::mutable_data);
   }
 
  private:
-  // Templated implementation of data() and mutable_data().
+  // Shared implementation of data() and mutable_data() regardless of
+  // constness.
   //
-  // We are able to pull this off because unsafeGetStorageImpl() is a
-  // const method that returns a non-const StorageImpl.
-  void* mutable_data_impl() const {
-    TORCH_CHECK(
-        has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
-    TORCH_CHECK(
-        dtype_initialized(),
-        "Cannot access data pointer of Tensor that doesn't have initialized dtype "
-        "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
-    // Computing an offset into an empty tensor would be UB, since an empty
-    // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
-    // is UB.  So we skip the offset computation in this case.
-    char* const data = static_cast<char*>(storage_.mutable_data());
-    if (data == nullptr) {
-      return nullptr;
+  // See NOTE [ Template over constness of this ].
+  template <typename Self>
+  struct data_impl {
+    static_assert(std::is_same<
+                  std::remove_const_t<std::remove_reference_t<Self>>,
+                  TensorImpl>::value);
+    // Carries the constness of the TensorImpl and can apply it to additional
+    // types.
+    template <typename T>
+    using MaybeConstT = std::conditional_t<
+        std::is_const<std::remove_reference_t<Self>>::value,
+        const T,
+        T>;
+
+    MaybeConstT<void>* operator()(
+        Self& self,
+        MaybeConstT<void>* (Storage::*data_accessor)() const) const {
+      TORCH_CHECK(
+          self.has_storage(),
+          "Cannot access data pointer of Tensor that doesn't have storage");
+      TORCH_CHECK(
+          self.dtype_initialized(),
+          "Cannot access data pointer of Tensor that doesn't have initialized dtype "
+          "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
+      // Computing an offset into an empty tensor would be UB, since an empty
+      // tensor's storage will be nullptr, and adding a nonzero offset to
+      // nullptr is UB.  So we skip the offset computation in this case.
+      auto* data =
+          static_cast<MaybeConstT<char>*>((self.storage_.*data_accessor)());
+      if (data == nullptr) {
+        return nullptr;
+      }
+      return static_cast<MaybeConstT<void>*>(
+          data + self.data_type_.itemsize() * self.storage_offset_);
     }
-    return static_cast<void*>(data + data_type_.itemsize() * storage_offset_);
-  }
+  };
 
  public:
   /**
