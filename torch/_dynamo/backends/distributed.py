@@ -195,7 +195,8 @@ class DDPOptimizer:
         # stash buckets for testing/debugging purposes
         self.buckets = buckets
         log.info(
-            f"DDPOptimizer used bucket cap {self.bucket_bytes_cap} and produced the following buckets:"
+            "DDPOptimizer used bucket cap %s and produced the following buckets:",
+            self.bucket_bytes_cap,
         )
         pretty_print_buckets(buckets)
 
@@ -309,7 +310,9 @@ class DDPOptimizer:
                         else:
                             new_args.append(arg)
 
-                    log.debug(f"run_node {n.op}, {n.target} got args {args_str(args)}")
+                    log.debug(
+                        "run_node %s, %s got args %s", n.op, n.target, args_str(args)
+                    )
                     assert isinstance(args, tuple)
                     assert isinstance(kwargs, dict)
 
@@ -320,7 +323,7 @@ class DDPOptimizer:
                         else:
                             curr_submod = real_mod
 
-                        log.debug(f"\n---{n.target} graph---\n{curr_submod.graph}")
+                        log.debug("\n---%s graph---\n%s", n.target, curr_submod.graph)
 
                         # When calling the compiler on the submod, inputs (new_args) are expected to
                         # be FakeTensors already since Dynamo would have made them FakeTensors in the
@@ -348,5 +351,5 @@ class DDPOptimizer:
         submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
-        log.debug(f"\n---final graph---\n{split_gm.graph}\n---------------\n")
+        log.debug("\n---final graph---\n%s\n---------------\n", split_gm.graph)
         return split_gm
