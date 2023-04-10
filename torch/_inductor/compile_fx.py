@@ -432,7 +432,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     ]
 
     # copy over input values for fresh allocations
-    for idx, (x, expanded_dims) in enumerate(zip(inputs, expanded_dims)):
+    for idx, (x, expanded_dims) in enumerate(zip(inputs, inps_expanded_dims)):
         if idx not in static_input_idxs:
             index_expanded_dims_and_copy_(static_inputs[idx], x, expanded_dims)
 

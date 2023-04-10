@@ -388,9 +388,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(self.num_checkpoints(), 2)
 
         def test_expanded_inputs(self):
-            x = torch.empty_strided([4, 512], [0, 1], device="cuda")
-            for i in range(4):
-                x[i].random_(0, 1)
+            x = torch.rand(1, 512, device="cuda").expand(4, 512)
 
             def foo(x):
                 return x + 4 + torch.ones([4, 512], device="cuda")
