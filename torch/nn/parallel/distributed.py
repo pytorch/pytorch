@@ -1388,7 +1388,7 @@ class DistributedDataParallel(Module, Joinable):
             inputs, kwargs = _to_kwargs(
                 inputs,
                 kwargs,
-                self.device_ids[0],
+                torch.device(self.device_type, self.device_ids[0]),
                 self.use_side_stream_for_tensor_copies,
             )
             args, kwargs = inputs[0], kwargs[0]  # type: ignore[index]
@@ -1557,7 +1557,10 @@ class DistributedDataParallel(Module, Joinable):
     def to_kwargs(self, inputs, kwargs, device_id):
         # Kept for BC
         return _to_kwargs(
-            inputs, kwargs, device_id, self.use_side_stream_for_tensor_copies
+            inputs,
+            kwargs,
+            torch.device(self.device_type, device_id),
+            self.use_side_stream_for_tensor_copies,
         )
 
     def gather(self, outputs, output_device):
