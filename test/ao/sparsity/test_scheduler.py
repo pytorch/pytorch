@@ -14,7 +14,7 @@ class ImplementedScheduler(BaseScheduler):
     def get_sl(self):
         if self.last_epoch > 0:
             return [group['sparsity_level'] * 0.5
-                    for group in self.sparsifier.groups]
+                    for group in self.pruner.groups]
         else:
             return list(self.base_sl)
 
@@ -28,7 +28,7 @@ class TestScheduler(TestCase):
         pruner.prepare(model, config=None)
         scheduler = ImplementedScheduler(pruner)
 
-        assert scheduler.sparsifier is pruner
+        assert scheduler.pruner is pruner
         assert scheduler._step_count == 1
         assert scheduler.base_sl == [pruner.groups[0]['sparsity_level']]
 
@@ -125,7 +125,7 @@ class TestCubicScheduler(TestCase):
         model = self._make_model()
         pruner, scheduler = self._make_scheduler(model=model, initially_zero=True)
         self.assertIs(
-            scheduler.sparsifier, pruner,
+            scheduler.pruner, pruner,
             msg="pruner is not properly attached")
         self.assertEqual(
             scheduler._step_count, 1,

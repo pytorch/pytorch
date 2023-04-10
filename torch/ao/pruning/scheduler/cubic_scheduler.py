@@ -24,7 +24,7 @@ class CubicSL(BaseScheduler):
     happens. By default,
 
     Args:
-        sparsifier (BasePruner): Wrapped pruner.
+        pruner (BasePruner): Wrapped pruner.
         init_sl (int, list): Initial level of sparsity
         init_t (int, list): Initial step, when pruning starts
         delta_t (int, list): Pruning frequency
@@ -37,7 +37,7 @@ class CubicSL(BaseScheduler):
             each update. Default: ``False``.
     """
     def __init__(self,
-                 sparsifier,
+                 pruner,
                  init_sl=0.0,
                  init_t=0,
                  delta_t=10,
@@ -46,7 +46,7 @@ class CubicSL(BaseScheduler):
                  last_epoch=-1,
                  verbose=False
                  ):
-        self.sparsifier = sparsifier
+        self.pruner = pruner
 
         self.init_sl = self._make_sure_a_list(init_sl)
         self.init_t = self._make_sure_a_list(init_t)
@@ -55,7 +55,7 @@ class CubicSL(BaseScheduler):
 
         self.initially_zero = self._make_sure_a_list(initially_zero)
 
-        super().__init__(sparsifier, last_epoch, verbose)
+        super().__init__(pruner, last_epoch, verbose)
 
     @staticmethod
     def sparsity_compute_fn(s_0, s_f, t, t_0, dt, n, initially_zero=False):
