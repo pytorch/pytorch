@@ -1550,7 +1550,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline const void* data() const {
-    return data_impl(storage_.data());
+    return data_impl<const void>([this] {
+      return static_cast<const char*>(storage_.data());
+    });
   }
 
   /**
@@ -1564,13 +1566,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline void* mutable_data() {
-    return data_impl(storage_.mutable_data());
+    return data_impl<void>([this] {
+      return static_cast<char*>(storage_.mutable_data());
+    });
   }
 
  private:
   /// Shared implementation of data() and mutable_data().
-  template <typename Void>
-  Void* data_impl(Void* data) const {
+  ///
+  /// get_data must return a byte-addressed pointer, e.g. char*,
+  /// std::byte const*, etc.
+  template <typename Void, typename Func>
+  Void* data_impl(const Func& get_data) const {
     TORCH_CHECK(
         has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
@@ -1578,15 +1585,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
+    auto* data = get_data();
+    static_assert(sizeof(*data) == 1,
+                  "get_data must return a byte-addressed pointer.");
     // Computing an offset into an empty tensor would be UB, since an empty
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
     if (data == nullptr) {
       return nullptr;
     }
-    using Char =
-        std::conditional_t<std::is_const<Void>::value, const char, char>;
-    return static_cast<Char*>(data) + data_type_.itemsize() * storage_offset_;
+    return data + data_type_.itemsize() * storage_offset_;
   }
 
  public:
