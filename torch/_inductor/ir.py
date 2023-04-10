@@ -22,6 +22,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import identity
 from torch._prims_common import (
+    compute_required_storage_length,
     is_boolean_dtype,
     is_float_dtype,
     make_channels_last_strides_for,
@@ -1310,6 +1311,7 @@ class View(BaseView):
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
+        # Skip pointless views
         if V.graph.sizevars.maybe_guard_list_equals(old_size, new_size):
             return x
 
@@ -1605,6 +1607,9 @@ class Layout(IRNode):
         stride: List[Expr],
         offset: Expr = Integer(0),
     ):
+        assert stride is None or len(size) == len(
+            stride
+        ), f"size={size}, stride={stride}"
         self.device = device
         self.dtype = dtype
         assert all(isinstance(s, (Expr, int)) for s in size)
@@ -1697,6 +1702,9 @@ class Layout(IRNode):
             and self.stride == other.stride
             and self.offset == other.offset
         )
+
+    def storage_size(self) -> sympy.Expr:
+        return compute_required_storage_length(self.size, self.stride, self.offset)
 
 
 class FixedLayout(Layout):
@@ -1864,10 +1872,20 @@ class MutationLayout(Layout):
     def stride(self):
         return self.real_layout().stride
 
+    def storage_size(self) -> sympy.Expr:
+        return self.real_layout().storage_size()
+
     def real_layout(self):
-        if isinstance(self.target, MutationLayout):
-            return self.target.real_layout()
-        return self.target.data.layout
+        def unwrap_views(target):
+            if isinstance(target, MutationLayout):
+                return unwrap_views(target.target)
+            if isinstance(target, BaseView):
+                return unwrap_views(target.unwrap_view())
+            if isinstance(target, MutableBox):
+                return unwrap_views(target.data)
+            return target
+
+        return unwrap_views(self.target).layout
 
     @classmethod
     def realize_into(cls, src, dst):
@@ -2235,7 +2253,9 @@ class ComputedBuffer(Buffer):
         except Exception:
             if config.debug:
                 log.warning(
-                    f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+                    "Did not simplify complex index:\n%s\n%s",
+                    dict(zip(index_vars, sizes)),
+                    memory_addrs,
                 )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
@@ -3690,6 +3710,10 @@ class MutableBox(IRNode):
         if callable(fn):
             return fn
         raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
+
+    @property
+    def layout(self):
+        return self.data.layout
 
     def __str__(self):
         if isinstance(self.data, MutableBox):
