@@ -1496,21 +1496,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for you; this class is available from 'Tensor'.
    */
   template <typename T>
-  inline const T* data() const {
-    TORCH_CHECK(
-        data_type_.Match<T>(),
-        "Tensor type mismatch, caller expects elements to be ",
-        caffe2::TypeMeta::TypeName<T>(),
-        ", while tensor contains ",
-        data_type_.name(),
-        ". ");
-    return legacy_mutable_data_ptr_impl<T>();
+  const T* data_dtype_initialized() const {
+    return data_dtype_initialized_impl<T, decltype(*this)>()(
+        *this, &TensorImpl::data_ptr_impl<T>);
   }
 
   /**
-   * Return a typed data pointer to the actual data which this tensor refers to.
-   * This checks that the requested type (from the template parameter) matches
-   * the internal type of the tensor.
+   * Return a mutable typed data pointer to the actual data which this
+   * tensor refers to. This checks that the requested type (from the
+   * template parameter) matches the internal type of the tensor.
    *
    * It is invalid to call data() on a dtype-uninitialized tensor, even if
    * the size is 0.
@@ -1521,17 +1515,68 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for you; this class is available from 'Tensor'.
    */
   template <typename T>
-  inline T* legacy_mutable_data_for_caffe2() {
-    // TODO How is this different from mutable_data<T>()? Do we want
-    // to keep both?
-    TORCH_CHECK(
-        data_type_.Match<T>(),
-        "Tensor type mismatch, caller expects elements to be ",
-        caffe2::TypeMeta::TypeName<T>(),
-        ", while tensor contains ",
-        data_type_.name(),
-        ". ");
-    return legacy_mutable_data_ptr_impl<T>();
+  T* mutable_data_dtype_initialized() {
+    return data_dtype_initialized_impl<T, decltype(*this)>()(
+        *this, &TensorImpl::mutable_data_ptr_impl<T>);
+  }
+
+ private:
+  // NOTE [ Template over constness of this ]
+  //
+  // We're using a trick a few places in this file to share the
+  // implementation between const and non-const methods. C++ doesn't
+  // let you template over the const qualifier on a method, but you
+  // can template over the constness of the class's argument in a
+  // static method.
+  //
+  // Implementation notes:
+  //  * The main trick we employ here is to create a static method
+  //    that is templated on TensorImpl. This lets us write a single
+  //    body that can be used for both const and non-const methods.
+  //  * The second main trick is to use a dependent template that
+  //    carries the constness of the tensor and can apply it to
+  //    additional types.
+
+  // Shared implementation of data_dtype_initialized() and
+  // mutable_data_dtype_initialized() regardless of constness.
+  //
+  // See NOTE [ Template over constness of this ].
+  template <typename T, typename Self>
+  struct data_dtype_initialized_impl {
+    static_assert(std::is_same<
+                  std::remove_const_t<std::remove_reference_t<Self>>,
+                  TensorImpl>::value);
+
+    template <typename U>
+    using MaybeConstT = std::conditional_t<
+        std::is_const<std::remove_reference_t<Self>>::value,
+        const U,
+        U>;
+
+    template <typename DataPtrImplAccessor>
+    MaybeConstT<T>* operator()(
+        Self& self,
+        const DataPtrImplAccessor& data_ptr_impl_accessor) {
+      TORCH_CHECK(
+          self.data_type_.template Match<T>(),
+          "Tensor type mismatch, caller expects elements to be ",
+          caffe2::TypeMeta::TypeName<T>(),
+          ", while tensor contains ",
+          self.data_type_.name(),
+          ". ");
+      return (self.*data_ptr_impl_accessor)();
+    }
+  };
+
+ public:
+  /**
+   * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
+   * does not do a type check. Unlike the untemplated data(), does
+   * check has_storage() and storage_initialized().
+   */
+  template <typename T>
+  inline const T* data_ptr_impl() const {
+    return data_ptr_impl_impl<T, decltype(*this)>()(*this, &Storage::data);
   }
 
   /**
@@ -1541,28 +1586,43 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data_ptr_impl() {
-    return legacy_mutable_data_ptr_impl<T>();
+    return data_ptr_impl_impl<T, decltype(*this)>()(
+        *this, &Storage::mutable_data);
   }
 
  private:
-  // The real implementation of mutable_data_ptr_impl, but in a
-  // non-const method.
+  // Shared implementation of data_ptr_impl() and
+  // mutable_data_ptr_impl() regardless of constness.
   //
-  // TODO: move the implementation into mutable_data_ptr_impl() and
-  // delete this when data<T>() is no longer const.
-  template <typename T>
-  inline T* legacy_mutable_data_ptr_impl() const {
-    TORCH_CHECK(
-        has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
-    TORCH_CHECK(
-        storage_initialized(),
-        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
-        "mutable_data() or raw_mutable_data() to actually allocate memory.");
-    // Caller does the type check.
-    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
-  }
+  // See NOTE [ Template over constness of this ].
+  template <typename T, typename Self>
+  struct data_ptr_impl_impl {
+    static_assert(std::is_same<
+                  std::remove_const_t<std::remove_reference_t<Self>>,
+                  TensorImpl>::value);
+
+    template <typename U>
+    using MaybeConstT = std::conditional_t<
+        std::is_const<std::remove_reference_t<Self>>::value,
+        const U,
+        U>;
+
+    MaybeConstT<T>* operator()(
+        Self& self,
+        MaybeConstT<void>* (Storage::*data_accessor)() const) {
+      TORCH_CHECK(
+          self.has_storage(),
+          "Cannot access data pointer of Tensor that doesn't have storage");
+      TORCH_CHECK(
+          self.storage_initialized(),
+          "The tensor has a non-zero number of elements, but its data is not allocated yet. "
+          "Caffe2 uses a lazy allocation, so you will need to call "
+          "mutable_data() or raw_mutable_data() to actually allocate memory.");
+      // Caller does the type check.
+      return static_cast<MaybeConstT<T>*>((self.storage_.*data_accessor)()) +
+          self.storage_offset_;
+    }
+  };
 
  public:
   /**
@@ -1577,7 +1637,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline const void* data() const {
-    return mutable_data_impl();
+    return data_impl<decltype(*this)>{}(*this, &Storage::data);
   }
 
   /**
@@ -1591,42 +1651,51 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline void* mutable_data() {
-    return mutable_data_impl();
+    return data_impl<decltype(*this)>{}(*this, &Storage::mutable_data);
   }
 
  private:
-  // Templated implementation of data() and mutable_data().
+  // Shared implementation of data() and mutable_data() regardless of
+  // constness.
   //
-  // We are able to pull this off because unsafeGetStorageImpl() is a
-  // const method that returns a non-const StorageImpl.
-  void* mutable_data_impl() const {
-    TORCH_CHECK(
-        has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
-    TORCH_CHECK(
-        dtype_initialized(),
-        "Cannot access data pointer of Tensor that doesn't have initialized dtype "
-        "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
-    // Computing an offset into an empty tensor would be UB, since an empty
-    // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
-    // is UB.  So we skip the offset computation in this case.
-    char* const data = static_cast<char*>(storage_.mutable_data());
-    if (data == nullptr) {
-      return nullptr;
+  // See NOTE [ Template over constness of this ].
+  template <typename Self>
+  struct data_impl {
+    static_assert(std::is_same<
+                  std::remove_const_t<std::remove_reference_t<Self>>,
+                  TensorImpl>::value);
+    // Carries the constness of the TensorImpl and can apply it to additional
+    // types.
+    template <typename T>
+    using MaybeConstT = std::conditional_t<
+        std::is_const<std::remove_reference_t<Self>>::value,
+        const T,
+        T>;
+
+    MaybeConstT<void>* operator()(
+        Self& self,
+        MaybeConstT<void>* (Storage::*data_accessor)() const) const {
+      TORCH_CHECK(
+          self.has_storage(),
+          "Cannot access data pointer of Tensor that doesn't have storage");
+      TORCH_CHECK(
+          self.dtype_initialized(),
+          "Cannot access data pointer of Tensor that doesn't have initialized dtype "
+          "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
+      // Computing an offset into an empty tensor would be UB, since an empty
+      // tensor's storage will be nullptr, and adding a nonzero offset to
+      // nullptr is UB.  So we skip the offset computation in this case.
+      auto* data =
+          static_cast<MaybeConstT<char>*>((self.storage_.*data_accessor)());
+      if (data == nullptr) {
+        return nullptr;
+      }
+      return static_cast<MaybeConstT<void>*>(
+          data + self.data_type_.itemsize() * self.storage_offset_);
     }
-    return static_cast<void*>(data + data_type_.itemsize() * storage_offset_);
-  }
+  };
 
  public:
-  /**
-   * Like data<T>(), but performs no checks.  You are responsible for ensuring
-   * that all invariants required by data() are upheld here.
-   */
-  template <typename T>
-  inline T* unsafe_data() const {
-    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
-  }
-
   /**
    * Returns the TypeMeta of a tensor, which describes what data type
    * it is (e.g., int, float, ...)
@@ -1819,7 +1888,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         new_stride.size(),
         ")");
     const auto new_dim = new_size.size();
-
+    bool overflowed = false;
     sizes_and_strides_.set_sizes(new_size);
 
     if (new_dim > 0) {
@@ -1834,15 +1903,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             sizes_and_strides_.stride_at_unchecked(dim) = 1;
           } else {
             // Keep stride monotonically increasing to match NumPy.
-            sizes_and_strides_.stride_at_unchecked(dim) =
+            overflowed |= c10::mul_overflows(
+                sizes_and_strides_.stride_at_unchecked(dim + 1),
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
-                sizes_and_strides_.stride_at_unchecked(dim + 1);
+                    sizes_and_strides_.size_at_unchecked(dim + 1), 1),
+                std::addressof(sizes_and_strides_.stride_at_unchecked(dim)));
           }
         }
         if (dim == 0)
           break;
       }
+      TORCH_CHECK(!overflowed, "Stride calculation overflowed");
     }
 
     refresh_numel();
@@ -2339,14 +2410,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         const auto dim_ = dim();
         sizes_and_strides_.resize(dim_);
         if (dim_ > 0) {
+          bool overflowed = false;
           const auto last_idx = dim_ - 1;
           sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
-            sizes_and_strides_.stride_at_unchecked(i) =
-                sizes_and_strides_.stride_at_unchecked(i + 1) *
+            overflowed |= c10::mul_overflows(
+                sizes_and_strides_.stride_at_unchecked(i + 1),
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1), 1);
+                    sizes_and_strides_.size_at_unchecked(i + 1), 1),
+                std::addressof(sizes_and_strides_.stride_at_unchecked(i)));
           }
+          TORCH_CHECK(!overflowed, "Stride calculation overflowed");
         }
         break;
       }

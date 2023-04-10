@@ -564,14 +564,23 @@ class TORCH_API TensorBase {
     return this->unsafeGetTensorImpl()->mutable_data();
   }
 
+  template <typename T>
+  const T* const_data_ptr() const;
+
+  template <typename T>
+  T* mutable_data_ptr() const;
+
+  // Legacy interface during the migration to indicate that a callsite
+  // has not been audited for mutability.
+  //
+  // Do not add new uses of this, use const_data_ptr() if possible,
+  // mutable_data_ptr() otherwise.
+  //
   // TODO(#97856) Make this return a const pointer. This is currently
   //              const because of the vast number of clients that
   //              rely on this.
   template <typename T>
   T* data_ptr() const;
-
-  template <typename T>
-  T* mutable_data_ptr() const;
 
   // Purposely not defined here to avoid inlining
   void print() const;
