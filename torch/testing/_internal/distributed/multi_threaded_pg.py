@@ -11,6 +11,7 @@ from torch._C._distributed_c10d import (
     _create_work_from_future,
     AllgatherOptions,
     AllreduceOptions,
+    AllToAllOptions,
     BroadcastOptions,
     ReduceScatterOptions,
     ScatterOptions,
@@ -60,6 +61,16 @@ _reduce_ops = {
     ReduceOp.BOR: partial(bitwise_reduce, op=torch.bitwise_or),
     ReduceOp.BXOR: partial(bitwise_reduce, op=torch.bitwise_xor),
 }
+
+class AllToAll:
+    def work(self, data):
+        world_size = len(data)
+        for dest_rank in range(world_size):
+            output_tensor_list, _ = data[dest_rank]
+            for src_rank in range(world_size):
+                _, input_tensor_list = data[src_rank]
+                with torch.no_grad():
+                    output_tensor_list[src_rank].copy_(input_tensor_list[dest_rank])
 
 class AllReduce:
     def __init__(self, op):
@@ -266,6 +277,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
         with cls._coll_lock:
             cls._cur_coll_on_pgs = {}
             cls._terminate.clear()
+
+    def alltoall(self, output_tensor_list, input_tensor_list, opts=AllToAllOptions()):
+        coll = ProcessLocalGroup._start_coll(AllToAll(), self)
+        res = coll.join(self._rank, (output_tensor_list, input_tensor_list))
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
 
     def allreduce(self, tensor_list, opts=AllreduceOptions()):
         coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
