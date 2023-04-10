@@ -65,7 +65,7 @@ def get_artifacts_urls(results, suites):
             id = r["id"]
             runAttempt = r["runAttempt"]
 
-            if suite in suites:
+            if suite in suites or "_large_memory_models_only" in suite:
                 artifact_filename = f"test-reports-test-{suite}-{shard_id}-{num_shards}-{machine}_{id}.zip"
                 s3_url = f"{S3_BASE_URL}/{repo}/{workflowId}/{runAttempt}/artifact/{artifact_filename}"
                 urls[(suite, int(shard_id))] = s3_url
@@ -73,16 +73,24 @@ def get_artifacts_urls(results, suites):
     return urls
 
 
-def normalize_suite_filename(suite_name, as_file_name=False):
-    assert suite_name.find("inductor_") == 0
-    if as_file_name:
-        subsuite = suite_name.replace("inductor_", "")
+def normalize_suite_filename(suite_name):
+    if "_large_memory_models_only" in suite_name:
+        # TODO: add HF and TB
+        subsuites = ["timm_models"]
+        configs = suite_name.replace("_large_memory_models_only", "").split("_")
+        compiler = configs[0]
+        keys = ["_".join([compiler, s]) for s in subsuites]
+        if len(configs) > 1:
+            extra_flag = configs[-1]
+            keys = [f"{key}_{extra_flag}" for key in keys]
+
+        return subsuites, keys
     else:
         subsuite = suite_name.split("_")[1]
+        if "timm" in subsuite:
+            subsuite = subsuite.replace("timm", "timm_models")
 
-    if "timm" in subsuite:
-        subsuite = subsuite.replace("timm", "timm_models")
-    return subsuite
+        return [subsuite], [suite_name]
 
 
 def download_artifacts_and_extract_csvs(urls):
@@ -90,16 +98,18 @@ def download_artifacts_and_extract_csvs(urls):
     try:
         for (suite, shard), url in urls.items():
             resp = urlopen(url)
-            subsuite = normalize_suite_filename(suite)
+            print(url)
+
+            subsuites, keys = normalize_suite_filename(suite)
             artifact = ZipFile(BytesIO(resp.read()))
             for phase in ("training", "inference"):
-                name = f"test/test-reports/{phase}_{subsuite}.csv"
-                df = pd.read_csv(artifact.open(name))
-                prev_df = dataframes.get((suite, phase), None)
-
-                dataframes[(suite, phase)] = (
-                    pd.concat([prev_df, df]) if prev_df is not None else df
-                )
+                for subsuite, key in zip(subsuites, keys):
+                    name = f"test/test-reports/{phase}_{subsuite}.csv"
+                    df = pd.read_csv(artifact.open(name))
+                    prev_df = dataframes.get((key, phase), None)
+                    dataframes[(key, phase)] = (
+                        pd.concat([prev_df, df]) if prev_df is not None else df
+                    )
 
     except urllib.error.HTTPError:
         print(f"Unable to download {url}, perhaps the CI job isn't finished?")
@@ -108,8 +118,7 @@ def download_artifacts_and_extract_csvs(urls):
 
 def write_filtered_csvs(root_path, dataframes):
     for (suite, phase), df in dataframes.items():
-        suite_fn = normalize_suite_filename(suite, as_file_name=True)
-        out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
+        out_fn = os.path.join(root_path, f"{suite}_{phase}.csv")
         df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
 
 
@@ -129,6 +138,8 @@ if __name__ == "__main__":
         "inductor_timm_dynamic",
         "inductor_torchbench",
         "inductor_torchbench_dynamic",
+        "inductor_large_memory_models_only",
+        "inductor_large_memory_models_only_dynamic",
     }
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"

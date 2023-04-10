@@ -354,11 +354,21 @@ test_single_dynamo_benchmark() {
     test_perf_for_dashboard "$suite" \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}"
   else
-    python "benchmarks/dynamo/$suite.py" \
-      --ci --accuracy --timing --explain \
-      "${DYNAMO_BENCHMARK_FLAGS[@]}" \
-      "$@" "${partition_flags[@]}" \
-      --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+    if [[ "${TEST_CONFIG}" == *inductor_timm* ]] && [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
+      # Drop --ci for inductor_timm runs
+      # TODO: do the same for HF and TB, and for dynamo_eager and aot_eager
+      python "benchmarks/dynamo/$suite.py" \
+        --accuracy --timing --explain \
+        "${DYNAMO_BENCHMARK_FLAGS[@]}" \
+        "$@" "${partition_flags[@]}" \
+        --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+    else
+      python "benchmarks/dynamo/$suite.py" \
+        --ci --accuracy --timing --explain \
+        "${DYNAMO_BENCHMARK_FLAGS[@]}" \
+        "$@" "${partition_flags[@]}" \
+        --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+    fi
 
     if [[ "${TEST_CONFIG}" == *inductor-skip-for-this-run* ]] && [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
       # Other jobs (e.g. periodic, cpu-accuracy) may have different set of expected models.

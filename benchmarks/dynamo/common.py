@@ -245,7 +245,6 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
-    "convit_base",  # _print_Pow: assert exp.is_integer
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
