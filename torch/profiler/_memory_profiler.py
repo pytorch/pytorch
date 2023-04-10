@@ -361,7 +361,7 @@ class SizeMap:
                     # the core PyTorch codebase.
                     if prior_size != new_size:
                         delta = f"{prior_size} vs. {new_size}"
-                        log.warning(f"Mismatch between allocation and free: {delta}")
+                        log.warning("Mismatch between allocation and free: %s", delta)
 
         self._values.update(allocations)
 
