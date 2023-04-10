@@ -15,7 +15,7 @@ class AsyncNetBarrierOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     // This is a pretty much no-op operator, since it's only purposes is make
-    // sure that async_scheduling will schedule certian operations earlier than
+    // sure that async_scheduling will schedule certain operations earlier than
     // others.
     //
     // Exaple where this operator can work well - mixture of data-parallel and
