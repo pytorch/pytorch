@@ -113,25 +113,23 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # the dtensor is now replicate on all ranks
         dtensor = dtensor.redistribute(device_mesh, [Replicate()])
 
-        # TODO: support dropout
-        with self.assertRaisesRegex(RuntimeError, "supported"):
-            dropout = torch.nn.Dropout(p=0.2)
-            dtensor = dropout(dtensor)
+        dropout = torch.nn.Dropout(p=0.2)
+        dtensor = dropout(dtensor)
 
-            # allgather the local tensors
-            dtensor = DTensor.from_local(dtensor.to_local(), device_mesh, [Shard(0)])
-            dtensor = dtensor.redistribute(device_mesh, [Replicate()])
-            local_tensor = dtensor.to_local()
+        # allgather the local tensors
+        dtensor = DTensor.from_local(dtensor.to_local(), device_mesh, [Shard(0)])
+        dtensor = dtensor.redistribute(device_mesh, [Replicate()])
+        local_tensor = dtensor.to_local()
 
-            # compare with local tensors from other ranks
-            self_slice = slice(4 * self.rank, 4 * self.rank + 4)
-            for other_rank in range(self.world_size):
-                if self.rank != other_rank:
-                    # other rank should have an identical local tensor
-                    other_slice = slice(4 * other_rank, 4 * other_rank + 4)
-                    self.assertEqual(
-                        local_tensor[self_slice, :], local_tensor[other_slice, :]
-                    )
+        # compare with local tensors from other ranks
+        self_slice = slice(4 * self.rank, 4 * self.rank + 4)
+        for other_rank in range(self.world_size):
+            if self.rank != other_rank:
+                # other rank should have an identical local tensor
+                other_slice = slice(4 * other_rank, 4 * other_rank + 4)
+                self.assertEqual(
+                    local_tensor[self_slice, :], local_tensor[other_slice, :]
+                )
 
     @with_comms
     @skip_if_lt_x_gpu(4)

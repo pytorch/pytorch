@@ -5,7 +5,7 @@ import torch
 
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
-from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Replicate
+from torch.distributed._tensor.placement_types import _Partial, DTensorSpec
 
 aten = torch.ops.aten
 random_ops = [
@@ -39,19 +39,19 @@ def dropout_rule(op_schema: OpSchema) -> OutputSharding:
     self_spec = cast(DTensorSpec, op_schema.args_schema[0])
 
     # NOTE: dropout on a partial tensor should be similar to the case of a replicate tensor
-    replicate_or_partial = False
+    partial = False
     for placement in self_spec.placements:
-        if isinstance(placement, (Replicate, _Partial)):
-            replicate_or_partial = True
+        if isinstance(placement, _Partial):
+            partial = True
             break
 
-    if replicate_or_partial:
+    if partial:
         return OutputSharding(
             None,
-            failed_reason="aten.native_dropout.default with replication is not supported yet!",
+            failed_reason="aten.native_dropout.default with _Partial is not supported yet!",
         )
     else:
-        return OutputSharding(self_spec)
+        return OutputSharding([self_spec, self_spec])
 
 
 for op in random_ops:
