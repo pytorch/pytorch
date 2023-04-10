@@ -729,6 +729,7 @@ def roll(a, shifts, dims=tuple()):
         return roll(first_dim_rolled, tail_shifts, tail_dims)
 
     (dim,) = dims
+    # TODO: Avoid guarding on shape here
     size = V.graph.sizevars.guard_static_shape(a.get_size()[dim])
     start = (size - shifts[0]) % size
     a_loader = a.make_loader()
@@ -798,6 +799,8 @@ def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
+        # TODO: We don't have to guard on sizes per se, but the number
+        # of splits must stay constant
         sizes = V.graph.sizevars.guard_static_shape(sizes)
     if isinstance(sizes, (int, sympy.Integer)):
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
@@ -854,6 +857,7 @@ def _validate_dim(x, dim, offset=0):
 @register_lowering(aten.glu)
 def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
+    # TODO: don't guard on static shape here
     new_len = V.graph.sizevars.guard_static_shape(x.get_size()[dim]) // 2
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
@@ -3918,7 +3922,6 @@ try:
     def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
         result = ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
         return list(map(TensorBox.create, result))
-
 
 except ImportError:
     log.info(
