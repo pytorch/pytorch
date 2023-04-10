@@ -128,9 +128,7 @@ inline c10::Half fmod(c10::Half a, c10::Half b) {
   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
   ----------------------------------------------------------------------
  */
-C10_HOST_DEVICE inline c10::Half nextafter(
-    c10::Half from,
-    c10::Half to) {
+C10_HOST_DEVICE inline c10::Half nextafter(c10::Half from, c10::Half to) {
   // Reference:
   // https://git.musl-libc.org/cgit/musl/tree/src/math/nextafter.c
   using int_repr_t = uint16_t;
