@@ -709,6 +709,15 @@ def clone_graph(input_graph):
     return CopyGraph(input_graph).transform()
 
 
+_seen_patterns = set()
+# First pass_patterns[0] are applied, then [1], then [2]
+pass_patterns = [
+    PatternMatcherPass(),
+    PatternMatcherPass(),
+    PatternMatcherPass(),
+]
+
+
 def get_arg_value(node, arg_number, kwarg_name=None):
     return (
         node.args[arg_number]
@@ -723,12 +732,3 @@ def filter_nodes(nodes, fn):
         fns.extend([getattr(fn, overload) for overload in fn.overloads()])
 
     return [node for node in nodes if node.target in fns]
-
-
-_seen_patterns = set()
-# First pass_patterns[0] are applied, then [1], then [2]
-pass_patterns = [
-    PatternMatcherPass(),
-    PatternMatcherPass(),
-    PatternMatcherPass(),
-]

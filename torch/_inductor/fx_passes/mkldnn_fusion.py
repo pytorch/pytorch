@@ -249,9 +249,7 @@ def _register_unary_fusion():
     computation_ops = [mkldnn._convolution_pointwise.default]
 
     for unary_attr, patterns in replacement_unary_fusion_patterns.items():
-        _register_unary_fusion_lowering(
-            patterns[0], unary_attr, computation_ops[0]
-        )
+        _register_unary_fusion_lowering(patterns[0], unary_attr, computation_ops[0])
         # TODO: add linear/ConvTranspose fusion
 
     _leaky_relu_patterns = [_leaky_relu_fusion(user) for user in _computation_user_3]
@@ -263,5 +261,4 @@ def _register_unary_fusion():
 
 
 def _mkldnn_fusion_init():
-    if torch._C.has_mkldnn:
-        _register_unary_fusion()
+    _register_unary_fusion()
