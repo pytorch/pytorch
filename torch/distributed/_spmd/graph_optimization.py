@@ -43,6 +43,9 @@ def enable_graph_optimization_dump(folder: str = ""):
     _dump_graph_folder = folder
 
 
+# TODO(@fegin): Support run_before argument.
+# TODO(@fegin): Support multiple runs of graph optimization
+# TODO(@fegin): Ensure that _optimized_func does not have conflict.
 def graph_optimization_pass(run_after: Iterable[str]) -> Callable:
     """
     The contract of graph optimization pass. All the passes should be wrapped with
@@ -69,24 +72,20 @@ def graph_optimization_pass(run_after: Iterable[str]) -> Callable:
         def pass_wrapper(
             gm: Union[fx.GraphModule, IterGraphModule], *args: Any, **kwargs: Any
         ) -> None:
-            assert isinstance(
-                gm, (fx.GraphModule, IterGraphModule)
-            ), "The first argument of the pass must be either fx.GraphModule or IterGraphModule"
-            assert (
-                func.__name__ not in _optimized_func
-            ), f"Cannot apply {func.__name__} twice."
-            invalid_passes = _run_before_sets[func.__name__].intersection(
-                _optimized_func
+            pass_key = ".".join([func.__module__, func.__name__])
+            assert isinstance(gm, (fx.GraphModule, IterGraphModule)), (
+                "The first argument of the pass must be either "
+                "fx.GraphModule or IterGraphModule."
             )
-            assert (
-                not invalid_passes
-            ), f"{invalid_passes} must run after {func.__name__}"
+            assert pass_key not in _optimized_func, f"Cannot apply {pass_key} twice."
+            invalid_passes = _run_before_sets[pass_key].intersection(_optimized_func)
+            assert not invalid_passes, f"{invalid_passes} must run after {pass_key}."
 
             func(gm, *args, **kwargs)
             gm.graph.lint()
             gm.graph.eliminate_dead_code()
             gm.recompile()
-            _optimized_func.add(func.__name__)
+            _optimized_func.add(pass_key)
 
             prefix = f"after_{func.__name__}"
             if _dump_graph_folder:
@@ -176,7 +175,8 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock:
     # TODO: populate all the tensor metadata and remove the default.
     tensor_meta = inputs[0].meta.get("tensor_meta", None)
     return CommBlock(
-        shape=tensor_meta.shape if tensor_meta else None,
+        # TODO: support symbolic shapes
+        shape=torch.Size(int(s) for s in tensor_meta.shape) if tensor_meta else None,
         node_list=node_list,
         wait_nodes=wait_nodes,
         comm_node=comm_node,
@@ -284,7 +284,8 @@ def _scatter_wait_result(
             aten.split,
             (
                 fused_wait_node,
-                [cast(torch.Size, cb.shape).numel() for cb in comm_blocks],
+                # TODO(@fegin): support symbolic shapes
+                [int(cast(torch.Size, cb.shape).numel()) for cb in comm_blocks],
             ),
         )
 
@@ -397,12 +398,12 @@ def _fuse_with_cat(
 
     tensor_meta = cat_node.meta.get("tensor_meta")
     fused_comm_block = CommBlock(
-        shape=tensor_meta.shape,  # type: [union-attr]
+        shape=tensor_meta.shape,  # type: ignore[union-attr]
         node_list=[fused_comm_node, fused_wait_node],
         wait_nodes=[fused_wait_node],
         comm_node=fused_comm_node,
         inputs=[cat_node],
-        outputs=set([fused_wait_node]),
+        outputs={fused_wait_node},
     )
 
     _scatter_wait_result(gm, fused_comm_block, comm_blocks, node_indices)
@@ -480,6 +481,15 @@ def schedule_comm_wait(gm: IterGraphModule) -> None:
 
 @graph_optimization_pass(run_after=tuple())
 def remove_copy_from_optimizer(gm: IterGraphModule) -> None:
+    """
+    Erase the the orphant copy_ that generated when tracing optimizer.
+    Two reasons why we could not simply use the DCE of fx.Graph.
+    1. fx.Graph treats copy_ as a side-effect node and does not erase it.
+    2. Users may want to preserve some orphan `copy_` that is not from the
+       optimizer.
+    If the second reason does not hold, this pass can be rewritten as using
+    DCE from fx.Graph (with the overwrite to the side-effect node list).
+    """
     MAX_COPY_DISTANCE = 5
     remove_candidates: Set[fx.Node] = set()
     for node in reversed(gm.graph.nodes):
@@ -509,6 +519,9 @@ def remove_copy_from_optimizer(gm: IterGraphModule) -> None:
                 if isinstance(parent, fx.Node):
                     nodes.append(parent)
         if should_remove:
+            # We add all ancestors to the list and it is okay as not all of
+            # them will be erased -- only those nodes with zero users will be
+            # erased.
             remove_candidates.update(copy_ancestors)
 
     for node in reversed(gm.graph.nodes):
