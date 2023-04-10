@@ -2131,7 +2131,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             a = torch.scalar_tensor(x.shape[0] > 4)
             return x.sin().sum() + a.sum()
 
-        gm, _ = torch._dynamo.export(f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic")
+        gm, _ = torch._dynamo.export(
+            f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
+        )
         self.assertEqual(gm(torch.ones(3, 4)), f(torch.ones(3, 4)))
 
     @config.patch(dynamic_shapes=True)
