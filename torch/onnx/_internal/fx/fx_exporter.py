@@ -49,10 +49,9 @@ class FXGraphModuleExporter(torch.onnx._internal.exporter.Exporter, abc.ABC):
         # Remove them since ONNX inference does not need them.
         module = passes.RemoveInputMutation(module).run(*fx_module_args)
 
-        # Run ShapeInferenceWithFakeTensor  to get static shape of nodes for op_level_debug purposes.
+        # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes.
         # The pass added nodes with static shape into original node metadata:
-        # node.meta["node_with_static_shape"]: torch.fx.Node
-        # TODO(titaiwang): refactor the pass to stop relying on Transformer.transform()
+        # node.meta["static_shape"]: torch.fx.Node
         if self.options.op_level_debug:
             module = passes.ShapeInferenceWithFakeTensor(module).run(*fx_module_args)
 

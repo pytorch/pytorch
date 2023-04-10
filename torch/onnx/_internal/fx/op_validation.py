@@ -195,14 +195,13 @@ def _recursive_wrap_args(
     wrapped_args: List[_type_utils.Argument] = []
     for arg in complete_args:
         if isinstance(arg, torch.fx.Node):
-            fake_tensor = arg.meta["val"]
+            fake_tensor = arg.meta["static_shape"]
             if isinstance(fake_tensor, torch.Tensor):
                 real_tensor = generate_random_tensors(
                     fake_tensor.shape, fake_tensor.dtype
                 )
                 wrapped_args.append(real_tensor)
             elif isinstance(fake_tensor, (int, float)):
-                # TODO(titaiwang): Could dtype be inside a fx.Node?
                 wrapped_args.append(fake_tensor)
             else:
                 warnings.warn(

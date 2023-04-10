@@ -458,16 +458,15 @@ def _export_fx_node_to_onnxscript(
             and node.target != torch.ops.aten.sym_size
             and not isinstance(node.target, types.BuiltinFunctionType)
         ):
-            node_with_static_shape = node.meta["node_with_static_shape"]
             (
                 node_with_fixed_shape_args,
                 node_with_fixed_shape_kwargs,
-            ) = _fill_in_default_kwargs(node_with_static_shape)
+            ) = _fill_in_default_kwargs(node)
             torch_args, torch_kwargs = op_validation.wrap_fx_args_as_torch_args(
                 node_with_fixed_shape_args, node_with_fixed_shape_kwargs
             )
             op_validation.validate_op_between_ort_torch(
-                node_with_static_shape, symbolic_fn, torch_args, torch_kwargs
+                node, symbolic_fn, torch_args, torch_kwargs
             )
         fx_name_to_onnxscript_value[node.name] = output
     elif node.op == "output":
