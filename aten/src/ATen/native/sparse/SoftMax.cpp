@@ -4,8 +4,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/Parallel.h>
-#include <ATen/SparseTensorUtils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
@@ -28,8 +28,7 @@
 
 #include <map>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
@@ -337,7 +336,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
         auto pool_indices = pools[p];
 
         // Skip empty pools
-        if (pool_indices.size() == 0)
+        if (pool_indices.empty())
           continue;
 
         /* Prepare scratch space */
@@ -478,7 +477,7 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
         auto pool_indices = pools[p];
 
         // Skip empty pools
-        if (pool_indices.size() == 0)
+        if (pool_indices.empty())
           continue;
 
         std::vector<scalar_t> tmp_row(nvalues, 0);
@@ -657,5 +656,4 @@ Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, optional<ScalarType>
   return at::_sparse_log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-}
-}
+} // namespace at::native

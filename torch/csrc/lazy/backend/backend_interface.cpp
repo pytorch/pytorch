@@ -41,13 +41,13 @@ std::unique_ptr<LoweringContext> LoweringContext::Create(
     c10::ArrayRef<const Node*> post_order,
     Util::EmissionMap emit_status) {
   return getBackend()->CreateLoweringContext(
-      name, device, post_order, emit_status);
+      name, std::move(device), post_order, emit_status);
 }
 
 std::unique_ptr<LoweringContext> LoweringContext::Create(
     const std::string& name,
     BackendDevice device) {
-  return getBackend()->CreateLoweringContext(name, device);
+  return getBackend()->CreateLoweringContext(name, std::move(device));
 }
 
 } // namespace lazy

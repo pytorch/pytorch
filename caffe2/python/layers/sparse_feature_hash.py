@@ -22,7 +22,7 @@ class SparseFeatureHash(ModelLayer):
 
     def __init__(self, model, input_record, seed=0, modulo=None,
                  use_hashing=True, use_divide_mod=False, divisor=None, name='sparse_feature_hash', **kwargs):
-        super(SparseFeatureHash, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
 
         assert use_hashing + use_divide_mod < 2, "use_hashing and use_divide_mod cannot be set true at the same time."
 

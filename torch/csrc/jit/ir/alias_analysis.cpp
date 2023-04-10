@@ -104,7 +104,7 @@ class MutableTypePtrHelper {
                 (*maybe_inner_types).end());
           }
         }
-        if (mutable_types.size() == 0) {
+        if (mutable_types.empty()) {
           return c10::nullopt;
         }
         return mutable_types;
@@ -123,6 +123,14 @@ class MutableTypePtrHelper {
         }
         return c10::nullopt;
       }
+      case TypeKind::AwaitType: {
+        if (auto maybe_mut_types = mapTypeToAliasTypeSet(
+                type->castRaw<AwaitType>()->getElementType())) {
+          return {
+              AliasTypeSet{AwaitType::create(*toSingleType(*maybe_mut_types))}};
+        }
+        return c10::nullopt;
+      }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
         for (const TypePtr& inner : type->expectRef<TupleType>().elements()) {
@@ -133,7 +141,7 @@ class MutableTypePtrHelper {
                 (*maybe_inner_types).end());
           }
         }
-        if (mutable_types.size() == 0) {
+        if (mutable_types.empty()) {
           return c10::nullopt;
         }
         return {AliasTypeSet{TupleType::create(mutable_types)}};
@@ -631,6 +639,11 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
+    case prim::awaitable:
+    case prim::awaitable_nowait:
+      return analyzeAwaitable(node);
+    case prim::awaitable_wait:
+      return analyzeAwaitableWait(node);
     case prim::rpc_async:
     case prim::rpc_sync:
     case prim::rpc_remote:
@@ -736,7 +749,7 @@ void AliasDb::analyzeImpl(Node* node) {
       // run into lifetime issues with the graph
       std::vector<std::shared_ptr<Graph>>& graphs =
           function_call_copies_[graph.get()];
-      if (graphs.size() == 0) {
+      if (graphs.empty()) {
         graphs.push_back(graph);
         analyzeSubgraph(node, graph);
       } else {
@@ -914,7 +927,7 @@ void AliasDb::analyzeImpl(Node* node) {
     // Otherwise it is the form of a|fresh, which we can ignore, taking the
     // conservative assumption that the output must alias `a`, e.g
     //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
-    if (!inputs_has_alias && formal->beforeSets().size()) {
+    if (!inputs_has_alias && !formal->beforeSets().empty()) {
       giveFreshAlias(actual);
     }
 
@@ -1047,6 +1060,27 @@ void AliasDb::analyzeWait(Node* node) {
   }
   // the forked subgraph that `wait` is waiting on may write to any of its
   // inputs. We don't have a reliable way of recovering the fork inputs, so
+  // for safety we just register a write to every wildcard.
+  writeRegistry_->registerWriteToAllWildcards(node);
+}
+
+void AliasDb::analyzeAwaitable(Node* node) {
+  for (const auto input : node->inputs()) {
+    setWildcard(input);
+  }
+
+  for (const auto output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+}
+
+void AliasDb::analyzeAwaitableWait(Node* node) {
+  TORCH_INTERNAL_ASSERT(node->kind() == prim::awaitable_wait);
+  for (const auto output : node->outputs()) {
+    setWildcard(output);
+  }
+  // the awaitable subgraph that `wait` is waiting on may write to any of its
+  // inputs. We don't have a reliable way of recovering the awaitable inputs, so
   // for safety we just register a write to every wildcard.
   writeRegistry_->registerWriteToAllWildcards(node);
 }
@@ -1385,9 +1419,8 @@ bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
     const at::ArrayRef<Value*> b) const {
   auto a_elems = getElements(a);
-  return a_elems.size() == 0
-      ? false
-      : memoryDAG_->mayContainAlias(a_elems, getElements(b));
+  return a_elems.empty() ? false
+                         : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
 
 bool AliasDb::mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const {
@@ -1395,7 +1428,7 @@ bool AliasDb::mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const {
     return false;
   }
   auto b_elems = getElements(b);
-  return b_elems.size() == 0
+  return b_elems.empty()
       ? false
       : memoryDAG_->mayContainAlias(elementMap_.at(a), b_elems);
 }

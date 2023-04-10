@@ -123,9 +123,7 @@ def hierarchical_pickle(data):
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
         if (
-            typename.startswith("__torch__.") or
-            typename.startswith("torch.jit.LoweredWrapper.") or
-            typename.startswith("torch.jit.LoweredModule.")
+            typename.startswith(('__torch__.', 'torch.jit.LoweredWrapper.', 'torch.jit.LoweredModule.'))
         ):
             assert data.args == ()
             return {
@@ -359,9 +357,6 @@ def get_inline_skeleton():
     The returned HTML page has no external network dependencies for code.
     It can load model_info.json over HTTP, or be passed to burn_in_info.
     """
-
-    if sys.version_info < (3, 7):
-        raise Exception("get_inline_skeleton requires Python 3.7")
 
     import importlib.resources
 

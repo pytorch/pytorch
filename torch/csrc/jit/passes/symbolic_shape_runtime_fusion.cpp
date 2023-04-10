@@ -115,7 +115,7 @@ StrideInput strideInputFromString(const std::string& si) {
 
 // in the runtime guard, strides are serialized as one flat
 // vector. stride_inputs_offset indexes into that vector
-// where the strides of this tensor beegin
+// where the strides of this tensor begin
 inline StrideInput summarizeStrideDim(
     const c10::IntArrayRef sizes,
     const c10::IntArrayRef strides,
@@ -322,7 +322,7 @@ void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
   auto false_block = if_v.elseBlock();
   std::vector<Value*> false_block_outputs(
       if_v.elseOutputs().begin(), if_v.elseOutputs().end());
-  TORCH_INTERNAL_ASSERT(false_block_outputs.size() != 0);
+  TORCH_INTERNAL_ASSERT(!false_block_outputs.empty());
 
   for (auto out : false_block_outputs) {
     TORCH_INTERNAL_ASSERT(out->type()->cast<TensorType>());
@@ -500,7 +500,7 @@ Operation StaticRuntimeCopyOuts(const Node* node) {
   return [num_ten_inputs](Stack& stack) {
     std::vector<IValue> inputs = pop(stack, num_ten_inputs);
     // uncommon case - first run
-    if (stack.size() == 0) {
+    if (stack.empty()) {
       for (IValue elem : inputs) {
         push(stack, std::move(elem));
       }
@@ -550,7 +550,7 @@ RegisterOperators reg_guard({
 
           // Map from symbolic dimension value to its set's index
           std::map<int64_t, size_t> sym_dim_flat_index;
-          TORCH_INTERNAL_ASSERT(types.size() >= 1);
+          TORCH_INTERNAL_ASSERT(!types.empty());
 
           // we should just be fusing fusion groups with a single device
           // and with tensors not requiring grad

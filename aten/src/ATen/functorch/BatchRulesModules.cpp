@@ -8,9 +8,11 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
+#include <utility>
+
 namespace at { namespace functorch {
 
-static Tensor getStepTensor(const Tensor& indices, c10::SymInt bdim_size, c10::SymInt num_embeddings) {
+static Tensor getStepTensor(const Tensor& indices, const c10::SymInt& bdim_size, const c10::SymInt& num_embeddings) {
   // [batch_size, 1, 1, 1, ..., 1]
   c10::SymDimVector view_shape(indices.dim(), 1);
   view_shape[0] = bdim_size;
@@ -24,13 +26,13 @@ std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
     c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
   if (!weight_bdim && indices_bdim) {
     // B*, ED -> B*D
-    const auto result = at::embedding_symint(weight, indices, padding_idx, scale_grad_by_freq, sparse);
-    return std::make_tuple(result, indices_bdim);
+    auto result = at::embedding_symint(weight, indices, std::move(padding_idx), scale_grad_by_freq, sparse);
+    return std::make_tuple(std::move(result), indices_bdim);
   } else if (weight_bdim && !indices_bdim) {
     // *, BED -> *, E(BD) -> *(BD) -> *BD
     const auto batch_size = weight.size(*weight_bdim);
     const auto weight_ = reshape_dim_into(*weight_bdim, /*embedding_dim*/1, weight);
-    auto result = at::embedding_symint(weight_, indices, padding_idx, scale_grad_by_freq, sparse);
+    auto result = at::embedding_symint(weight_, indices, std::move(padding_idx), scale_grad_by_freq, sparse);
     result = reshape_dim_outof(-1, batch_size, result);
     return std::make_tuple(result, result.dim() - 2);
   }
@@ -44,8 +46,8 @@ std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
 
   const auto range = getStepTensor(indices, batch_size, num_embeddings);
   indices_ = indices_ + range;
-  const auto result = at::embedding_symint(weight_, indices_, padding_idx, scale_grad_by_freq, sparse);
-  return std::make_tuple(result, 0);
+  auto result = at::embedding_symint(weight_, indices_, std::move(padding_idx), scale_grad_by_freq, sparse);
+  return std::make_tuple(std::move(result), 0);
 }
 
 std::tuple<Tensor,optional<int64_t>>
@@ -59,9 +61,9 @@ embedding_dense_backward_batch_rule(
     const auto bdim_size = grad.sym_size(*grad_bdim);
     grad = reshape_dim_into(*grad_bdim, -1, grad);
     auto result = at::embedding_dense_backward_symint(
-        grad, indices, num_weights, padding_idx, scale_grad_by_freq);
+        grad, indices, std::move(num_weights), std::move(padding_idx), scale_grad_by_freq);
     result = reshape_dim_outof_symint(1, bdim_size, result);
-    return std::make_tuple(result, 1);
+    return std::make_tuple(std::move(result), 1);
   }
   const auto bdim_size = indices.size(*indices_bdim);
   indices = moveBatchDimToFront(indices, indices_bdim);
@@ -74,9 +76,9 @@ embedding_dense_backward_batch_rule(
   // Fill in the padding. We can't do it in the embedding_dense_backward call
   // because we need to fill in multiple rows!
   if (padding_idx >= 0) {
-    result.select_symint(1, padding_idx).fill_(0);
+    result.select_symint(1, std::move(padding_idx)).fill_(0);
   }
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 /**
@@ -114,19 +116,19 @@ grid_sample_batch_rule(const Tensor& input, optional<int64_t> input_bdim, const 
     auto new_input = reshape_dim_into(*input_bdim, 1, input);
     auto out = Func(new_input, grid, std::forward<ExtraArgs>(extra_args)...);
     out = reshape_dim_outof(1, input.sizes()[*input_bdim], out);
-    result = std::make_tuple(out, 1);
+    result = std::make_tuple(std::move(out), 1);
   } else if (!input_bdim && grid_bdim) {
     // grid of N(BH)W2 -> NC(BH)W or grid of N(BD)HBW3 -> NC(BD)HW
     auto new_grid = reshape_dim_into(*grid_bdim, 1, grid);
     auto out = Func(input, new_grid, std::forward<ExtraArgs>(extra_args)...);
     out = reshape_dim_outof(2, grid.sizes()[*grid_bdim], out);
-    result = std::make_tuple(out, 2);
+    result = std::make_tuple(std::move(out), 2);
   } else if (input_bdim && grid_bdim) {
     auto new_input = reshape_dim_into(*input_bdim, 0, input);
     auto new_grid = reshape_dim_into(*grid_bdim, 0, grid);
     auto out = Func(new_input, new_grid, std::forward<ExtraArgs>(extra_args)...);
     out = reshape_dim_outof(0, input.sizes()[*grid_bdim], out);
-    result = std::make_tuple(out, 0);
+    result = std::make_tuple(std::move(out), 0);
   } else {
     result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), nullopt);
   }
@@ -154,7 +156,7 @@ grid_sample_backward_helper_in(
   grid_ = ensure_has_bdim(grid_, grid_bdim.has_value(), batch_size);
   grid_ = reshape_dim_into(0, 0, grid_);
 
-  return std::make_tuple(grad_output_, input_, grid_, batch_size);
+  return std::make_tuple(std::move(grad_output_), std::move(input_), std::move(grid_), batch_size);
 }
 
 std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>>
@@ -298,7 +300,7 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
       c10::SymIntArrayRef output_size, c10::SymIntArrayRef input_size,
       T... extra_args) {
     auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
-    TORCH_INTERNAL_ASSERT(input_size.size() > 0);
+    TORCH_INTERNAL_ASSERT(!input_size.empty());
 
     // input_size is wrong so we correct it
     c10::SymDimVector physical_input_size(input_size.begin(), input_size.end());

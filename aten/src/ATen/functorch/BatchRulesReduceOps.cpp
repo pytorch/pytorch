@@ -9,6 +9,8 @@
 #include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
+#include <utility>
+
 namespace at { namespace functorch {
 
 bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
@@ -133,7 +135,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   if (arguments[dim_arg_pos].isIntList()) {
     reduction_case = ReductionCase::DimArray;
     dims = arguments[dim_arg_pos].toIntList().vec();
-    if (dims.size() == 0) {
+    if (dims.empty()) {
       auto all_dims = range(0, std::max((int64_t)1, logical_dim));
       dims = std::vector<int64_t>(all_dims.begin(), all_dims.end());
     }
@@ -205,7 +207,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
     self = self.unsqueeze(-1);
     new_dims = {1};
   }
-  arguments[0] = self;
+  arguments[0] = std::move(self);
   if (reduction_case == ReductionCase::DimArray) {
     arguments[dim_arg_pos] = std::vector<int64_t>(new_dims.begin(), new_dims.end());
   } else if (reduction_case == ReductionCase::Dim) {
@@ -314,38 +316,6 @@ std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
   return std::make_tuple(at::_log_softmax_backward_data(grad_output_, output_, dim, input_dtype), 0);
 }
 
-// aminmax has divergent behavior for 0-d tenosrs.
-// reference: https://github.com/pytorch/pytorch/issues/64008
-// TODO: Once the divergent behavior for 0-d scalar is fixed, we should use REDUCTION_BOXED_ARGS
-std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> aminmax_batching_rule(
-    const Tensor &self, optional<int64_t> self_bdim, optional<int64_t> dim, bool keep_dim)
-{
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto logical_rank = rankWithoutBatchDim(self_, self_bdim);
-  if (logical_rank == 0) {
-    self_ = self_.unsqueeze(-1);
-  }
-
-  if (dim.has_value()) {
-    dim = maybe_wrap_dim(dim.value(), logical_rank) + 1;
-  } else {
-    // flatten the input except for batch-dim
-    auto bsize = self_.size(0);
-    self_ = self_.view({bsize, -1});
-    dim = 1;
-  }
-
-  Tensor min, max;
-  std::tie(min, max) = at::aminmax(self_, dim, keep_dim);
-
-  if (logical_rank == 0 && self_.device().is_cuda()) {
-    // behaviour diverges between cpu and cuda
-    min = min.squeeze(-1);
-    max = max.squeeze(-1);
-  }
-  return std::make_tuple(min, 0, max, 0);
-}
-
 std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
     const Tensor& sorted_sequence,
     optional<int64_t> sorted_sequence_bdim,
@@ -388,21 +358,21 @@ std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
     // B<...>D, B<...>V -> no change
     if (buckets_bdim.has_value() && self_bdim.has_value()) {
       auto self_ = moveBatchDimToFront(self, self_bdim);
-      auto result = at::searchsorted(buckets, self_, out_int32, right, side, sorter_);
-      return std::make_tuple(result, 0);
+      auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
+      return std::make_tuple(std::move(result), 0);
     }
     // B<...>D, <...>V -> B<...>D, B<...>V
     if (buckets_bdim.has_value() && !self_bdim.has_value()) {
       auto self_ = moveBatchDimToFront(self, self_bdim);
       self_ = ensure_has_bdim(self_, self_bdim.has_value(), buckets.size(0));
-      auto result = at::searchsorted(buckets, self_, out_int32, right, side, sorter_);
-      return std::make_tuple(result, 0);
+      auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
+      return std::make_tuple(std::move(result), 0);
     }
     // <...>D, B<...>V -> <...>D, <...>(BV)
     if (!buckets_bdim.has_value() && self_bdim.has_value()) {
       auto bdim_size = self.size(*self_bdim);
       auto self_ = reshape_dim_into(*self_bdim, -1, self);
-      auto result = at::searchsorted(buckets, self_, out_int32, right, side, sorter_);
+      auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
       result = reshape_dim_outof(-1, bdim_size, result);
       return std::make_tuple(result, result.dim() - 2);
     }
@@ -413,23 +383,23 @@ std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
   if (buckets_bdim.has_value() && self_bdim.has_value()) {
     auto self_ = moveBatchDimToFront(self, self_bdim);
     self_ = self_.flatten(1);
-    auto result = at::searchsorted(buckets, self_, out_int32, right, side, sorter_);
+    auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
     result = result.view(self_.sizes());
-    return std::make_tuple(result, 0);
+    return std::make_tuple(std::move(result), 0);
   }
   // BD, * -> BD, flat(*) -> BD, B flat(*)
   if (buckets_bdim.has_value() && !self_bdim.has_value()) {
     auto bdim_size = buckets.size(*buckets_bdim);
     auto self_ = ensure_has_bdim(self, false, bdim_size);
     self_ = self_.flatten(1);
-    auto result = at::searchsorted(buckets, self_, out_int32, right, side, sorter_);
+    auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
     result = result.view(self_.sizes());
-    return std::make_tuple(result, 0);
+    return std::make_tuple(std::move(result), 0);
   }
   // D, B* -> no change
   if (!buckets_bdim.has_value() && self_bdim.has_value()) {
-    auto result = at::searchsorted(buckets, self, out_int32, right, side, sorter_);
-    return std::make_tuple(result, self_bdim);
+    auto result = at::searchsorted(buckets, self, out_int32, right, std::move(side), sorter_);
+    return std::make_tuple(std::move(result), self_bdim);
   }
   TORCH_INTERNAL_ASSERT(false);
 }
@@ -464,6 +434,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_NO_KEEPDIM_ARG(_fft_c2c);
   REDUCTION_WITH_KEEPDIM_ARG(amax);
   REDUCTION_WITH_KEEPDIM_ARG(amin);
+  REDUCTION_WITH_KEEPDIM_ARG(aminmax);
   m.impl("all", all_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(all.dim);
   m.impl("any", any_decomp);
@@ -509,7 +480,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_BOXED_ARGS(var_mean.correction, 1, KEEPDIM_CASE_VARIABLE, 3);
   REDUCTION_NO_KEEPDIM_ARG(_log_softmax);
   REDUCTION_BOXED_ARGS(rot90, 2, KEEPDIM_CASE_TRUE, -1);
-  VMAP_SUPPORT(aminmax, aminmax_batching_rule);
   VMAP_SUPPORT(_log_softmax_backward_data, _log_softmax_backward_batch_rule);
   VMAP_SUPPORT(_softmax_backward_data, _softmax_backward_batch_rule);
   VMAP_SUPPORT(_is_all_true, _is_all_true_batch_rule);

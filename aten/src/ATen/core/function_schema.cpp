@@ -109,7 +109,7 @@ c10::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr&
               (*maybe_inner_types).end());
         }
       }
-      if (mutable_types.size() == 0) {
+      if (mutable_types.empty()) {
         return c10::nullopt;
       }
       return mutable_types;
@@ -130,7 +130,7 @@ c10::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr&
               (*maybe_inner_types).end());
         }
       }
-      if (mutable_types.size() == 0) {
+      if (mutable_types.empty()) {
         return c10::nullopt;
       }
       return {AliasTypeSet{TupleType::create(std::move(mutable_types))}};

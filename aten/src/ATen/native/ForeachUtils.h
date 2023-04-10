@@ -29,7 +29,7 @@ bool has_bool_tensor(TensorList tensors) {
 // - All TensorLists and ScalarLists must have the same number of elements.
 // - Corresponding tensors must have the same size.
 void check_foreach_api_restrictions(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(!tensors.empty(), "Tensor list must have at least one tensor.");
 }
 
 void check_foreach_api_restrictions(TensorList tensors, ArrayRef<Scalar> scalars) {
@@ -38,15 +38,15 @@ void check_foreach_api_restrictions(TensorList tensors, ArrayRef<Scalar> scalars
 }
 
 void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(!tensors1.empty(), "Tensor list must have at least one tensor.");
+  TORCH_CHECK(!tensors2.empty(), "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
 }
 
 void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors3.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(!tensors1.empty(), "Tensor list must have at least one tensor.");
+  TORCH_CHECK(!tensors2.empty(), "Tensor list must have at least one tensor.");
+  TORCH_CHECK(!tensors3.empty(), "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
   TORCH_CHECK(tensors1.size() == tensors3.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors3.size());
 }
@@ -110,7 +110,7 @@ bool check_fast_path_restrictions(
           return false;
         }
       }
-      if (scalarList.size() > 0) {
+      if (!scalarList.empty()) {
         const auto& scalar = scalarList.size() == 1 ? scalarList[0] : scalarList[i];
         const auto& tensor = tensorLists[0][i];
         // note(mkozuki): This check might be responsible for `_foreach_add(bool_tensors, bool_tensors)`

@@ -118,6 +118,9 @@ ALLOW_LIST = [
     ("aten::_nested_tensor", datetime.date(9999, 1, 1)),
     ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
     ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
+    ("aten::_symeig_helper", datetime.date(9999, 1, 1)),
+    ("aten::symeig", datetime.date(9999, 1, 1)),
+    ("aten::symeig.e", datetime.date(9999, 1, 1)),
     ("aten::linalg_solve", datetime.date(2022, 8, 31)),
     ("aten::linalg_solve.out", datetime.date(2022, 8, 31)),
     ("aten::quantile", datetime.date(2022, 9, 30)),
@@ -147,6 +150,10 @@ ALLOW_LIST = [
     ("aten::sum.SymInt", datetime.date(2022, 11, 30)),
     ("aten::mps_linear", datetime.date(9999, 1, 1)),
     ("aten::_mps_linear", datetime.date(9999, 1, 1)),
+    ("aten::_mps_max_pool2d", datetime.date(9999, 1, 1)),
+    ("aten::_mps_max_pool2d.out", datetime.date(9999, 1, 1)),
+    ("aten::mps_max_pool2d_backward", datetime.date(9999, 1, 1)),
+    ("aten::mps_max_pool2d_backward.out", datetime.date(9999, 1, 1)),
     ("aten::view_copy.SymInt", datetime.date(2022, 11, 30)),
     ("aten::view_copy.SymInt_out", datetime.date(2022, 11, 30)),
     ("aten::expand_copy.SymInt", datetime.date(2022, 11, 30)),
@@ -319,6 +326,7 @@ ALLOW_LIST = [
     ("aten::_upsample_nearest_exact2d_backward", datetime.date(2022, 12, 15)),
     ("aten::_scaled_dot_product_attention", datetime.date(2023, 3, 15)),
     ("aten::_scaled_dot_product_flash_attention", datetime.date(2023, 3, 15)),
+    ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
     ("aten::_fused_sdp_choice", datetime.date(2023, 3, 15)),
     ("aten::_flash_attention_forward", datetime.date(2023, 3, 15)),
     ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
@@ -340,6 +348,21 @@ ALLOW_LIST = [
     ("prim::infer_unsqueeze_size", datetime.date(2023, 2, 1)),
     ("prim::t_copy", datetime.date(2023, 2, 1)),
     ("prim::view_copy", datetime.date(2023, 2, 1)),
+    # BetterTransformer 1.0 internal operators
+    ("aten::_transformer_decoder_only_layer_fwd", datetime.date(9999, 1, 1)),
+    ("aten::_native_decoder_only_multi_head_attention",
+     datetime.date(9999, 1, 1)),
+    ("aten::_int_mm.out", datetime.date(2023, 4, 1)),
+    ("aten::_int_mm", datetime.date(2023, 4, 1)),
+    ("aten::_nested_view_from_buffer_copy.out", datetime.date(2023, 5, 1)),
+    ("aten::_nested_view_from_buffer_copy", datetime.date(2023, 5, 1)),
+    ("aten::_nested_view_from_buffer", datetime.date(2023, 5, 1)),
+    # These ops were moved to python under the c10d_functional namespace
+    ("aten::wait_tensor", datetime.date(9999, 1, 30)),
+    ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
+    ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
+    ("aten::all_reduce", datetime.date(9999, 1, 30)),
+
 ]
 
 ALLOW_LIST_COMPILED = [

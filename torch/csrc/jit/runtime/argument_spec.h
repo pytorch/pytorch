@@ -101,7 +101,8 @@ struct ArgumentSpec {
     // https://github.com/zdevito/pytorch/commit/21e7200a0a0fc456bea2f10e95b1781f83933d10
     // show overhead in extra refcounting along this path
     const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
-    if ((arg.defined_ = t->defined())) {
+    arg.defined_ = t->defined();
+    if (arg.defined_) {
       arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
       arg.dim_ = t->dim();
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
@@ -134,7 +135,7 @@ struct ArgumentSpec {
       return false;
     // NB: we need to break out early when there are no elements, because
     // passing a nullptr to memcmp is UB.
-    if (tensor_args.size() == 0)
+    if (tensor_args.empty())
       return true;
     return std::memcmp(
                tensor_args.data(),

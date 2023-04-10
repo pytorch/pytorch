@@ -50,7 +50,7 @@ FunctionSchema PythonValue::getSchema(
   auto param_names = py::cast<std::vector<std::string>>(py_param_names);
   auto names_it = param_names.begin();
   if (moduleSelf_) {
-    if (param_names.size() == 0) {
+    if (param_names.empty()) {
       throw ErrorReport(loc)
           << "Non-static method does not have a self argument";
     }
@@ -418,7 +418,7 @@ void recurseThroughNestedModules(
     auto keys_value = keys_iter->tup_.at(i);
     auto key_string = toIValue(keys_value->asValue(loc, m))->toStringRef();
     std::string submodule_prefix = prefix;
-    if (prefix != "") {
+    if (!prefix.empty()) {
       submodule_prefix = prefix + ".";
     }
     submodule_prefix += key_string;
@@ -746,9 +746,8 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   c10::ClassTypePtr class_type = concreteType_->getJitType()->cast<ClassType>();
-  bool have_pre_hooks =
-      class_type && class_type->getForwardPreHooks().size() != 0;
-  bool have_hooks = class_type && class_type->getForwardHooks().size() != 0;
+  bool have_pre_hooks = class_type && !class_type->getForwardPreHooks().empty();
+  bool have_hooks = class_type && !class_type->getForwardHooks().empty();
 
   std::vector<Value*> arg_values;
   std::vector<NamedValue> pre_hook_result;
@@ -797,7 +796,7 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
     for (auto& output_node : output_nodes) {
       pre_hook_result.emplace_back(output_node);
     }
-    if (args.size() != 0) { // only replace input if it existed
+    if (!args.empty()) { // only replace input if it existed
       args = pre_hook_result;
     }
   }
@@ -971,7 +970,7 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t /*n_binders*/) {
   Value* error_message = nullptr;
-  if (args.size() == 0) {
+  if (args.empty()) {
     error_message = insertConstant(*caller.graph(), "", loc);
   } else if (args.size() == 1) {
     error_message = args.at(0).value(*caller.graph());
@@ -1007,13 +1006,19 @@ bool isNamedTupleClass(const py::object& obj) {
   return is_tuple_class == 1 && py::hasattr(obj, "_fields");
 }
 
-TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
+TypePtr registerNamedTuple(
+    const py::object& obj,
+    const SourceRange& loc,
+    const ResolutionCallback& rcb) {
   TORCH_INTERNAL_ASSERT(isNamedTupleClass(obj));
   auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
       py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
 
-  py::object props = py::module::import("torch._jit_internal")
-                         .attr("_get_named_tuple_properties")(obj);
+  // Note: we need to pass rcb to resolve ForwardRef annotations. See
+  // [Note: ForwardRef annotations in NamedTuple attributes]
+  py::object props =
+      py::module::import("torch._jit_internal")
+          .attr("_get_named_tuple_properties")(obj, loc, py::cpp_function(rcb));
 
   std::string unqualName;
   std::vector<std::string> field_names;
@@ -1208,6 +1213,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
   } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("_awaitable").ptr()) {
+    return SpecialFormValue::create(prim::awaitable);
+  } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
   } else if (
@@ -1288,7 +1296,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (isNamedTupleClass(obj)) {
-    auto tuple_type = registerNamedTuple(obj, loc)->expect<TupleType>();
+    // The use of fakeRcb here prevents us from correctly resolving ForwardRef
+    // annotations on NamedTuple attributes for instances whose types are
+    // inferred. See #95858 for more details, as well as
+    // [Note: ForwardRef annotations in NamedTuple attributes]
+    auto fakeRcb =
+        py::module::import("torch.jit.annotations").attr("_fake_rcb");
+    auto tuple_type =
+        registerNamedTuple(obj, loc, fakeRcb)->expect<TupleType>();
     return std::make_shared<NamedTupleConstructor>(tuple_type);
   }
 

@@ -72,7 +72,7 @@ _known_working_ops = [
 ]
 
 
-class ModelHelper(object):
+class ModelHelper:
     """A helper model so we can manange models more easily. It contains net def
     and parameter storages. You can add an Operator yourself, e.g.
 

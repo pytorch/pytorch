@@ -6,12 +6,13 @@ from typing import List
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-import torch.nn.qat as nnqat
-import torch.nn.quantized._reference as nnqr
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.quantized.reference as nnqr
 from .backend_config import (
     BackendConfig,
     BackendPatternConfig,
     DTypeConfig,
+    DTypeWithConstraints,
     ObservationType,
 )
 from .qnnpack import (
@@ -19,7 +20,7 @@ from .qnnpack import (
     qnnpack_default_op_qint8_symmetric_dtype_config
 )
 from ._common_operator_config_utils import _Conv2dMetadata
-from ..fuser_method_mappings import _sequential_wrapper2
+from ..fuser_method_mappings import _sequential_wrapper2, fuse_conv_bn, fuse_conv_bn_relu
 
 
 __all__ = [
@@ -43,10 +44,30 @@ executorch_default_op_quint8_dtype_config = DTypeConfig(
     output_dtype=torch.quint8,
 )
 
-executorch_default_dynamic_int8_dtype_config = DTypeConfig(
+executorch_default_dynamic_quint8_dtype_config = DTypeConfig(
     input_dtype=torch.quint8,
     output_dtype=torch.float,
     weight_dtype=torch.qint8,
+    bias_dtype=torch.float,
+    is_dynamic=True,
+)
+
+executorch_act_qint8_scale_min_2_neg_12 = DTypeWithConstraints(
+    dtype=torch.qint8,
+    scale_min_lower_bound=2 ** -12,
+)
+
+executorch_weight_qint8_neg_127_to_127_scale_min_2_neg_12 = DTypeWithConstraints(
+    dtype=torch.qint8,
+    quant_min_lower_bound=-127,
+    quant_max_upper_bound=127,
+    scale_min_lower_bound=2 ** -12,
+)
+
+executorch_default_dynamic_qint8_dtype_config = DTypeConfig(
+    input_dtype=executorch_act_qint8_scale_min_2_neg_12,
+    output_dtype=torch.float,
+    weight_dtype=executorch_weight_qint8_neg_127_to_127_scale_min_2_neg_12,
     bias_dtype=torch.float,
     is_dynamic=True,
 )
@@ -78,7 +99,8 @@ def _get_linear_configs() -> List[BackendPatternConfig]:
     dtype_configs = [
         qnnpack_weighted_op_qint8_symmetric_dtype_config,
         executorch_weighted_op_int8_dtype_config,
-        executorch_default_dynamic_int8_dtype_config,
+        executorch_default_dynamic_quint8_dtype_config,
+        executorch_default_dynamic_qint8_dtype_config,
         executorch_default_dynamic_float16_dtype_config,
     ]
     linear_configs: List[BackendPatternConfig] = []
@@ -153,6 +175,26 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
             BackendPatternConfig((convs.func, F.relu))
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs))
+        # conv + batchnorm (+ relu)
+        conv_configs.append(
+            BackendPatternConfig((convs.root, convs.bn))
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                .set_fuser_method(fuse_conv_bn)
+                .set_fused_module(convs.fused_conv_bn))
+        # conv + bn + relu module fusion
+        conv_configs.append(
+            BackendPatternConfig((convs.root, convs.bn, nn.ReLU))
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                .set_fuser_method(fuse_conv_bn_relu)
+                .set_fused_module(convs.fused_conv_bn_relu))
+        # conv + bn + relu functional fusion
+        conv_configs.append(
+            BackendPatternConfig((convs.root, convs.bn, F.relu))
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                .set_root_module(convs.root)
+                .set_fuser_method(fuse_conv_bn_relu)
+                .set_fused_module(convs.fused_conv_bn_relu))
+        # TODO: we can add fusion for torch.relu as well
     return conv_configs
 
 def _get_binary_ops_configs() -> List[BackendPatternConfig]:
@@ -196,10 +238,13 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     ]
     share_qparams_ops = [
         F.adaptive_avg_pool2d,
+        F.hardtanh,
         F.relu,
         F.relu6,
         torch.nn.AdaptiveAvgPool2d,
+        torch.nn.Hardtanh,
         torch.squeeze,
+        "mean",
         "permute",
         "reshape",
         "relu",
@@ -258,16 +303,15 @@ def _get_embedding_op_configs() -> List[BackendPatternConfig]:
                 .set_dtype_configs(dtype_configs)
                 .set_qat_module(qat_embedding_op)
                 .set_root_module(embedding_op)
-                .set_reference_quantized_module(ref_embedding_op)
-                ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+                .set_reference_quantized_module(ref_embedding_op))
         # config for qat op
         embedding_op_configs.append(
             BackendPatternConfig(qat_embedding_op)
                 .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
                 .set_dtype_configs(dtype_configs)
                 .set_root_module(embedding_op)
-                .set_reference_quantized_module(ref_embedding_op)
-                ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+                .set_reference_quantized_module(ref_embedding_op))
+
         # config for functional embedding
         embedding_op_configs.append(
             BackendPatternConfig(torch.nn.functional.embedding)

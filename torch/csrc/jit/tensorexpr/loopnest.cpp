@@ -813,7 +813,7 @@ class FunctionInliner : public IRMutator {
     }
   }
 
-  // Any Random Instrinsics that were turned into vars must be inserted here.
+  // Any Random Intrinsics that were turned into vars must be inserted here.
   StmtPtr mutate(BlockPtr v) override {
     if (!success()) {
       return v;
@@ -1354,7 +1354,7 @@ bool LoopNest::optimizeConditionals() {
       continue;
     }
     TORCH_INTERNAL_ASSERT(
-        comp_values.size() >= 1,
+        !comp_values.empty(),
         buildErrorMessage(
             "Expected at least one expression in optimizeConditional in the fuser."));
     comp_values.insert(comp_values.begin(), immLike(comp_values[0], 0));
@@ -1434,7 +1434,7 @@ void LoopNest::vectorizeInnerLoops() {
     worklist.push_back(rootF);
   } else if (BlockPtr body = to<Block>(root_stmt_)) {
     std::vector<BlockPtr> blocks = {body};
-    while (blocks.size()) {
+    while (!blocks.empty()) {
       BlockPtr b = blocks.back();
       blocks.pop_back();
 
@@ -1450,7 +1450,7 @@ void LoopNest::vectorizeInnerLoops() {
 
   // Traverse the For loop nest find inner-most loops, which are
   // vectorization candidates.
-  while (worklist.size()) {
+  while (!worklist.empty()) {
     ForPtr f = worklist.back();
     worklist.pop_back();
 
@@ -2930,7 +2930,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     tmp_params.push_back(alloc<Add>(new_loop_vars[i], info.start[i]));
   }
 
-  // Replace acceses to the producer in the consumer with the cache.
+  // Replace accesses to the producer in the consumer with the cache.
   CacheReplacer replacer(producer, tmp_buf, info.start);
   consumer->accept_mutator(&replacer);
 

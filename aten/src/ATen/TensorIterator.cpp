@@ -163,7 +163,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
 
 TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims) {
   declare_static_shape(shape);
-  if (!static_shape_->size()) return *this;
+  if (static_shape_->empty()) return *this;
   for (const auto& squash_dim : squash_dims) {
     TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
                 "squash_dim ", squash_dim, " must be in [0, ", static_shape_->size(), ").");
@@ -715,7 +715,7 @@ void TensorIteratorBase::permute_dimensions(IntArrayRef perm) {
   // Update shape and strides
   shape_ = reorder(shape_);
   for (auto& op : operands_) {
-    if (op.stride_bytes.size() > 0) {
+    if (!op.stride_bytes.empty()) {
       op.stride_bytes = reorder(op.stride_bytes);
     }
   }
@@ -1225,7 +1225,7 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
       "TensorIterator does not support symbolic shapes; please implement this operator in torch/_refs "
       "using the elementwise or reduction helpers (look at backtrace to find out what operator this is)");
     auto shape = op.tensor_base().sizes();
-    if (shape.size() == 0) {
+    if (shape.empty()) {
       has_scalars = true;
     } else {
       has_tensors = true;
@@ -1507,6 +1507,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
   // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
   if (privateuse1_without_storage  ||
+      common_device_.type() == DeviceType::MTIA ||
       common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||
@@ -1724,7 +1725,7 @@ void DimCounter::increment(const std::array<int64_t, 2>& step) {
 std::array<int64_t, 2> DimCounter::max_2d_step() const {
   int64_t step0 = std::min(shape[0] - values[0], range.end - offset);
   int64_t step1 = 1;
-  if (step0 == shape[0] && shape.size() >= 1) {
+  if (step0 == shape[0] && !shape.empty()) {
     step1 = std::min(shape[1] - values[1], (range.end - offset) / shape[0]);
   }
   return {step0, step1};

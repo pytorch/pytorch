@@ -8,7 +8,11 @@ from torch.ao.quantization.observer import (
     _is_activation_post_process,
 )
 from torch.ao.quantization.backend_config import (
+    BackendConfig,
     DTypeConfig,
+)
+from torch.ao.quantization.backend_config.utils import (
+    get_module_to_qat_module,
 )
 
 from torch.fx import (
@@ -17,12 +21,11 @@ from torch.fx import (
 from torch.fx.graph import (
     Graph,
 )
-from torch.nn.intrinsic import _FusedModule
+from torch.ao.nn.intrinsic import _FusedModule
 
 from ..utils import (
     _parent_name,
     get_qconfig_dtypes,
-    get_combined_dict
 )
 from ..qconfig_mapping import (
     _OBJECT_TYPE_DICT_KEY,
@@ -30,10 +33,6 @@ from ..qconfig_mapping import (
     _MODULE_NAME_REGEX_DICT_KEY,
     QConfigMapping,
 )
-from ..quantization_mappings import (
-    get_default_qat_module_mappings,
-)
-
 
 __all__: List[str] = []
 
@@ -331,15 +330,14 @@ def _get_flattened_qconfig_dict(qconfig_mapping: QConfigMapping) -> Dict[Union[C
 
 def _update_qconfig_for_qat(
         qconfig_mapping: QConfigMapping,
-        additional_qat_module_mapping: Dict[Callable, Callable]):
+        backend_config: BackendConfig):
     """
-    Update the qconfig_dict to account for module swaps during QAT.
+    Update the qconfig_mapping to account for module swaps during QAT.
     During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
     """
-    all_qat_mappings = get_combined_dict(
-        get_default_qat_module_mappings(), additional_qat_module_mapping)
+    module_to_qat_module_class = get_module_to_qat_module(backend_config)
     object_type_dict = qconfig_mapping.object_type_qconfigs
     new_object_type_dict = object_type_dict.copy()
     for k, v in new_object_type_dict.items():
-        if k in all_qat_mappings:
-            object_type_dict[all_qat_mappings[k]] = v
+        if k in module_to_qat_module_class:
+            object_type_dict[module_to_qat_module_class[k]] = v

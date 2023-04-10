@@ -347,14 +347,7 @@ void Engine::thread_init(
   // We don't have any good reason to prefer one or the other, so we've
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
-
-#if defined(USE_CUDA)
-  if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
-    set_device(device);
-  }
-#else
-  set_device(device);
-#endif
+  worker_device = device;
 
   // initialize each device thread's thread local ready queue with the ready
   // queue that is created before the thread initialization
@@ -411,7 +404,7 @@ std::vector<Node*> get_current_graph_task_execution_order() {
   }
 
   // We could potentially check if there is only a single device here
-  // but explicitly require this context doens't seem bad either
+  // but explicitly require this context doesn't seem bad either
   TORCH_CHECK(
       !c10::AutogradState::get_tls_state().get_multithreading_enabled(),
       "get_current_graph_task_execution_order expects the current backward to be "
@@ -525,6 +518,8 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         // execution.
         continue;
       }
+
+      set_device(worker_device);
 
       if (task.fn_ && !local_graph_task->has_error_.load()) {
         // Set the ThreadLocalState before calling the function.
@@ -676,7 +671,7 @@ void GraphTask::exec_post_processing() {
   // See Note [Streaming backwards].
   // Syncs caller_current_stream with leaf streams, so final_callbacks may use
   // any grad on its device's current stream.
-  if (leaf_streams.size() > 0) {
+  if (!leaf_streams.empty()) {
     for (const auto& leaf_stream : leaf_streams) {
       // stash_current_streams() stashed streams for all device IDs that already
       // had a CUDA context before the GraphTask executed. For inactive devices,
@@ -849,7 +844,7 @@ void validate_outputs(
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
       // (tensor.layout(), tensor.grad.layout()) In future, there will be an
-      // oppportunity to support more combinations of layouts if they are
+      // opportunity to support more combinations of layouts if they are
       // composable (example., operations like addition etc., are well defined
       // between tensors of different layouts.), as well as all parts of
       // autograd like AccumulateGrad correctly handle this. We allow grad to be
@@ -930,7 +925,6 @@ static variable_list call_function(
   });
 
   if (has_post_hooks) {
-    // NOLINTNEXTLINE(bugprone-use-after-move)
     return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;
@@ -1501,7 +1495,7 @@ void GraphTask::init_to_execute(
   // recursion, but the actual code does this iteratively. Refer to the
   // numbering to see how the actual code corresponds. A difference to note is
   // that in the iterative version, when you are working with the current Node,
-  // you are reponsible to update your parent's is_needed after all your
+  // you are responsible to update your parent's is_needed after all your
   // children have been updated.
   //
   // is_needed = {fn: True for fn in outputs}             # (0)

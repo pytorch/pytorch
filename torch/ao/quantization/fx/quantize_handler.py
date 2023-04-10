@@ -77,15 +77,6 @@ class QuantizeHandler(ABC):
                             arg, self.modules, cache_for_no_tensor_check)):
                     self.num_tensor_args += 1
 
-    # TODO: can remove after the is_dynamic flag is defined, so that we can
-    # move embedding op to backend_config_dict
-    def input_output_observed(self) -> bool:
-        """
-        Returns True if the pattern matched to this qhandler could be
-        be observed, and False it it should not be observed.
-        """
-        return True
-
     def is_general_tensor_value_op(self) -> bool:
         """
         Returns True if the operator works for both floating point and
@@ -112,8 +103,7 @@ class QuantizeHandler(ABC):
 def _get_quantize_handler_cls(
         observation_type: ObservationType,
         dtype_configs: List[DTypeConfig],
-        num_tensor_args_to_observation_type: Dict[int, ObservationType],
-        input_output_observed: bool) -> Type[QuantizeHandler]:
+        num_tensor_args_to_observation_type: Dict[int, ObservationType]) -> Type[QuantizeHandler]:
     """
     Return a configurable QuantizeHandler that matches the given specifications from the backend.
     """
@@ -133,14 +123,9 @@ def _get_quantize_handler_cls(
             else:
                 self.observation_type = observation_type
             self.dtype_configs = dtype_configs
-            self.input_output_observed_ = input_output_observed
 
         def is_general_tensor_value_op(self) -> bool:
             return self.observation_type == ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT
-
-        # This is temporary, and will be removed soon
-        def input_output_observed(self):
-            return self.input_output_observed_
 
     return ConfigurableQuantizeHandler
 
@@ -156,18 +141,14 @@ def _get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Pat
         observation_type = config.observation_type
         dtype_configs = config.dtype_configs
         num_tensor_args_to_observation_type = config._num_tensor_args_to_observation_type
-        input_output_observed = config._input_output_observed
-        if input_output_observed is None:
-            input_output_observed = True
         pattern_to_quantize_handlers[pattern] = \
             _get_quantize_handler_cls(
                 observation_type,
                 dtype_configs,
-                num_tensor_args_to_observation_type,
-                input_output_observed)
+                num_tensor_args_to_observation_type)
     return pattern_to_quantize_handlers
 
-# TODO: remove this class, this is still exposed in torch.quantization
+# TODO: remove this class, this is still exposed in torch.ao.quantization
 # but we should be able to break bc
 class BinaryOpQuantizeHandler(QuantizeHandler):
     pass
@@ -213,10 +194,10 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
 class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
     pass
 
-# TODO: not used, can be removed after torch.quantization namespace is deprecated
+# TODO: not used, can be removed after torch.ao.quantization namespace is deprecated
 class CustomModuleQuantizeHandler(QuantizeHandler):
     pass
 
-# TODO: not used, can be removed after torch.quantization namespace is deprecated
+# TODO: not used, can be removed after torch.ao.quantization namespace is deprecated
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
     pass

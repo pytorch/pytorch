@@ -38,6 +38,29 @@
 
 namespace at { namespace native {
 
+// Parse environment variable "TORCH_LINEAR_FLATTEN_3D"
+static inline bool parseLinearFlatten3d() {
+  // Uninitialized value
+  static int value = -1;
+  if (value == -1) {
+    const char* env_str = std::getenv("TORCH_LINEAR_FLATTEN_3D");
+    if (env_str != nullptr && strcmp(env_str, "1") == 0) {
+      value = 1;
+    } else {
+      value = 0;
+    }
+  }
+  return bool(value);
+}
+
+// `_flatten_3d_linear` flattens the first two dimensions of the input tensor
+// before passing it to linear operation, if the input tensor is 3D
+static inline Tensor _flatten_3d_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
+    const auto input_sizes = input.sym_sizes();
+    const auto result = at::addmm(bias, input.view_symint({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
+    return result.view_symint({input_sizes[0], input_sizes[1], result.sym_size(1)});
+}
+
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
@@ -56,13 +79,16 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
-  if (input.dim() == 3 && bias->defined() && input.is_contiguous() &&
-      !input.is_xla()) {
+  if (input.dim() == 3 && bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    const auto input_sizes = input.sym_sizes();
-    const auto result = at::addmm(*bias, input.view_symint({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
-    return result.view_symint({input_sizes[0], input_sizes[1], result.sym_size(1)});
+    if (input.is_contiguous()) {
+      return _flatten_3d_linear(input, weight, *bias);
+    } else if (parseLinearFlatten3d()) {
+      // If user forces flattening via env var
+      const Tensor input_cont = input.contiguous();
+      return _flatten_3d_linear(input_cont, weight, *bias);
+    }
   }
   auto output = at::matmul(input, weight.t());
   if (bias->defined()) {
@@ -102,7 +128,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // assumes that tensors have been pre-unsqueezed (so that all dimensions match - after broadcasting)
   // but makes no other assumptions on the order of dimensions
   TORCH_CHECK(left_.dim()==right_.dim(), "number of dimensions must match");
-  if (sum_dims_.size() == 0)
+  if (sum_dims_.empty())
     return at::mul(left_, right_);
   int64_t dim = left_.dim();
   auto sum_dims = at::dim_list_to_bitset(sum_dims_, dim);

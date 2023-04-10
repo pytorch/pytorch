@@ -1,5 +1,4 @@
 #include <c10/core/GeneratorImpl.h>
-#include <chrono>
 #include <random>
 
 #if defined(__SGX_ENABLED__)
@@ -9,6 +8,7 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
+#include <chrono>
 #endif
 
 namespace c10 {
@@ -26,6 +26,7 @@ GeneratorImpl::GeneratorImpl(Device device_in, DispatchKeySet key_set)
 c10::intrusive_ptr<GeneratorImpl> GeneratorImpl::clone() const {
   auto res = this->clone_impl();
   c10::raw::intrusive_ptr::incref(res);
+  c10::raw::weak_intrusive_ptr::incref(res);
   return c10::intrusive_ptr<GeneratorImpl>::reclaim(res);
 }
 
@@ -62,7 +63,7 @@ static uint64_t readURandomLong() {
  * /dev/urandom or the current time. For CUDA, gets random from
  * std::random_device and adds a transformation on it. For Intel SGX
  * platform use sgx_read_rand as reading from /dev/urandom is
- * prohibited on that platfrom.
+ * prohibited on that platform.
  *
  * FIXME: The behavior in this function is from legacy code
  * (THRandom_seed/THCRandom_seed) and is probably not the right thing to do,

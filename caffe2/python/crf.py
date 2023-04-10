@@ -13,7 +13,7 @@ and its gradient in C++ and handle the different batches there.
 """
 
 
-class CRFWithLoss(object):
+class CRFWithLoss:
     def __init__(self, model, num_classes, transitions_blob=None):
         self.model = model
         self.num_classes = num_classes

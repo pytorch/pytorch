@@ -82,6 +82,7 @@ struct CodeImpl {
       operator_table_inv_;
   std::vector<Function*> function_table_;
   std::vector<std::unique_ptr<GraphFunction>> forked_functions_;
+  std::vector<std::unique_ptr<GraphFunction>> awaited_functions_;
   std::vector<TypePtr> type_table_;
   std::vector<std::function<void(std::vector<IValue>&)>>
       profile_function_table_;
@@ -611,6 +612,16 @@ struct CodeImpl {
     insertInstruction(FORK, function_table_.size() - 1, node->inputs().size());
   }
 
+  void emitAwaitable(Node* node) {
+    emitLoadInputs(node->inputs());
+    std::unique_ptr<GraphFunction> await_fn(new GraphFunction(
+        "<awaitable function>", node->g(attr::Subgraph), nullptr));
+    awaited_functions_.emplace_back(std::move(await_fn));
+    function_table_.emplace_back(awaited_functions_.back().get());
+    insertInstruction(
+        AWAITABLE, function_table_.size() - 1, node->inputs().size());
+  }
+
   void emitWarn(Node* node) {
     if (FLAGS_torch_jit_disable_warning_prints) {
       return;
@@ -715,6 +726,9 @@ struct CodeImpl {
         break;
       case prim::fork:
         emitFork(node);
+        break;
+      case prim::awaitable:
+        emitAwaitable(node);
         break;
       case aten::warn:
         emitWarn(node);
@@ -851,8 +865,8 @@ struct CodeImpl {
         static_cast<int64_t>(schema.arguments().size()) +
         static_cast<int64_t>(schema.returns().size());
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        expected_size == actual_size || schema.is_varret() ||
-            schema.is_vararg(),
+        static_cast<size_t>(expected_size) == actual_size ||
+            schema.is_varret() || schema.is_vararg(),
         "Expected to find ",
         expected_size,
         " values on the stack, but found ",
@@ -903,7 +917,7 @@ struct MobileCodeImpl : CodeImpl {
 
           size_t numInclude = specifiedArgs.first +
               (support_default_args_before_out_ ? specifiedArgs.second : 0);
-          auto unique_name = op_schema.overload_name() != ""
+          auto unique_name = !op_schema.overload_name().empty()
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();
           auto it = op_to_num_specified_args_.insert(

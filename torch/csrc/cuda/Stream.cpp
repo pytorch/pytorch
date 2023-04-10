@@ -28,7 +28,7 @@ static PyObject* THCPStream_pynew(
   uint64_t stream_ptr = 0;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  static char* kwlist[] = {
+  constexpr const char* kwlist[] = {
       "priority",
       "stream_id",
       "device_index",
@@ -38,8 +38,8 @@ static PyObject* THCPStream_pynew(
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|iKKKK",
-          kwlist,
+          "|iLLLK",
+          const_cast<char**>(kwlist),
           &priority,
           &stream_id,
           &device_index,
@@ -59,7 +59,8 @@ static PyObject* THCPStream_pynew(
   }
 
   at::cuda::CUDAStream stream = (stream_id || device_index || device_type)
-      ? at::cuda::CUDAStream::unpack3(stream_id, device_index, device_type)
+      ? at::cuda::CUDAStream::unpack3(
+            stream_id, device_index, static_cast<c10::DeviceType>(device_type))
       : stream_ptr
       ? at::cuda::getStreamFromExternal(
             reinterpret_cast<cudaStream_t>(stream_ptr), current_device)

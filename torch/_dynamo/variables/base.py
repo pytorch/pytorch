@@ -29,7 +29,7 @@ class HasPostInit(type):
         return obj
 
 
-class VariableTracker(object, metaclass=HasPostInit):
+class VariableTracker(metaclass=HasPostInit):
     """
     Base class for tracked locals and stack values
 
@@ -222,7 +222,7 @@ class VariableTracker(object, metaclass=HasPostInit):
         unimplemented(f"num_parameters: {self}")
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        unimplemented(f"hasattr: {self}")
+        unimplemented(f"hasattr: {repr(self)}")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -259,7 +259,7 @@ class VariableTracker(object, metaclass=HasPostInit):
         mutable_local: MutableLocal = None,
         recursively_contains: Optional[Set] = None,
     ):
-        super(VariableTracker, self).__init__()
+        super().__init__()
         self.guards = guards or set()
         self.source = source
         self.mutable_local = mutable_local

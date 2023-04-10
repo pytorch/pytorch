@@ -3,7 +3,7 @@ import torch
 import torch.distributed as dist
 
 
-class DefaultState(object):
+class DefaultState:
     r"""
     Stores state needed to perform the default communication algorithm
     within a communication hook.

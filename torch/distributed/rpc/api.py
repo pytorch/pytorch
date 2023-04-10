@@ -84,7 +84,7 @@ def _require_initialized(func):
     return wrapper
 
 
-class AllGatherStates(object):
+class AllGatherStates:
     def __init__(self):
         # Each `gathered_objects` is an empty dict at beginning.
         # The leader worker is elected as the first worker in a sorted worker
@@ -102,7 +102,7 @@ class AllGatherStates(object):
 
 
 # States used by `def _all_gather()`.
-# `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
+# `_ALL_WORKER_NAMES` is initialized on initializing RPC layer.
 _ALL_WORKER_NAMES: Set[Any] = set()
 _all_gather_dict_lock = threading.RLock()
 _all_gather_sequence_id: Dict[str, int] = {}
@@ -283,7 +283,7 @@ def _barrier(worker_names):
         _all_gather(None, set(worker_names))
     except RuntimeError as ex:
         logger.error(
-            f"Failed to complete barrier, got error {ex}"
+            "Failed to complete barrier, got error %s", ex
         )
 
 
@@ -300,7 +300,7 @@ def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
         _all_gather(None, timeout=timeout)
     except RuntimeError as ex:
         logger.error(
-            f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
+            "Failed to respond to 'Shutdown Proceed' in time, got error %s", ex
         )
         raise ex
 
@@ -425,7 +425,7 @@ def get_worker_info(worker_name=None):
 def _to_worker_info(to):
     if isinstance(to, WorkerInfo):
         return to
-    elif isinstance(to, str) or isinstance(to, int):
+    elif isinstance(to, (str, int)):
         return get_worker_info(to)
     else:
         raise ValueError("Cannot get WorkerInfo from name {}".format(to))
@@ -483,7 +483,7 @@ except TypeError:
 # This is for the fact that pybind11 generates the parameter
 # `self` as type `rpc.PyRRef`, so a `:inherited-members:`
 # under `.. autoclass:: RRef` does not work.
-# we have to do the following process to replacee `rpc.PyRRef` with `rpc.RRef`.
+# we have to do the following process to replace `rpc.PyRRef` with `rpc.RRef`.
 #
 def method_factory(method_name, docstring):
     def method(self, *args, **kwargs):

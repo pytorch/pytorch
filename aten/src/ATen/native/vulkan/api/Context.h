@@ -157,14 +157,14 @@ class Context final {
     return std::unique_lock<std::mutex>(cmd_mutex_);
   }
 
- private:
-  inline void set_cmd() {
+  inline void set_cmd(bool reusable = false) {
     if (!cmd_) {
-      cmd_ = command_pool_.get_new_cmd();
+      cmd_ = command_pool_.get_new_cmd(reusable);
       cmd_.begin();
     }
   }
 
+ private:
   DescriptorSet submit_compute_prologue(
       CommandBuffer&,
       const ShaderInfo&,
@@ -196,10 +196,10 @@ class Context final {
       const VkFence fence_handle,
       Arguments&&...);
 
- private:
-  void submit_cmd_to_gpu(const VkFence fence_handle = VK_NULL_HANDLE);
+  void submit_cmd_to_gpu(
+      const VkFence fence_handle = VK_NULL_HANDLE,
+      const bool final_use = false);
 
- public:
   void flush();
 };
 
@@ -257,14 +257,18 @@ class StorageBuffer final {
   StorageBuffer(const StorageBuffer&) = delete;
   StorageBuffer& operator=(const StorageBuffer&) = delete;
 
-  StorageBuffer(StorageBuffer&&) = delete;
-  StorageBuffer& operator=(StorageBuffer&&) = delete;
+  StorageBuffer(StorageBuffer&&) = default;
+  StorageBuffer& operator=(StorageBuffer&&) = default;
 
   ~StorageBuffer() {
     context_p_->register_buffer_cleanup(vulkan_buffer_);
   }
 
-  VulkanBuffer& buffer() {
+  inline c10::ScalarType dtype() {
+    return dtype_;
+  }
+
+  inline VulkanBuffer& buffer() {
     return vulkan_buffer_;
   }
 };

@@ -68,7 +68,7 @@ runs:
         )
         git submodule sync && git submodule update -q --init --recursive --depth 1
         docker cp "${GITHUB_WORKSPACE}/." "${container_name}:/var/lib/jenkins/workspace"
-        (echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete" | docker exec -u jenkins -i "${container_name}" bash) 2>&1
+        (echo "sudo chown -R jenkins . && .ci/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete" | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
         # Copy install binaries back
         mkdir -p "${GITHUB_WORKSPACE}/build_android_install_${MATRIX_ARCH}"

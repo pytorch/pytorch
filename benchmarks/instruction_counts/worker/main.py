@@ -183,6 +183,6 @@ def main(communication_file: str) -> None:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--communication_file', type=str)
+    parser.add_argument('--communication-file', '--communication_file', type=str)
     communication_file = parser.parse_args().communication_file
     main(communication_file)

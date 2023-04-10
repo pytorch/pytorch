@@ -158,7 +158,8 @@ at::_ops::${unambiguous_name}::call(${unpacked_args})"""
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
     """\
 std::function<at::Tensor(const at::Tensor&)> func=nullptr;
-if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
+if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided() ||
+    c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
   ${replay_view_func}
 }
 """
@@ -219,6 +220,7 @@ ${assign_return_values} ([&]() {
 )
 
 TMP_VAR = "_tmp"
+
 
 # FIXME: Ideally these functions should be methods on Type class, but we have a
 #        comment in codegen/model.py there saying these concepts are not well defined.
@@ -320,7 +322,8 @@ def emit_view_call(
 
 def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
     """Generate an additional lambda function to recover views in backward when as_strided is not supported.
-    See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details."""
+    See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details.
+    """
     input_base = "input_base"
     replay_view_func = ""
     updated_unpacked_args: List[str] = []
@@ -363,7 +366,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
             )
             updated_unpacked_args.append(arg_value)
         elif (
-            arg == "nested_size_" or arg == "nested_strides_"
+            arg == "nested_size_" or arg == "nested_strides_" or arg == "offsets_"
         ) and arg_type == ConstRefCType(BaseCType(tensorT)):
             # [NOTE] [Nested Arg Types]
             # This is temporary. Nested tensors will be migrating to use SymInts and

@@ -242,7 +242,7 @@ void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
             ++vecIt;
           }
         }
-        if (it->second.size() == 0) {
+        if (it->second.empty()) {
           it = waitingSockets_.erase(it);
         } else {
           ++it;
@@ -1035,7 +1035,7 @@ void TCPStore::waitForWorkers() {
       auto buf = reinterpret_cast<const char*>(value.data());
       auto len = value.size();
       int numWorkersCompleted = std::stoi(std::string(buf, len));
-      if (numWorkersCompleted >= *numWorkers_) {
+      if (numWorkersCompleted >= static_cast<int>(*numWorkers_)) {
         break;
       }
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(

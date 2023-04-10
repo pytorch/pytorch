@@ -63,7 +63,7 @@ void fillQConfigMap(
 
   for (const NameModule& s : module.named_children()) {
     std::string child_key;
-    if (key == "") {
+    if (key.empty()) {
       child_key = s.name;
     } else {
       child_key = key + "." + s.name;
@@ -316,7 +316,7 @@ class InsertObserversHelper {
    * observe/quantize a value a not, we don't want to observe a value multiple
    * times.
    *
-   * arguemnt: is_entry_point means whether the current method is the forward
+   * argument: is_entry_point means whether the current method is the forward
    * method of the top level module.
    *
    * Since we want to insert observers in the call site instead of in the called
@@ -404,7 +404,7 @@ class InsertObserversHelper {
   // to return an observer configured for a value, if it is needed.
   c10::optional<Module> getObserverFor(Value* v);
 
-  // Uses the state created by fillPassThroughValueMap to propage observed
+  // Uses the state created by fillPassThroughValueMap to propagage observed
   // property which should pass through from inputs to outputs.
   void propagateObservedProperty(
       Value* output,
@@ -1409,7 +1409,7 @@ InsertObserversHelper::insertObserversFor(
     }
 
     for (auto* v : block->outputs()) {
-      // we need explictly skip the values that are already observed
+      // we need explicitly skip the values that are already observed
       // this might happen in subblocks for `if` since
       // these subblock has access to all values before the `if` node
       if (!isObserved(v, block_observed_values)) {
@@ -1562,7 +1562,7 @@ InsertObserversHelper::insertObserversFor(
             subblock_output_observe_state.push_back(
                 isObserved(output, block_observed_values));
           }
-          if (aggregated_output_observe_state.size() > 0) {
+          if (!aggregated_output_observe_state.empty()) {
             TORCH_CHECK(
                 aggregated_output_observe_state ==
                     subblock_output_observe_state,
@@ -1706,7 +1706,7 @@ Module InsertObserversForOnDevicePTQ(
   // you will have multiple getattrs for the same attribute and thus potentially
   // multiple observers observing the same value. This will also lead to
   // increased size of the packed param struct. I dont expect this to be a
-  // commong pattern but something to be aware fo Note that current quant
+  // common pattern but something to be aware fo Note that current quant
   // workflow does not prevent this anyway since during inset quant dequant
   // things are inlined anyway
   helper.fillBoundaryValueMap(cloned_module, observer_method_name);

@@ -519,7 +519,7 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
     const ProfilerConfig& config)
     : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
-  if (config_.experimental_config.performance_events.size()) {
+  if (!config_.experimental_config.performance_events.empty()) {
     perf_profiler_ =
         std::make_unique<torch::profiler::impl::linux_perf::PerfProfiler>();
     perf_profiler_->Configure(config_.experimental_config.performance_events);
@@ -583,7 +583,8 @@ static constexpr const char* indexKey = "Ev Idx";
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
     uint64_t start_time_us,
-    uint64_t end_time_us) {
+    uint64_t end_time_us,
+    const ProfilerConfig& config) {
   using namespace torch::profiler::impl::kineto;
   TraceWrapper cpu_trace(start_time_us, "PyTorch Profiler");
 
@@ -601,6 +602,16 @@ void passEventsToKineto(
     TORCH_INTERNAL_ASSERT(activity || !kKinetoAvailable);
     if (activity) {
       addMetadata(activity, indexKey, std::to_string(i));
+
+      // There is a longstanding regression for initializing
+      // on-demand Kineto activity handling. Enabling this path
+      // for Profiler API could cause side effects as much has changed since.
+      // Make a surgical fix here until we holistically assess the on-demand
+      // vs API path framentation, which has been snowballing in complexity
+      // and thus flakiness.
+      if (config.global()) {
+        e->kineto_activity_ = activity;
+      }
     }
   }
 
@@ -865,7 +876,7 @@ trace_ptr_t addKinetoEvents(
     uint64_t end_time_us,
     const ProfilerConfig& config) {
   using namespace torch::profiler::impl::kineto;
-  passEventsToKineto(results, start_time_us, end_time_us);
+  passEventsToKineto(results, start_time_us, end_time_us, config);
 
   // In on demand mode kineto is directly controlled by other machinery.
   if (config.global()) {

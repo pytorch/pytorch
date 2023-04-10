@@ -76,7 +76,7 @@ def gpus_for_rank(world_size):
     return gpus_for_rank
 
 
-class AbstractTimeoutTest(object):
+class AbstractTimeoutTest:
     def _test_store_timeout(self, backend, init_method, c2p):
         try:
             dist.init_process_group(
@@ -131,7 +131,7 @@ class AbstractTimeoutTest(object):
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = nn.Linear(10, 50, bias=False)
         self.fc3 = nn.Linear(50, 4, bias=False)
@@ -146,7 +146,7 @@ class Net(nn.Module):
 
 class DoubleGpuNet(nn.Module):
     def __init__(self, gpus):
-        super(DoubleGpuNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
         self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[1])
         self.fc3 = nn.Linear(50, 4, bias=False).to(gpus[1])
@@ -166,7 +166,7 @@ class DoubleGpuNet(nn.Module):
 
 class QuadraGpuNet(nn.Module):
     def __init__(self, gpus):
-        super(QuadraGpuNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
         self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[1])
         self.fc3 = nn.Linear(50, 4, bias=False).to(gpus[2])
@@ -190,7 +190,7 @@ class QuadraGpuNet(nn.Module):
 
 class ConvNet(nn.Module):
     def __init__(self, gpus, layouts, dtypes):
-        super(ConvNet, self).__init__()
+        super().__init__()
         self.dtypes = dtypes
         if isinstance(gpus, list):
             self.layer_gpus = gpus
@@ -242,14 +242,14 @@ class ModuleForDdpCommHook(nn.Module):
 
 class SparseGradientModule(nn.Module):
     def __init__(self):
-        super(SparseGradientModule, self).__init__()
+        super().__init__()
         self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
 
     def forward(self, x):
         return F.softmax(self.embedding(x), dim=1)
 
 
-class CommonDistributedDataParallelTest(object):
+class CommonDistributedDataParallelTest:
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
@@ -1037,7 +1037,7 @@ class ComputeBucketAssignmentTest(TestCase):
         self.assertEqual(per_bucket_size_limits, [200, 200, 400, 400])
 
 
-class AbstractCommTest(object):
+class AbstractCommTest:
     @property
     def op_timeout_sec(self):
         return 1
@@ -1098,7 +1098,7 @@ class AbstractCommTest(object):
                 rank = dist.get_rank(process_group)
                 obj_list = [None for _ in range(dist.get_world_size(verify_pg))]
                 dist.all_gather_object(obj_list, (rank, seq_num), group=verify_pg)
-                rank_to_seq_num = {rank: num for (rank, num) in obj_list}
+                rank_to_seq_num = dict(obj_list)
                 self.assertEqual(len(set(rank_to_seq_num.values())), 2)
                 self.assertEqual(rank_to_seq_num[0], rank_to_seq_num[2])
                 expected_same = {
@@ -1120,7 +1120,7 @@ class AbstractCommTest(object):
         )
         self._test_sequence_num_incremented(
             c10d._get_default_group(),
-            ranks=list(i for i in range(dist.get_world_size())),
+            ranks=list(range(dist.get_world_size())),
         )
 
     def _test_sequence_num_incremented_subgroup(self, backend_name):
@@ -1300,11 +1300,11 @@ class AbstractCommTest(object):
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
-        super(CommTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(CommTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1419,11 +1419,11 @@ class DummyProcessGroup(dist.ProcessGroup):
 
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
-        super(PythonProcessGroupExtensionTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(PythonProcessGroupExtensionTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1443,6 +1443,59 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
+
+    def test_backend_config(self):
+        dist.Backend.register_backend(
+            "dummy",
+            PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        # Ensure backend config can be created with the following arguments
+        backend_config_strings_and_expected_values = [
+            (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
+            (dist.Backend.NCCL, "cpu:nccl,cuda:nccl"),
+            (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
+            (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
+            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
+            ("DUMMY", "cpu:dummy,cuda:dummy"),
+            ("dummy", "cpu:dummy,cuda:dummy"),
+            ("cpu:dummy,cuda:dummy", "cpu:dummy,cuda:dummy"),
+            ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
+            ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
+            ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
+            ("cPu:gLoO,cuDa:NcCl", "cpu:gloo,cuda:nccl")
+        ]
+
+        for config_str, expected_value in backend_config_strings_and_expected_values:
+            with self.subTest(config_str):
+                # ensures these configs strings are valid and no ValueError is raised
+                config = dist.BackendConfig(config_str)
+                self.assertEqual(str(config), expected_value)
+
+        # Ensure backend config will raise ValueError with the following arguments
+        invalid_backend_config_strings = [
+            "cpu:gloo,cuda:nccl,",  # trailing comma
+            "cpu:gloo,cuda:nccl,cpu:dummy",  # duplicate device
+        ]
+        for config_str in invalid_backend_config_strings:
+            with self.subTest(config_str):
+                with self.assertRaises(ValueError):
+                    dist.BackendConfig(config_str)
+
+    def test_init_process_group_with_multiple_backends(self):
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
+
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '6789'
+        dist.init_process_group("cpu:dummy,cuda:dummy", rank=self.rank, world_size=self.world_size)
+
+        # test all_gather
+        input_tensor = torch.ones(2, 2) * 7
+        output_tensor_list = [torch.zeros(2, 2) for _ in range(self.world_size)]
+        dist.all_gather(output_tensor_list, input_tensor)
+
+        dist.barrier()
+        dist.destroy_process_group()
 
     class Options:
         def __init__(self):
@@ -1522,15 +1575,27 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         return 1
 
     def setUp(self):
-        super(ProcessGroupWithDispatchedCollectivesTests, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(ProcessGroupWithDispatchedCollectivesTests, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
             pass
+
+    def test_init_process_group_optional_backend(self):
+        with tempfile.NamedTemporaryFile() as f:
+            store = dist.FileStore(f.name, self.world_size)
+            # creates both gloo and nccl backend
+            if dist.is_gloo_available() and dist.is_nccl_available():
+                dist.init_process_group(
+                    store=store,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                )
+                dist.destroy_process_group()
 
     def test_init_process_group_for_all_backends(self):
         for backend in dist.Backend.backend_list:
@@ -1558,6 +1623,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                     world_size=self.world_size,
                     store=store
                 )
+                pg = c10d._get_default_group()
+                self.assertEqual(pg.rank(), self.rank)
+                self.assertEqual(pg.size(), self.world_size)
+                self.assertEqual(pg.name(), str(backend))
+
                 dist.destroy_process_group()
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
@@ -1639,11 +1709,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):
-        super(CompilerTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(CompilerTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:

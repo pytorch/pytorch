@@ -19,7 +19,7 @@ class MarginRankLoss(ModelLayer):
 
     def __init__(self, model, input_record, name='margin_rank_loss',
                  margin=0.1, average_loss=False, **kwargs):
-        super(MarginRankLoss, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         assert margin >= 0, ('For hinge loss, margin should be no less than 0')
         self._margin = margin
         self._average_loss = average_loss

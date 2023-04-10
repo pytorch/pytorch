@@ -3,8 +3,8 @@
 # This script can also be used to test whether your diff changes any codegen output.
 #
 # Run it before and after your change:
-#   .jenkins/pytorch/codegen-test.sh <baseline_output_dir>
-#   .jenkins/pytorch/codegen-test.sh <test_output_dir>
+#   .ci/pytorch/codegen-test.sh <baseline_output_dir>
+#   .ci/pytorch/codegen-test.sh <test_output_dir>
 #
 # Then run diff to compare the generated files:
 #   diff -Naur <baseline_output_dir> <test_output_dir>

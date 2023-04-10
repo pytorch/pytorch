@@ -3,7 +3,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import TEST_NUMBA, IS_WINDOWS, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_NUMBA, TEST_WITH_ROCM
 import inspect
 import contextlib
 
@@ -18,6 +18,8 @@ TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
 SM53OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3)
 SM60OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0)
 SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+
+PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 TEST_MAGMA = TEST_CUDA
 if TEST_CUDA:
@@ -86,7 +88,7 @@ def tf32_on(self, tf32_precision=1e-5):
 
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
-# allow_tf32=True, it will use reduced precision as pecified by the
+# allow_tf32=True, it will use reduced precision as specified by the
 # argument. For example:
 #    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
 #    @tf32_on_and_off(0.005)
@@ -178,11 +180,7 @@ def _get_torch_rocm_version():
     return tuple(int(x) for x in rocm_version.split("."))
 
 def _check_cusparse_generic_available():
-    version = _get_torch_cuda_version()
-    min_supported_version = (10, 1)
-    if IS_WINDOWS:
-        min_supported_version = (11, 0)
-    return version >= min_supported_version
+    return not TEST_WITH_ROCM
 
 def _check_hipsparse_generic_available():
     if not TEST_WITH_ROCM:

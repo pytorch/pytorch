@@ -130,13 +130,11 @@ FILENAME_ALLOWLIST = {
 }
 
 # Include optimizer code for tracing
-FILENAME_ALLOWLIST |= set(
-    [
-        inspect.getfile(obj)
-        for obj in torch.optim.__dict__.values()
-        if inspect.isclass(obj)
-    ]
-)
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.optim.__dict__.values()
+    if inspect.isclass(obj)
+}
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 if HAS_PRIMS_REFS:
@@ -152,6 +150,16 @@ if HAS_PRIMS_REFS:
 
 SKIP_DIRS_RE = None
 
+is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
+# Skip fbcode paths(including torch.package paths) containing
+# one of the following strings.
+FBCODE_SKIP_DIRS = {
+    "torchrec/distributed",
+    "torchrec/fb/distributed",
+    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
+}
+FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
+
 
 def _recompile_re():
     global SKIP_DIRS_RE
@@ -162,7 +170,10 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    module_spec = importlib.util.find_spec(import_name)
+    try:
+        module_spec = importlib.util.find_spec(import_name)
+    except Exception:
+        return
     if not module_spec:
         return
     origin = module_spec.origin
@@ -181,6 +192,8 @@ def check(filename, allow_torch=False):
         return False
     if allow_torch and is_torch(filename):
         return False
+    if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
+        return True
     return bool(SKIP_DIRS_RE.match(filename))
 
 
@@ -200,6 +213,7 @@ for _name in (
     "tensorflow",
     "tensorrt",
     "torch2trt",
+    "torchrec.distributed",
     "tqdm",
     "tree",
     "tvm",
@@ -220,7 +234,9 @@ def is_torch_inline_allowed(filename):
 
 @functools.lru_cache(None)
 def dynamo_dir():
-    return _module_dir(importlib.import_module(config.dynamo_import))
+    import torch._dynamo
+
+    return _module_dir(torch._dynamo)
 
 
 def is_torch(filename):

@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
-                        _default_to_foreach, _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _default_to_fused_or_foreach, _differentiable_doc, _foreach_doc, _maximize_doc)
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
@@ -48,7 +48,7 @@ class Adagrad(Optimizer):
             maximize=maximize,
             differentiable=differentiable,
         )
-        super(Adagrad, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         for group in self.param_groups:
             for p in group["params"]:
@@ -210,7 +210,7 @@ def adagrad(
         )
 
     if foreach is None:
-        foreach = _default_to_foreach([params, grads, state_sums, state_steps], differentiable=differentiable)
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")

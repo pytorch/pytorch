@@ -338,7 +338,7 @@ Tensor computeChunk(
         size_t step = buf_info->dims[norm_dim] / chunks;
 
         std::vector<ExprHandle> new_indices;
-        for (int64_t i = 0; i < indices.size(); ++i) {
+        for (int64_t i = 0; i < static_cast<int64_t>(indices.size()); ++i) {
           if (i == norm_dim) {
             new_indices.push_back(
                 indices[i] + ExprHandle(immLike(indices[i], chunkIdx * step)));
@@ -444,7 +444,7 @@ Tensor computeReshape(
         for (size_t idx = 0; idx < A.ndim(); idx++) {
           size_t dim_idx = A.ndim() - idx - 1;
           // We don't need to generate mod-div for the first dimension -
-          // ideally IRSimlifier would get rid of that for us, but for now
+          // ideally IRSimplifier would get rid of that for us, but for now
           // let's just avoid generating it in the first place.
           if (dim_idx > 0) {
             orig_buf_indexes[dim_idx] = flat_idx / stride % A.dim(dim_idx);
@@ -479,7 +479,7 @@ Tensor computeFlatten(
 
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     const std::vector<BufHandle>& bufList) {
-  if (bufList.size() == 0) {
+  if (bufList.empty()) {
     throw std::runtime_error("Empty input list is passed to aten::cat");
   }
   std::vector<BufHandle> bufInputs;
@@ -487,7 +487,7 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   for (auto buf : bufList) {
     bufInputs.push_back(buf);
     TORCH_INTERNAL_ASSERT(
-        buf.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
+        !buf.node()->dims().empty(), buildErrorMessage("Invalid buf rank"));
     // Ignore buffers that are 0-sized on any dimension.
     bool hasEmptyDims = false;
     for (const auto& dim : buf.dims()) {
@@ -542,7 +542,7 @@ Tensor computeCatWoConditionals(
       ToDtype(high_type),
       nullptr,
       output_strides_expr);
-  if (non_empty_inputs.size() == 0) {
+  if (non_empty_inputs.empty()) {
     return Tensor(
         output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
   }
@@ -574,7 +574,7 @@ Tensor computeCatWoConditionals(
     std::vector<VarPtr> for_vars(dims.size());
     std::vector<ExprPtr> load_indices(dims.size());
     std::vector<ExprPtr> store_indices(dims.size());
-    for (int64_t i = 0; i < dims.size(); ++i) {
+    for (int64_t i = 0; i < static_cast<int64_t>(dims.size()); ++i) {
       for_vars[i] = alloc<Var>(
           "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i),
           dims[i].dtype());
@@ -638,7 +638,7 @@ Tensor computeCat(
       outputShape,
       outputStrides,
       [&](const std::vector<VarHandle>& axes) {
-        if (nonEmptyInputs.size() == 0) {
+        if (nonEmptyInputs.empty()) {
           return ExprHandle(0);
         }
 

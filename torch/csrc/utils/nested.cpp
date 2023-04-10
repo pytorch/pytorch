@@ -74,11 +74,11 @@ at::Tensor nested_tensor_ctor(
   }
 
   at::ScalarType final_dtype = dtype_val;
-  if (r.isNone(1) && new_list.size() > 0) {
+  if (r.isNone(1) && !new_list.empty()) {
     final_dtype = c10::typeMetaToScalarType(new_list[0].dtype());
   }
   at::Device final_device = tensor_options.device();
-  if (r.isNone(2) && new_list.size() > 0) {
+  if (r.isNone(2) && !new_list.empty()) {
     final_device = new_list[0].device();
   }
   auto out = at::_nested_tensor_from_tensor_list(

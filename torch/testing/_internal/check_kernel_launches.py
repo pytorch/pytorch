@@ -107,7 +107,7 @@ def check_file(filename):
     Returns:
         The number of unsafe kernel launches in the file
     """
-    if not (filename.endswith(".cu") or filename.endswith(".cuh")):
+    if not (filename.endswith((".cu", ".cuh"))):
         return 0
     if should_exclude_file(filename):
         return 0

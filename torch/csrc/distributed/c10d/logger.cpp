@@ -37,7 +37,7 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
       ddp_logging_data.ints_map["avg_backward_comm_time"],
       ddp_logging_data.ints_map["avg_backward_compute_comm_overlap_time"]);
 
-  if (ddp_logging_data.strs_map["comm_hook"] != "") {
+  if (!ddp_logging_data.strs_map["comm_hook"].empty()) {
     loggerInfo += fmt::format(
         "\n Gradient comm. hook: {}", ddp_logging_data.strs_map["comm_hook"]);
   }
@@ -274,7 +274,7 @@ void Logger::set_runtime_stats_and_log() {
   // If unused_parameters_ is not empty, calculate its sizes.
   // unused_parameters_ is calculated in forward call of
   // each iteration.
-  if (reducer_->unused_parameters_.size() == 0 &&
+  if (reducer_->unused_parameters_.empty() &&
       reducer_->find_unused_parameters_) {
     // No unused params in this iteration
     ddp_logging_data_->ints_map["unused_parameter_size"] = 0;
@@ -320,7 +320,9 @@ void Logger::set_runtime_stats_and_log() {
         "Cuda time stats are not collected for multi-device modules.");
     return;
   }
-  if (!reducer_->params_[0].is_cuda() && !reducer_->params_[0].is_cpu()) {
+
+  if (!reducer_->timer_ &&
+      (!reducer_->params_[0].is_cuda() && !reducer_->params_[0].is_cpu())) {
     TORCH_WARN_ONCE(
         "Time stats are currently only collected for CPU and CUDA devices. "
         "Please refer to CpuTimer or CudaTimer for how to register timer "

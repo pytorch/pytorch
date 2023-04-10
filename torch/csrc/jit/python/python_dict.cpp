@@ -64,7 +64,7 @@ void initScriptDictBindings(PyObject* module) {
       .def(py::init([](py::dict dict) {
         TypePtr type = nullptr;
 
-        if (dict.size() > 0) {
+        if (!dict.empty()) {
           // If the source dictionary is nonempty, try to infer its type.
           auto inferred_type = tryToInferType(dict);
 

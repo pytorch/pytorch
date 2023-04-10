@@ -79,7 +79,7 @@ class TestMultiPrecisionSgd(
 
     @unittest.skipIf(not workspace.has_gpu_support, "No GPU support")
     def testGPUDense(self):
-        super(TestMultiPrecisionSgd, self).testGPUDense(core.DataType.FLOAT16)
+        super().testGPUDense(core.DataType.FLOAT16)
 
 
 class TestFtrl(OptimizerTestBase, TestCase):

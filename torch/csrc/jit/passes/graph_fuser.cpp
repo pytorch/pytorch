@@ -199,7 +199,7 @@ struct GraphFuser {
   bool isFusableDefault(Node* node, bool strict_fuser_check) {
     bool fusableDevice = true;
     for (const auto& output : node->outputs()) {
-      if (output->uses().size() > 0) {
+      if (!output->uses().empty()) {
         fusableDevice &= isFusableDevice(output, strict_fuser_check);
       }
     }
@@ -307,7 +307,7 @@ struct GraphFuser {
       auto outputs = node->outputs();
       for (const auto i : c10::irange(outputs.size())) {
         auto output = outputs[i];
-        if (output->uses().size() == 0)
+        if (output->uses().empty())
           continue;
         consumer_subgraph->registerOutput(merged->outputs()[i]);
         auto new_output = consumer_group->addOutput();
@@ -402,7 +402,7 @@ struct GraphFuser {
   // to prepare for fusion and replace uses of n with the new group
   Node* createSingletonFusionGroup(Node* n) {
     auto group = block_->owningGraph()->createWithSubgraph(kind_);
-    // propogate position information for the new node so we can always
+    // propagate position information for the new node so we can always
     // have a valid mapping
     group->insertBefore(n);
     Node* mergedNode = mergeNodeIntoGroup(group, n);
@@ -455,7 +455,7 @@ struct GraphFuser {
     // fusion in cases where uses remain after the consumer
     // if these exist, re-route them to the version of producer
     // created in FusionGroup
-    if (producer->uses().size() != 0) {
+    if (!producer->uses().empty()) {
       getSubgraph(group).registerOutput(merged->output());
       Value* new_producer = group->addOutput();
       new_producer->copyMetadata(producer);
@@ -586,7 +586,7 @@ struct GraphFuser {
   }
 
   at::ArrayRef<Value*> broadcast_tensors(value_list inputs) {
-    AT_ASSERT(inputs.size() > 0);
+    AT_ASSERT(!inputs.empty());
     auto* g = inputs[0]->owningGraph();
     auto* input_list =
         g->insertNode(g->createList(TensorType::get(), inputs))->output();
