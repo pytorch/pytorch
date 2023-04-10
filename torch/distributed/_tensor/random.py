@@ -7,7 +7,7 @@ import torch.distributed as dist
 
 from torch import Tensor
 from torch.distributed._tensor.device_mesh import DeviceMesh
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 
 
 def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
@@ -179,18 +179,40 @@ def set_pre_op_offset(spec: DTensorSpec) -> None:
     # The coordinate on each tensor dim is a tuple (idx, range)
     # If a DTensor is partitioned on its dim i into n shards, and the current rank
     # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
-    shard_coord = _get_shard_coord(spec)
+    coordinate = mesh.get_coordinate()
+    assert coordinate is not None
+    shard_coord = [
+        coordinate[mesh_dim] if mesh_dim >= 0 else 0 for mesh_dim in spec.dim_map
+    ]
+    shard_size = [
+        mesh.size(mesh_dim) if mesh_dim >= 0 else 1 for mesh_dim in spec.dim_map
+    ]
 
     # compute shard linear index
-    shard_size = _get_shard_size(spec)
     shard_linear_idx = _calc_shard_linear_idx(shard_coord, shard_size)
 
-    # compute starting offset
-    local_size = math.prod(local_tensor_size)
+    # compute starting offset using the first shard's size
+    local_size_on_rank_0 = list(dtensor_shape)
+    for idx, placement in enumerate(spec.placements):
+        if isinstance(placement, Shard):
+            mesh_dim_size = mesh.size(idx)
+            shard_dim = placement.dim
+            local_size_on_rank_0[shard_dim] = placement._local_shard_size_on_dim(
+                dtensor_shape[shard_dim],
+                mesh_dim_size,
+                0,
+                return_offset=False,
+            )[0]
+
+    local_size = math.prod(local_size_on_rank_0)
 
     # get current RNG offset
     current_offset = _get_rng_offset(mesh)
-    _set_rng_offset(current_offset + shard_linear_idx * local_size, mesh)
+
+    # pytorch: offset must be multiple of 4
+    # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
+    offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
+    _set_rng_offset(current_offset + offset_incr, mesh)
 
 
 def set_post_op_offset(spec: DTensorSpec, old_offset: int) -> None:
@@ -209,6 +231,9 @@ def set_post_op_offset(spec: DTensorSpec, old_offset: int) -> None:
     dtensor_shape = spec.shape
     mesh = spec.mesh
     numel = math.prod(dtensor_shape)
+    # pytorch: offset must be multiple of 4
+    # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
+    numel = (numel + 3) // 4 * 4
     _set_rng_offset(old_offset + numel, mesh)
 
 
@@ -283,24 +308,6 @@ def _set_rng_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
             )
 
 
-def _get_shard_coord(spec: DTensorSpec) -> List[int]:
-    mesh = spec.mesh
-
-    # get rank coordinate
-    rank_coord = mesh.get_coordinate()
-    if rank_coord is None:
-        raise RuntimeError(
-            "Do not support calculating starting offset for DTensor over sub-mesh"
-        )
-
-    return [rank_coord[mesh_dim] if mesh_dim >= 0 else 0 for mesh_dim in spec.dim_map]
-
-
-def _get_shard_size(spec: DTensorSpec) -> List[int]:
-    mesh = spec.mesh
-    return [mesh.size(mesh_dim) if mesh_dim >= 0 else 1 for mesh_dim in spec.dim_map]
-
-
 def _calc_shard_linear_idx(shard_coord: List[int], shard_size: List[int]) -> int:
     # compute shard linear index
     shard_linear_idx = 0
@@ -310,3 +317,12 @@ def _calc_shard_linear_idx(shard_coord: List[int], shard_size: List[int]) -> int
         shard_coord_stride *= size
 
     return shard_linear_idx
+
+
+def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
+    assert isinstance(
+        device_mesh, DeviceMesh
+    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
+
+    # currently we only support correct RNG on cuda device
+    return device_mesh.device_type == "cuda"

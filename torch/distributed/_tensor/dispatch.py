@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
+import warnings
 from typing import Callable, cast, Dict, List, Sequence, Tuple, Union
 
 import torch
@@ -17,6 +18,7 @@ from torch.distributed._tensor.op_schema import (
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.random import (
     _get_rng_offset,
+    is_rng_supported_mesh,
     set_post_op_offset,
     set_pre_op_offset,
 )
@@ -245,11 +247,16 @@ def _operator_dispatch(
         # before running local op computation, check if op is random op
         # for random ops, set RNG offset
         if op_call in random_ops:
-            dtensor_arg = arg_list[0]
-            assert isinstance(dtensor_arg, dtensor.DTensor)
             assert isinstance(mesh, DeviceMesh)
-            old_offset = _get_rng_offset(mesh)
-            set_pre_op_offset(dtensor_arg._spec)
+            if is_rng_supported_mesh(mesh):
+                dtensor_arg = arg_list[0]
+                assert isinstance(dtensor_arg, dtensor.DTensor)
+                old_offset = _get_rng_offset(mesh)
+                set_pre_op_offset(dtensor_arg._spec)
+            else:
+                warnings.warn(
+                    f"DTensor random operators may not have complete support on {mesh.device_type} device mesh"
+                )
 
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
@@ -266,9 +273,9 @@ def _operator_dispatch(
             dist.all_gather_object(obj_list, local_results)
 
         # if op is a random op, adjust Philox RNG state to maintain synchronization
-        if op_call in random_ops:
+        assert isinstance(mesh, DeviceMesh)
+        if op_call in random_ops and is_rng_supported_mesh(mesh):
             assert isinstance(dtensor_arg, dtensor.DTensor)
-            assert isinstance(mesh, DeviceMesh)
             set_post_op_offset(dtensor_arg._spec, old_offset)
 
     if suggested_input_schema.is_inplace:

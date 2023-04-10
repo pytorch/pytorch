@@ -6,12 +6,11 @@ import itertools
 import torch
 
 from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._tensor._utils import compute_local_offset
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed._tensor.random import (
     _calc_shard_linear_idx,
     _get_rng_offset,
-    _get_shard_coord,
-    _get_shard_size,
     get_rng_state,
     manual_seed,
 )
@@ -21,6 +20,7 @@ from torch.distributed.distributed_c10d import broadcast_object_list
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    skip_if_lt_x_gpu,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -35,6 +35,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         self.assertEqual(offset_int64, torch.tensor([offset]))
 
     @with_comms
+    @skip_unless_torch_gpu
     def test_device_mesh_init(self):
         # device mesh init should sync seed and store it as an attribute
         # However, we have not figured out how we want to use the seed, so
@@ -58,49 +59,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
         manual_seed(1234, device_mesh)
         with self.assertRaisesRegex(RuntimeError, "different seed values"):
             manual_seed(self.rank, device_mesh)
-
-    @with_comms
-    def test_shard_info(self):
-        # test internal help functions:
-        #   _get_shard_coord, _get_shard_size, _calc_shard_linear_idx
-        mesh = torch.arange(self.world_size).reshape(2, 2, -1)
-        device_mesh = DeviceMesh(self.device_type, mesh)
-        local_tensor = torch.empty(*[self.world_size for _ in mesh.size()])
-
-        placements_list = [  # this list of placements should be enough to cover
-            [Shard(0), Shard(1), Shard(2)],
-            [Shard(2), Shard(1), Shard(0)],
-            [Shard(1), Replicate(), Shard(0)],
-            [Replicate(), Replicate(), Replicate()],
-        ]
-        exp_shard_coord = [
-            {0: [0, 0, 0], 1: [0, 1, 0], 2: [1, 0, 0], 3: [1, 1, 0]},
-            {0: [0, 0, 0], 1: [0, 1, 0], 2: [0, 0, 1], 3: [0, 1, 1]},
-            {0: [0, 0, 0], 1: [0, 0, 0], 2: [0, 1, 0], 3: [0, 1, 0]},
-            {0: [0, 0, 0], 1: [0, 0, 0], 2: [0, 0, 0], 3: [0, 0, 0]},
-        ]
-        exp_shard_size = [
-            [2, 2, 1],
-            [1, 2, 2],
-            [1, 2, 1],
-            [1, 1, 1],
-        ]
-        exp_shard_linear_idx = [
-            {0: 0, 1: 1, 2: 2, 3: 3},
-            {0: 0, 1: 2, 2: 1, 3: 3},
-            {0: 0, 1: 0, 2: 1, 3: 1},
-            {0: 0, 1: 0, 2: 0, 3: 0},
-        ]
-
-        for idx, placements in enumerate(placements_list):
-            dtensor = DTensor.from_local(local_tensor, device_mesh, placements)
-            spec = dtensor._spec
-            shard_coord = _get_shard_coord(spec)
-            shard_size = _get_shard_size(spec)
-            shard_linear_idx = _calc_shard_linear_idx(shard_coord, shard_size)
-            self.assertEqual(shard_coord, exp_shard_coord[idx][self.rank])
-            self.assertEqual(shard_size, exp_shard_size[idx])
-            self.assertEqual(shard_linear_idx, exp_shard_linear_idx[idx][self.rank])
 
     @with_comms
     @skip_unless_torch_gpu
@@ -176,9 +134,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     )
 
     @with_comms
-    @skip_unless_torch_gpu
-    def test_deterministic_uniform_nd(self):
-        mesh = torch.arange(self.world_size).reshape(2, 2, -1)
+    @skip_if_lt_x_gpu(4)
+    def test_deterministic_uniform_2d(self):
+        mesh = torch.arange(self.world_size).reshape(2, 2)
         device_mesh = DeviceMesh(self.device_type, mesh)
         _local_tensor = torch.empty(
             *[self.world_size for _ in mesh.size()], device="cuda"
@@ -188,33 +146,72 @@ class DistTensorRandomOpTest(DTensorTestBase):
         self.check_rng_state(1234, 0, device_mesh)
 
         placements_list = [  # this list of placements should be enough to cover
-            [Shard(0), Shard(1), Shard(2)],
-            [Shard(2), Shard(1), Shard(0)],
-            [Shard(1), Replicate(), Shard(0)],
-            [Replicate(), Replicate(), Replicate()],
-        ]
-        dim_map_list = [
-            [0, 1, 2],
-            [2, 1, 0],
-            [2, 0, -1],
-            [-1, -1, -1],
+            [Shard(0), Shard(1)],
+            [Shard(1), Shard(0)],
+            [Shard(0), Replicate()],
+            [Replicate(), Shard(0)],
+            [Shard(1), Replicate()],
+            [Replicate(), Shard(1)],
+            [Replicate(), Replicate()],
         ]
 
-        coord = device_mesh.get_coordinate()
-        assert coord is not None
+        shard_index_list = [
+            {0: 0, 1: 1, 2: 2, 3: 3},
+            {0: 0, 1: 2, 2: 1, 3: 3},
+            {0: 0, 1: 0, 2: 1, 3: 1},
+            {0: 0, 1: 1, 2: 0, 3: 1},
+            {0: 0, 1: 0, 2: 1, 3: 1},
+            {0: 0, 1: 1, 2: 0, 3: 1},
+            {0: 0, 1: 0, 2: 0, 3: 0},
+        ]
 
-        for placements, dim_map in zip(placements_list, dim_map_list):
+        coordinate = device_mesh.get_coordinate()
+        assert coordinate is not None
+
+        for placements, shard_index in zip(placements_list, shard_index_list):
             dtensor = DTensor.from_local(_local_tensor, device_mesh, placements)
-            spec = dtensor._spec
-            self.assertEqual(spec.dim_map, dim_map)
 
-            # get shard information
-            shard_coord = _get_shard_coord(spec)
-            shard_size = _get_shard_size(spec)
+            # check shard information is correct
+            shard_coord = [
+                coordinate[mesh_dim] if mesh_dim >= 0 else 0
+                for mesh_dim in dtensor._spec.dim_map
+            ]
+
+            shard_size = [
+                device_mesh.size(mesh_dim) if mesh_dim >= 0 else 1
+                for mesh_dim in dtensor._spec.dim_map
+            ]
+
             shard_linear_idx = _calc_shard_linear_idx(shard_coord, shard_size)
+            self.assertEqual(shard_linear_idx, shard_index[self.rank])
 
-            # compute local size
-            local_tensor_size = list(_local_tensor.size())
+            # compute local size and offset
+            local_shard_offset = compute_local_offset(
+                dtensor.shape, device_mesh, placements
+            )
+
+            # get the local shard size and local shard offset for each shard
+            # local_shard_list_on_dim[i] has the list of all shards on that dim
+            # as a tuple (local_shard_offset, local_shard_size)
+            dtensor_shape = dtensor.shape
+            local_shard_list_on_dim = [[(0, l)] for l in dtensor_shape]
+            for idx, placement in enumerate(placements):
+                if isinstance(placement, Shard):
+                    mesh_dim_size = device_mesh.size(idx)
+                    shard_dim = placement.dim
+                    local_shard_list_on_dim[shard_dim] = []
+                    for shard_idx_on_dim in range(mesh_dim_size):
+                        shard_size, shard_offset = placement._local_shard_size_on_dim(
+                            dtensor_shape[shard_dim],
+                            mesh_dim_size,
+                            shard_idx_on_dim,
+                            return_offset=True,
+                        )
+                        local_shard_list_on_dim[shard_dim].append(
+                            (shard_offset, shard_size)
+                        )
+
+            local_shard_comb = itertools.product(*local_shard_list_on_dim)
 
             # get rng offset for checking correctness
             global_size = dtensor.numel()
@@ -234,24 +231,14 @@ class DistTensorRandomOpTest(DTensorTestBase):
             )
             # the allgather-ed tensor
             local_tensor_gathered = dtensor.to_local()
-            # generate shard's range on each dim
-            shard_range_on_dim = [
-                list(range(0, l_dist + 1, l_local))
-                for l_dist, l_local in zip(dtensor.size(), local_tensor_size)
-            ]
-            shard_range_on_dim = [
-                [(dim_range[i], dim_range[i + 1]) for i in range(len(dim_range) - 1)]
-                for dim_range in shard_range_on_dim
-            ]
 
-            shard_range_comb = list(itertools.product(*shard_range_on_dim))
-            shard_range_comb = [
-                [slice(*t) for t in shard_range] for shard_range in shard_range_comb
-            ]
-
-            for idx in range(len(shard_range_comb)):
-                slice_idx = shard_range_comb[idx]
-                if idx == shard_linear_idx:
+            # compare local tensor with each other shard
+            for other_local_shard in local_shard_comb:
+                other_local_shard_offset, _ = zip(*other_local_shard)
+                slice_idx = [
+                    slice(offset, offset + size) for offset, size in other_local_shard
+                ]
+                if local_shard_offset == other_local_shard_offset:
                     self.assertEqual(local_tensor_gathered[slice_idx], local_tensor)
                 else:
                     self.assertNotEqual(local_tensor_gathered[slice_idx], local_tensor)
