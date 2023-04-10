@@ -188,10 +188,10 @@ def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
 
 
 @_beartype.beartype
-def _recursive_wrap_args(
+def _fx_args_to_torch_args(
     complete_args: List[_type_utils.Argument],
 ) -> List[_type_utils.Argument]:
-    """Wrap args in torch.fx.Node to FakeTensor"""
+    """Recursively convert fx args to torch args"""
     wrapped_args: List[_type_utils.Argument] = []
     for arg in complete_args:
         if isinstance(arg, torch.fx.Node):
@@ -220,7 +220,7 @@ def _recursive_wrap_args(
                     f"{type(fake_tensor)}."
                 )
         elif isinstance(arg, Sequence):
-            wrapped_args.append(_recursive_wrap_args(arg))
+            wrapped_args.append(_fx_args_to_torch_args(arg))
         elif isinstance(arg, (int, float, torch.dtype)):
             wrapped_args.append(arg)
         else:
@@ -239,6 +239,6 @@ def wrap_fx_args_as_torch_args(
     """Prepare torch format args and kwargs for op-level validation by using fake tensor to create real tensor to feed in ops"""
 
     # NOTE: This function only supports FakeTensor with concrete shapes
-    torch_args: List[_type_utils.Argument] = _recursive_wrap_args(complete_args)
+    torch_args: List[_type_utils.Argument] = _fx_args_to_torch_args(complete_args)
     torch_kwargs = complete_kwargs
     return tuple(torch_args), torch_kwargs
