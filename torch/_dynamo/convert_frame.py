@@ -52,7 +52,6 @@ from .utils import (
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
-recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 
 
 class Tracker:
@@ -177,11 +176,8 @@ def has_tensor_in_frame(frame):
             return True
 
     log.debug(
-        "skipping because no torch.* %s \
-            %s %s",
-        frame.f_code.co_name,
-        frame.f_code.co_filename,
-        frame.f_code.co_firstlineno,
+        f"skipping because no torch.* {frame.f_code.co_name} \
+            {frame.f_code.co_filename} {frame.f_code.co_firstlineno}"
     )
 
     return False
@@ -214,20 +210,10 @@ def convert_frame_assert(
         increment_frame()
         code = frame.f_code
 
-        if code in input_codes and (
-            recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
-        ):
-            message = (
-                f"Recompiling function {code.co_name} in {code.co_filename}",
-                f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+        if code in input_codes and config.error_on_recompile:
+            raise exc.RecompileError(
+                f"Recompiled function {code.co_name} in {code.co_filename}"
             )
-
-            if recompiles_log.isEnabledFor(logging.DEBUG):
-                recompiles_log.debug(message)
-
-            if config.error_on_recompile:
-                raise exc.RecompileError(message)
-
         input_codes.add(code)
         if code in output_codes:
             return None
@@ -367,12 +353,8 @@ def _compile(
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
                 log.debug(
-                    "Skipping frame %s %s \
-                    %s %s",
-                    e,
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
+                    f"Skipping frame {e} {code.co_name} \
+                    {code.co_filename} {code.co_firstlineno}"
                 )
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")

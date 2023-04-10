@@ -703,7 +703,7 @@ def run_doctests(test_module, test_directory, options):
             import onnxruntime  # NOQA
             import onnxscript  # NOQA
         except ImportError:
-            exclude_module_list.append("torch.onnx.*")
+            exclude_module_list.append("torch.onnx._internal.fx.*")
             enabled["onnx"] = False
         else:
             enabled["onnx"] = True
@@ -832,7 +832,6 @@ CUSTOM_HANDLERS = {
     "distributed/algorithms/quantization/test_quantization": test_distributed,
     "distributed/test_c10d_nccl": run_test_with_subprocess,
     "distributed/test_c10d_gloo": run_test_with_subprocess,
-    "distributed/test_c10d_ucc": run_test_with_subprocess,
     "distributed/test_c10d_common": run_test_with_subprocess,
     "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
     "distributed/test_c10d_spawn_nccl": run_test_with_subprocess,

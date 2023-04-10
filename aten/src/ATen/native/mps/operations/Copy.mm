@@ -129,7 +129,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
 
-    const void* host_dst = dst.storage().data();
+    void* host_dst = dst.storage().data();
     void* alignedPtr = pageAlignedBlockPtr(host_dst, (NSUInteger)dst_tensor_nbytes, &alignedLength);
     NSUInteger destOffset = (uintptr_t(host_dst) - uintptr_t(alignedPtr));
     // 4 bytes alignment required on macos for blits.
@@ -184,7 +184,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
   auto src_byte_offset = src.storage_offset() * src.itemsize();
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst);
   const size_t size_to_copy = src.nbytes();
-  const void* host_src = static_cast<const char*>(src.storage().data()) + src_byte_offset;
+  const void* host_src = static_cast<char*>(src.storage().data()) + src_byte_offset;
 
   TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
 

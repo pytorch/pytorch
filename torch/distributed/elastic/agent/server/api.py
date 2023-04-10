@@ -683,7 +683,7 @@ class SimpleElasticAgent(ElasticAgent):
         of state to ``_monitor_workers()`` method
         """
         role = worker_group.spec.role
-        log.info("[%s] Rendezvous'ing worker group", role)
+        log.info(f"[{role}] Rendezvous'ing worker group")
 
         # TODO after stopping workers, wait at least monitor_interval*2 for
         # workers on different nodes to fail on a collective op before waiting
@@ -691,7 +691,7 @@ class SimpleElasticAgent(ElasticAgent):
         # at around the same time and reduce false positive rdzv timeout errors
         self._rendezvous(worker_group)
 
-        log.info("[%s] Starting worker group", role)
+        log.info(f"[{role}] Starting worker group")
         worker_ids = self._start_workers(worker_group)
         for local_rank, w_id in worker_ids.items():
             worker = worker_group.workers[local_rank]
@@ -708,7 +708,7 @@ class SimpleElasticAgent(ElasticAgent):
         """
 
         role = worker_group.spec.role
-        log.info("[%s] Stopping worker group", role)
+        log.info(f"[{role}] Stopping worker group")
         self._stop_workers(worker_group)
         worker_group.state = WorkerState.STOPPED
         self._initialize_workers(worker_group)
@@ -726,7 +726,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except SignalException as e:
-            log.warning("Received %s death signal, shutting down workers", e.sigval)
+            log.warning(f"Received {e.sigval} death signal, shutting down workers")
             self._shutdown(e.sigval)
             shutdown_called = True
             raise
@@ -852,7 +852,7 @@ class SimpleElasticAgent(ElasticAgent):
         role = spec.role
 
         log.info(
-            "[%s] starting workers for entrypoint: %s", role, spec.get_entrypoint_name()
+            f"[{role}] starting workers for entrypoint: {spec.get_entrypoint_name()}"
         )
 
         self._initialize_workers(self._worker_group)
@@ -925,10 +925,10 @@ class SimpleElasticAgent(ElasticAgent):
                 barrier_timeout=self._exit_barrier_timeout,
             )
             log.info(
-                "Done waiting for other agents. Elapsed: %s seconds", time.time() - start
+                f"Done waiting for other agents. Elapsed: {time.time() - start} seconds"
             )
         except SignalException as e:
-            log.warning("Got termination signal: %s", e.sigval)
+            log.warning(f"Got termination signal: {e.sigval}")
             raise
         except Exception:
             log.exception(

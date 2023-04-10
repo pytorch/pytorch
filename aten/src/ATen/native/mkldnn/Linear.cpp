@@ -225,17 +225,23 @@ Tensor mkldnn_linear_pointwise(
   }
 
   if (mkldnn_bias.has_value()) {
-    ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
+    ideep::inner_product_forward::compute(
         mkldnn_input,
         w,
         mkldnn_bias.value(),
         mkldnn_output,
+        ideep::scale_t(),
+        ideep::scale_t(),
+        ideep::scale_t(),
         op_attr);
   } else {
-    ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
+    ideep::inner_product_forward::compute(
         mkldnn_input,
         w,
         mkldnn_output,
+        ideep::scale_t(),
+        ideep::scale_t(),
+        ideep::scale_t(),
         op_attr);
   }
 
@@ -302,7 +308,7 @@ Tensor mkldnn_linear_pointwise_binary(
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
 
   if (mkldnn_bias.has_value()) {
-    ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
+    ideep::inner_product_forward::compute_binary(
         mkldnn_input,
         mkldnn_other,
         w,
@@ -310,7 +316,7 @@ Tensor mkldnn_linear_pointwise_binary(
         mkldnn_output,
         op_attr);
   } else {
-    ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
+    ideep::inner_product_forward::compute_binary(
         mkldnn_input, mkldnn_other, w, mkldnn_output, op_attr);
   }
 

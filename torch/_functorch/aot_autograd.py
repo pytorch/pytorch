@@ -1295,8 +1295,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
         compiled_fw,
         runtime_metadata=fw_metadata,
         trace_joint=False,
-        keep_input_mutations=aot_config.keep_inference_input_mutations,
-        disable_amp=disable_amp
+        keep_input_mutations=aot_config.keep_inference_input_mutations
     )
 
     return compiled_fn
@@ -2097,7 +2096,6 @@ def create_runtime_wrapper(
     runtime_metadata: ViewAndMutationMeta,
     trace_joint: bool,
     keep_input_mutations: bool,
-    disable_amp: bool
 ):
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
@@ -2108,13 +2106,13 @@ def create_runtime_wrapper(
                 all_outs = call_func_with_args(
                     compiled_fn,
                     args,
-                    disable_amp=disable_amp,
+                    disable_amp=True,
                 )
         else:
             all_outs = call_func_with_args(
                 compiled_fn,
                 args,
-                disable_amp=disable_amp,
+                disable_amp=True,
             )
 
         num_mutated_inps = runtime_metadata.num_mutated_inputs
@@ -2569,7 +2567,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         runtime_metadata=fw_metadata,
         trace_joint=True,
         keep_input_mutations=False,
-        disable_amp=disable_amp
     )
 
     if not config.debug_assert:

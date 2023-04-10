@@ -703,17 +703,17 @@ class IterGraphModule(nn.Module):
     def print_all_graphs(self) -> None:
         logger.info("Printing the three fx.Graph:")
         logger.info("1. Setup fx.Graph:")
-        logger.info("%s", self.setup_gm.graph)
+        logger.info(f"{self.setup_gm.graph}")
         logger.info("2. Main fx.Graph:")
-        logger.info("%s", self.main_gm.graph)
+        logger.info(f"{self.main_gm.graph}")
         logger.info("3. Cleanup fx.Graph:")
-        logger.info("%s", self.cleanup_gm.graph)
+        logger.info(f"{self.cleanup_gm.graph}")
 
     def print_all_graph_modules(self) -> None:
         logger.info("Printing the three fx gm:")
         logger.info("1. Setup fx.GraphModule:")
-        logger.info("%s", self.setup_gm.print_readable(False))
+        logger.info(f"{self.setup_gm.print_readable(False)}")
         logger.info("2. Main fx.GraphModule:")
-        logger.info("%s", self.main_gm.print_readable(False))
+        logger.info(f"{self.main_gm.print_readable(False)}")
         logger.info("3. Cleanup fx.GraphModule:")
-        logger.info("%s", self.cleanup_gm.print_readable(False))
+        logger.info(f"{self.cleanup_gm.print_readable(False)}")

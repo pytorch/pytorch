@@ -586,7 +586,7 @@ class MultiProcessTestCase(TestCase):
                 args=(rank, self._current_test_name(), self.file_name, child_conn),
             )
             process.start()
-            logger.info("Started process %s with pid %s", rank, process.pid)
+            logger.info(f"Started process {rank} with pid {process.pid}")
             self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
 
@@ -599,7 +599,7 @@ class MultiProcessTestCase(TestCase):
 
     @staticmethod
     def _event_listener(parent_pipe, signal_pipe, rank: int):
-        logger.info("Starting event listener thread for rank %s", rank)
+        logger.info(f"Starting event listener thread for rank {rank}")
         while True:
             ready_pipes = multiprocessing.connection.wait([parent_pipe, signal_pipe])
 
@@ -607,12 +607,12 @@ class MultiProcessTestCase(TestCase):
 
                 if parent_pipe.closed:
                     logger.info(
-                        "Pipe closed for process %s, stopping event listener thread", rank
+                        f"Pipe closed for process {rank}, stopping event listener thread"
                     )
                     return
 
                 event = parent_pipe.recv()
-                logger.info("Received event %s on process %s", event, rank)
+                logger.info(f"Received event {event} on process {rank}")
 
                 if event == MultiProcessTestCase.Event.GET_TRACEBACK:
                     # Return traceback to the parent process.
@@ -623,7 +623,7 @@ class MultiProcessTestCase(TestCase):
                         tmp_file.seek(0)
                         parent_pipe.send(tmp_file.read())
 
-                        logger.info("Process %s sent traceback", rank)
+                        logger.info(f"Process {rank} sent traceback")
 
             if signal_pipe in ready_pipes:
                 return
@@ -657,7 +657,7 @@ class MultiProcessTestCase(TestCase):
             getattr(self, test_name)()
         except unittest.SkipTest as se:
             logger.info(
-                "Process %s skipping test %s for following reason: %s", self.rank, test_name, str(se)
+                f"Process {self.rank} skipping test {test_name} for following reason: {str(se)}"
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception as e:
@@ -687,7 +687,7 @@ class MultiProcessTestCase(TestCase):
                     pipes.append((i, pipe))
                 except ConnectionError as e:
                     logger.error(
-                        "Encountered error while trying to get traceback for process %s: %s", i, e
+                        f"Encountered error while trying to get traceback for process {i}: {e}"
                     )
 
         # Wait for results.
@@ -697,21 +697,21 @@ class MultiProcessTestCase(TestCase):
                 if pipe.poll(5):
                     if pipe.closed:
                         logger.info(
-                            "Pipe closed for process %s, cannot retrieve traceback", rank
+                            f"Pipe closed for process {rank}, cannot retrieve traceback"
                         )
                         continue
 
                     traceback = pipe.recv()
                     logger.error(
-                        "Process %s timed out with traceback: \n\n%s", rank, traceback
+                        f"Process {rank} timed out with traceback: \n\n{traceback}"
                     )
                 else:
                     logger.error(
-                        "Could not retrieve traceback for timed out process: %s", rank
+                        f"Could not retrieve traceback for timed out process: {rank}"
                     )
             except ConnectionError as e:
                 logger.error(
-                    "Encountered error while trying to get traceback for process %s: %s", rank, e
+                    f"Encountered error while trying to get traceback for process {rank}: {e}"
                 )
 
     def _join_processes(self, fn) -> None:
@@ -826,7 +826,7 @@ class MultiProcessTestCase(TestCase):
                     # is some follow-up needed. Instead just "pass" the test
                     # with an appropriate message.
                     logger.info(
-                        "Skipping %s on sandcastle for the following reason: %s", self.id(), skip.message
+                        f"Skipping {self.id()} on sandcastle for the following reason: {skip.message}"
                     )
                     return
                 else:
@@ -1086,7 +1086,7 @@ class MultiThreadedTestCase(TestCase):
             exc = exc_info[1]
             if isinstance(exc, unittest.SkipTest):
                 logger.info(
-                    "Thread %s skipping test %s for following reason: %s", rank, fn, str(exc)
+                    f"Thread {rank} skipping test {fn} for following reason: {str(exc)}"
                 )
                 if skip_code < 0:
                     skip_code = TEST_SKIPS["generic"].exit_code
@@ -1099,7 +1099,7 @@ class MultiThreadedTestCase(TestCase):
             elif isinstance(exc, Exception):
                 msg = "".join(traceback.format_exception(*exc_info))
                 logger.error(
-                    "Caught exception: \n%s exiting thread %s", msg, rank
+                    f"Caught exception: \n{msg} exiting thread {rank}"
                 )
                 error_msg += (
                     "Thread {} exited with exception:\n{}\n".format(rank, msg)
@@ -1118,7 +1118,7 @@ class MultiThreadedTestCase(TestCase):
                     if IS_SANDCASTLE:
                         # "pass" the test with an appropriate message.
                         logger.info(
-                            "Skipping %s on sandcastle for the following reason: %s", fn, skip.message
+                            f"Skipping {fn} on sandcastle for the following reason: {skip.message}"
                         )
                         return
                     else:
