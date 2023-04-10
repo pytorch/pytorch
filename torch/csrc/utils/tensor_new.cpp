@@ -401,7 +401,7 @@ Tensor internal_new_from_data(
         tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
         if (c10::multiply_integers(tensor.sizes()) != 0) {
           recursive_store(
-              (char*)tensor.data_ptr(),
+              (char*)tensor.mutable_data_ptr(),
               tensor.sizes(),
               tensor.strides(),
               0,
