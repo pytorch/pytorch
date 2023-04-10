@@ -1326,6 +1326,13 @@ def _lru_cache(fn, maxsize=None):
 
 @dataclass(frozen=True)
 class ShapeGuardExprSources:
+    """
+    Represents a shape guard expression, with the related sources.
+
+    Ex:
+        expr: s0 < s1 * 2
+        sources: LocalInputSource(x), LocalInputSource(y)
+    """
     expr: str
     sources: List[Source]
 
@@ -1639,7 +1646,7 @@ class ShapeEnv:
             self.var_to_sources[r].append(source)
         return r
 
-    # Generates a list of guards strings which, when evaluated in a context that
+    # Generates a list of guards ShapeGuardExprSources which, when evaluated in a context that
     # defines tensors for all the sources, returns True or False depending
     # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see

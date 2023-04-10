@@ -100,9 +100,14 @@ def strip_getattr_getitem(name):
     return re.split(r"[.\[]", name)[0]
 
 
-# Don't put anything on here you don't want laundered to the next frame
 @dataclasses.dataclass
 class CodePart:
+    """
+    A CodePart represents a code string and bookeeping information accumulated at guard creation time.
+    CodeParts are used to make up the check_fn we use for guards. A collection of CodeParts is kept on each
+    guard cache entry, and is passed into the subsequent eval_frame callback upon guard failure.
+    """
+
     source: Optional[
         List[Source]
     ]  # Note: List of sources for tensor checks and shape_env
@@ -734,7 +739,7 @@ class CheckFunctionManager:
         code_parts = []
         code_parts.append(validation_code_part)
         code_parts += local_builder.code + global_builder.code
-        part_map: Dict[int, CodePart] = {}
+        part_list: List[CodePart] = []
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
@@ -794,7 +799,7 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensor_verbose),
                 ("tensor_check_names", tensor_check_names),
-                ("part_map", part_map),
+                ("part_list", part_list),
             ]
             + list(SYMPY_INTERP.items())
         )
@@ -812,8 +817,8 @@ class CheckFunctionManager:
         # 3) In this, this code is rather confusing, because it defines both ___make_guard_fn and the lambda it produces
         # which becomes the check_fn.
         #
-        # 4) Everything is `code` becomes the check_fn. We write it out by first defining a `__fail`, which
-        # given a code_part_id, the id() of a code_part, extract a code_part from the part_map and binds a scope
+        # 4) Everything in `code` becomes the check_fn. We write it out by first defining a `__fail`, which
+        # given a code_part_id, the id() of a code_part, extract a code_part from the part_list and binds a scope
         # to it. This is used later for evaluating the expression defined in code_part, if necessary. `__fail` is
         # invoked if a specific sub expression of a guard is failed.
         #
@@ -826,27 +831,7 @@ class CheckFunctionManager:
         # and pass it through to the frame evaluation callback. This is where downstream systems that handle guard
         # failures hook in, like guard failure logging, or converting static shape failures to dynamic shapes (if
         # the config is set).
-        code = "      def __fail(code_part_id): \n"
-        code += "          code_part = part_map[code_part_id] \n"
-        code += "          code_part.scope = locals() \n"
-        code += "          code_part.scope['L'] = L \n"
-        for key, value in closure_vars.items():
-            if callable(value):
-                code += f"          code_part.scope['{key}'] = {key} \n"
-        code += "          return code_part \n"
-        code += "      passing = True \n"
-        for code_part in unique(code_parts):
-            part_map[id(code_part)] = code_part
-            code += f"      passing = {code_part.code} \n"
-            code += "      if not passing: \n"
-            code += f"          return (False, __fail({id(code_part)})) \n"
-        code += "      return (True, None)"
-        py_code = f"""\
-def ___make_guard_fn({','.join(closure_vars.keys())}):
-    def guard_fn(L):
-{code}
-    return guard_fn
-"""
+        py_code = make_guard_fn(code_parts, closure_vars, part_list)
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         out: Dict[str, Any] = dict()
@@ -859,7 +844,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {"G": global_builder.scope["G"]}
         guard_fn.guard_fail_fn = guard_fail_fn
-        guard_fn.part_map = part_map
+        guard_fn.part_list = part_list
         return guard_fn
 
     def invalidate(self, ref):
@@ -877,7 +862,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         return id(obj)
 
 
-def guard_fail_hook(
+def record_guard_failure(
     guard_fail_fn,
     code,
     code_part: CodePart,
@@ -885,12 +870,7 @@ def guard_fail_hook(
     """
     called whenever a guard fails.
     """
-    # Don't waste time computing the fail reason for guards we aren't going to report out.
     reason = code_part.code
-    # Technically, we're failing our last guard, which is our oldest guard due to the
-    # eval_frame.c logic that moves newest frames to head, but for logging purposes
-    # it's more useful to see the 'first' failure (if we never got a hit) since it's
-    # likely not yet been logged as a failure reason in a case of repeating failures.
     if "__check_tensors" in reason:
         assert code_part.tensor_check_names is not None
         reason = eval(
@@ -920,11 +900,53 @@ def guard_error_hook(
     # column number of which subexpression failed.  But that would also
     # require us to have the TRUE code that was eval'ed, not a shoddy
     # reconstruction (like is done here)
-    print("lambda " + ", ".join(guard_fn.args) + ":")
-    print(" ", " and\n  ".join([code_part.code for code_part in guard_fn.code_parts]))
+    print(make_guard_fn(guard_fn.code_parts, {}, []))
 
 
 set_guard_error_hook(guard_error_hook)
+
+
+def make_guard_fn(code_parts, closure_vars, part_list):
+    # TODO(voz): Move this somewhere more general so we don't have to violate heirarchy?
+    from torch._inductor.utils import IndentedBuffer
+
+    make_fail_buf = IndentedBuffer()
+    make_fail_buf.writeline("def __fail(code_part_idx):")
+    with make_fail_buf.indent():
+        make_fail_buf.writeline("code_part = part_list[code_part_idx]")
+        make_fail_buf.writeline("code_part.scope = locals()")
+        make_fail_buf.writeline("code_part.scope['L'] = L")
+        for key, value in closure_vars.items():
+            if callable(value):
+                make_fail_buf.writeline(f"code_part.scope['{key}'] = {key}")
+        make_fail_buf.writeline("return code_part")
+
+    assert len(part_list) == 0
+
+    code_buf = IndentedBuffer()
+    code_buf.writeline("passing = True")
+    unique_code_parts = unique(code_parts)
+    for i, code_part in enumerate(unique_code_parts):
+        part_list.append(code_part)
+        code_buf.writeline(f"passing = {code_part.code}")
+        code_buf.writeline("if not passing:")
+        with code_buf.indent():
+            code_buf.writeline(f"return (False, __fail({i}))")
+
+    code_buf.writeline("return (True, None)")
+
+    make_guard_fn_buf = IndentedBuffer()
+    make_guard_fn_buf.writeline(
+        f"def ___make_guard_fn({','.join(closure_vars.keys())}):"
+    )
+    with make_guard_fn_buf.indent():
+        make_guard_fn_buf.writeline("def guard_fn(L):")
+        with make_guard_fn_buf.indent():
+            make_guard_fn_buf.splice(make_fail_buf)
+            make_guard_fn_buf.splice(code_buf)
+        make_guard_fn_buf.writeline("return guard_fn")
+
+    return make_guard_fn_buf.getvalue()
 
 
 def unique(seq):

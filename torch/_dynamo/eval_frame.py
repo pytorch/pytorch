@@ -369,7 +369,7 @@ def dynamic_plan_from_code_part(code_part, dynamic_plan):
         code_part is None
         or config.automatic_dynamic_shapes_strategy == config.DYNAMIC_SHAPE_STRATEGY.OFF
     ):
-        return dynamic_plan
+        return
 
     def is_dynamic_source_candidate(source):
         if isinstance(source, TensorPropertySource):
@@ -411,7 +411,7 @@ def dynamic_plan_from_code_part(code_part, dynamic_plan):
             config.assume_static_by_default = False
             return
         elif strategy == config.DYNAMIC_SHAPE_STRATEGY.ALL_FAILED_IN_FRAME:
-            code_parts = code_part.scope["part_map"].values()
+            code_parts = code_part.scope["part_list"]
             for code_part in code_parts:
                 add_dynamic_dim(code_part)
         else:
@@ -419,7 +419,7 @@ def dynamic_plan_from_code_part(code_part, dynamic_plan):
 
     # Take the failed code part, and add it as a dynamic dim
     add_dynamic_dims(code_part, config.automatic_dynamic_shapes_strategy)
-    return dynamic_plan
+    return
 
 
 def catch_errors_wrapper(callback, hooks: Hooks):
@@ -429,14 +429,13 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
         msg = f"Compiling {frame.f_code.co_name} {frame.f_code.co_filename} with cache_size {cache_size}."
         if code_part is not None:
-            torch._dynamo.guards.guard_fail_hook(
+            torch._dynamo.guards.record_guard_failure(
                 hooks.guard_fail_fn, frame.f_code, code_part
             )
             msg += f" Due to guard failure {code_part.code} from guard {code_part.origin} and source {code_part.source}"
-            print(msg)
         log.debug(msg)
 
-        dynamic_plan = dynamic_plan_from_code_part(code_part, dynamic_plan)
+        dynamic_plan_from_code_part(code_part, dynamic_plan)
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)

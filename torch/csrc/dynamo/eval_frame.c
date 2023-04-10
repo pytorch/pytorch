@@ -306,7 +306,7 @@ static PyObject* profiler_end_hook = NULL;
 static PyObject* guard_profiler_name_str = NULL; /* cached py str */
 
 size_t cache_entry_extra_index = -1;
-size_t dynamic_plan_extra_index = -2;
+size_t dynamic_frame_state_extra_index = -2;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
@@ -408,7 +408,7 @@ static inline PyObject* call_callback(
     THP_EVAL_API_FRAME_OBJECT* _frame,
     long cache_len,
     PyObject* code_part,
-    PyObject* plan) {
+    PyObject* frame_state) {
 
 #if IS_PYTHON_3_11_PLUS
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
@@ -418,7 +418,7 @@ static inline PyObject* call_callback(
   if (code_part == NULL) {
     code_part = Py_None;
   }
-  PyObject* args = Py_BuildValue("(OlOO)", frame, cache_len, code_part, plan);
+  PyObject* args = Py_BuildValue("(OlOO)", frame, cache_len, code_part, frame_state);
   if (args == NULL) {
     return NULL;
   }
@@ -470,15 +470,15 @@ inline static void set_extra(PyCodeObject* code, CacheEntry* extra) {
   _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, extra);
 }
 
-inline static PyObject* get_plan(PyCodeObject* code) {
+inline static PyObject* get_frame_state(PyCodeObject* code) {
   PyObject* extra = NULL;
-  _PyCode_GetExtra((PyObject*)code, dynamic_plan_extra_index, (void*)&extra);
+  _PyCode_GetExtra((PyObject*)code, dynamic_frame_state_extra_index, (void*)&extra);
   return extra;
 }
 
-inline static void set_plan(PyCodeObject* code, PyObject* extra) {
+inline static void set_frame_state(PyCodeObject* code, PyObject* extra) {
   // TODO(jansel): would it be faster to bypass this?
-  _PyCode_SetExtra((PyObject*)code, dynamic_plan_extra_index, extra);
+  _PyCode_SetExtra((PyObject*)code, dynamic_frame_state_extra_index, extra);
 }
 
 inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
@@ -773,14 +773,17 @@ static PyObject* _custom_eval_frame(
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
+      Py_XDECREF(code_part);
       return NULL;
     } else if (maybe_cached_code == Py_None) {
       DEBUG_TRACE("cache miss %s", name(frame));
+      Py_XDECREF(code_part);
       return eval_frame_default(tstate, frame, throw_flag);
     }
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
+    Py_XDECREF(code_part);
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
@@ -793,12 +796,14 @@ static PyObject* _custom_eval_frame(
   eval_frame_callback_set(Py_None);
 
   PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
-  PyObject *code_part = NULL;
+  PyObject* code_part = NULL;
   PyObject* maybe_cached_code = lookup(extra, frame, NULL, 0, &code_part);
+  Py_XINCREF(code_part);
   call_profiler_end_hook(hook_record);
   Py_XDECREF(hook_record);
   if (maybe_cached_code == NULL) {
     // Python error
+    Py_XDECREF(code_part);
     return NULL;
   } else if (maybe_cached_code != Py_None) {
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
@@ -806,20 +811,21 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("cache hit %s", name(frame));
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
+    Py_XDECREF(code_part);
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   // cache miss
 
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // that gets re-interpreted as a PyObject (which it is NOT!)
-  PyObject *plan = get_plan(frame->f_code);
-  if (plan == NULL) {
-    plan = PyDict_New();
-    set_plan(frame->f_code, plan);
+  PyObject *frame_state = get_frame_state(frame->f_code);
+  if (frame_state == NULL) {
+    // TODO(voz): Replace this dict with a real FrameState object.
+    frame_state = PyDict_New();
+    set_frame_state(frame->f_code, frame_state);
   }
-  Py_XINCREF(code_part);
   PyObject* result =
-      call_callback(callback, frame, cache_size(extra), code_part, plan);
+      call_callback(callback, frame, cache_size(extra), code_part, frame_state);
   Py_XDECREF(code_part);
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
@@ -927,10 +933,10 @@ static PyObject* reset_code(PyObject* dummy, PyObject* args) {
   }
 
   destroy_cache_entry(get_extra((PyCodeObject*)code));
-  PyObject* plan = get_plan((PyCodeObject*)code);
-  Py_XDECREF(plan);
+  PyObject* frame_state = get_frame_state((PyCodeObject*)code);
+  Py_XDECREF(frame_state);
   set_extra((PyCodeObject*)code, NULL);
-  set_plan((PyCodeObject*)code, NULL);
+  set_frame_state((PyCodeObject*)code, NULL);
   Py_RETURN_NONE;
 }
 
@@ -1024,7 +1030,7 @@ static struct PyModuleDef _module = {
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
   cache_entry_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
-  dynamic_plan_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
+  dynamic_frame_state_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
 
   int result = PyThread_tss_create(&eval_frame_callback_key);
   CHECK(result == 0);
