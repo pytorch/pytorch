@@ -284,11 +284,6 @@ class GradScaler:
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(optimizer, inv_scale, found_inf, False)
         optimizer_state["stage"] = OptState.UNSCALED
 
-    def _maybe_opt_step(self, optimizer, optimizer_state, *args, **kwargs):
-        retval = None
-        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
-            retval = optimizer.step(*args, **kwargs)
-        return retval
 
     def step(self, optimizer, *args, **kwargs):
         """
@@ -362,15 +357,29 @@ class GradScaler:
                 del optimizer.found_inf
             return retval
 
+        found_inf = None
         if optimizer_state["stage"] is OptState.READY:
+            scaler = self._get_scale_async()
+            found_inf = cast(
+                torch.Tensor,
+                sum([
+                    t.to(scaler.device, non_blocking=True) for t in self._check_inf_per_device(optimizer).values()
+                ])
+            )
+            if found_inf > 0:
+                # If inf or NaNs have been found, mark that we've completed the step function and return immediately.
+                # Do NOT unscale grads since the codepath above (custom optimizer scale-handling) does not unscale grads.
+                # Do NOT actually step into the optimizer as that will pollute parameters with invalid updates.
+                optimizer_state["stage"] = OptState.STEPPED
+                return retval
+
             self.unscale_(optimizer)
 
         assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
 
-        retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
-
+        if found_inf == 0 or not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+            retval = optimizer.step(*args, **kwargs)
         optimizer_state["stage"] = OptState.STEPPED
-
         return retval
 
     def update(self, new_scale=None):
