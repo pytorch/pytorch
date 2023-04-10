@@ -510,7 +510,7 @@ def _store_based_barrier(rank, store, timeout):
             )
 
     logger.info(
-        f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes."
+        "Rank %s: Completed store-based barrier for key:%s with %s nodes.", rank, store_key, world_size
     )
 
 
