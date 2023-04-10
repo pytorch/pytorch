@@ -5,6 +5,8 @@ import re
 import types
 from typing import Dict, List
 
+import torch_np._helpers
+
 import torch._C
 import torch.fx
 import torch.nn
@@ -306,8 +308,8 @@ class TorchVariable(VariableTracker):
                     target_cls=TensorVariable,
                     tx=tx,
                     proxy=tx.output.create_proxy(
-                        "call_method",
-                        "detach",
+                        "call_function",
+                        torch_np._helpers.ndarrays_to_tensors,
                         *proxy_args_kwargs(args, {}),
                     ),
                     example_value=None,

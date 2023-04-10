@@ -862,17 +862,15 @@ class NumpyVariable(VariableTracker):
     ) -> "VariableTracker":
         if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
             unimplemented(f"numpy.{self.value}()")
-        import torch_np._detail.implementations
+        import torch_np
 
         from .builder import wrap_fx_proxy_cls
         from .tensor import NumpyTensorVariable
 
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         # lookup method name in torch_np
-        if hasattr(torch_np._detail, self.value.__name__):
-
-            func = getattr(torch_np._detail, self.value.__name__)
-
+        if hasattr(torch_np, self.value.__name__):
+            func = getattr(torch_np, self.value.__name__)
             return wrap_fx_proxy_cls(
                 target_cls=NumpyTensorVariable,
                 tx=tx,

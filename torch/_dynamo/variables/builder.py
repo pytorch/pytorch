@@ -50,6 +50,7 @@ from ..utils import (
     preserve_rng_state,
     tensor_shape_should_be_static,
     tensor_static_reason_to_message,
+    torch_np,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -1044,6 +1045,15 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
+    elif config.numpy_ndarray_as_tensor and isinstance(example_value, torch_np.ndarray):
+        proxy.node.meta["example_value"] = example_value
+        return target_cls(proxy, **options)
+    elif isinstance(example_value, int) and proxy.node.target in [
+        getattr,
+        operator.getitem,
+    ]:
+        proxy.node.meta["example_value"] = example_value
+        return ConstantVariable(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
