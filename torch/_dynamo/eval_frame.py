@@ -60,6 +60,12 @@ always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
 
 
+from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+from torch.utils._sympy.value_ranges import ValueRanges
+import builtins
+import sympy
+
+
 # See https://github.com/python/typing/pull/240
 class Unset(Enum):
     token = 0
@@ -596,9 +602,48 @@ class Constraint:
     # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
-    constraint_range: Optional[
-        torch.fx.experimental.symbolic_shapes.StrictMinMaxConstraint
-    ]
+    constraint_range: Optional[StrictMinMaxConstraint]
+
+    @property
+    def _lower(self):
+        if self.constraint_range is None:
+            return 2
+        else:
+            return self.constraint_range.vr.lower
+
+    @property
+    def _upper(self):
+        if self.constraint_range is None:
+            return sympy.oo
+        else:
+            return self.constraint_range.vr.upper
+
+    def _clone_with_range(self, lower=2, upper=sympy.oo):
+        lower, upper = builtins.max(lower, self._lower), builtins.min(upper, self._upper)
+        return Constraint(self.w_tensor, self.t_id, self.dim, StrictMinMaxConstraint(ValueRanges(lower=lower, upper=upper)))
+
+    def __ge__(self, lower):
+        return self._clone_with_range(lower=lower)
+
+    def __gt__(self, lower):
+        return self._clone_with_range(lower=lower+1)
+
+    def __le__(self, upper):
+        return self._clone_with_range(upper=upper)
+
+    def __lt__(self, upper):
+        return self._clone_with_range(upper=upper-1)
+
+    def __bool__(self):
+        # NOTE(avik): We do not support compound expressions like a <= x <= b.
+        # This is because Python implicitly desugars them into bool(a <= x) and bool(x <= b),
+        # and moreover, enforces that any overload of __bool__ must return True or False.
+        # FWIW, sympy also raises TypeError in this case.
+        raise TypeError(
+            f"Cannot determine truth value of Constraint. "
+            "If you are trying to combine Constraints with logical connectives, "
+            "split it into multiple Constraints instead."
+        )
 
 
 def export(

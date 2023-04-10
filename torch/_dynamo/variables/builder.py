@@ -1167,7 +1167,23 @@ def wrap_to_fake_tensor_and_record(
         if tx.output.export_constraints:
             for constraint in tx.output.export_constraints:
                 if constraint.t_id == t_id:
-                    dim2constraint[constraint.dim] = constraint.constraint_range
+                    if constraint.dim in dim2constraint:
+                        other_cr = dim2constraint[constraint.dim]
+                        cr = constraint.constraint_range
+                        if other_cr is None:
+                            dim2constraint[constraint.dim] = cr
+                        elif cr is not None:
+                            from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+                            from torch.utils._sympy.value_ranges import ValueRanges
+                            import builtins
+                            dim2constraint[constraint.dim] = StrictMinMaxConstraint(
+                                ValueRanges(
+                                    builtins.max(cr.vr.lower, other_cr.vr.lower),
+                                    builtins.min(cr.vr.upper, other_cr.vr.upper),
+                                )
+                            )
+                    else:
+                        dim2constraint[constraint.dim] = constraint.constraint_range
 
         dynamic_dims = None
         constraint_dims = None
