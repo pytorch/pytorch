@@ -701,6 +701,15 @@ See :func:`torch.as_strided`
 )
 
 add_docstr_all(
+    "as_strided_",
+    r"""
+as_strided_(size, stride, storage_offset=None) -> Tensor
+
+In-place version of :meth:`~Tensor.as_strided`
+""",
+)
+
+add_docstr_all(
     "atan",
     r"""
 atan() -> Tensor
@@ -6581,7 +6590,7 @@ Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
 add_docstr_all(
     "is_sparse",
     r"""
-Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
+Is ``True`` if the Tensor uses sparse COO storage layout, ``False`` otherwise.
 """,
 )
 
@@ -6603,6 +6612,22 @@ add_docstr_all(
     "ndim",
     r"""
 Alias for :meth:`~Tensor.dim()`
+""",
+)
+
+add_docstr_all(
+    "itemsize",
+    r"""
+Alias for :meth:`~Tensor.element_size()`
+""",
+)
+
+add_docstr_all(
+    "nbytes",
+    r"""
+Returns the number of bytes consumed by the "view" of elements of the Tensor
+if the Tensor does not use sparse storage layout.
+Defined to be :meth:`~Tensor.numel()` * :meth:`~Tensor.element_size()`
 """,
 )
 

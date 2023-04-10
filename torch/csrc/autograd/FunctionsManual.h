@@ -56,11 +56,6 @@ std::vector<Tensor> not_implemented_list(
 at::Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result);
 at::Tensor maybe_multiply(const at::Tensor& t, const at::Scalar& s);
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
-bool chunk_grad_outputs_efficient_attention(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    bool is_causal);
 Tensor restore_reduced_dims(
     const Tensor& output,
     IntArrayRef dims,
@@ -97,6 +92,11 @@ Tensor _nested_from_padded_backward(
     const Tensor& grad,
     const Tensor& input,
     const bool do_transform_0213);
+std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
+    const variable_list& grads,
+    const Tensor& self,
+    const Tensor& grad_output,
+    const Tensor& weight);
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -392,6 +392,11 @@ at::Tensor split_with_sizes_backward(
     int64_t dim,
     c10::SymIntArrayRef sizes,
     const at::TensorOptions& options);
+at::Tensor _nested_split_with_sizes_backward(
+    const std::vector<torch::autograd::Variable>& grads,
+    c10::SymIntArrayRef split_sizes,
+    int64_t dim,
+    const Tensor& self);
 at::Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymInt split_size,

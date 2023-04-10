@@ -1098,7 +1098,7 @@ class AbstractCommTest:
                 rank = dist.get_rank(process_group)
                 obj_list = [None for _ in range(dist.get_world_size(verify_pg))]
                 dist.all_gather_object(obj_list, (rank, seq_num), group=verify_pg)
-                rank_to_seq_num = {rank: num for (rank, num) in obj_list}
+                rank_to_seq_num = dict(obj_list)
                 self.assertEqual(len(set(rank_to_seq_num.values())), 2)
                 self.assertEqual(rank_to_seq_num[0], rank_to_seq_num[2])
                 expected_same = {
@@ -1623,6 +1623,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                     world_size=self.world_size,
                     store=store
                 )
+                pg = c10d._get_default_group()
+                self.assertEqual(pg.rank(), self.rank)
+                self.assertEqual(pg.size(), self.world_size)
+                self.assertEqual(pg.name(), str(backend))
+
                 dist.destroy_process_group()
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):

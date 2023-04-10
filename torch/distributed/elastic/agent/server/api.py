@@ -36,7 +36,7 @@ __all__ = ['WorkerSpec', 'Worker', 'WorkerState', 'WorkerGroup', 'RunResult', 'E
 _TERMINAL_STATE_SYNC_ID = "torchelastic/agent/terminal_state"
 
 DEFAULT_ROLE = "default"
-log = get_logger()
+log = get_logger(__name__)
 
 
 @dataclass
@@ -44,7 +44,7 @@ class WorkerSpec:
     """
     Contains blueprint information about a particular type of worker.
     For a given role, there must only exist a single worker spec.
-    Worker spec is expected to be homogenous across all nodes (machine),
+    Worker spec is expected to be homogeneous across all nodes (machine),
     that is each node runs the same number of workers for a particular spec.
 
     Args:
@@ -764,7 +764,7 @@ class SimpleElasticAgent(ElasticAgent):
         elif failure or worker.global_rank in result.return_values:
             return result.state.value
         else:
-            raise ValueError(f"Unknow worker: {worker.global_rank}")
+            raise ValueError(f"Unknown worker: {worker.global_rank}")
 
     def _construct_event(
         self,

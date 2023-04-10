@@ -100,26 +100,6 @@ Tensor copysign_tensor_self_backward(
   return grad * ratio;
 }
 
-// Helper for determining behavior of
-// _scaled_dot_product_efficient_attention_backward based on forward inputs
-bool chunk_grad_outputs_efficient_attention(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    bool is_causal) {
-  int64_t M = query.size(2);
-  int64_t N = key.size(2);
-
-  bool grad_kv_needs_init = is_causal && N > M;
-  bool is_aliased = query.storage().is_alias_of(key.storage()) &&
-      query.storage().is_alias_of(value.storage());
-  bool equal_seq_len = query.size(2) == key.size(2);
-  bool q_v_same_head_dim = query.size(3) == value.size(3);
-  bool chunk_grad_outputs =
-      (!grad_kv_needs_init && equal_seq_len && q_v_same_head_dim && is_aliased);
-  return chunk_grad_outputs;
-}
-
 template <typename T>
 T not_implemented_base(const char* name, const char* reason) {
   std::string msg =
@@ -141,9 +121,9 @@ std::vector<Tensor> not_implemented_list(const char* name, const char* reason) {
 Tensor maybe_multiply(const Tensor& t, const Scalar& s) {
   bool is_one = false;
   if (s.isFloatingPoint()) {
-    is_one = s.toDouble() == 1;
+    is_one = s.toSymFloat() == 1;
   } else if (s.isIntegral(true)) {
-    is_one = s.toLong() == 1;
+    is_one = s.toSymInt() == 1;
   }
 
   if (is_one) {
@@ -398,6 +378,60 @@ Tensor _nested_from_padded_backward(
     return out.view(expand_last_dim_size).permute({0, 2, 1, 3});
   }
   return grad.to_padded_tensor(0, input.sizes());
+}
+
+std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
+    const variable_list& grads,
+    const Tensor& self,
+    const Tensor& grad_output,
+    const Tensor& weight) {
+  if (!grad_output.defined()) {
+    return std::make_tuple(Tensor(), Tensor(), Tensor());
+  }
+
+  Tensor grad_self, grad_grad_output, grad_weight;
+
+  if (grads[1].defined()) {
+    grad_self =
+        (grad_output.dim() == 1 ? grad_output.unsqueeze(0) : grad_output)
+            .matmul(grads[1]);
+    if (grad_output.dim() == 1) {
+      grad_self = grad_self.squeeze(0);
+    }
+  }
+  if (grads[0].defined()) {
+    grad_weight =
+        (grad_output.dim() == 1 ? grad_output.unsqueeze(1) : grad_output.mT())
+            .matmul(grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0]);
+  }
+
+  if (grads[0].defined() || grads[1].defined() || grads[2].defined()) {
+    grad_grad_output = at::zeros_like(grad_output);
+    if (grad_output.dim() == 1) {
+      grad_grad_output = grad_grad_output.unsqueeze(0);
+    }
+  }
+
+  if (grads[0].defined()) {
+    grad_grad_output = grad_grad_output +
+        (grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0])
+            .matmul(weight.mT());
+  }
+  if (grads[1].defined()) {
+    grad_grad_output = grad_grad_output +
+        (self.dim() == 1 ? self.unsqueeze(0) : self).matmul(grads[1].mT());
+  }
+  if (grads[2].defined()) {
+    grad_grad_output = grad_grad_output + grads[2];
+  }
+  if (grad_grad_output.defined() && grad_output.dim() == 1) {
+    grad_grad_output = grad_grad_output.squeeze(0);
+  }
+
+  return std::make_tuple(
+      std::move(grad_self),
+      std::move(grad_grad_output),
+      std::move(grad_weight));
 }
 
 Tensor linalg_vector_norm_jvp(
@@ -1891,6 +1925,14 @@ Tensor split_with_sizes_backward(
 
   auto ret = at::cat(grads_all_defined, dim);
   return ret;
+}
+
+Tensor _nested_split_with_sizes_backward(
+    const std::vector<torch::autograd::Variable>& grads,
+    c10::SymIntArrayRef split_sizes,
+    int64_t dim,
+    const Tensor& self) {
+  return not_implemented("aten::split_with_sizes");
 }
 
 Tensor split_backward(
@@ -6660,9 +6702,9 @@ Tensor take_backward(
     const Tensor& indices) {
   Tensor grad_self = at::zeros_like(self);
   // For Composite Compliance,
-  // if `grad` and `indices` are CCT but `self` is not
+  // if `grad` and `indices` are CCT but `grad_self` is not
   // then we use the out-of-place variant of `put`.
-  if (!isTensorSubclassLike(self) &&
+  if (!isTensorSubclassLike(grad_self) &&
       areAnyTensorSubclassLike({grad, indices})) {
     return grad_self.put(indices, grad, true);
   }

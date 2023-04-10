@@ -1,4 +1,3 @@
-import dataclasses
 import functools
 import itertools
 import logging
@@ -15,14 +14,28 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass
-class PositiveGuard:
-    """
-    An expression we should check for > 0
-    Guards are currently not checked.  Plan to add this later.
-    """
-
-    expr: Expr
+# Note [maybe_guard vs guard]
+#
+# maybe_guard should only be used in situations where we would generate
+# correct code even if the guard always returned False; in other words,
+# it should be used to guard optional optimizations which could be applied,
+# but only if we can statically determine that the condition we're guarding on
+# is true.  NB: this means that
+#
+#   maybe_guard_leq(lhs, rhs)
+#
+# and
+#
+#   not maybe_guard_lt(rhs, lhs)
+#
+# are not equivalent!
+#
+# maybe_guard is useful in two situations: (1) we have an optional
+# optimization that may be valid if some condition holds, but we do not know
+# for certain if the condition holds,  and (2) with dynamic shapes, we may
+# decide we don't want to do the optimization if it would require a guard on a
+# dynamic shape, because guarding on it would force us to generate multiple
+# kernels as this size varies.
 
 
 class SizeVarAllocator:
@@ -32,7 +45,6 @@ class SizeVarAllocator:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
-        self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
         # maps of dynamic sizes that have to be precomputed on the host to the kernel args
         self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
@@ -224,9 +236,14 @@ class SizeVarAllocator:
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
+        if isinstance(left, Expr):
+            left = sympy_subs(left, self.inv_precomputed_replacements)
+        if isinstance(right, Expr):
+            right = sympy_subs(right, self.inv_precomputed_replacements)
         assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
+    # See Note [maybe_guard vs guard]
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
         """if left==right, guard on that fact and return true"""
         if left == right:
@@ -236,6 +253,7 @@ class SizeVarAllocator:
             return True
         return False
 
+    # See Note [maybe_guard vs guard]
     def maybe_guard_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
         """if left==right, guard on that fact and return true"""
         if len(left) != len(right):
@@ -246,6 +264,7 @@ class SizeVarAllocator:
             return True
         return False
 
+    # See Note [maybe_guard vs guard]
     def maybe_guard_leq(self, left: Expr, right: Expr) -> bool:
         try:
             if self.size_hint(left) > self.size_hint(right):
@@ -255,6 +274,7 @@ class SizeVarAllocator:
         self.guard_leq(left, right)
         return True
 
+    # See Note [maybe_guard vs guard]
     def maybe_guard_lt(self, left: Expr, right: Expr) -> bool:
         try:
             if self.size_hint(left) >= self.size_hint(right):
@@ -272,9 +292,7 @@ class SizeVarAllocator:
         assert self.size_hint(expr) > 0
         if len(expr.free_symbols) == 0:
             return
-        if "-" in str(expr):
-            # all vars are positive, so needs a minus sign to get negative values
-            self.guards.append(PositiveGuard(expr))
+        assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
     def guard_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
@@ -293,6 +311,7 @@ class SizeVarAllocator:
         """return the larger of left and right, and guard on that choice"""
         return -self.guard_min(-left, -right)
 
+    # See Note [maybe_guard vs guard]
     def maybe_guard_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
         """if denominator divides numerator, return True and guard on that fact"""
         if sympy.gcd(numerator, denominator) == denominator:
@@ -315,8 +334,20 @@ class SizeVarAllocator:
         return self.shape_env.duck_int(val)
 
     def size_hint(self, expr: Expr) -> int:
-        out = sympy_subs(sympy.expand(expr), self.var_to_val)
-        return int(out)
+        if not isinstance(expr, Expr):
+            return int(expr)
+        free_symbols = expr.free_symbols
+        if not free_symbols:
+            return int(expr)
+        while any(s.name.startswith("ps") for s in free_symbols):
+            expr = sympy_subs(expr, self.inv_precomputed_replacements)
+            free_symbols = expr.free_symbols
+        out = sympy_subs(expr, self.var_to_val)
+        try:
+            return int(out)
+        except Exception:
+            log.warning(f"failed on: {out}")
+            raise
 
     def size_hints(self, exprs: List[Expr]) -> int:
         return tuple(self.size_hint(x) for x in exprs)
@@ -399,7 +430,7 @@ class SizeVarAllocator:
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         strides = tuple(
-            map(lambda x: abs(x), self.stride_hints(index, vars))
+            map(abs, self.stride_hints(index, vars))
         )  # lambda to placate mypy
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))

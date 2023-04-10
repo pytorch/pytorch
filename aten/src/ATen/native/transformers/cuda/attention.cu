@@ -7,6 +7,7 @@
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorAccessor.h>
 #include <c10/util/Logging.h>
+#include <c10/util/bit_cast.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -385,7 +386,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
     const Tensor& qkv_bias,
     const int64_t num_head) {
   auto B = qkv.is_nested()
-      ? get_nested_tensor_impl(qkv)->get_nested_size_tensor().size(0)
+      ? get_nested_tensor_impl(qkv)->get_nested_sizes().size(0)
       : qkv.size(0);
   // TODO: calculate this without the std::vector -- NestedTensor_to_mask wants
   // this too
@@ -452,7 +453,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
         if (qkv.is_nested()) {
           auto* nt_qkv = get_nested_tensor_impl(qkv);
           const at::Tensor& nt_qkv_buffer = nt_qkv->get_buffer();
-          auto sizes = collapse_dims_1_and_2(nt_qkv->get_nested_size_tensor());
+          auto sizes = collapse_dims_1_and_2(nt_qkv->get_nested_sizes());
           auto offsets =
               NestedTensor_batch_offsets_from_size_tensor(sizes, sizes.numel());
           at::native::narrow_symint(offsets, 0, sizes.numel() + 1, sizes.numel())
@@ -542,7 +543,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
       "expected `qkv_weight` second dim to be embed_Dim");
   TORCH_CHECK(
       qkv_bias.dim() == 1,
-      "expected 2-D `qkv_bias`, got ",
+      "expected 1-D `qkv_bias`, got ",
       qkv_bias.dim(),
       "-D tensor");
   TORCH_CHECK(
@@ -552,7 +553,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
 #ifndef NDEBUG
   const auto B = query.is_nested()
-      ? get_nested_tensor_impl(query)->get_nested_size_tensor().size(0)
+      ? get_nested_tensor_impl(query)->get_nested_sizes().size(0)
       : query.sizes()[0];
   auto T = query.is_nested() ? 0 : query.sizes()[1];
 
@@ -844,8 +845,8 @@ std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
 
   debug_attn_mask = return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
 
-  int64_t signed_philox_seed = sdp::bit_cast<int64_t>(philox_seed);
-  int64_t signed_philox_offset= sdp::bit_cast<int64_t>(philox_offset);
+  int64_t signed_philox_seed = c10::bit_cast<int64_t>(philox_seed);
+  int64_t signed_philox_offset= c10::bit_cast<int64_t>(philox_offset);
 
   return std::make_tuple(output, logsumexp, signed_philox_seed, signed_philox_offset, debug_attn_mask);
 #endif
