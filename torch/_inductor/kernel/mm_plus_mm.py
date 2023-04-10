@@ -168,4 +168,6 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
                     )
                 )
 
-    return autotune_select_algorithm(choices, [mat1, mat2, mat3, mat4], layout)
+    return autotune_select_algorithm(
+        "mm_plus_mm", choices, [mat1, mat2, mat3, mat4], layout
+    )
