@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, 
 from unittest.mock import patch
 
 import torch
+import torch._logging
 from torch._guards import Checkpointable, TracingContext
 
 from . import (
@@ -51,7 +52,6 @@ from .source import (
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
-    LocalInputSource,
     LocalSource,
 )
 from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
@@ -328,7 +328,12 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         else:
-            unimplemented(f"generic_jump {typestr(value)}")
+            # TODO link the torch.cond doc later
+            raise exc.UserError(
+                exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
+                "Dynamic control flow is not supported at the moment. Please use "
+                "functorch.experimental.control_flow.cond to explicitly capture the control flow",
+            )
 
     return inner
 
@@ -675,7 +680,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(ClosureVariable(name=inst.argval))
 
     def LOAD_CONST(self, inst):
-        self.push(ConstantVariable(value=inst.argval))
+        # For empty tuples, create empty TupleVariable
+        if isinstance(inst.argval, tuple) and not inst.argval:
+            self.push(TupleVariable([]))
+        else:
+            self.push(ConstantVariable(value=inst.argval))
 
     def get_global_source(self, name):
         if self.output.root_globals is self.f_globals:
@@ -918,6 +927,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def END_FINALLY(self, inst):
         tos = self.pop()
         assert tos is None
+
+    def POP_FINALLY(self, inst):
+        preserve_tos = inst.argval
+        if preserve_tos:
+            tos = self.pop()
+        assert self.pop() is None
+        if preserve_tos:
+            self.push(tos)
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -1819,7 +1836,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 k,
                 VariableBuilder(
                     self,
-                    LocalInputSource(k, code_options["co_varnames"].index(k))
+                    LocalSource(k)
                     if k in code_options["co_varnames"]
                     else LocalSource((k)),
                 )(f_locals[k]),
@@ -1958,7 +1975,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         log.debug("RETURN_VALUE triggered compile")
         self.output.compile_subgraph(
-            self, reason=GraphCompileReason("return_value", [self.frame_summary()])
+            self,
+            reason=GraphCompileReason(
+                "return_value", [self.frame_summary()], graph_break=False
+            ),
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
@@ -2020,7 +2040,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented(f"inline {code.co_name}")
 
         suffix = ""
-        if config.output_code:
+        # TODO: mlazos, add support for enabling multiple artifact logs
+        # with a single alias
+        if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
         log.debug(f"INLINING {code}{suffix}")
 
