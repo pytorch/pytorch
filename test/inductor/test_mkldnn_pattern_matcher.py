@@ -259,12 +259,10 @@ class TestPaternMatcher(TestCase):
                 opt_model = torch.compile(mod)
                 actual = opt_model(v)
                 torch.testing.assert_close(actual, expected)
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_count"], 2 if has_relu else 1
-                )
+                self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_nodes"],
-                    binary_list[binary_fn] + 2 if has_relu else binary_list[binary_fn],
+                    binary_list[binary_fn] + 1 if has_relu else binary_list[binary_fn],
                 )
                 counters.clear()
 

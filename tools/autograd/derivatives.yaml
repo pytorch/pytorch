@@ -2175,7 +2175,10 @@
   output_differentiability: [True, False]
 
 - name: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
-  input, weight, bias: linear_backward(input, grad, weight, grad_input_mask)
+  input, weight, bias: "grad.defined() ? linear_backward(input, grad, weight, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+
+- name: linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  self, grad_output, weight: linear_double_backward(grads, self, grad_output, weight)
 
 #mps
 - name: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
@@ -3000,12 +3003,3 @@
 
 - name: _foreach_maximum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < scalars[i], 0)
-
-- name: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor
-  self: non_differentiable
-
-- name: all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor
-  shard: non_differentiable
-
-- name: wait_tensor(Tensor self) -> Tensor
-  self: non_differentiable

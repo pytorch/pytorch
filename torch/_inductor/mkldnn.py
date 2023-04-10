@@ -1,13 +1,14 @@
 import copy
 from functools import reduce
+from typing import Optional
 
 import torch
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch._dynamo.utils import fake_mode_from_tensors
+from torch._dynamo.utils import detect_fake_mode
 from torch.fx.experimental.optimization import replace_node_module
-from torch.fx.experimental.symbolic_shapes import guard_int
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.modules.utils import _pair
 from . import config
@@ -49,8 +50,10 @@ class PackedConv2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                tuple(guard_int(x) for x in input_size),
-            ),
+                input_size,
+            )
+            if input_size is not None
+            else self.weight.to_mkldnn(),
             requires_grad=self.weight.requires_grad,
         )
 
@@ -128,10 +131,15 @@ class PackedLinearBF16(nn.Linear):
 
     def _update_module_params(self, linear, input_size):
         self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1])
+        self.batch_size = (
+            reduce(lambda x, y: x * y, input_size[:-1])
+            if input_size is not None
+            else None
+        )
         self.packed_weight = torch.nn.Parameter(
             torch.ops.mkldnn._reorder_linear_weight(
-                self.weight.to_mkldnn(), self.batch_size
+                self.weight.to_mkldnn(),
+                self.batch_size,
             ),
             requires_grad=self.weight.requires_grad,
         )
@@ -172,14 +180,18 @@ class PackedConvTranspose2d(nn.ConvTranspose2d):
 
     def _update_module_params(self, conv_transpose, input_size):
         self.__dict__ = copy.deepcopy(conv_transpose.__dict__)
-        packed_weight = torch.ops.mkldnn._reorder_convolution_transpose_weight(
-            self.weight.to_mkldnn(),
-            self.padding,
-            self.output_padding,
-            self.stride,
-            self.dilation,
-            self.groups,
-            input_size,
+        packed_weight = (
+            torch.ops.mkldnn._reorder_convolution_transpose_weight(
+                self.weight.to_mkldnn(),
+                self.padding,
+                self.output_padding,
+                self.stride,
+                self.dilation,
+                self.groups,
+                input_size,
+            )
+            if input_size is not None
+            else self.weight.transpose(0, 1).to_mkldnn()
         )
         self.weight = torch.nn.Parameter(
             packed_weight,
@@ -221,7 +233,7 @@ class PackedConvTranspose2d(nn.ConvTranspose2d):
         return self._conv_transpose_forward(input, self.weight, self.bias)
 
 
-def packed_conv_eval(conv: nn.Module, input_size: list):
+def packed_conv_eval(conv: nn.Module, input_size: Optional[list]):
     assert not (conv.training), "Fusion only for eval!"
     return PackedConv2d(
         conv,
@@ -229,7 +241,7 @@ def packed_conv_eval(conv: nn.Module, input_size: list):
     )
 
 
-def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: list):
+def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: Optional[list]):
     assert not (conv_transpose.training), "Fusion only for eval!"
     return PackedConvTranspose2d(conv_transpose, input_size)
 
@@ -255,41 +267,11 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     if not is_cpu:
         return gm
-    # For binary fusion, we need to check inputs info to make sure
-    # the binary inputs have same tensor info(device, dtype, and layout).
-
-    fake_mode = fake_mode_from_tensors(example_inputs)
-    ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
+    fake_mode = detect_fake_mode(example_inputs)
     if config.cpp.weight_prepack:
+        if not dynamo_config.dynamic_shapes:
+            ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
         gm = pack_module(gm)
-    return gm
-
-
-def convert_outplace_to_inplace(gm: torch.fx.GraphModule):
-    if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
-        return gm
-    # This function is about replace outplace with inplace for better performance(external call),
-    # which happen after AOTAutograd.
-    for node in gm.graph.nodes:
-        if node.op == "call_function" and node.target in [
-            torch.ops.mkldnn._convolution_pointwise.binary
-        ]:
-            # args[0] and args[1] is _convolution_pointwise.binary's input,
-            # need to check whether args[1] can be written or not.
-            if node.args[1].op in ["placeholder", "output"]:
-                continue
-            # TODO: node.args[1].users > 1, but node.args[1] never be used after current node.
-            if len(node.args[1].users) > 1:
-                continue
-            if node.args[1] == node.args[0]:
-                continue
-            binary_attr = node.args[8]
-            unary_attr = node.args[10]
-            if binary_attr != "add" or unary_attr not in ["", "relu"]:
-                continue
-            node.target = torch.ops.mkldnn._convolution_pointwise_.binary
-    gm.graph.lint()
-    gm.recompile()
     return gm
 
 
@@ -302,26 +284,33 @@ def pack_module(gm: torch.fx.GraphModule):
             if type(cur_module) in computation_op_packed_map:
                 if cur_module.training:
                     continue
-                computation_node_input_meta = node.args[0].meta.get("tensor_meta")
-                # for fp32 linear, only packed when has mkl
-                if (
-                    computation_node_input_meta.dtype == torch.float32
-                    and type(cur_module) in [torch.nn.Linear]
-                    and not torch._C.has_mkl
-                ):
-                    continue
-                computation_node_input_size = computation_node_input_meta.shape
-                if (
-                    type(cur_module) in [torch.nn.Linear]
-                    and len(computation_node_input_size) < 2
-                ):
-                    continue
+                if dynamo_config.dynamic_shapes:
+                    computation_node_input_meta = None
+                    computation_node_input_size = None
+                    if (
+                        type(cur_module) in [torch.nn.Linear]
+                        and cur_module.weight.dtype == torch.float32
+                    ):
+                        continue
+                else:
+                    computation_node_input_meta = node.args[0].meta.get("tensor_meta")
+                    computation_node_input_size = computation_node_input_meta.shape
+                    if type(cur_module) in [torch.nn.Linear]:
+                        # for fp32 linear, only packed when has mkl.
+                        if (
+                            cur_module.weight.dtype == torch.float32
+                            and (not torch._C.has_mkl)
+                        ) or len(computation_node_input_size) < 2:
+                            continue
                 if type(cur_module) in [nn.Conv2d] and isinstance(
                     cur_module.padding, str
                 ):
                     continue
                 # TODO: remove this when group depthwise ConvTranspose is supported
-                if is_group_depthwise_conv_transpose(cur_module):
+                if type(cur_module) in [nn.ConvTranspose2d] and (
+                    is_group_depthwise_conv_transpose(cur_module)
+                    or dynamo_config.dynamic_shapes
+                ):
                     continue
                 new_module = computation_op_packed_map[type(cur_module)](
                     cur_module, computation_node_input_size
