@@ -337,7 +337,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.remove_node(node)
                 self.real_value_cache.pop(node, None)
                 removed_nodes += 1
-        log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
+        log.debug("restore_graphstate: removed %s nodes", removed_nodes)
 
     def add_grapharg(self, arg: GraphArg):
         self.graphargs.append(arg)
@@ -526,7 +526,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
 
-        log.debug(f"COMPILING GRAPH due to {reason}")
+        log.debug("COMPILING GRAPH due to %s", reason)
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
@@ -814,7 +814,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
             if arg.uses == 0:
-                log.debug(f"REMOVE UNUSED GRAPHARG {arg.source.name()}")
+                log.debug("REMOVE UNUSED GRAPHARG %s", arg.source.name())
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.remove_node(node)
