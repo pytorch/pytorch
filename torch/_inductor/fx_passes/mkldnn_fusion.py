@@ -293,6 +293,7 @@ def _is_valid_binary(match, fn):
         for n in binary_nodes
     ):
         return False
+    # check args[0] and args[1] is not same
     if any(n.args[0] == n.args[1] for n in binary_nodes):
         return False
     if any(
@@ -303,7 +304,7 @@ def _is_valid_binary(match, fn):
     return True
 
 
-def _is_valid_computation_binary(computation_op, binary_op):
+def _is_valid_computation_binary(computation_op, binary_op, other_index=None):
     def fn(match):
         if not _is_single_computation_op(computation_op)(match):
             return False
@@ -314,28 +315,50 @@ def _is_valid_computation_binary(computation_op, binary_op):
     return fn
 
 
+def _is_valid_computation_binary_inplace(computation_op, binary_op, other_index):
+    def fn(match):
+        if not _is_valid_computation_binary(computation_op, binary_op)(match):
+            return False
+        binary_nodes = filter_nodes(match.nodes, fn)
+        if any(n.args[other_index].users > 1 for n in binary_nodes):
+            return False
+        if any(
+            n.args[other_index].op in ["placeholder", "output"] for n in binary_nodes
+        ):
+            return False
+        return True
+
+    return fn
+
+
 def _register_binary_unary_fusion_lowering(
-    pattern, computation_op, binary_op, fusion_op, unary_attr=None
+    pattern,
+    computation_op,
+    binary_op,
+    fusion_op,
+    check_fn=_is_valid_computation_binary,
+    unary_attr=None,
+    other_index=None,
 ):
     @register_lowering_pattern(
-        pattern, extra_check=_is_valid_computation_binary(computation_op, binary_op)
+        pattern, extra_check=check_fn(computation_op, binary_op, other_index)
     )
     def fn(match, *args, **kwargs):
         other = kwargs.get("other")
         binary_attr = _binary_attr[binary_op]
         args_list = list(args)
-        compuation_args = [args_list[0], other] + args_list[1:-3] + [binary_attr]
+        computation_args = [args_list[0], other] + args_list[1:-3] + [binary_attr]
         if len(args_list) > 6:
             if unary_attr is not None:
-                compuation_args += [
+                computation_args += [
                     1.0,
                     unary_attr.op_name,
                     unary_attr.scalars_attr,
                     unary_attr.algorithm_attr,
                 ]
             else:
-                compuation_args += [1.0, None, [], None]
-        return L[fusion_op](*compuation_args)
+                computation_args += [1.0, None, [], None]
+        return L[fusion_op](*computation_args)
 
     return fn
 
@@ -388,6 +411,53 @@ def _register_unary_fusion():
         _register_hardtanh_fusion_lowering(pattern, computation_op)
 
 
+def _register_inplace_fusion_lowering():
+    binary_ops = [aten.add, ops.add]
+    fusion_ops = [mkldnn._convolution_pointwise_.binary]
+    for computation_call, computation_op in zip(
+        _computation_user_1[:-1], computation_ops[:-1]
+    ):
+        for binary_op in binary_ops:
+            binary_v1 = _binary_fusion_v1(computation_call, binary_op)
+            binary_unary_v1 = _combined_fusion(binary_v1, aten.relu)
+            _register_binary_unary_fusion_lowering(
+                binary_unary_v1,
+                computation_op,
+                binary_op,
+                fusion_ops[0],
+                check_fn=_is_valid_computation_binary_inplace,
+                other_index=0,
+                unary_attr=UnaryAttr("relu"),
+            )
+            _register_binary_unary_fusion_lowering(
+                binary_v1,
+                computation_op,
+                binary_op,
+                fusion_ops[0],
+                check_fn=_is_valid_computation_binary_inplace,
+                other_index=0,
+            )
+            binary_v2 = _binary_fusion_v2(computation_call, binary_op)
+            binary_unary_v2 = _combined_fusion(binary_v2, aten.relu)
+            _register_binary_unary_fusion_lowering(
+                binary_unary_v2,
+                computation_op,
+                binary_op,
+                fusion_ops[0],
+                check_fn=_is_valid_computation_binary_inplace,
+                other_index=1,
+                unary_attr=UnaryAttr("relu"),
+            )
+            _register_binary_unary_fusion_lowering(
+                binary_v2,
+                computation_op,
+                binary_op,
+                fusion_ops[0],
+                check_fn=_is_valid_computation_binary_inplace,
+                other_index=1,
+            )
+
+
 def _register_binary_fusion():
     binary_ops = [aten.add, ops.add, aten.sub, ops.sub]
     fusion_ops = [mkldnn._convolution_pointwise.binary, mkldnn._linear_pointwise.binary]
@@ -399,6 +469,7 @@ def _register_binary_fusion():
             _register_binary_unary_fusion_lowering(
                 pattern, computation_op, binary_op, fusion_op
             )
+
         for binary_op in [aten.add, ops.add]:
             pattern = _binary_fusion_v1(computation_call, binary_op)
             _register_binary_unary_fusion_lowering(
@@ -417,48 +488,27 @@ def _register_binary_unary_fusion():
                 _binary_fusion_v2(computation_call, binary_op), aten.relu
             )
             _register_binary_unary_fusion_lowering(
-                pattern_v1, computation_op, binary_op, fusion_op, UnaryAttr("relu")
+                pattern_v1,
+                computation_op,
+                binary_op,
+                fusion_op,
+                unary_attr=UnaryAttr("relu"),
             )
         for binary_op in [aten.add, ops.add]:
             pattern_v2 = _combined_fusion(
                 _binary_fusion_v1(computation_call, binary_op), aten.relu
             )
             _register_binary_unary_fusion_lowering(
-                pattern_v2, computation_op, binary_op, fusion_op, UnaryAttr("relu")
+                pattern_v2,
+                computation_op,
+                binary_op,
+                fusion_op,
+                unary_attr=UnaryAttr("relu"),
             )
-
-
-"""
-def convert_outplace_to_inplace(gm: torch.fx.GraphModule):
-    if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
-        return gm
-    # This function is about replace outplace with inplace for better performance(external call),
-    # which happen after AOTAutograd.
-    for node in gm.graph.nodes:
-        if node.op == "call_function" and node.target in [
-            torch.ops.mkldnn._convolution_pointwise.binary
-        ]:
-            # args[0] and args[1] is _convolution_pointwise.binary's input,
-            # need to check whether args[1] can be written or not.
-            if node.args[1].op in ["placeholder", "output"]:
-                continue
-            # TODO: node.args[1].users > 1, but node.args[1] never be used after current node.
-            if len(node.args[1].users) > 1:
-                continue
-            if node.args[1] == node.args[0]:
-                continue
-            binary_attr = node.args[8]
-            unary_attr = node.args[10]
-            if binary_attr != "add" or unary_attr not in ["", "relu"]:
-                continue
-            node.target = torch.ops.mkldnn._convolution_pointwise_.binary
-    gm.graph.lint()
-    gm.recompile()
-    return gm
-"""
 
 
 def _mkldnn_fusion_init():
     _register_unary_fusion()
+    _register_inplace_fusion_lowering()
     _register_binary_unary_fusion()
     _register_binary_fusion()
