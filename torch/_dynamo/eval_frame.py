@@ -427,12 +427,12 @@ def catch_errors_wrapper(callback, hooks: Hooks):
     def catch_errors(frame, cache_size, code_part, dynamic_plan):
         assert dynamic_plan is not None
 
-        msg = f"Compiling %s %s with cache_size %s."
+        msg = "Compiling %s %s with cache_size %s."
         if code_part is not None:
             torch._dynamo.guards.record_guard_failure(
                 hooks.guard_fail_fn, frame.f_code, code_part
             )
-            msg += f" Due to guard failure %s from guard %s and source %s"
+            msg += " Due to guard failure %s from guard %s and source %s"
             log.debug(
                 msg,
                 frame.f_code.co_name,
