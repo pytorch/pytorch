@@ -5,7 +5,7 @@
 import logging
 
 import torch
-from torch.ao.pruning.sparsifier.utils import (
+from torch.ao.pruning.pruner.utils import (
     fqn_to_module,
     get_arg_info_from_tensor_fqn,
     module_to_fqn,
@@ -37,7 +37,7 @@ model_list = [
 ]
 
 
-class TestSparsityUtilFunctions(TestCase):
+class TestPruningUtilFunctions(TestCase):
     def test_module_to_fqn(self):
         """
         Tests that module_to_fqn works as expected when compared to known good
@@ -146,5 +146,5 @@ class TestSparsityUtilFunctions(TestCase):
             arg_info = get_arg_info_from_tensor_fqn(model, tensor_fqn)
             self.assertEqual(arg_info["module"], None)
             self.assertEqual(arg_info["module_fqn"], "foo.bar")
-            self.assertEqual(arg_info["tensor_name"], "baz")
             self.assertEqual(arg_info["tensor_fqn"], "foo.bar.baz")
+            self.assertEqual(arg_info["tensor_name"], "baz")

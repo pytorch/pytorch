@@ -13,7 +13,7 @@ import torch
 import torch.ao.quantization as tq
 
 from torch import nn
-from torch.ao.pruning.sparsifier.utils import fqn_to_module
+from torch.ao.pruning.pruner.utils import fqn_to_module
 
 from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 from torch.testing._internal.common_quantized import (
@@ -154,7 +154,7 @@ def _sparse_layer_test_helper(
         model.eval()
 
         # Add `sparse_params` to the model. The test for correct
-        # sparse_param addition is in the sparsifier tests
+        # sparse_param addition is in the pruner tests
         model.linear.sparse_params = {"sparse_block_shape": (1, 4)}
 
         # generate model versions
