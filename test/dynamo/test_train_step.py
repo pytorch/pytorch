@@ -141,7 +141,6 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
                 self.assertTrue(loss[-2] > loss[-1])
 
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

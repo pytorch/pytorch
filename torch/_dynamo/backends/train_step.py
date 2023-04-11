@@ -21,7 +21,6 @@ def _rematerialize_optimizer(
     named_states: Dict[str, Any],
     params: Dict[str, torch.nn.Parameter],
 ):
-    print("********remat optimizer***********")
     assert opt is not None
 
     # update opt.state with proxy tensors
@@ -161,15 +160,18 @@ def train_step_compiler(backend_compile_fn):
         with torch.inference_mode():
             functional_fx_g = make_fx(functionalize(retraced_f))(*full_fake_args)
             # print(f"functional_fx_g.graph {functional_fx_g.graph}")
+
         """
         Step 4: Reverse the calling-convention change we made above with _reparametrize_module,
                 and return a function that accepts the arguments as originally provided by dynamo
         """
+
         def call_without_params(*runtime_args):
             with torch.no_grad():
                 return functional_fx_g(
                     *params_flat + named_states_flat + list(runtime_args)
                 )
+
         return call_without_params
 
     return _compile_fn
