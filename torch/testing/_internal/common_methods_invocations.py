@@ -13369,6 +13369,21 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
+            # https://github.com/pytorch/pytorch/issues/98431
+            # ROCM fails with Device-side assertion `target_val >= zero && target_val <= one' failed
+            # even though sample inputs for target are generated with low=0 and high=1
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFwdGradients",
+                "test_fn_fwgrad_bwgrad",
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestBwdGradients",
+                "test_fn_grad",
+                active_if=TEST_WITH_ROCM,
+            )
         ),
         skips=(
             # RuntimeError: expected int at position 0, but got: Tensor
@@ -16561,7 +16576,7 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.complex64, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=[torch.chalf, torch.complex64, torch.cdouble])),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.complex32, torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -19850,6 +19865,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.cumsum",
         torch_opinfo_name="cumsum",
+        supports_out=True,
+        supports_nvfuser=False,  # arange not supported
+    ),
+    PythonRefInfo(
+        "_refs.cumprod",
+        torch_opinfo_name="cumprod",
         supports_out=True,
         supports_nvfuser=False,  # arange not supported
     ),
