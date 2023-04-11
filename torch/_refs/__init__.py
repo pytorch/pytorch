@@ -9,6 +9,8 @@ from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
 from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
 
+import sympy
+
 import torch
 
 import torch._prims as prims
@@ -3241,7 +3243,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # specify the same number of elements above
         accum = a_.shape[idx]
         end = idx
-        while accum % length != 0:
+        while sympy.Mod(accum, length) != 0:
             end = end + 1
             accum = accum * a_.shape[end]
         if end != idx:
