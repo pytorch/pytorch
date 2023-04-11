@@ -131,7 +131,14 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_train_step = torch.compile(
             train_step, backend="train_step_eager", fullgraph=True
         )
-        opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
+
+        loss = []
+        for step in range(10):
+            opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
+            loss.append(opt_loss)
+            if step > 0:
+                # in practice, this model loss goes 684, 458, 264, 125, ... so this check should not be too noisy
+                self.assertTrue(loss[-2] > loss[-1])
 
 
 if __name__ == "__main__":

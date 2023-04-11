@@ -445,9 +445,10 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  SymIntArrayRef sizes = extra_meta_->sizes_;
-  SymIntArrayRef strides = extra_meta_->strides_;
-  return _compute_contiguous(sizes, strides, extra_meta_->numel_);
+  auto& sym_shape_meta{symbolic_shape_meta()};
+  SymIntArrayRef sizes = sym_shape_meta.sizes_;
+  SymIntArrayRef strides = sym_shape_meta.strides_;
+  return _compute_contiguous(sizes, strides, sym_shape_meta.numel_);
 }
 
 // The rest of them
@@ -456,8 +457,9 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
     if (is_sparse()) {                                         \
       return false;                                            \
     }                                                          \
-    SymIntArrayRef sizes = extra_meta_->sizes_;                \
-    SymIntArrayRef strides = extra_meta_->strides_;            \
+    auto& sym_shape_meta{symbolic_shape_meta()};               \
+    SymIntArrayRef sizes = sym_shape_meta.sizes_;              \
+    SymIntArrayRef strides = sym_shape_meta.strides_;          \
     return fallback(sizes, strides);                           \
   }
 
@@ -466,8 +468,9 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
     if (is_sparse()) {                                          \
       return false;                                             \
     }                                                           \
-    SymIntArrayRef sizes = extra_meta_->sizes_;                 \
-    SymIntArrayRef strides = extra_meta_->strides_;             \
+    auto& sym_shape_meta{symbolic_shape_meta()};                \
+    SymIntArrayRef sizes = sym_shape_meta.sizes_;               \
+    SymIntArrayRef strides = sym_shape_meta.strides_;           \
     auto n = normalize_sym_sizes_strides(sizes, strides);       \
     if (n.has_value()) {                                        \
       SymNode base;                                             \
@@ -503,65 +506,71 @@ static bool definitely_true(SymBool b) {
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim4(
     identity<SymBool> type_id) {
-  if (definitely_true(extra_meta_->is_contiguous_)) {
+  auto& sym_shape_meta{symbolic_shape_meta()};
+  if (definitely_true(sym_shape_meta.is_contiguous_)) {
     return true;
   }
-  if (definitely_true(extra_meta_->is_channels_last_contiguous_)) {
+  if (definitely_true(sym_shape_meta.is_channels_last_contiguous_)) {
     return true;
   }
-  return extra_meta_->is_contiguous_ |
-      extra_meta_->is_channels_last_contiguous_ |
+  return sym_shape_meta.is_contiguous_ |
+      sym_shape_meta.is_channels_last_contiguous_ |
       compute_non_overlapping_and_dense(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_contiguous_3d_dim5(
     identity<SymBool> type_id) {
-  if (definitely_true(extra_meta_->is_channels_last_contiguous_)) {
+  auto& sym_shape_meta{symbolic_shape_meta()};
+  if (definitely_true(sym_shape_meta.is_channels_last_contiguous_)) {
     return false;
   }
-  return ~extra_meta_->is_channels_last_contiguous_ &
+  return ~sym_shape_meta.is_channels_last_contiguous_ &
       compute_channels_last_contiguous_3d(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_2d_dim5(identity<SymBool> type_id) {
-  if (definitely_true(extra_meta_->is_channels_last_3d_contiguous_)) {
+  auto& sym_shape_meta{symbolic_shape_meta()};
+  if (definitely_true(sym_shape_meta.is_channels_last_3d_contiguous_)) {
     return false;
   }
-  return ~extra_meta_->is_channels_last_3d_contiguous_ &
+  return ~sym_shape_meta.is_channels_last_3d_contiguous_ &
       compute_strides_like_channels_last_2d(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_3d_dim5(identity<SymBool> type_id) {
-  if (definitely_true(extra_meta_->is_channels_last_)) {
+  auto& sym_shape_meta{symbolic_shape_meta()};
+  if (definitely_true(sym_shape_meta.is_channels_last_)) {
     return false;
   }
-  return ~extra_meta_->is_channels_last_ &
+  return ~sym_shape_meta.is_channels_last_ &
       compute_strides_like_channels_last_3d(type_id);
 }
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim5(
     identity<SymBool> type_id) {
-  if (definitely_true(extra_meta_->is_contiguous_)) {
+  auto& sym_shape_meta{symbolic_shape_meta()};
+  if (definitely_true(sym_shape_meta.is_contiguous_)) {
     return true;
   }
-  if (definitely_true(extra_meta_->is_channels_last_contiguous_)) {
+  if (definitely_true(sym_shape_meta.is_channels_last_contiguous_)) {
     return true;
   }
-  if (definitely_true(extra_meta_->is_channels_last_3d_contiguous_)) {
+  if (definitely_true(sym_shape_meta.is_channels_last_3d_contiguous_)) {
     return true;
   }
-  return extra_meta_->is_contiguous_ |
-      extra_meta_->is_channels_last_contiguous_ |
-      extra_meta_->is_channels_last_3d_contiguous_ |
+  return sym_shape_meta.is_contiguous_ |
+      sym_shape_meta.is_channels_last_contiguous_ |
+      sym_shape_meta.is_channels_last_3d_contiguous_ |
       compute_non_overlapping_and_dense(type_id);
 }
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_anydim(
     identity<SymBool> type_id) {
-  if (definitely_true(extra_meta_->is_contiguous_)) {
+  auto& sym_shape_meta{symbolic_shape_meta()};
+  if (definitely_true(sym_shape_meta.is_contiguous_)) {
     return true;
   }
-  return extra_meta_->is_contiguous_ |
+  return sym_shape_meta.is_contiguous_ |
       compute_non_overlapping_and_dense(type_id);
 }
 
@@ -934,7 +943,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
       static_cast<int64_t>(std::ceil(
           static_cast<float>(sizes_and_strides_.size_at_unchecked(0)) *
           (1 + growthPct / 100))));
-  auto oldData = std::move(storage_.data_ptr());
+  auto oldData = std::move(storage_.mutable_data_ptr());
   auto oldSize = numel_;
   Resize(std::move(newCapacity));
   auto* newData = raw_mutable_data(data_type_);
@@ -984,7 +993,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
     return;
   }
   // Old data is discarded
-  storage_.data_ptr().clear();
+  storage_.mutable_data_ptr().clear();
   auto oldSize = numel_;
   SmallVector<int64_t, 5> oldDims(
       sizes_and_strides.begin(), sizes_and_strides.end());
@@ -1132,14 +1141,18 @@ void TensorImpl::set_sizes_and_strides(
   refresh_sizes_strides_policy();
   if (!extra_meta_) {
     extra_meta_ = std::make_unique<ExtraMeta>();
+    extra_meta_->symbolic_shape_meta_ =
+        std::make_unique<c10::SymbolicShapeMeta>();
     if (!storage_offset.has_value()) {
-      extra_meta_->storage_offset_ = storage_offset_;
+      extra_meta_->symbolic_shape_meta_->storage_offset_ = storage_offset_;
     }
   }
-  clone_symvec(sizes, extra_meta_->sizes_);
-  clone_symvec(strides, extra_meta_->strides_);
+
+  auto& sym_shape_meta{symbolic_shape_meta()};
+  clone_symvec(sizes, sym_shape_meta.sizes_);
+  clone_symvec(strides, sym_shape_meta.strides_);
   if (storage_offset.has_value())
-    extra_meta_->storage_offset_ = storage_offset->clone();
+    sym_shape_meta.storage_offset_ = storage_offset->clone();
 
   refresh_numel();
   refresh_contiguous();
@@ -1159,12 +1172,13 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
 
   has_symbolic_sizes_strides_ = true;
   refresh_sizes_strides_policy();
-  if (!extra_meta_) {
-    extra_meta_ = std::make_unique<ExtraMeta>();
-    extra_meta_->storage_offset_ = storage_offset_;
+  auto& extra_meta{get_extra_meta()};
+  if (extra_meta.symbolic_shape_meta_ == nullptr) {
+    extra_meta_->symbolic_shape_meta_ =
+        std::make_unique<c10::SymbolicShapeMeta>();
   }
 
-  clone_symvec(sizes, extra_meta_->sizes_);
+  clone_symvec(sizes, symbolic_shape_meta().sizes_);
   refresh_numel();
   empty_tensor_restride_symint(
       MemoryFormat::Contiguous); // calls refresh_contiguous()
@@ -1172,18 +1186,19 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
 
 void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   TORCH_INTERNAL_ASSERT(has_symbolic_sizes_strides_);
+  auto& sym_shape_meta{symbolic_shape_meta()};
   switch (memory_format) {
     case MemoryFormat::Contiguous: {
       // TODO: figure out if the non-symint version can also devirtualize;
       // the last time we tried it was probably a narrowing problem
-      const auto dim_ = static_cast<int64_t>(extra_meta_->sizes_.size());
-      extra_meta_->strides_.resize(dim_);
+      const auto dim_ = static_cast<int64_t>(sym_shape_meta.sizes_.size());
+      sym_shape_meta.strides_.resize(dim_);
       if (dim_ > 0) {
         const auto last_idx = dim_ - 1;
-        extra_meta_->strides_[last_idx] = c10::SymInt(1);
+        sym_shape_meta.strides_[last_idx] = c10::SymInt(1);
         for (auto i = last_idx - 1; i >= 0; --i) {
-          extra_meta_->strides_[i] =
-              extra_meta_->strides_[i + 1] * extra_meta_->sizes_[i + 1].max(1);
+          sym_shape_meta.strides_[i] = sym_shape_meta.strides_[i + 1] *
+              sym_shape_meta.sizes_[i + 1].max(1);
         }
       }
       break;
@@ -1192,14 +1207,14 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
       TORCH_CHECK(
           dim() == 4, "required rank 4 tensor to use channels_last format");
       clone_symvec(
-          get_channels_last_strides_2d(sym_sizes()), extra_meta_->strides_);
+          get_channels_last_strides_2d(sym_sizes()), sym_shape_meta.strides_);
       break;
     }
     case MemoryFormat::ChannelsLast3d: {
       TORCH_CHECK(
           dim() == 5, "required rank 5 tensor to use channels_last_3d format");
       clone_symvec(
-          get_channels_last_strides_3d(sym_sizes()), extra_meta_->strides_);
+          get_channels_last_strides_3d(sym_sizes()), sym_shape_meta.strides_);
       break;
     }
     case MemoryFormat::Preserve:
@@ -1217,20 +1232,20 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   // TODO: avoid chundering into the guards for computing these
   switch (memory_format) {
     case MemoryFormat::Contiguous: {
-      extra_meta_->is_contiguous_ = true;
-      extra_meta_->is_non_overlapping_and_dense_ = true;
+      sym_shape_meta.is_contiguous_ = true;
+      sym_shape_meta.is_non_overlapping_and_dense_ = true;
       break;
     }
     case MemoryFormat::ChannelsLast: {
-      extra_meta_->is_channels_last_contiguous_ = true;
-      extra_meta_->is_channels_last_ = true;
-      extra_meta_->is_non_overlapping_and_dense_ = true;
+      sym_shape_meta.is_channels_last_contiguous_ = true;
+      sym_shape_meta.is_channels_last_ = true;
+      sym_shape_meta.is_non_overlapping_and_dense_ = true;
       break;
     }
     case MemoryFormat::ChannelsLast3d: {
-      extra_meta_->is_channels_last_3d_contiguous_ = true;
-      extra_meta_->is_channels_last_3d_ = true;
-      extra_meta_->is_non_overlapping_and_dense_ = true;
+      sym_shape_meta.is_channels_last_3d_contiguous_ = true;
+      sym_shape_meta.is_channels_last_3d_ = true;
+      sym_shape_meta.is_non_overlapping_and_dense_ = true;
       break;
     }
     default:

@@ -33,6 +33,7 @@ def _rematerialize_optimizer(
     param_group = opt.param_groups[0]
     orig_params = param_group["params"]
     # FIXME(@mrshenli): exclude buffers
+    print(f"setting optimizer to use parm0 {params}")
     param_group["params"] = params.values()
 
     try:
@@ -61,6 +62,11 @@ def train_step_compiler(backend_compile_fn):
         Step 1: Assert inputs (from user) are already Fake, and user their FakeTensorMode
                 (created by dynamo) to fakeify the module's parameters
         """
+        # at input dynamo puts two copies e.g.
+        #   L__model___layers_0.weight
+        #   model.layers.0.weight
+        # both as realtensor on passed in graphmodule.  `model` comes from having model as input to train_step.
+
         print(mod.graph)
         torch.set_grad_enabled(True)
         torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
@@ -71,21 +77,30 @@ def train_step_compiler(backend_compile_fn):
         ), "Expected a valid FakeTensorMode on dynamo inputs"
 
         def fakeify_inputs(flat_args):
+            already_fake = {}
             def convert(idx, x):
                 # todo: do we expect symint inputs?
                 assert isinstance(x, torch.Tensor)
-                return fake_mode.from_tensor(x, static_shapes=False)
+                if x not in already_fake:
+                    # Since we do have duplicate names from dynamo refering to the same tensor,
+                    # ensure that we never make more than one faketensor for a given real tensor!
+                    already_fake[x] = fake_mode.from_tensor(x, static_shapes=False)
+                return already_fake[x]
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
+        # problem: if i don't remove duplicates here, stateless.Parametrize gets confused by presence of duplicates
+        # duplicates come from dynamo.  it adds `model` key which contains one set of references to all params/buffers,
+        # and then it also adds individual keys for names actually traced by dynamo.
         params = {
-            **dict(mod.named_parameters(remove_duplicate=False)),
-            **dict(mod.named_buffers(remove_duplicate=False)),
+            **dict(mod.named_parameters(remove_duplicate=True)),
+            **dict(mod.named_buffers(remove_duplicate=True)),
         }
         params_flat, params_spec = pytree.tree_flatten(params)
         params_len = len(params_flat)
         fake_params_flat = fakeify_inputs(params_flat)
 
+        # TODO fix dynamo's "list of optimizers" on the module, and iterate them instead of hardcoding here
         opt = mod.__optimizer_0
         named_states = {}
         # Pass named_states instead of opt.state to stateless_func, because
@@ -131,8 +146,8 @@ def train_step_compiler(backend_compile_fn):
         assert torch.is_grad_enabled(), "grad isn't enabled before calling make_fx"
         fx_g = make_fx(functional_call)(*full_fake_args)
         torch.set_grad_enabled(False)
-        print("fx_g")
-        print(fx_g)
+        # print(f"fx_g: {fx_g}")
+
         """
         Step 3: Functionalize the resulting flattend graph, producing code with copy_ ops
                 as an epilogue for any inplace/mutating ops such as optimizer update.
@@ -141,16 +156,15 @@ def train_step_compiler(backend_compile_fn):
         def retraced_f(*args):
             return Interpreter(fx_g).run(*args)
 
-        # not really sure why we need inference mode here
+        # we use inference mode to stop autograd complaining about inplace updating a leaf node
         with torch.inference_mode():
             functional_fx_g = make_fx(functionalize(retraced_f))(*full_fake_args)
+            # print(f"functional_fx_g.graph {functional_fx_g.graph}")
 
         """
         Step 4: Reverse the calling-convention change we made above with _reparametrize_module,
                 and return a function that accepts the arguments as originally provided by dynamo
         """
-        print("functional_fx_g.graph")
-        print(functional_fx_g.graph)
 
         def call_without_params(*runtime_args):
             with torch.no_grad():
