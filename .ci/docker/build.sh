@@ -88,8 +88,8 @@ _UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.7.0
+  pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7)
+    CUDA_VERSION=12.1.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=7
