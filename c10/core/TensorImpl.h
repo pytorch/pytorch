@@ -29,6 +29,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <type_traits>
 #include <utility>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -1538,7 +1539,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  public:
   /**
-   * Return a void* data pointer to the actual data which this tensor refers to.
+   * Return a const void* data pointer to the actual data which this
+   * tensor refers to.
    *
    * It is invalid to call data() on a dtype-uninitialized tensor, even if the
    * size is 0.
@@ -1547,7 +1549,33 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * assume that itemsize() * numel() is sufficient to compute the bytes that
    * can be validly read from this tensor.
    */
-  inline void* data() const {
+  inline const void* data() const {
+    return data_impl<const void>(
+        [this] { return static_cast<const char*>(storage_.data()); });
+  }
+
+  /**
+   * Return a void* data pointer to the actual data which this tensor refers to.
+   *
+   * It is invalid to call mutable_data() on a dtype-uninitialized
+   * tensor, even if the size is 0.
+   *
+   * WARNING: The data pointed to by this tensor may not contiguous; do NOT
+   * assume that itemsize() * numel() is sufficient to compute the bytes that
+   * can be validly read from this tensor.
+   */
+  inline void* mutable_data() {
+    return data_impl<void>(
+        [this] { return static_cast<char*>(storage_.mutable_data()); });
+  }
+
+ private:
+  /// Shared implementation of data() and mutable_data().
+  ///
+  /// get_data must return a byte-addressed pointer, e.g. char*,
+  /// std::byte const*, etc.
+  template <typename Void, typename Func>
+  Void* data_impl(const Func& get_data) const {
     TORCH_CHECK(
         has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
@@ -1555,16 +1583,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
+    auto* data = get_data();
+    static_assert(
+        sizeof(*data) == 1, "get_data must return a byte-addressed pointer.");
     // Computing an offset into an empty tensor would be UB, since an empty
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
-    char* const data = static_cast<char*>(storage_.mutable_data());
     if (data == nullptr) {
       return nullptr;
     }
-    return static_cast<void*>(data + data_type_.itemsize() * storage_offset_);
+    return data + data_type_.itemsize() * storage_offset_;
   }
 
+ public:
   /**
    * Like data<T>(), but performs no checks.  You are responsible for ensuring
    * that all invariants required by data() are upheld here.

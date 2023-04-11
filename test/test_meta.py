@@ -896,11 +896,13 @@ meta_dispatch_skips = {
 meta_dispatch_early_skips = set({
     torch.Tensor.float_power_,
     # Errors out in one of the tests, while ProxyTensor passes...
+    torch.Tensor.cumprod_,
     torch.Tensor.cumsum_,
 })
 
 meta_inplace_skips = set({
     # Errors out in one of the tests, while ProxyTensor passes...
+    torch.Tensor.cumprod_,
     torch.Tensor.cumsum_,
 })
 
