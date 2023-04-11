@@ -2022,7 +2022,8 @@ class BufferList(IRNode):
     def get_device(self, ind=0):
         return self.layouts[ind].device
 
-    def get_dtype(self, ind):
+    # TODO mlazos: Ensure each Bufferlist has uniform dtype and device
+    def get_dtype(self, ind=0):
         return getattr(self.layouts[ind], "dtype", None)
 
     def get_size(self, ind):
@@ -2107,6 +2108,12 @@ class BufferList(IRNode):
 
     def realize(self):
         pass
+
+    def _index(self, ind):
+        return self.data._index(ind)
+
+    def body(self, indices):
+        self.data.body(indices)
 
 
 class ForeachOutputBuffer(Buffer):
@@ -3978,6 +3985,17 @@ class ForeachPointwise(IRNode):
 
     def get_inputs(self):
         return itertools.chain(self.left_inputs, self.right_inputs)
+
+    def body(self, indices):
+        for i, input in enumerate(self.get_inputs()):
+            loader = input.make_loader()
+            loader(indices[i])
+
+    def _index(self, ind):
+        return [
+            sympy.Integer(0) if s == 1 else sympy_symbol(f"i{n}")
+            for n, s in enumerate(self.layouts[ind].size)
+        ]
 
 
 class InterpreterShim(torch.fx.Interpreter):

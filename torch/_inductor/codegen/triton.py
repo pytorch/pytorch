@@ -19,6 +19,7 @@ from ..codecache import get_code_path
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
+    ceildiv,
     get_fused_kernel_name,
     get_kernel_category_by_source_code,
     get_kernel_metadata,
@@ -1489,20 +1490,53 @@ class TritonKernel(Kernel):
 class ForeachKernel(Kernel):
     overrides = TritonOverrides
 
-    def __init__(
-        self,
-    ):
+    def __init__(self, input_names, output_names, layouts):
         super().__init__()
         self.body = IndentedBuffer()
+        self.tensor_elem_counts = [sympy_product(layout.size) for layout in layouts]
 
-    def load(self, code, name: str):
-        pass
+        for name in input_names:
+            self.args.input(name)
 
-    def store(self, code, name: str):
-        pass
+        for name in output_names:
+            self.args.output(name)
 
-    def codegen_kernel(self):
-        from triton import next_power_of_2
+    @staticmethod
+    def _compute_num_blocks(tensor_elem_counts, block_size):
+        num_blocks = 0
+        for count in tensor_elem_counts:
+            num_blocks += ceildiv(count, block_size)
+
+        return num_blocks
+
+    @staticmethod
+    def _gen_tile_loads(
+        left_arg_name,
+        right_arg_name,
+        out_arg_name,
+        block_ind,
+        num_elems,
+        block_size,
+        code,
+    ):
+        num_blocks = ceildiv(num_elems, block_size)
+        upper_bound_pid = block_ind + num_blocks
+        last_block_elem_count = block_size - (num_blocks * block_size - num_elems)
+
+        code.writeline(f"if pid >= {block_ind} and pid < {upper_bound_pid}:")
+        with code.indent():
+            code.writeline(f"elem_ind_offset = (pid - {block_ind}) * BLOCK_SIZE")
+            code.writeline(f"left_ptr = {left_arg_name} + elem_ind_offset")
+            code.writeline(f"right_ptr = {right_arg_name} + elem_ind_offset")
+            code.writeline(f"out_ptr = {out_arg_name} + elem_ind_offset")
+            code.writeline(f"if pid == {upper_bound_pid - 1}:")
+            with code.indent():
+                f"elem_count = {last_block_elem_count}"
+
+        return
+
+    def codegen_kernel(self, name=None):
+        # from triton import next_power_of_2
 
         code = IndentedBuffer()
 
@@ -1510,11 +1544,12 @@ class ForeachKernel(Kernel):
             """
                 import triton
                 import triton.language as tl
-                from torch._inductor.ir import ReductionHint
-                from torch._inductor.ir import TileHint
-                from torch._inductor.utils import instance_descriptor
             """
         )
+        argdefs, _, signature = self.args.python_argdefs()
+        code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
+        with code.indent():
+            code.writeline("pass")
         if config.benchmark_kernel:
             code.splice(
                 """
@@ -1525,7 +1560,7 @@ class ForeachKernel(Kernel):
                 """
             )
 
-        # argdefs, _, signature = self.args.python_argdefs()
+        return code.getvalue()
 
     def call_kernel(self, code, name: str):
         _, call_args, _ = self.args.python_argdefs()
@@ -1818,11 +1853,18 @@ class TritonScheduling:
 
     def codegen_foreach(self, foreach_node):
         """ """
-        kernel = ForeachKernel()
+        if isinstance(foreach_node.node, ir.ForeachOutputBuffer):
+            return
+
+        kernel = ForeachKernel(
+            [r.name for r in foreach_node.read_writes.reads],
+            [b.name for b in foreach_node.node.buffers],
+            foreach_node.node.layouts,
+        )
 
         with kernel:
             foreach_node.mark_run()
-            foreach_node.codegen()
+            # foreach_node.codegen()
 
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, [foreach_node])
