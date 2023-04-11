@@ -123,7 +123,6 @@ test_failures = {
     "test_arange3_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange4_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange6_dynamic_shapes": TestFailure(("cpu",)),
-    "test_as_strided_dynamic_shapes": TestFailure(("cpu",)),
     "test_cat_dynamic_shapes": TestFailure(("cpu",)),
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_constant_pad_float64_dynamic_shapes": TestFailure(("cpu",)),
@@ -131,7 +130,6 @@ test_failures = {
     "test_conv3d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_embedding_dynamic_shapes": TestFailure(("cpu",)),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
-    "test_gather1_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
     "test_invalid_operand_issue1_dynamic_shapes": TestFailure(("cpu",)),
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
@@ -172,7 +170,6 @@ test_failures = {
     "test_conv2d_backward_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_packed_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv_transpose2d_packed_dynamic_shapes": TestFailure(("cpu",)),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
     "test_div8_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -323,7 +320,7 @@ if HAS_CPU:
     )
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HA96, 96, S_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesCodegenCudaTests(TestCase):
         maxDiff = None
