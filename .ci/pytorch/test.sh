@@ -363,7 +363,7 @@ test_single_dynamo_benchmark() {
       # TODO: make update_expected.py produces combined expected csv file
       python benchmarks/dynamo/check_graph_breaks.py \
         --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-        --expected "benchmarks/dynamo/ci_expected_accuracy/${name}_${suite}${shard_id}.csv"
+        --expected "benchmarks/dynamo/ci_expected_accuracy/${name}_${suite}.csv"
     fi
   fi
 }

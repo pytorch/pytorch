@@ -345,6 +345,27 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_callable_lambda(x):
+        if callable(lambda x: True):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_callable_torch(x):
+        if callable(torch.abs):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_callable_builtin(x):
+        if callable(sum):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_len_constant_misc_iterables(x):
         a = len((1, 2, 3))
         b = len("test str")
@@ -356,6 +377,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         y = float(1.2)
         y += float("1.2")
         return torch.add(x, y)
+
+    @make_test
+    def test_is_floating_point(x):
+        y = x + 1
+        return torch.is_floating_point(y), torch.is_floating_point(input=y)
 
     @make_test
     def test_dtype(x):
