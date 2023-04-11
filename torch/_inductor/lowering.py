@@ -2575,7 +2575,7 @@ def reflection_pad2d_backward(grad_output, x, padding):
 
 @register_lowering(prims.rev.default)
 def rev(x, dims):
-    # note - dims pre-canoncalized
+    # note - dims pre-canonicalized
     x_loader = x.make_loader()
     sizes = x.get_size()
 

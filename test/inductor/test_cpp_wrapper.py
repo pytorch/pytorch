@@ -114,6 +114,7 @@ if RUN_CUDA:
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
+        BaseTest("test_convolution1"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest("test_linear_packed"),

@@ -2253,7 +2253,9 @@ class ComputedBuffer(Buffer):
         except Exception:
             if config.debug:
                 log.warning(
-                    f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+                    "Did not simplify complex index:\n%s\n%s",
+                    dict(zip(index_vars, sizes)),
+                    memory_addrs,
                 )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
@@ -2674,36 +2676,39 @@ class ExternKernel(InputsKernel):
         pass
 
     def codegen_args(self):
-        def to_str(s):
-            if s is None:
-                return V.graph.wrapper_code.none_str
-            elif isinstance(s, str):
-                return f'"{s}"'
-            elif isinstance(s, (List, Tuple)):
-                return V.graph.wrapper_code.codegen_shape_tuple(s)
-            else:
-                return repr(s)
-
         args = [x.codegen_reference() for x in self.inputs]
-        args.extend(map(to_str, self.constant_args))
+        args.extend(
+            map(
+                V.graph.wrapper_code.val_to_str,
+                self.constant_args,
+            )
+        )
         return args
 
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
             if V.graph.cpp_wrapper:
-                for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                    assert arg_name in self.kwargs, (
-                        "arg %s not found in self.kwargs" % arg_name
-                    )
-                    v = self.kwargs.get(arg_name)
-                    kwargs.append(repr(v))
+                if self.kwargs:
+                    # TODO: use native_functions.yaml as the ground truth
+                    assert (
+                        self.ordered_kwargs_for_cpp_kernel
+                    ), "ordered_kwargs_for_cpp_kernel has to be provided"
+                    for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                        assert arg_name in self.kwargs, (
+                            "arg %s not found in self.kwargs" % arg_name
+                        )
+                        v = self.kwargs.get(arg_name)
+                        kwargs.append(V.graph.wrapper_code.val_to_str(v))
             else:
-                kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
+                kwargs = [
+                    f"{k}={V.graph.wrapper_code.val_to_str(v)}"
+                    for k, v in self.kwargs.items()
+                ]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
-        if config.size_asserts:
+        if config.size_asserts and not V.graph.cpp_wrapper:
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
@@ -2721,7 +2726,7 @@ class ExternKernel(InputsKernel):
 
     def canonicalize(self):
         """
-        Manually get cononicalization of the output index
+        Manually get canonicalization of the output index
         """
         # manually generate index formula for conv
         sizevars = V.graph.sizevars
@@ -2762,11 +2767,7 @@ class ExternKernelOut(ExternKernel):
     output_view: Optional[ReinterpretView] = None
 
     def codegen(self, wrapper):
-        args = self.codegen_args()
-        kwargs = self.codegen_kwargs()
-        if kwargs:
-            args.extend(kwargs)
-
+        args = [*self.codegen_args(), *self.codegen_kwargs()]
         wrapper.generate_extern_kernel_out(
             self.output_view,
             self.codegen_reference(),
@@ -2800,7 +2801,9 @@ class ExternKernelOut(ExternKernel):
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
         args = [*self.codegen_args(), *self.codegen_kwargs()]
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({', '.join(args)})")
+        V.graph.wrapper_code.generate_extern_kernel_alloc(
+            self.get_name(), self.kernel, args
+        )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
