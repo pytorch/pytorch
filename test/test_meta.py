@@ -858,7 +858,7 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.max_pool3d_with_indices.default : {bf16, f32, f64},
+    aten.max_pool3d_with_indices.default : {f16, bf16, f32, f64},
     aten.max_unpool2d.default : {f32, f64},
     aten.max_unpool3d.default : {f32, f64},
     aten.median.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
