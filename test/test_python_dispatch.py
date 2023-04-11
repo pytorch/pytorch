@@ -80,7 +80,7 @@ class TestPythonRegistration(TestCase):
 
         def my_sum(*args, **kwargs):
             run[0] = True
-            return args[0].clone()
+            return args[0]
 
         my_lib1 = Library("aten", "IMPL")
         my_lib1.impl('aten::sum', my_sum, "CPU")
@@ -216,7 +216,7 @@ class TestPythonRegistration(TestCase):
 
     def test_extend_library_with_dispatch_key_arg(self):
         def my_sum(*args, **kwargs):
-            return args[0].clone()
+            return args[0]
         my_lib1 = Library("aten", "IMPL", dispatch_key="CPU")
 
         # RuntimeError: Explicitly provided dispatch key (Conjugate) is
@@ -236,7 +236,7 @@ class TestPythonRegistration(TestCase):
         # Example 1
         @torch.library.impl(my_lib1, "sum", "CPU")
         def my_sum(*args, **kwargs):
-            return args[0].clone()
+            return args[0]
 
         x = torch.tensor([1, 2])
         self.assertEqual(torch.ops.foo.sum(x), x)
@@ -249,7 +249,7 @@ class TestPythonRegistration(TestCase):
             if args[0]._is_zerotensor():
                 return torch._efficientzerotensor(args[0].shape)
             else:
-                return args[0].clone()
+                return args[0]
 
         y = torch._efficientzerotensor(3)
         self.assertTrue(torch.ops.foo.sum(y)._is_zerotensor())
@@ -257,51 +257,6 @@ class TestPythonRegistration(TestCase):
 
         del my_lib2
         del my_lib1
-
-    def test_create_new_library_fragment_no_existing(self):
-        my_lib = Library("foo", "FRAGMENT")
-
-        my_lib.define("sum2(Tensor self) -> Tensor")
-
-        @torch.library.impl(my_lib, "sum2", "CPU")
-        def my_sum(*args, **kwargs):
-            return args[0]
-
-        x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum2(x), x)
-
-        del my_lib
-
-    def test_create_new_library_fragment_with_existing(self):
-        my_lib1 = Library("foo", "DEF")
-
-        # Create a fragment
-        my_lib2 = Library("foo", "FRAGMENT")
-
-        my_lib2.define("sum4(Tensor self) -> Tensor")
-
-        @torch.library.impl(my_lib2, "sum4", "CPU")
-        def my_sum4(*args, **kwargs):
-            return args[0]
-
-        x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum4(x), x)
-
-        # Create another fragment
-        my_lib3 = Library("foo", "FRAGMENT")
-
-        my_lib3.define("sum3(Tensor self) -> Tensor")
-
-        @torch.library.impl(my_lib3, "sum3", "CPU")
-        def my_sum3(*args, **kwargs):
-            return args[0]
-
-        x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum3(x), x)
-
-        del my_lib1
-        del my_lib2
-        del my_lib3
 
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     def test_alias_analysis(self):
@@ -329,9 +284,8 @@ class TestPythonRegistration(TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported kind"):
             my_lib1 = Library("myns", "BLA")
 
-        for kind in ('DEF', 'FRAGMENT'):
-            with self.assertRaisesRegex(ValueError, "reserved namespace"):
-                my_lib1 = Library("prim", kind)
+        with self.assertRaisesRegex(ValueError, "reserved namespace"):
+            my_lib1 = Library("prim", "DEF")
 
     def test_returning_symint(self) -> None:
         shape_env = ShapeEnv()

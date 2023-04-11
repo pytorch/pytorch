@@ -1088,7 +1088,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(
-                "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
+                f"{' ' * RECURSION_COUNT}FakeTensorMode.__torch_dispatch__: {func}"
             )
             incr = IncrementRecursionCount()
 

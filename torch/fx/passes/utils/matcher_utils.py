@@ -97,7 +97,7 @@ class SubgraphMatcher:
             self.pattern_anchors = [n for n in output_node.all_input_nodes if len(n.users) == 1]
 
     def _match_attributes(self, pn: Node, gn: Node) -> bool:
-        # Attributes matching is complicated. Right now we only support matching constant tensor
+        # Attributes matching is compilcated. Right now we only support matching constant tensor
         assert isinstance(pn.target, str), f"pn.target {pn.target} must be a string."
         assert isinstance(gn.target, str), f"gn.target {gn.target} must be a string."
         pn_value = getattr(pn.graph.owning_module, pn.target)
@@ -182,7 +182,7 @@ class SubgraphMatcher:
             return type(gn) == type(pn) and gn == pn
 
     def _match_nodes(self, pn: Node, gn: Node, match: InternalMatch) -> bool:
-        logger.info("  matching %s to %s", pn, gn)
+        logger.info(f"  matching {pn} to {gn}")
 
         assert isinstance(pn, Node) and isinstance(gn, Node), str(f"pn and gn must be Node, pn: {pn}, gn: {gn}")
 
@@ -191,7 +191,7 @@ class SubgraphMatcher:
         if pn in match.nodes_map:
             return match.nodes_map[pn] == gn
 
-        # TODO: use a more efficient way to check if gn is matched before: two-way dict
+        # TODO: use a more efficienty way to check if gn is matched before: two-way dict
         if gn in match.nodes_map.values():
             return False
 
@@ -294,7 +294,7 @@ class SubgraphMatcher:
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
 
-        logger.info("Initial match_candidates_list: %s\n", match_candidates_list)
+        logger.info(f"Initial match_candidates_list: {match_candidates_list}\n")
 
         matches: List[InternalMatch] = []
 
@@ -304,21 +304,21 @@ class SubgraphMatcher:
                 match.returning_nodes = [match.nodes_map[pn] for pn in self.pattern_returning_nodes]
                 matches.append(match)
 
-                logger.info("Found a match: %s\n", match)
+                logger.info(f"Found a match: {match}\n")
                 return
 
             pattern_anchor, candidate_nodes = match_candidates_list[anchor_index]
             saved_match = copy.copy(match)
 
             for node in candidate_nodes:
-                logger.info("Trying to match anchor %s to %s", pattern_anchor, node)
+                logger.info(f"Trying to match anchor {pattern_anchor} to {node}")
 
                 match_found = self._match_nodes(pattern_anchor, node, match)
                 if match_found:
                     # match next anchor
                     backtracking(anchor_index + 1, match)
                 else:
-                    logger.info("Failed to match anchor %s to %s\n", pattern_anchor, node)
+                    logger.info(f"Failed to match anchor {pattern_anchor} to {node}\n")
 
                 # revert to saved_match before matching with current anchor
                 match = copy.copy(saved_match)
@@ -332,7 +332,7 @@ class SubgraphMatcher:
         matches = [match for match in matches if self._is_contained(match.nodes_map)]
         after = len(matches)
         if before != after:
-            logger.info("Filtered out %s matches because they are not fully contained", before - after)
+            logger.info(f"Filtered out {before - after} matches because they are not fully contained")
 
         # filter out the matches that that forms a cycle if the subgraph is fused
         valid_matches = []
@@ -342,16 +342,16 @@ class SubgraphMatcher:
             if validate_partition(matched_compute_nodes):
                 valid_matches.append(match)
         if len(valid_matches) != len(matches):
-            logger.info("Filtered out %s matches because \
-                          matched subgraph would form a cycle if fused", len(matches) - len(valid_matches))
+            logger.info(f"Filtered out {len(matches) - len(valid_matches)} matches because \
+                          matched subgraph would form a cycle if fused")
 
         if self.remove_overlapping_matches:
             before = len(valid_matches)
             matches = self._remove_overlapping_matches(valid_matches)
             after = len(matches)
             if before != after:
-                logger.info("Filtered out %s matches because matched subgraphs are overlapping", before - after)
+                logger.info(f"Filtered out {before - after} matches because matched subgraphs are overlapping")
 
-        logger.info("Matches returned: %s", matches)
+        logger.info(f"Matches returned: {matches}")
 
         return matches

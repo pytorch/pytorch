@@ -1030,7 +1030,7 @@ magma_trans_t to_magma(TransposeType trans) {
 
 #define ALLOCATE_ARRAY(name, type, size) \
   auto storage_##name = pin_memory<type>(size); \
-  name = static_cast<type*>(storage_##name.mutable_data());
+  name = static_cast<type*>(storage_##name.data());
 
 namespace {
 
@@ -1927,7 +1927,7 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
   if (vectors.is_complex()) {
     lrwork = magma_int_cast(std::max<int64_t>(1, rwkopt), "rwork_size");
     storage_rwork = pin_memory<value_t>(lrwork);
-    rwork = static_cast<value_t*>(storage_rwork.mutable_data());
+    rwork = static_cast<value_t*>(storage_rwork.data());
   }
 
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
@@ -2125,7 +2125,7 @@ AT_ERROR("linalg.svd: MAGMA library not found in "
   if (A.is_complex()) {
     auto lrwork = computeLRWorkDim(compute_uv ? (full_matrices ? 'A' : 'S') : 'N', m, n);
     storage_rwork = pin_memory<value_t>(lrwork);
-    rwork = static_cast<value_t*>(storage_rwork.mutable_data());
+    rwork = static_cast<value_t*>(storage_rwork.data());
   }
 
   magma_int_t* iwork;

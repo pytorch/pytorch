@@ -1295,8 +1295,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
         compiled_fw,
         runtime_metadata=fw_metadata,
         trace_joint=False,
-        keep_input_mutations=aot_config.keep_inference_input_mutations,
-        disable_amp=disable_amp
+        keep_input_mutations=aot_config.keep_inference_input_mutations
     )
 
     return compiled_fn
@@ -2097,7 +2096,6 @@ def create_runtime_wrapper(
     runtime_metadata: ViewAndMutationMeta,
     trace_joint: bool,
     keep_input_mutations: bool,
-    disable_amp: bool
 ):
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
@@ -2108,13 +2106,13 @@ def create_runtime_wrapper(
                 all_outs = call_func_with_args(
                     compiled_fn,
                     args,
-                    disable_amp=disable_amp,
+                    disable_amp=True,
                 )
         else:
             all_outs = call_func_with_args(
                 compiled_fn,
                 args,
-                disable_amp=disable_amp,
+                disable_amp=True,
             )
 
         num_mutated_inps = runtime_metadata.num_mutated_inputs
@@ -2569,7 +2567,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         runtime_metadata=fw_metadata,
         trace_joint=True,
         keep_input_mutations=False,
-        disable_amp=disable_amp
     )
 
     if not config.debug_assert:
@@ -3032,8 +3029,6 @@ def aot_module_simplified(
     if inference_compiler is None:
         inference_compiler = fw_compiler
 
-    seen_sources = set()
-
     full_args = []
     # First, the params
     full_args.extend(params_flat)
@@ -3047,10 +3042,7 @@ def aot_module_simplified(
         # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
         for name in params.keys():
             assert name in mod._param_name_to_source, f"{name} not found."
-            source = mod._param_name_to_source[name]
-            assert source not in seen_sources, source
-            seen_sources.add(source)
-            aot_autograd_arg_pos_to_source.append(source)
+            aot_autograd_arg_pos_to_source.append(mod._param_name_to_source[name])
 
     # Next, the input args
     full_args.extend(args)
@@ -3063,10 +3055,7 @@ def aot_module_simplified(
                     # ... but not here!
                     if aot_autograd_arg_pos_to_source is None:
                         aot_autograd_arg_pos_to_source = []
-                    source = node._dynamo_source
-                    assert source not in seen_sources, source
-                    seen_sources.add(source)
-                    aot_autograd_arg_pos_to_source.append(source)
+                    aot_autograd_arg_pos_to_source.append(node._dynamo_source)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)

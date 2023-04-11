@@ -35,5 +35,5 @@ def _log_sparsified_level(model, data_sparsifier) -> None:
         mask = data_sparsifier.get_mask(name=valid_name)
         sparsity_level = 1.0 - mask.float().mean()
         logger.info(
-            "Sparsity in layer %s = % .2%", name, sparsity_level
+            f"Sparsity in layer {name} = {sparsity_level: .2%}"
         )

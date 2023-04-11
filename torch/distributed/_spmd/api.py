@@ -21,9 +21,6 @@ from functorch import make_fx
 
 import torch
 import torch.distributed as dist
-
-# We need to import _functional_collectives to trigger op registration
-import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch import fx
@@ -252,6 +249,7 @@ def _rematerialize_optimizer(
     # FIXME: support multiple parameter groups
     param_group = opt.param_groups[0]
     orig_params = param_group["params"]
+    # FIXME(@mrshenli): exclude buffers
     param_group["params"] = params.values()
 
     try:
@@ -383,8 +381,8 @@ FOREACH_DECOMP_TABLE = {
 
 
 DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
-    torch.ops.c10d_functional.all_reduce.default,
-    torch.ops.c10d_functional.wait_tensor.default,
+    aten.all_reduce.default,
+    aten.wait_tensor.default,
 }
 
 
@@ -450,8 +448,10 @@ def _compile(
                     accessor.swap_submodule(name, override.replacement(submodule))
 
     # 3. Trace statelss version of the train_step
-    params = dict(mod.named_parameters(remove_duplicate=False))
-    buffers = dict(mod.named_buffers(remove_duplicate=False))
+    params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
+    }
 
     named_states = {}
     if opt is not None:
@@ -460,7 +460,7 @@ def _compile(
         # Pass named_states instead of opt.state to stateless_func, because
         # the later uses nn.Parameter as key. During tracing, we need to
         # make sure optimizers can find the states using proxy tensors.
-        for n, p in params.items():
+        for n, p in params_and_buffers.items():
             if p in opt.state:
                 # opt.state's key type is string, but optimizer uses
                 # Parameter as keys
@@ -468,11 +468,11 @@ def _compile(
 
     # Lift states and parameters as function arguments so that make_fx
     # can trace operations applied to them.
-    def stateless_func(func, named_states, params, buffers, args, kwargs):
+    def stateless_func(func, named_states, params_and_buffers, args, kwargs):
         with stateless._reparametrize_module(
-            cast(nn.Module, mod), {**params, **buffers}
+            cast(nn.Module, mod), params_and_buffers
         ), _rematerialize_optimizer(
-            opt, named_states, params
+            opt, named_states, params_and_buffers
         ) if opt else nullcontext():
             ret = func(*args, **kwargs)
             # make sure updated parameters are returned
@@ -492,12 +492,7 @@ def _compile(
             tracing_mode="symbolic",
             decomposition_table=FOREACH_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
-        )(named_states, params, buffers, args, kwargs)
-
-    params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
-        **params,
-        **buffers,
-    }
+        )(named_states, params_and_buffers, args, kwargs)
 
     # 4. Use DTensor to insert collectives
     gm = _dtensor_expand(gm, args, kwargs, named_states, params_and_buffers)

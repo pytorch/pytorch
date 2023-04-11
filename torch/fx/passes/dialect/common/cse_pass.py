@@ -68,13 +68,13 @@ class CSEPass(PassBase):
         hash_env: Dict[Tuple[torch._ops.OpOverload, int], Node] = {}  # map from hash to a node in the new graph
         token_map: Dict[Tuple[torch._ops.OpOverload, int], Dict[str, Any]] = {}  # map from hash to token
         for n in graph_module.graph.nodes:
-            # The placeholder, output, and get_attr nodes are copied to the new graph without change
+            # The placeholder, output, and get_attr nodes are copied to the new grpah without change
             # do not CSE away random operations
             if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in self.banned_ops:
                 new_node = new_graph.node_copy(n, lambda x: env[x])
                 env[n] = new_node
             else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
-                # substitute args and kwargs members to their mapping in env if exists
+                # substitute args and kwargs memebrs to their mapping in env if exists
                 # specs can be used to reconstruct nested list/dictionaries
                 def substitute(arg_list):
                     arg_list, spec = tree_flatten(arg_list)
@@ -98,7 +98,7 @@ class CSEPass(PassBase):
                 # check if a node has a substitute and can be eliminated
                 hash_val_in_hash_env = hash_val in hash_env
                 if hash_val_in_hash_env and token_map[hash_val] == token:
-                    modified = True  # substitution happens and the graph is modified
+                    modified = True  # substition happens and the graph is modified
                     env[n] = hash_env[hash_val]
                     continue
 

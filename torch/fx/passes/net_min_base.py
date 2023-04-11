@@ -615,4 +615,4 @@ class _MinimizerBase:
         if self.settings.traverse_method == "accumulate":
             return self._accumulate_traverse(nodes)
 
-        raise RuntimeError(f"Unknown traverse method {self.settings.traverse_method}!")
+        raise RuntimeError(f"Unknow traverse method {self.settings.traverse_method}!")

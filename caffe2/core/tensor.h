@@ -351,7 +351,7 @@ class TORCH_API Tensor final {
    * or raw_mutable_data() must have been called prior to this function call.
    */
   inline void* raw_data() const {
-    return impl_->mutable_data();
+    return impl_->data();
   }
 
   template <typename T>

@@ -16,8 +16,8 @@ from unittest import mock
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available() or not c10d.is_nccl_available():
-    print("c10d NCCL not available, skipping tests", file=sys.stderr)
+if not c10d.is_available():
+    print("c10d not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
@@ -2880,7 +2880,7 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
     @skip_if_lt_x_gpu(2)
     def test_allreduce_work_wait_gpu(self):
-        self._test_allreduce_work_wait(
+        self._test_allgather_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank,
         )
 

@@ -182,7 +182,7 @@ def launch_agent(
 ) -> Dict[int, Any]:
     if not config.run_id:
         run_id = str(uuid.uuid4().int)
-        logger.warning("config has no run_id, generated a random run_id: %s", run_id)
+        logger.warning(f"config has no run_id, generated a random run_id: {run_id}")
         config.run_id = run_id
 
     entrypoint_name = _get_entrypoint_name(entrypoint, args)

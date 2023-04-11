@@ -564,7 +564,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         self.tracer = tracer
         # When false, we don't trace operations.  If you do this, you MUST
         # call track_tensor/track_tensor_tree on all results of the operation
-        # to ensure we can adequately track the results
+        # to ensure we can adeduately track the results
         self.enable_tracing = True
 
     @contextmanager

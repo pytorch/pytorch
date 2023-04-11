@@ -14,7 +14,7 @@ namespace at {
          #name                                                       \
          " but found ",                                              \
          scalar_type());                                             \
-     return this->unsafeGetTensorImpl()->mutable_data_ptr_impl<T>(); \
+     return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
    }
 
  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CAST)

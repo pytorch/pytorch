@@ -1278,8 +1278,7 @@ class BenchmarkRunner:
             fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
         except Exception:
             log.warning(
-                "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
-                name,
+                f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
             )
             self.args.cosine = True
             fp64_outputs = None
@@ -2341,7 +2340,7 @@ def run(runner, args, original_dir=None):
                     import traceback
 
                     print(traceback.format_exc())
-                    logging.warning("%s failed to load", args.only)
+                    logging.warning(f"{args.only} failed to load")
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:

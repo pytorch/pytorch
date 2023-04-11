@@ -164,7 +164,7 @@ struct TORCH_API ExecutionGraphObserver {
   std::map<size_t, std::stack<ID>> op_stack{};
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
-  std::map<const void*, ID> object_id{};
+  std::map<void*, ID> object_id{};
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
@@ -362,7 +362,7 @@ void finalizeExecutionGraphOutput(ExecutionGraphObserver& ob) {
 
 inline ExecutionGraphObserver::ID getObjectID(
     ExecutionGraphObserver& ob,
-    const void* t) {
+    void* t) {
   auto iter = ob.object_id.find(t);
   if (iter == ob.object_id.end()) {
     ExecutionGraphObserver::ID object_id = ob.getNewID();

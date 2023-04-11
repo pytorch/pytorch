@@ -15,7 +15,6 @@
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
 
 #if AT_CUDNN_ENABLED()
@@ -121,7 +120,7 @@ Device CUDAHooks::getDeviceFromPtr(void* data) const {
   return at::cuda::getDeviceFromPtr(data);
 }
 
-bool CUDAHooks::isPinnedPtr(const void* data) const {
+bool CUDAHooks::isPinnedPtr(void* data) const {
   // First check if driver is broken/missing, in which case PyTorch CPU
   // functionalities should still work, we should report `false` here.
   if (!at::cuda::is_available()) {
@@ -135,9 +134,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
     device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
   cudaPointerAttributes attr;
-  // We do not believe that CUDA needs mutable access to the data
-  // here.
-  cudaError_t err = cudaPointerGetAttributes(&attr, const_cast<void*>(data));
+  cudaError_t err = cudaPointerGetAttributes(&attr, data);
 #if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
     cudaGetLastError();
@@ -226,7 +223,7 @@ const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
 
 int64_t current_device() {
   int device;
-  cudaError_t err = c10::cuda::GetDevice(&device);
+  cudaError_t err = cudaGetDevice(&device);
   if (err == cudaSuccess) {
     return device;
   }

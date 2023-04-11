@@ -2512,6 +2512,8 @@ symbolic_aot_autograd_failures = {
     xfail('column_stack', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
+    xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
+    xfail('cummin', ''),  # aten.cummin.default - couldn't find symbolic meta function/decomposition
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
@@ -2578,6 +2580,7 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.tensorsolve', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.vander', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
+    xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
     xfail('logdet', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
