@@ -166,46 +166,7 @@ class InputFormatStep(Protocol):
 
 
 class InputFormatter:
-    """A class that formats the PyTorch model inputs to exported ONNX model inputs format.
-
-    Due to design differences, input/output format between PyTorch model and exported
-    ONNX model are often not the same. E.g., None is allowed for PyTorch model, but are
-    not supported by ONNX. Nested constructs of tensors are allowed for PyTorch model,
-    but only flattened tensors are supported by ONNX, etc.
-
-    This formatter is designed to be exported with the ONNX model. Providing an
-    interface to automatically convert and validate inputs format.
-
-    Example::
-
-        # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
-        >>> import torch
-        >>> import torch.onnx
-        >>> from typing import Dict, Tuple
-        >>> def func_with_nested_input_structure(
-        ...     x_dict: Dict[str, torch.Tensor],
-        ...     y_tuple: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
-        ... ):
-        ...     if "a" in x_dict:
-        ...         x = x_dict["a"]
-        ...     elif "b" in x_dict:
-        ...         x = x_dict["b"]
-        ...     else:
-        ...         x = torch.randn(3)
-        ...
-        ...     y1, (y2, y3) = y_tuple
-        ...
-        ...     return x + y1 + y2 + y3
-        >>> x_dict = {"a": torch.tensor(1.)}
-        >>> y_tuple = (torch.tensor(2.), (torch.tensor(3.), torch.tensor(4.)))
-        >>> export_output = torch.onnx.dynamo_export(func_with_nested_input_structure, x_dict, y_tuple)
-        >>> print(x_dict, y_tuple)
-        {'a': tensor(1.)}
-        (tensor(2.), (tensor(3.), tensor(4.)))
-        >>> print(export_output.input_formatter.to_onnx(x_dict, y_tuple))
-        (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
-
-    """
+    """A class that formats the PyTorch model inputs to exported ONNX model inputs format."""
 
     _input_format_steps: List[InputFormatStep]
 
@@ -247,37 +208,7 @@ class OutputFormatStep(Protocol):
 
 
 class OutputFormatter:
-    """A class that formats the PyTorch model outputs to exported ONNX model outputs format.
-
-    Due to design differences, input/output format between PyTorch model and exported
-    ONNX model are often not the same. E.g., None is allowed for PyTorch model, but are
-    not supported by ONNX. Nested constructs of tensors are allowed for PyTorch model,
-    but only flattened tensors are supported by ONNX, etc.
-
-    This formatter is designed to be exported with the ONNX model. Providing an
-    interface to automatically convert and validate outputs format.
-
-    Example::
-
-        # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
-        >>> import torch
-        >>> import torch.onnx
-        >>> def func_returning_tuples(x, y, z):
-        ...     x = x + y
-        ...     y = y + z
-        ...     z = x + y
-        ...     return (x, (y, z))
-        >>> x = torch.tensor(1.)
-        >>> y = torch.tensor(2.)
-        >>> z = torch.tensor(3.)
-        >>> export_output = torch.onnx.dynamo_export(func_returning_tuples, x, y, z)
-        >>> pt_output = func_returning_tuples(x, y, z)
-        >>> print(pt_output)
-        (tensor(3.), (tensor(5.), tensor(8.)))
-        >>> print(export_output.output_formatter.to_onnx(pt_output))
-        [tensor(3.), tensor(5.), tensor(8.)]
-
-    """
+    """A class that formats the PyTorch model outputs to exported ONNX model outputs format."""
 
     _output_format_steps: List[OutputFormatStep]
 
@@ -332,17 +263,107 @@ class ExportOutput:
 
         return self._model_proto
 
-    @property
-    def input_formatter(self) -> InputFormatter:
-        """The input formatter to convert inputs from PyTorch to compatible format in ONNX."""
+    @_beartype.beartype
+    def format_torch_inputs_to_onnx(
+        self, *model_args, **model_kwargs
+    ) -> Sequence[torch.Tensor]:
+        """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
-        return self._input_formatter
+        Due to design differences, input/output format between PyTorch model and exported
+        ONNX model are often not the same. E.g., None is allowed for PyTorch model, but are
+        not supported by ONNX. Nested constructs of tensors are allowed for PyTorch model,
+        but only flattened tensors are supported by ONNX, etc.
 
-    @property
-    def output_formatter(self) -> OutputFormatter:
-        """The output formatter to convert outputs from PyTorch to compatible format in ONNX."""
+        The actual formatting steps are associated with each individual export. It
+        depends on the PyTorch model, the particular set of *args and **kwargs used for
+        the export, and export options.
 
-        return self._output_formatter
+        This method replays the formatting steps recorded during export.
+
+        Args:
+            model_args: The PyTorch model inputs.
+            model_kwargs: The PyTorch model keyword inputs.
+
+        Returns:
+            A sequence of tensors converted from PyTorch model inputs.
+
+        Example::
+
+            # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
+            >>> import torch
+            >>> import torch.onnx
+            >>> from typing import Dict, Tuple
+            >>> def func_with_nested_input_structure(
+            ...     x_dict: Dict[str, torch.Tensor],
+            ...     y_tuple: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+            ... ):
+            ...     if "a" in x_dict:
+            ...         x = x_dict["a"]
+            ...     elif "b" in x_dict:
+            ...         x = x_dict["b"]
+            ...     else:
+            ...         x = torch.randn(3)
+            ...
+            ...     y1, (y2, y3) = y_tuple
+            ...
+            ...     return x + y1 + y2 + y3
+            >>> x_dict = {"a": torch.tensor(1.)}
+            >>> y_tuple = (torch.tensor(2.), (torch.tensor(3.), torch.tensor(4.)))
+            >>> export_output = torch.onnx.dynamo_export(func_with_nested_input_structure, x_dict, y_tuple)
+            >>> print(x_dict, y_tuple)
+            {'a': tensor(1.)}
+            (tensor(2.), (tensor(3.), tensor(4.)))
+            >>> print(export_output.format_torch_inputs_to_onnx(x_dict, y_tuple))
+            (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
+
+        """
+        return self._input_formatter.to_onnx(*model_args, **model_kwargs)
+
+    @_beartype.beartype
+    def format_torch_outputs_to_onnx(
+        self, model_outputs: Any
+    ) -> Sequence[torch.Tensor]:
+        """Converts the PyTorch model outputs to exported ONNX model outputs format.
+
+        Due to design differences, input/output format between PyTorch model and exported
+        ONNX model are often not the same. E.g., None is allowed for PyTorch model, but are
+        not supported by ONNX. Nested constructs of tensors are allowed for PyTorch model,
+        but only flattened tensors are supported by ONNX, etc.
+
+        The actual formatting steps are associated with each individual export. It
+        depends on the PyTorch model, the particular set of *args and **kwargs used for
+        the export, and export options.
+
+        This method replays the formatting steps recorded during export.
+
+        Args:
+            model_outputs: The PyTorch model outputs.
+
+        Returns:
+            PyTorch model outputs in exported ONNX model outputs format.
+
+        Example::
+
+            # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
+            >>> import torch
+            >>> import torch.onnx
+            >>> def func_returning_tuples(x, y, z):
+            ...     x = x + y
+            ...     y = y + z
+            ...     z = x + y
+            ...     return (x, (y, z))
+            >>> x = torch.tensor(1.)
+            >>> y = torch.tensor(2.)
+            >>> z = torch.tensor(3.)
+            >>> export_output = torch.onnx.dynamo_export(func_returning_tuples, x, y, z)
+            >>> pt_output = func_returning_tuples(x, y, z)
+            >>> print(pt_output)
+            (tensor(3.), (tensor(5.), tensor(8.)))
+            >>> print(export_output.format_torch_outputs_to_onnx(pt_output))
+            [tensor(3.), tensor(5.), tensor(8.)]
+
+        """
+        return self._output_formatter.to_onnx(model_outputs)
 
     @_beartype.beartype
     def save(
@@ -512,6 +533,4 @@ __all__ = [
     "ExportOutputSerializer",
     "UnsatisfiedDependencyError",
     "dynamo_export",
-    "InputFormatter",
-    "OutputFormatter",
 ]

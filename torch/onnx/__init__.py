@@ -50,8 +50,6 @@ from ._internal.exporter import (  # usort:skip. needs to be last to avoid circu
     ExportOutput,
     ExportOutputSerializer,
     dynamo_export,
-    InputFormatter,
-    OutputFormatter,
 )
 
 __all__ = [
@@ -95,8 +93,6 @@ __all__ = [
     "ExportOutput",
     "ExportOutputSerializer",
     "dynamo_export",
-    "InputFormatter",
-    "OutputFormatter",
 ]
 
 # Set namespace for exposed private names
@@ -106,8 +102,6 @@ ExportOptions.__module__ = "torch.onnx"
 ExportOutput.__module__ = "torch.onnx"
 ExportOutputSerializer.__module__ = "torch.onnx"
 dynamo_export.__module__ = "torch.onnx"
-InputFormatter.__module__ = "torch.onnx"
-OutputFormatter.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION

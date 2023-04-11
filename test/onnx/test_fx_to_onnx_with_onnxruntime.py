@@ -119,11 +119,11 @@ def _compare_pytorch_onnx_with_ort(
         ref_input_kwargs = input_kwargs
 
     # Format original model inputs into the format expected by exported ONNX model.
-    onnx_format_args = export_output.input_formatter.to_onnx(
+    onnx_format_args = export_output.format_torch_inputs_to_onnx(
         *input_args, **input_kwargs
     )
 
-    ref_outputs = export_output.output_formatter.to_onnx(
+    ref_outputs = export_output.format_torch_outputs_to_onnx(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
     ort_outputs = _run_ort(export_output, onnx_format_args)
@@ -865,9 +865,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             args = create_args()
             kwargs = create_pytorch_only_kwargs()
             # Original outputs.
-            ref_outputs = export_output.output_formatter.to_onnx(model(*args, **kwargs))
+            ref_outputs = export_output.format_torch_outputs_to_onnx(
+                model(*args, **kwargs)
+            )
             # ORT outputs.
-            args_not_none = export_output.input_formatter.to_onnx(*args)
+            args_not_none = export_output.format_torch_inputs_to_onnx(*args)
             ort_outputs = _run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
                 args_not_none,
