@@ -55,7 +55,7 @@ jobs:
           git checkout --force ${{ github.event.pull_request.head.sha }}
 
           # Find the common ancestor commit (base commit) of the head and base branches of the pull request
-          base=$(git rev-list "${{ github.event.pull_request.head.sha }}" ^"${{ github.event.pull_request.base.sha }}")
+          base=$(git rev-list "${{ github.event.pull_request.head.sha }}" ^"${{ github.event.pull_request.base.sha }}" | tail -1)
           base=$(git rev-list "${base}"~1 2>/dev/null | head -1)
 
           # Iterate until a common ancestor is found
@@ -66,7 +66,7 @@ jobs:
             git fetch --no-tags --prune --no-recurse-submodules --deepen=10 origin ${{ github.event.pull_request.base.sha }}
 
             # Try to find the common ancestor commit (base commit) again
-            base=$(git rev-list "${{ github.event.pull_request.head.sha }}" ^"${{ github.event.pull_request.base.sha }}")
+            base=$(git rev-list "${{ github.event.pull_request.head.sha }}" ^"${{ github.event.pull_request.base.sha }}" | tail -1)
             base=$(git rev-list "${base}"~1 2>/dev/null | head -1)
 
             counter=$((counter + 1))
