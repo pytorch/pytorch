@@ -1,6 +1,6 @@
 def define_targets(rules):
-    rules.filegroup(
+    rules.py_binary(
         name = "tool",
         srcs = ["tool.py"],
-        visibility = [":__subpackages__"],
+        visibility = ["//:__subpackages__"],
     )
