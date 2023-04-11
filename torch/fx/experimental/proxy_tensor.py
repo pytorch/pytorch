@@ -20,7 +20,12 @@ import weakref
 import operator
 from torch.utils._stats import count
 
-from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, _get_current_dispatch_mode
+from torch.utils._python_dispatch import (
+    TorchDispatchMode,
+    _pop_mode_temporarily,
+    _get_current_dispatch_mode,
+)
+
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
@@ -409,7 +414,8 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     else:
         constant = None
 
-    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    with inside_mode(proxy_mode):
+        track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
 
 

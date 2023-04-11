@@ -4,6 +4,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <c10/util/bit_cast.h>
 
 #include <c10/core/TensorImpl.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
@@ -106,8 +107,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
-  uint64_t unsigned_philox_seed = sdp::bit_cast<uint64_t>(philox_seed);
-  uint64_t unsigned_philox_offset = sdp::bit_cast<uint64_t>(philox_offset);
+  uint64_t unsigned_philox_seed = c10::bit_cast<uint64_t>(philox_seed);
+  uint64_t unsigned_philox_offset = c10::bit_cast<uint64_t>(philox_offset);
 
   std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
           contiguous_grad_out,

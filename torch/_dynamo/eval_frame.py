@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import dis
 import functools
 import inspect
 import logging
@@ -51,6 +52,8 @@ from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
+from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental import proxy_tensor
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
@@ -98,6 +101,13 @@ class OptimizedModule(torch.nn.Module):
         super().__setattr__(name, value)
 
     def __call__(self, *args, **kwargs):
+        if hasattr(self._orig_mod, "_initialize_hook"):
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
+            assert len(kwargs) == 0
+            self._orig_mod._infer_parameters(self._orig_mod, args)
         return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
@@ -341,15 +351,25 @@ class DisableContext(_TorchDynamoContext):
         super().__init__(callback=None)
 
 
+def first_real_inst_idx(code):
+    if sys.version_info < (3, 11):
+        return 0
+    for inst in dis.get_instructions(code):
+        if inst.opname == "RESUME":
+            return inst.offset // 2
+    raise RuntimeError("RESUME instruction not found in code")
+
+
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
         if (
-            frame.f_lasti >= 0
+            # TODO: the first condition is not covered by any test
+            frame.f_lasti >= first_real_inst_idx(frame.f_code)
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):
-            log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
+            log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
@@ -513,7 +533,7 @@ def explain(f, *args, **kwargs):
 
         op_count += len(ops)
         ops_per_graph.append(ops)
-        if gm.compile_subgraph_reason is not None:
+        if gm.compile_subgraph_reason.graph_break:
             break_reasons.append(gm.compile_subgraph_reason)
         return gm.forward
 
@@ -584,7 +604,8 @@ class Constraint:
 def export(
     f: Callable[..., Any],
     *args,
-    aten_graph: str = "none",
+    aten_graph: bool = False,
+    pre_autograd: bool = False,
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
@@ -600,10 +621,14 @@ def export(
 
         *args: Variable length argument list to be passed to the function f.
 
-        aten_graph (str): Valid options include:
-          "none": export a graph with Python operations. Default is False.
-          "aten": export a graph with ATen operations.
-          "aten_pre_autograd": export a graph with pre_autograd ATen operations.
+        aten_graph (bool): If True, exports a graph with ATen operators.
+        If False, exports a graph with Python operators. Default is False.
+
+        pre_autograd (bool): If True, exports a graph with ATen operators,
+        but before autograd has run. This can be useful if you want to apply further tranformations
+        on a graph before running it through autograd.
+        This flag is only valid if aten_graph=True is set.
+        Default is False.
 
         decomposition_table (dict): A dictionary that maps operators to their decomposition functions.
         Required if aten_graph or tracing_mode is specified. Default is None.
@@ -628,17 +653,18 @@ def export(
     """
     check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
-    assert aten_graph in ['none', 'aten', 'aten_pre_autograd'], "aten_graph must be set to one of 'none','aten','aten_pre_autograd'"
     if decomposition_table is not None or tracing_mode != "real":
         assert (
-            aten_graph != "none"
-        ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph='aten' \
-        or aten_graph='aten_pre_autograd'"
+            aten_graph
+        ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
+    if pre_autograd:
+        assert aten_graph, 'pre_autograd=True can only be used when aten_graph=True'
     f = innermost_fn(f)
 
     graph = None
     out_guards = None
     graph_captured_input = None
+    example_fake_inputs = []
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
 
     def produce_matching(source_args, candidate_args):
@@ -684,6 +710,9 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
+        nonlocal example_fake_inputs
+        example_fake_inputs = example_inputs
+
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
             nonlocal graph_captured_input
@@ -703,7 +732,10 @@ def export(
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
-            hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
+            hooks=Hooks(
+                guard_export_fn=guard_export_print,
+                guard_fail_fn=None,
+            ),
             export=True,
             export_constraints=constraints,
             dynamic=(tracing_mode == "symbolic"),
@@ -761,19 +793,26 @@ def export(
                 r.node.meta["val"] = self.current_node.meta["val"]
             return r
 
-    if aten_graph != "none":
+    if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(
-            graph_with_interpreter,
-            decomposition_table=decomposition_table,
-            tracing_mode=tracing_mode,
-            pre_autograd=aten_graph == "aten_pre_autograd",
-            _allow_non_fake_inputs=True,
-        )(*graph_captured_input)
+        fake_tensor_mode = null_context()
+        for val in example_fake_inputs:
+            if isinstance(val, FakeTensor):
+                fake_tensor_mode = val.fake_mode
+                break
+
+        with enable_python_dispatcher(), fake_tensor_mode:
+            graph = make_fx(
+                graph_with_interpreter,
+                decomposition_table=decomposition_table,
+                tracing_mode="real",
+                pre_autograd=pre_autograd,
+                _allow_non_fake_inputs=True,
+            )(*example_fake_inputs)
 
     new_graph = ChangeInputOutputSignature(
         graph,
@@ -870,6 +909,10 @@ def export(
     )
 
     new_graph.recompile()
+
+    # TODO remove this once Executorch uses proper functionalization
+    new_graph._example_fake_inputs = example_fake_inputs
+    new_graph._matched_input_elements_positions = matched_input_elements_positions
 
     return (new_graph, out_guards)
 
