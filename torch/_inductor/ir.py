@@ -2686,30 +2686,38 @@ class ExternKernel(InputsKernel):
 
     def codegen_args(self):
         args = [x.codegen_reference() for x in self.inputs]
-        args.extend(map(repr, self.constant_args))
-        return args
-
-    def cpp_wrapper_codegen_args(self):
-        args = [x.codegen_reference() for x in self.inputs]
-        args.extend(self.cpp_constant_args)
+        args.extend(
+            map(
+                V.graph.wrapper_code.val_to_str,
+                self.constant_args,
+            )
+        )
         return args
 
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
             if V.graph.cpp_wrapper:
-                for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                    assert arg_name in self.kwargs, (
-                        "arg %s not found in self.kwargs" % arg_name
-                    )
-                    v = self.kwargs.get(arg_name)
-                    kwargs.append(repr(v))
+                if self.kwargs:
+                    # TODO: use native_functions.yaml as the ground truth
+                    assert (
+                        self.ordered_kwargs_for_cpp_kernel
+                    ), "ordered_kwargs_for_cpp_kernel has to be provided"
+                    for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                        assert arg_name in self.kwargs, (
+                            "arg %s not found in self.kwargs" % arg_name
+                        )
+                        v = self.kwargs.get(arg_name)
+                        kwargs.append(V.graph.wrapper_code.val_to_str(v))
             else:
-                kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
+                kwargs = [
+                    f"{k}={V.graph.wrapper_code.val_to_str(v)}"
+                    for k, v in self.kwargs.items()
+                ]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
-        if config.size_asserts:
+        if config.size_asserts and not V.graph.cpp_wrapper:
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
@@ -2768,11 +2776,7 @@ class ExternKernelOut(ExternKernel):
     output_view: Optional[ReinterpretView] = None
 
     def codegen(self, wrapper):
-        args = self.codegen_args()
-        kwargs = self.codegen_kwargs()
-        if kwargs:
-            args.extend(kwargs)
-
+        args = [*self.codegen_args(), *self.codegen_kwargs()]
         wrapper.generate_extern_kernel_out(
             self.output_view,
             self.codegen_reference(),
@@ -2806,7 +2810,9 @@ class ExternKernelOut(ExternKernel):
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
         args = [*self.codegen_args(), *self.codegen_kwargs()]
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({', '.join(args)})")
+        V.graph.wrapper_code.generate_extern_kernel_alloc(
+            self.get_name(), self.kernel, args
+        )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -2819,7 +2825,6 @@ class ExternKernelAlloc(ExternKernel):
         kernel=None,
         cpp_kernel=None,
         ordered_kwargs_for_cpp_kernel=(),
-        cpp_constant_args=(),
     ):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
@@ -2827,7 +2832,6 @@ class ExternKernelAlloc(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel = cpp_kernel if V.graph.cpp_wrapper else kernel
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
-        self.cpp_constant_args = cpp_constant_args
 
     def should_allocate(self):
         return False
@@ -3130,13 +3134,6 @@ class MultiOutput(ExternKernel):
 
     def should_allocate(self):
         return False
-
-
-def _string(shape: tuple):
-    from .codegen.wrapper import CppWrapperCodeGen
-
-    cpp_wrapper_codegen = CppWrapperCodeGen()
-    return cpp_wrapper_codegen.codegen_shape_tuple(shape)
 
 
 def _prepare_convolution_fusion_create(
@@ -3448,7 +3445,6 @@ class MKLPackedLinear(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-        cpp_constant_args=(),
     ):
         super().__init__(
             layout,
@@ -3466,20 +3462,12 @@ class MKLPackedLinear(ExternKernelAlloc):
                 const at::Tensor& origin_weight_t,
                 const c10::optional<at::Tensor>& bias_opt,
                 const int64_t prepack_batch_size)"""
-        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
-
-        if isinstance(wrapper, CppWrapperCodeGen):
-            args = self.cpp_wrapper_codegen_args()
-        else:
-            args = self.codegen_args()
-
         wrapper.generate_fusion_ops_code(
             self.get_name(),
             self.kernel,
-            args,
+            self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
         )
@@ -3493,10 +3481,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        bias = None
-        cpp_bias = "at::Tensor()"
-        constant_args = [bias, batch_size]
-        cpp_constant_args = [cpp_bias, str(batch_size)]
+        constant_args = [None, batch_size]
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -3504,7 +3489,6 @@ class MKLPackedLinear(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
-            cpp_constant_args=cpp_constant_args,
         )
 
 
@@ -3514,7 +3498,6 @@ class LinearUnary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-        cpp_constant_args=(),
     ):
         super().__init__(
             layout,
@@ -3533,20 +3516,12 @@ class LinearUnary(ExternKernelAlloc):
                 c10::string_view attr,
                 torch::List<c10::optional<at::Scalar>> scalars,
                 c10::optional<c10::string_view> algorithm)"""
-        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
-
-        if isinstance(wrapper, CppWrapperCodeGen):
-            args = self.cpp_wrapper_codegen_args()
-        else:
-            args = self.codegen_args()
-
         wrapper.generate_fusion_ops_code(
             self.get_name(),
             self.kernel,
-            args,
+            self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
         )
@@ -3560,18 +3535,12 @@ class LinearUnary(ExternKernelAlloc):
         oc, ic = w.get_size()
 
         inputs = [x, w]
-        constant_args = [attr, scalars, algorithm]
-        cpp_constant_args = [
-            f'"{attr}"',
-            _string(scalars) if scalars else "{-1}",
-            f'"{algorithm}"',
-        ]
+        constant_args = [attr, scalars if scalars else [-1], algorithm]
         if b is not None:
             b = cls.require_stride1(cls.realize_input(b))
             inputs.append(b)
         else:
-            constant_args.insert(0, b)
-            cpp_constant_args.insert(0, "at::Tensor()")
+            constant_args.insert(0, None)
 
         return LinearUnary(
             layout=FlexibleLayout(
@@ -3581,7 +3550,6 @@ class LinearUnary(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
-            cpp_constant_args=cpp_constant_args,
         )
 
     def apply_constraint(self):
