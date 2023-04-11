@@ -497,7 +497,7 @@ void initDispatchBindings(PyObject* module) {
   //  AutogradCUDA
   //  ...
   //  AutogradPrivateUse3
-  m.def("functionality_to_backend_keys", [](c10::DispatchKey key) {
+  m.def("_functionality_to_backend_keys", [](c10::DispatchKey key) {
     std::vector<c10::DispatchKey> keys;
     if (c10::isPerBackendFunctionalityKey(key)) {
       auto ks = c10::DispatchKeySet(key) |
@@ -529,6 +529,10 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(Python)
       DEF_ONE(FuncTorchDynamicLayerFrontMode)
       DEF_ONE(FuncTorchDynamicLayerBackMode)
+      DEF_ONE(FuncTorchBatchedDecomposition)
+      DEF_ONE(FuncTorchBatched)
+      DEF_ONE(FuncTorchVmapMode)
+      DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)

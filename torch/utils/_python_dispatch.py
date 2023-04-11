@@ -78,7 +78,7 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
         from torch._ops import push_mode_for_key, get_cached_ops
         # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
         # Clear the cache of every op that has been used so far, for this particular key.
-        ks = torch._C.functionality_to_backend_keys(k)
+        ks = torch._C._functionality_to_backend_keys(k)
         for op in get_cached_ops():
             for key in ks:
                 op._uncache_dispatch(key)
