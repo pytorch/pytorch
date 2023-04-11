@@ -307,8 +307,8 @@ if torch._C.has_mkldnn:
         def fn(match):
             if not _is_valid_computation_binary(computation_op, binary_op)(match):
                 return False
-            binary_nodes = filter_nodes(match.nodes, fn)
-            if any(n.args[other_index].users > 1 for n in binary_nodes):
+            binary_nodes = filter_nodes(match.nodes, binary_op)
+            if any(len(n.args[other_index].users) > 1 for n in binary_nodes):
                 return False
             if any(
                 n.args[other_index].op in ["placeholder", "output"]
