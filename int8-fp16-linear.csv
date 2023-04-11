@@ -1,3 +1,2 @@
-,m,k,n,eval_batch_size,dtype,sparse_latency (ms),dense_latency (ms),speedup (d/s)
-0,768,3072,768,64,torch.int8,0.29453635588288307,12.24844444077462,41.58550955130641
-1,768,3072,768,64,torch.float16,0.5440279520116746,12.246948457323015,22.511616199198897
+,m,k,n,eval_batch_size,dtype
+0,64,64,64,1,torch.int8

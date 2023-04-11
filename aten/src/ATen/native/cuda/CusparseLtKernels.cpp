@@ -381,6 +381,12 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
         &alg_id,
         sizeof(alg_id)) )
   }
+  // else {
+  //   CHECK_CUSPARSE( cusparseLtMatmulAlgSetAttribute(
+  //                                          &handle, &alg_sel,
+  //                                          CUSPARSELT_MATMUL_ALG_CONFIG_ID,
+  //                                          &alg_id, sizeof(alg_id)))
+  // }
 
   CHECK_CUSPARSE(
     cusparseLtMatmul(
@@ -395,6 +401,11 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       d_workspace,
       streams,
       num_streams) )
+
+  
+  CHECK_CUSPARSE( cusparseLtMatDescriptorDestroy(&activation_descriptor) )
+  CHECK_CUSPARSE( cusparseLtMatDescriptorDestroy(&matC) )
+  // CHECK_CUSPARSE( cusparseLtMatmulPlanDestroy(&plan) )
 
   return res;
 
