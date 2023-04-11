@@ -113,9 +113,9 @@ class Shard(Placement):
             device = torch.device(
                 tensor.get_device() if torch.cuda.is_available() else "cpu"
             )
-            shard_size = list(reference_tensor.shape)
-            shard_size = [dim if dim >= self.dim else 0 for dim in shard_size]
-            return torch.zeros(shard_size, device=device)
+            tensor_size = list(reference_tensor.size())
+            tensor_size = [dim if dim >= self.dim else 0 for dim in tensor_size]  # type: ignore
+            return torch.zeros(tensor_size, device=device)
         else:
             pad = [0, 0] * (tensor.ndim - self.dim)
             pad[-1] = pad_size
@@ -174,7 +174,9 @@ class Shard(Placement):
         # Compute chunk size for each chunk on the dimension.
         chunk_sizes = [
             max(
-                min(size_on_dim, full_chunk_size * (idx + 1)) - full_chunk_size * idx, 0
+                min(size_on_dim, full_chunk_size * (idx + 1))
+                - full_chunk_size * idx,
+                0,
             )
             for idx in range(num_chunks)
         ]
@@ -272,7 +274,9 @@ class Shard(Placement):
         full_chunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
         chunk_sizes = [
             max(
-                min(size[self.dim], full_chunk_size * (idx + 1)) - full_chunk_size * idx, 0
+                min(size[self.dim], full_chunk_size * (idx + 1))
+                - full_chunk_size * idx,
+                0,
             )
             for idx in range(num_chunks)
         ]
@@ -429,7 +433,9 @@ class DTensorSpec:
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
         # fields to them,
         if self.tensor_meta is not None:
-            return hash((self.mesh, tuple(self.placements), self.tensor_meta.shape))
+            return hash(
+                (self.mesh, tuple(self.placements), self.tensor_meta.shape)
+            )
         else:
             return hash((self.mesh, tuple(self.placements)))
 
