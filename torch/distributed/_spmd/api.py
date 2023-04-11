@@ -189,10 +189,10 @@ def _override_placements(t: torch.Tensor, placements: List[Placement]):
 
 def _dtensor_expand(
     gm: fx.GraphModule,
+    params_and_buffers: Dict[str, Any],
+    named_states: Dict[str, Any],
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
-    named_states: Dict[str, Any],
-    params_and_buffers: Dict[str, Any],
 ) -> fx.GraphModule:
     flat_args, _ = pytree.tree_flatten(list(args) + list(kwargs.values()))
 
@@ -203,6 +203,11 @@ def _dtensor_expand(
 
     inps, schemas = [], []
 
+    for p in pytree.tree_flatten(params_and_buffers)[0]:
+        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
+        inps.append(p)
+        schemas.append(replicate_schema)
+
     for o in pytree.tree_flatten(named_states)[0]:
         if isinstance(o, torch.Tensor):
             inps.append(o)
@@ -210,11 +215,6 @@ def _dtensor_expand(
         else:
             inps.append(torch.empty(0))
             schemas.append(replicate_schema)
-
-    for p in pytree.tree_flatten(params_and_buffers)[0]:
-        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
-        inps.append(p)
-        schemas.append(replicate_schema)
 
     for a in flat_args:
         if isinstance(a, torch.Tensor):
@@ -473,7 +473,7 @@ def _compile(
 
     # Lift states and parameters as function arguments so that make_fx
     # can trace operations applied to them.
-    def stateless_func(func, named_states, params, buffers, args, kwargs):
+    def stateless_func(func, params, buffers, named_states, args, kwargs):
         with stateless._reparametrize_module(
             cast(nn.Module, mod), {**params, **buffers}
         ), _rematerialize_optimizer(
@@ -497,7 +497,7 @@ def _compile(
             tracing_mode="symbolic",
             decomposition_table=FOREACH_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
-        )(named_states, params, buffers, args, kwargs)
+        )(params, buffers, named_states, args, kwargs)
 
     params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
         **params,
@@ -505,7 +505,7 @@ def _compile(
     }
 
     # 4. Use DTensor to insert collectives
-    gm = _dtensor_expand(gm, args, kwargs, named_states, params_and_buffers)
+    gm = _dtensor_expand(gm, params_and_buffers, named_states, args, kwargs)
 
     # 5. Move the responsibility of flattening the input arguments from the
     # graph module to the caller. This serves two purposes:
@@ -513,7 +513,7 @@ def _compile(
     #   container that maintains the state tensors in the same order as they
     #   appear in graph placeholders.
     #   - Reduced runtime cost. The state container is only flattened once upfront.
-    flat_state, _ = pytree.tree_flatten([named_states, params_and_buffers])
+    flat_state, _ = pytree.tree_flatten([params_and_buffers, named_states])
     gm = _to_caller_flattened_graph_module(gm)
 
     # 6. dedup comm operators.
