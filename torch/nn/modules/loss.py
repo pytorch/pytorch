@@ -1178,7 +1178,6 @@ class CrossEntropyLoss(_WeightedLoss):
         super().__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing
-        self.dim = dim
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.cross_entropy(input, target, weight=self.weight,
