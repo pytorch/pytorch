@@ -305,9 +305,9 @@ def register_module_full_backward_pre_hook(
             ``handle.remove()``
 
     """
-    _update_has_global_hooks()
     handle = hooks.RemovableHandle(_global_backward_pre_hooks)
     _global_backward_pre_hooks[handle.id] = hook
+    _update_has_global_hooks()
     return handle
 
 
@@ -356,6 +356,7 @@ def register_module_full_backward_hook(
 
     handle = hooks.RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
+    _update_has_global_hooks()
     return handle
 
 
