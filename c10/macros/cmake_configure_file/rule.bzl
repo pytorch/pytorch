@@ -4,14 +4,11 @@
 # get around this limitation by using a list as our substitutions.
 def _cmake_configure_file_impl(ctx):
     ctx.actions.run(
-        inputs = [
-            ctx.executable.tool,
-            ctx.file.src,
-        ],
+        tools = [ctx.executable.tool],
+        inputs = [ctx.file.src],
         outputs = [ctx.outputs.out],
-        executable = "python3",
+        executable = ctx.executable.tool.path,
         arguments = [
-            ctx.executable.tool.path,
             ctx.file.src.path,
             ctx.outputs.out.path,
         ] + ctx.attr.definitions,
@@ -51,7 +48,7 @@ Args:
             allow_single_file = True,
         ),
         "tool": attr.label(
-            default = Label("//c10/macros:cmake_configure_file/tool.py"),
+            default = Label(":tool"),
             executable = True,
             allow_files = True,
             cfg = "exec",
