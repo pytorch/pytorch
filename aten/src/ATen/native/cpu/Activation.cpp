@@ -185,17 +185,22 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
           return float(a) <= float(0) ? (std::exp(float(a) * negiptcoef) - float(1)) * negcoef : float(a) * poscoef;
         },
         [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
-          Vectorized<float> a0, a1;
+          Vectorized<float> a0, a1, res0, res1;
           std::tie(a0, a1) = convert_to_float<scalar_t>(a);
           auto cmp0 = (a0 > zero_vec);
           auto cmp1 = (a1 > zero_vec);
-          if (!cmp0.zero_mask() && !cmp1.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
-            return convert_from_float<scalar_t>(a0 * poscoef_vec, a1 * poscoef_vec);
+
+          if (!cmp0.zero_mask()) {
+            res0 = a0 * poscoef_vec;
           } else {
-            auto res0 = Vectorized<float>::blendv(((a0 * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a0 * poscoef_vec, cmp0);
-            auto res1 = Vectorized<float>::blendv(((a1 * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a1 * poscoef_vec, cmp1);
-            return convert_from_float<scalar_t>(res0, res1);
+            res0 = Vectorized<float>::blendv(((a0 * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a0 * poscoef_vec, cmp0);
           }
+          if (!cmp1.zero_mask()) {
+            res1 = a1 * poscoef_vec;
+          } else {
+            res1 = Vectorized<float>::blendv(((a1 * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a1 * poscoef_vec, cmp1);
+          }
+          return convert_from_float<scalar_t>(res0, res1);
         });
     });
   } else {
@@ -246,25 +251,29 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
           }
         },
         [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec, is_result](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
-          Vectorized<float> a0, a1;
+          Vectorized<float> a0, a1, res0, res1;
           std::tie(a0, a1) = convert_to_float<scalar_t>(a);
           Vectorized<float> b0, b1;
           std::tie(b0, b1) = convert_to_float<scalar_t>(b);
           auto cmp0 = (b0 > zero_vec);
           auto cmp1 = (b1 > zero_vec);
           if (is_result) {
-            if (!cmp0.zero_mask() && !cmp1.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
-              return convert_from_float<scalar_t>(a0 * poscoef_vec, a1 * poscoef_vec);
+            if (!cmp0.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+              // return convert_from_float<scalar_t>(a0 * poscoef_vec, a1 * poscoef_vec);
+              res0 = a0 * poscoef_vec;
             } else {
-              auto res0 = Vectorized<float>::blendv(a0 * negiptcoef_vec * (b0 + negcoef_vec), a0 * poscoef_vec, cmp0);
-              auto res1 = Vectorized<float>::blendv(a1 * negiptcoef_vec * (b1 + negcoef_vec), a1 * poscoef_vec, cmp1);
-              return convert_from_float<scalar_t>(res0, res1);
+              res0 = Vectorized<float>::blendv(a0 * negiptcoef_vec * (b0 + negcoef_vec), a0 * poscoef_vec, cmp0);
+            }
+            if (!cmp0.zero_mask()) {
+              res1 = a1 * poscoef_vec;
+            } else {
+              res1 = Vectorized<float>::blendv(a1 * negiptcoef_vec * (b1 + negcoef_vec), a1 * poscoef_vec, cmp1);
             }
           } else {
-            auto res0 = Vectorized<float>::blendv(a0 * negiptcoef_vec * negcoef_vec * (b0 * negiptcoef_vec).exp(), a0 * poscoef_vec, cmp0);
-            auto res1 = Vectorized<float>::blendv(a1 * negiptcoef_vec * negcoef_vec * (b1 * negiptcoef_vec).exp(), a1 * poscoef_vec, cmp1);
-            return convert_from_float<scalar_t>(res0, res1);
+            res0 = Vectorized<float>::blendv(a0 * negiptcoef_vec * negcoef_vec * (b0 * negiptcoef_vec).exp(), a0 * poscoef_vec, cmp0);
+            res1 = Vectorized<float>::blendv(a1 * negiptcoef_vec * negcoef_vec * (b1 * negiptcoef_vec).exp(), a1 * poscoef_vec, cmp1);
           }
+          return convert_from_float<scalar_t>(res0, res1);
         });
     });
   } else {
@@ -328,32 +337,34 @@ void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
     grain_size = it.numel() / at::get_num_threads();
   }
   if (approximate == GeluType::Tanh) {
-    if (it.common_dtype() == kBFloat16) {
-      auto kBetaVec = Vectorized<float>((float)(M_SQRT2 * M_2_SQRTPI * 0.5));
-      auto kKappaVec = Vectorized<float>((float)(0.044715));
-      auto kOneVec = Vectorized<float>((float)(1));
-      auto kPointFiveVec = Vectorized<float>((float)(0.5));
-      cpu_kernel_vec(
-          it,
-          [](BFloat16 x) -> BFloat16 {
-            const float kBeta = float(M_SQRT2 * M_2_SQRTPI * 0.5);
-            const float kKappa = float(0.044715);
-            float x_cube = float(x) * float(x) * float(x);
-            float inner = kBeta * (float(x) + kKappa * x_cube);
-            return float(0.5) * float(x) * (float(1) + std::tanh(inner));
-          },
-          [&](Vectorized<BFloat16> x) -> Vectorized<BFloat16> {
-            Vectorized<float> x0, x1;
-            std::tie(x0, x1) = convert_bfloat16_float(x);
-            auto x0_cube = x0 * x0 * x0;
-            auto x1_cube = x1 * x1 * x1;
-            auto inner_vec0 = kBetaVec * (x0 + kKappaVec * x0_cube);
-            auto inner_vec1 = kBetaVec * (x1 + kKappaVec * x1_cube);
-            auto res0 = kPointFiveVec * x0 * (kOneVec + inner_vec0.tanh());
-            auto res1 = kPointFiveVec * x1 * (kOneVec + inner_vec1.tanh());
-            return convert_float_bfloat16(res0, res1);
-          },
-          grain_size);
+    if (at::isReducedFloatingType(it.common_dtype())) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(it.common_dtype(), "GeluKernelImpl", [&]() {
+        auto kBetaVec = Vectorized<float>((float)(M_SQRT2 * M_2_SQRTPI * 0.5));
+        auto kKappaVec = Vectorized<float>((float)(0.044715));
+        auto kOneVec = Vectorized<float>((float)(1));
+        auto kPointFiveVec = Vectorized<float>((float)(0.5));
+        cpu_kernel_vec(
+            it,
+            [](scalar_t x) -> scalar_t {
+              const float kBeta = float(M_SQRT2 * M_2_SQRTPI * 0.5);
+              const float kKappa = float(0.044715);
+              float x_cube = float(x) * float(x) * float(x);
+              float inner = kBeta * (float(x) + kKappa * x_cube);
+              return float(0.5) * float(x) * (float(1) + std::tanh(inner));
+            },
+            [&](Vectorized<scalar_t> x) -> Vectorized<scalar_t> {
+              Vectorized<float> x0, x1;
+              std::tie(x0, x1) = convert_to_float<scalar_t>(x);
+              auto x0_cube = x0 * x0 * x0;
+              auto x1_cube = x1 * x1 * x1;
+              auto inner_vec0 = kBetaVec * (x0 + kKappaVec * x0_cube);
+              auto inner_vec1 = kBetaVec * (x1 + kKappaVec * x1_cube);
+              auto res0 = kPointFiveVec * x0 * (kOneVec + inner_vec0.tanh());
+              auto res1 = kPointFiveVec * x1 * (kOneVec + inner_vec1.tanh());
+              return convert_from_float<scalar_t>(res0, res1);
+            },
+            grain_size);
+      });
     } else {
       AT_DISPATCH_FLOATING_TYPES(
           it.dtype(), "GeluKernelImpl", [&]() {
@@ -380,24 +391,26 @@ void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
       });
     }
   } else {
-    if (it.common_dtype() == kBFloat16) {
-      auto kAlphaVec = Vectorized<float>((float)(M_SQRT1_2));
-      auto kOneVec = Vectorized<float>((float)(1));
-      auto kPointFiveVec = Vectorized<float>((float)(0.5));
-      cpu_kernel_vec(
-          it,
-          [](BFloat16 x) -> BFloat16 {
-            const float kAlpha = float(M_SQRT1_2);
-            return float(x) * float(0.5) * (float(1) + std::erf(float(x) * kAlpha));
-          },
-          [&](Vectorized<BFloat16> x) -> Vectorized<BFloat16> {
-            Vectorized<float> x0, x1;
-            std::tie(x0, x1) = convert_bfloat16_float(x);
-            auto res0 = x0 * kPointFiveVec * (kOneVec + (x0 * kAlphaVec).erf());
-            auto res1 = x1 * kPointFiveVec * (kOneVec + (x1 * kAlphaVec).erf());
-            return convert_float_bfloat16(res0, res1);
-          },
-          grain_size);
+    if (at::isReducedFloatingType(it.common_dtype())) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
+        auto kAlphaVec = Vectorized<float>((float)(M_SQRT1_2));
+        auto kOneVec = Vectorized<float>((float)(1));
+        auto kPointFiveVec = Vectorized<float>((float)(0.5));
+        cpu_kernel_vec(
+            it,
+            [](scalar_t x) -> scalar_t {
+              const float kAlpha = float(M_SQRT1_2);
+              return float(x) * float(0.5) * (float(1) + std::erf(float(x) * kAlpha));
+            },
+            [&](Vectorized<scalar_t> x) -> Vectorized<scalar_t> {
+              Vectorized<float> x0, x1;
+              std::tie(x0, x1) = convert_to_float<scalar_t>(x);
+              auto res0 = x0 * kPointFiveVec * (kOneVec + (x0 * kAlphaVec).erf());
+              auto res1 = x1 * kPointFiveVec * (kOneVec + (x1 * kAlphaVec).erf());
+              return convert_from_float<scalar_t>(res0, res1);
+            },
+            grain_size);
+      });
     } else {
       AT_DISPATCH_FLOATING_TYPES(
           it.dtype(), "GeluKernelImpl", [&]() {
@@ -423,7 +436,8 @@ void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
 
 void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
   if (approximate == GeluType::Tanh) {
-    if (it.common_dtype() == kBFloat16) {
+    if (at::isReducedFloatingType(it.common_dtype())) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(it.common_dtype(), "GeluBackwardKernelImpl", [&]() {
       auto kBetaVec = Vectorized<float>((float)(M_SQRT2 * M_2_SQRTPI * 0.5));
       auto kKappaVec = Vectorized<float>((float)(0.044715));
       auto kOneVec = Vectorized<float>((float)(1));
@@ -431,7 +445,7 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
       auto kPointFiveVec = Vectorized<float>((float)(0.5));
       cpu_kernel_vec(
           it,
-          [](BFloat16 dy, BFloat16 x) -> BFloat16 {
+          [](scalar_t dy, scalar_t x) -> scalar_t {
             const float kBeta = float(M_SQRT2 * M_2_SQRTPI * 0.5);
             const float kKappa = float(0.044715);
             float x_sq = float(x) * float(x);
@@ -451,11 +465,11 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
 
             return float(dy) * (left_derivative + right_derivative);
           },
-          [&](Vectorized<BFloat16> dy_vec, Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
+          [&](Vectorized<scalar_t> dy_vec, Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
             Vectorized<float> x0_vec, x1_vec;
-            std::tie(x0_vec, x1_vec) = convert_bfloat16_float(x_vec);
+            std::tie(x0_vec, x1_vec) = convert_to_float<scalar_t>(x_vec);
             Vectorized<float> dy0_vec, dy1_vec;
-            std::tie(dy0_vec, dy1_vec) = convert_bfloat16_float(dy_vec);
+            std::tie(dy0_vec, dy1_vec) = convert_to_float<scalar_t>(dy_vec);
             auto x0_sq = x0_vec * x0_vec;
             auto x1_sq = x1_vec * x1_vec;
             auto x0_cube = x0_vec * x0_vec * x0_vec;
@@ -482,8 +496,9 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
 
             auto res0 = dy0_vec * (left_derivative_vec0 + right_derivative_vec0);
             auto res1 = dy1_vec * (left_derivative_vec1 + right_derivative_vec1);
-            return convert_float_bfloat16(res0, res1);
+            return convert_from_float<scalar_t>(res0, res1);
           });
+      });
     } else {
       AT_DISPATCH_FLOATING_TYPES(
           it.dtype(), "GeluBackwardKernelImpl", [&]() {
@@ -539,7 +554,8 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
       });
     }
   } else {
-    if (it.common_dtype() == kBFloat16) {
+    if (at::isReducedFloatingType(it.common_dtype())) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(it.common_dtype(), "GeluBackwardKernelImpl", [&]() {
       auto kAlphaVec = Vectorized<float>((float)(M_SQRT1_2));
       auto kBetaVec = Vectorized<float>((float)(M_2_SQRTPI * M_SQRT1_2 * 0.5));
       auto kOneVec = Vectorized<float>((float)(1));
@@ -547,7 +563,7 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
       auto kMinusPointFiveVec = Vectorized<float>((float)(-0.5));
       cpu_kernel_vec(
           it,
-          [](BFloat16 dy, BFloat16 x) -> BFloat16 {
+          [](scalar_t dy, scalar_t x) -> scalar_t {
               const float kAlpha = float(M_SQRT1_2);
               const float kBeta = float(M_2_SQRTPI) * float(M_SQRT1_2) * float(0.5);
               const float cdf =
@@ -555,19 +571,20 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
               const float pdf = kBeta * std::exp(float(x) * float(x) * float(-0.5));
               return float(dy) * (cdf + float(x) * pdf);
           },
-          [&](Vectorized<BFloat16> dy, Vectorized<BFloat16> x) -> Vectorized<BFloat16> {
+          [&](Vectorized<scalar_t> dy, Vectorized<scalar_t> x) -> Vectorized<scalar_t> {
               Vectorized<float> x0, x1;
-              std::tie(x0, x1) = convert_bfloat16_float(x);
+              std::tie(x0, x1) = convert_to_float<scalar_t>(x);
               Vectorized<float> dy0, dy1;
-              std::tie(dy0, dy1) = convert_bfloat16_float(dy);
+              std::tie(dy0, dy1) = convert_to_float<scalar_t>(dy);
               auto cdf_vec0 = kPointFiveVec * (kOneVec + (x0 * kAlphaVec).erf());
               auto cdf_vec1 = kPointFiveVec * (kOneVec + (x1 * kAlphaVec).erf());
               auto pdf_vec0 = kBetaVec * (x0 * x0 * kMinusPointFiveVec).exp();
               auto pdf_vec1 = kBetaVec * (x1 * x1 * kMinusPointFiveVec).exp();
               auto res0 = dy0 * (cdf_vec0 + x0 * pdf_vec0);
               auto res1 = dy1 * (cdf_vec1 + x1 * pdf_vec1);
-              return convert_float_bfloat16(res0, res1);
+              return convert_from_float<scalar_t>(res0, res1);
           });
+      });
     } else {
       AT_DISPATCH_FLOATING_TYPES(
           it.dtype(), "GeluBackwardKernelImpl", [&]() {
@@ -600,7 +617,8 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
 }
 
 void hardsigmoid_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "hardsigmoid_cpu", [&]() {
     const float zero(0.0f);
     const float three(3.0f);
     const float six(6.0f);
@@ -610,12 +628,12 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
     const Vec kSixVec(six);
     cpu_kernel_vec(
         iter,
-        [&](BFloat16 self_val) -> BFloat16 {
+        [&](scalar_t self_val) -> scalar_t {
           return std::min(std::max(float(self_val) + three, zero), six) / six;
         },
-        [&](vec::Vectorized<BFloat16> self_val) -> vec::Vectorized<BFloat16> {
+        [&](vec::Vectorized<scalar_t> self_val) -> vec::Vectorized<scalar_t> {
           Vectorized<float> self_val0, self_val1;
-          std::tie(self_val0, self_val1) = convert_bfloat16_float(self_val);
+          std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
           self_val0 = minimum(
             maximum(self_val0 + kThreeVec, kZeroVec),
             kSixVec
@@ -624,8 +642,9 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
             maximum(self_val1 + kThreeVec, kZeroVec),
             kSixVec
           ) / kSixVec;
-          return convert_float_bfloat16(self_val0, self_val1);
+          return convert_from_float<scalar_t>(self_val0, self_val1);
         });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_cpu", [&] {
     const scalar_t zero(0.0f);
@@ -651,7 +670,8 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
 }
 
 void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.common_dtype(), "hardsigmoid_backward", [&]() {
     const float zero(0.0f);
     const float three(3.0f);
     const float neg_three(-3.0f);
@@ -661,21 +681,22 @@ void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
     Vec kOneSixthVec(1.0f / 6.0f);
     cpu_kernel_vec(
         iter,
-        [=](BFloat16 grad_val, BFloat16 self_val) -> BFloat16 {
+        [=](scalar_t grad_val, scalar_t self_val) -> scalar_t {
           return (float(self_val) > neg_three && float(self_val) < three)
             ? float(grad_val) * one_sixth
             : zero;
         },
-        [=](Vectorized<BFloat16> grad_val, Vectorized<BFloat16> self_val) -> Vectorized<BFloat16> {
+        [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           Vec self_val0, self_val1, grad_val0, grad_val1;
-          std::tie(self_val0, self_val1) = convert_bfloat16_float(self_val);
-          std::tie(grad_val0, grad_val1) = convert_bfloat16_float(grad_val);
+          std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
+          std::tie(grad_val0, grad_val1) = convert_to_float<scalar_t>(grad_val);
           Vec gradNonZeroMask = (self_val0 > neg_three) & (self_val0 < three);
           self_val0 = Vec::blendv(kZeroVec, grad_val0 * kOneSixthVec, gradNonZeroMask);
           gradNonZeroMask = (self_val1 > neg_three) & (self_val1 < three);
           self_val1 = Vec::blendv(kZeroVec, grad_val1 * kOneSixthVec, gradNonZeroMask);
-          return convert_float_bfloat16(self_val0, self_val1);
+          return convert_from_float<scalar_t>(self_val0, self_val1);
         });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_backward", [&] {
     const scalar_t zero(0.0f);
@@ -701,7 +722,7 @@ void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
 }
 
 void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hardshrink_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     using Vec = Vectorized<scalar_t>;
     cpu_kernel_vec(
@@ -717,22 +738,24 @@ void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 }
 
 void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.common_dtype(), "softshrink_cpu", [&]() {
     auto lambd_val = lambd.to<float>();
     auto lambdVec = Vectorized<float>(lambd_val);
     cpu_kernel_vec(
       iter,
-      [=](BFloat16 a) -> BFloat16 {
+      [=](scalar_t a) -> scalar_t {
         return float(a) > lambd_val ? a - lambd_val : (float(a) < -lambd_val ? a + lambd_val : float(0));
       },
-      [=](Vectorized<BFloat16> self_val) {
+      [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           Vectorized<float> self_val0, self_val1;
-          Vectorized<BFloat16> self_val_t0, self_val_t1;
-          std::tie(self_val0, self_val1) = convert_bfloat16_float(self_val);
-          self_val_t0 = convert_float_bfloat16((self_val0 > lambdVec) & (self_val0 - lambdVec), (self_val1 > lambdVec) & (self_val1 - lambdVec));
-          self_val_t1 = convert_float_bfloat16((self_val0 < -lambd_val) & (self_val0 + lambdVec), (self_val1 < -lambd_val) & (self_val1 + lambdVec));
+          Vectorized<scalar_t> self_val_t0, self_val_t1;
+          std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
+          self_val_t0 = convert_from_float<scalar_t>((self_val0 > lambdVec) & (self_val0 - lambdVec), (self_val1 > lambdVec) & (self_val1 - lambdVec));
+          self_val_t1 = convert_from_float<scalar_t>((self_val0 < -lambd_val) & (self_val0 + lambdVec), (self_val1 < -lambd_val) & (self_val1 + lambdVec));
           return (self_val_t0 | self_val_t1);
       });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softshrink_cpu", [&]() {
     auto lambd_val = lambd.to<scalar_t>();
@@ -742,7 +765,7 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
       [=](scalar_t a) -> scalar_t {
         return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
       },
-      [=](Vectorized<scalar_t> self_val) {
+      [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           Vectorized<scalar_t> self_val_t0, self_val_t1;
           self_val_t0 = (self_val > lambdVec) & (self_val - lambdVec);
           self_val_t1 = (self_val < -lambd_val) & (self_val + lambdVec);
@@ -753,7 +776,7 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 }
 
 void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "shrink_backward_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "shrink_backward_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(
         iter,
@@ -768,23 +791,25 @@ void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&]() {
     auto min_val = min.to<float>();
     auto max_val = max.to<float>();
     cpu_kernel_vec(
         iter,
-        [=](BFloat16 grad_val, BFloat16 self_val) -> BFloat16 {
-          return (float(self_val) <= min_val || float(self_val) >= max_val) ? BFloat16(0) : grad_val;
+        [=](scalar_t grad_val, scalar_t self_val) -> scalar_t {
+          return (float(self_val) <= min_val || float(self_val) >= max_val) ? scalar_t(0) : grad_val;
         },
-        [=](Vectorized<BFloat16> grad_val, Vectorized<BFloat16> self_val) -> Vectorized<BFloat16> {
+        [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           Vectorized<float> grad_val0, grad_val1, self_val0, self_val1;
-          std::tie(grad_val0, grad_val1) = convert_bfloat16_float(grad_val);
-          std::tie(self_val0, self_val1) = convert_bfloat16_float(self_val);
-          return convert_float_bfloat16(
+          std::tie(grad_val0, grad_val1) = convert_to_float<scalar_t>(grad_val);
+          std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
+          return convert_from_float<scalar_t>(
             ((self_val0 > min_val) & (self_val0 < max_val)) & grad_val0,
             ((self_val1 > min_val) & (self_val1 < max_val)) & grad_val1
           );
         });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
     auto min_val = min.to<scalar_t>();
@@ -802,7 +827,8 @@ void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Sca
 }
 
 void hardswish_kernel(TensorIterator& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "hardswish_cpu", [&]() {
     const float zero(0.0f);
     const float three(3.0f);
     const float six(6.0f);
@@ -812,12 +838,12 @@ void hardswish_kernel(TensorIterator& iter) {
     const Vec kSixVec(six);
     cpu_kernel_vec(
       iter,
-      [&](BFloat16 x) -> BFloat16 {
+      [&](scalar_t x) -> scalar_t {
         return float(x) * std::min(std::max(float(x) + three, zero), six) / six;
       },
-      [&](vec::Vectorized<BFloat16> x_vec) {
+      [&](vec::Vectorized<scalar_t> x_vec) {
         Vectorized<float> x_vec0, x_vec1;
-        std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
+        std::tie(x_vec0, x_vec1) = convert_to_float<scalar_t>(x_vec);
         x_vec0 = x_vec0 * minimum(
           maximum(x_vec0 + kThreeVec, kZeroVec),
           kSixVec
@@ -826,9 +852,9 @@ void hardswish_kernel(TensorIterator& iter) {
           maximum(x_vec1 + kThreeVec, kZeroVec),
           kSixVec
         ) / kSixVec;
-        return convert_float_bfloat16(x_vec0, x_vec1);
-      }
-    );
+        return convert_from_float<scalar_t>(x_vec0, x_vec1);
+      });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardswish_cpu", [&]() {
     const scalar_t zero(0.0f);
@@ -855,7 +881,8 @@ void hardswish_kernel(TensorIterator& iter) {
 }
 
 void hardswish_backward_kernel(TensorIterator& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "hardswish_backward_cpu", [&]() {
     const float zero(0.0f);
     const float three(3.0f);
     const float neg_three(-3.0f);
@@ -867,7 +894,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
     const Vec kOneHalfVec(one_half);
     cpu_kernel_vec(
       iter,
-      [&](BFloat16 grad_val, BFloat16 self_val) -> BFloat16 {
+      [&](scalar_t grad_val, scalar_t self_val) -> scalar_t {
         if (float(self_val) < neg_three) {
           return zero;
         } else if (float(self_val) <= three) {
@@ -876,10 +903,10 @@ void hardswish_backward_kernel(TensorIterator& iter) {
           return grad_val;
         }
       },
-      [&](vec::Vectorized<BFloat16> grad_val, vec::Vectorized<BFloat16> self_val) {
+      [&](vec::Vectorized<scalar_t> grad_val, vec::Vectorized<scalar_t> self_val) {
         Vectorized<float> self_val0, self_val1, grad_val0, grad_val1;
-        std::tie(self_val0, self_val1) = convert_bfloat16_float(self_val);
-        std::tie(grad_val0, grad_val1) = convert_bfloat16_float(grad_val);
+        std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
+        std::tie(grad_val0, grad_val1) = convert_to_float<scalar_t>(grad_val);
         self_val0 = Vec::blendv(
           Vec::blendv(
             grad_val0 * ((self_val0 / kThreeVec) + kOneHalfVec),
@@ -898,9 +925,9 @@ void hardswish_backward_kernel(TensorIterator& iter) {
           kZeroVec,
           self_val1 < kNegThreeVec
         );
-        return convert_float_bfloat16(self_val0, self_val1);
-      }
-    );
+        return convert_from_float<scalar_t>(self_val0, self_val1);
+      });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardswish_backward_cpu", [&]() {
     const scalar_t zero(0.0f);
@@ -940,23 +967,25 @@ void hardswish_backward_kernel(TensorIterator& iter) {
 }
 
 static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
-  if (iter.common_dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "leaky_relu_cpu", [&]() {
     auto zero_vec = Vectorized<float>((float)(0));
     auto one_vec = Vectorized<float>((float)(1));
     float negval = negval_.to<float>();
     Vectorized<float> negval_v = Vectorized<float>(negval);
     cpu_kernel_vec(
         iter,
-        [&](BFloat16 a) -> BFloat16 {
+        [&](scalar_t a) -> scalar_t {
           return float(a) > float(0) ? float(a) : float(a) * negval;
         },
-        [&](Vectorized<BFloat16> a) -> Vectorized<BFloat16> {
+        [&](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
           Vectorized<float> a0, a1;
-          std::tie(a0, a1) = convert_bfloat16_float(a);
+          std::tie(a0, a1) = convert_to_float<scalar_t>(a);
           auto res0 = a0 * (Vectorized<float>::blendv(negval_v, one_vec, a0 > zero_vec));
           auto res1 = a1 * (Vectorized<float>::blendv(negval_v, one_vec, a1 > zero_vec));
-          return convert_float_bfloat16(res0, res1);
+          return convert_from_float<scalar_t>(res0, res1);
         });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_cpu", [&] {
       using Vec = Vectorized<scalar_t>;
@@ -978,24 +1007,26 @@ static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
 }
 
 static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
-  if (iter.common_dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "leaky_relu_backward_cpu", [&]() {
     auto zero_vec = Vectorized<float>((float)(0));
     auto one_vec = Vectorized<float>((float)(1));
     float negval = negval_.to<float>();
     Vectorized<float> negval_v = Vectorized<float>(negval);
     cpu_kernel_vec(
       iter,
-      [&](BFloat16 a, BFloat16 b) -> BFloat16 {
+      [&](scalar_t a, scalar_t b) -> scalar_t {
         return float(a) > float(0) ? float(b) : float(b) * negval;
       },
-      [&](Vectorized<BFloat16> a, Vectorized<BFloat16> b) -> Vectorized<BFloat16> {
+      [&](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
         Vectorized<float> a0, a1, b0, b1;
-        std::tie(a0, a1) = convert_bfloat16_float(a);
-        std::tie(b0, b1) = convert_bfloat16_float(b);
+        std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+        std::tie(b0, b1) = convert_to_float<scalar_t>(b);
         auto res0 = b0 * (Vectorized<float>::blendv(negval_v, one_vec, a0 > zero_vec));
         auto res1 = b1 * (Vectorized<float>::blendv(negval_v, one_vec, a1 > zero_vec));
-        return convert_float_bfloat16(res0, res1);
+        return convert_from_float<scalar_t>(res0, res1);
       });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_backward_cpu", [&] {
       using Vec = Vectorized<scalar_t>;
@@ -1017,7 +1048,8 @@ static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& n
 }
 
 void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
-    if (iter.dtype() == kBFloat16) {
+    if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "softplus_cpu", [&]() {
       using Vec = Vectorized<float>;
       auto beta = beta_.to<float>();
       auto threshold = threshold_.to<float>();
@@ -1025,18 +1057,19 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
       const Vec threshold_vec(threshold);
       cpu_kernel_vec(
           iter,
-          [beta, threshold](BFloat16 a) -> BFloat16 {
+          [beta, threshold](scalar_t a) -> scalar_t {
             return (float(a) * beta) > threshold ? a
-              : static_cast<BFloat16>((std::log1p(std::exp(float(a) * beta))) / beta);
+              : static_cast<scalar_t>((std::log1p(std::exp(float(a) * beta))) / beta);
           },
-          [beta_vec, threshold_vec](Vectorized<BFloat16> a) -> Vectorized<BFloat16> {
+          [beta_vec, threshold_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
             Vectorized<float> a0, a1;
-            std::tie(a0, a1) = convert_bfloat16_float(a);
+            std::tie(a0, a1) = convert_to_float<scalar_t>(a);
             a0 = Vec::blendv((a0 * beta_vec).exp().log1p() / beta_vec, a0, (a0 * beta_vec) > threshold_vec);
             a1 = Vec::blendv((a1 * beta_vec).exp().log1p() / beta_vec, a1, (a1 * beta_vec) > threshold_vec);
-            return convert_float_bfloat16(a0, a1);
+            return convert_from_float<scalar_t>(a0, a1);
           }
       );
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softplus_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -1059,7 +1092,8 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
 }
 
 void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "softplus_backward_cpu", [&]() {
     using Vec = Vectorized<float>;
     auto beta = beta_.to<float>();
     auto threshold = threshold_.to<float>();
@@ -1068,21 +1102,21 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
     const Vec one_vec(static_cast<float>(1.0));
     cpu_kernel_vec(
         iter,
-        [beta, threshold](BFloat16 a, BFloat16 b) -> BFloat16 {
+        [beta, threshold](scalar_t a, scalar_t b) -> scalar_t {
           float z = std::exp(float(b) * beta);
-          return (float(b) * beta) > threshold ? a : static_cast<BFloat16>(float(a) * z / (z + float(1.)));
+          return (float(b) * beta) > threshold ? a : static_cast<scalar_t>(float(a) * z / (z + float(1.)));
         },
-        [beta_vec, one_vec, threshold_vec](Vectorized<BFloat16> a, Vectorized<BFloat16> b) -> Vectorized<BFloat16> {
+        [beta_vec, one_vec, threshold_vec](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
           Vectorized<float> a0, a1, b0, b1;
-          std::tie(a0, a1) = convert_bfloat16_float(a);
-          std::tie(b0, b1) = convert_bfloat16_float(b);
+          std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+          std::tie(b0, b1) = convert_to_float<scalar_t>(b);
           Vec z = (b0 * beta_vec).exp();
           a0 = Vec::blendv(a0 * z / (z + one_vec), a0, (b0 * beta_vec) > threshold_vec);
           z = (b1 * beta_vec).exp();
           a1 = Vec::blendv(a1 * z / (z + one_vec), a1, (b1 * beta_vec) > threshold_vec);
-          return convert_float_bfloat16(a0, a1);
-        }
-    );
+          return convert_from_float<scalar_t>(a0, a1);
+        });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softplus_backward_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -1107,23 +1141,24 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
 }
 
 void glu_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "glu_cpu", [&]() {
     const float float_one_val(1);
     const Vectorized<float> float_one_vec(float_one_val);
     cpu_kernel_vec(
       iter,
-      [float_one_val](BFloat16 a, BFloat16 b) -> BFloat16 {
+      [float_one_val](scalar_t a, scalar_t b) -> scalar_t {
         return float(a) * (float_one_val / (float_one_val + std::exp(- float(b))));
       },
-      [float_one_vec](Vectorized<BFloat16> a, Vectorized<BFloat16> b) -> Vectorized<BFloat16> {
+      [float_one_vec](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
         Vectorized<float> a0, a1, b0, b1;
-        std::tie(a0, a1) = convert_bfloat16_float(a);
-        std::tie(b0, b1) = convert_bfloat16_float(b);
+        std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+        std::tie(b0, b1) = convert_to_float<scalar_t>(b);
         a0 = a0 * (float_one_vec / (float_one_vec + b0.neg().exp()));
         a1 = a1 * (float_one_vec / (float_one_vec + b1.neg().exp()));
-        return convert_float_bfloat16(a0, a1);
-      }
-    );
+        return convert_from_float<scalar_t>(a0, a1);
+      });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_cpu", [&] {
     using Vec = Vectorized<scalar_t>;
@@ -1162,24 +1197,25 @@ void glu_jvp_kernel(TensorIteratorBase& iter) {
 }
 
 void glu_backward_kernel(TensorIterator& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "glu_backward_cpu", [&]() {
     const float float_one_val(1);
     const Vectorized<float> float_one_vec(float_one_val);
     cpu_kernel_vec(
       iter,
-      [float_one_val](BFloat16 a, BFloat16 b, BFloat16 c) -> BFloat16 {
+      [float_one_val](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
         return  (float_one_val - float(a)) * float(a) * float(b) * float(c);
       },
-      [float_one_vec](Vectorized<BFloat16> a, Vectorized<BFloat16> b, Vectorized<BFloat16> c) -> Vectorized<BFloat16> {
+      [float_one_vec](Vectorized<scalar_t> a, Vectorized<scalar_t> b, Vectorized<scalar_t> c) -> Vectorized<scalar_t> {
         Vectorized<float> a0, a1, b0, b1, c0, c1;
-        std::tie(a0, a1) = convert_bfloat16_float(a);
-        std::tie(b0, b1) = convert_bfloat16_float(b);
-        std::tie(c0, c1) = convert_bfloat16_float(c);
+        std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+        std::tie(b0, b1) = convert_to_float<scalar_t>(b);
+        std::tie(c0, c1) = convert_to_float<scalar_t>(c);
         a0 = (float_one_vec - a0) * a0 * b0 * c0;
         a1 = (float_one_vec - a1) * a1 * b1 * c1;
-        return convert_float_bfloat16(a0, a1);
-      }
-    );
+        return convert_from_float<scalar_t>(a0, a1);
+      });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_backward_cpu", [&] {
       using Vec = Vectorized<scalar_t>;
@@ -1199,20 +1235,22 @@ void glu_backward_kernel(TensorIterator& iter) {
 }
 
 void silu_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "silu_cpu", [&]() {
       const Vectorized<float> kOneVec(1.0f);
       cpu_kernel_vec(
           iter,
-          [](BFloat16 x) -> BFloat16 {
+          [](scalar_t x) -> scalar_t {
             return float(x) / (1.0f + std::exp(-float(x)));
           },
-          [kOneVec](Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
+          [kOneVec](Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
             Vectorized<float> x_vec0, x_vec1;
-            std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
-            return convert_float_bfloat16(
+            std::tie(x_vec0, x_vec1) = convert_to_float<scalar_t>(x_vec);
+            return convert_from_float<scalar_t>(
               x_vec0 / (kOneVec + x_vec0.neg().exp()),
               x_vec1 / (kOneVec + x_vec1.neg().exp()));
           });
+    });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       iter.dtype(), "silu_cpu", [&]() {
@@ -1230,27 +1268,29 @@ void silu_kernel(TensorIteratorBase& iter) {
 }
 
 void silu_backward_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "silu_backward_cpu", [&]() {
     const Vectorized<float> kOneVec(1.0f);
     cpu_kernel_vec(
         iter,
-        [](BFloat16 dy, BFloat16 x) -> BFloat16 {
+        [](scalar_t dy, scalar_t x) -> scalar_t {
           const float sigmoid =
               1.0f / (1.0f + std::exp(-float(x)));
           return dy * sigmoid * (1.0f + x * (1.0f - sigmoid));
         },
-        [kOneVec](Vectorized<BFloat16> dy_vec, Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
+        [kOneVec](Vectorized<scalar_t> dy_vec, Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
           Vectorized<float> x_vec0, x_vec1, dy_vec0, dy_vec1;
-          std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
-          std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
+          std::tie(x_vec0, x_vec1) = convert_to_float<scalar_t>(x_vec);
+          std::tie(dy_vec0, dy_vec1) = convert_to_float<scalar_t>(dy_vec);
           const Vectorized<float> sigmoid0 =
               kOneVec / (kOneVec + x_vec0.neg().exp());
           const Vectorized<float> sigmoid1 =
               kOneVec / (kOneVec + x_vec1.neg().exp());
-          return convert_float_bfloat16(
+          return convert_from_float<scalar_t>(
             dy_vec0 * sigmoid0 * (kOneVec + x_vec0 * (kOneVec - sigmoid0)),
             dy_vec1 * sigmoid1 * (kOneVec + x_vec1 * (kOneVec - sigmoid1)));
         });
+    });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       iter.dtype(), "silu_backward_cpu", [&]() {
@@ -1272,20 +1312,22 @@ void silu_backward_kernel(TensorIteratorBase& iter) {
 }
 
 void mish_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "mish_cpu", [&]() {
     cpu_kernel_vec(
         iter,
-        [](BFloat16 x) -> BFloat16{
-          return static_cast<BFloat16>(float(x) * std::tanh(std::log1p(std::exp(float(x)))));
+        [](scalar_t x) -> scalar_t{
+          return static_cast<scalar_t>(float(x) * std::tanh(std::log1p(std::exp(float(x)))));
         },
-        [](Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
+        [](Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
           Vectorized<float> x_vec0, x_vec1;
-          std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
-          return convert_float_bfloat16(
+          std::tie(x_vec0, x_vec1) = convert_to_float<scalar_t>(x_vec);
+          return convert_from_float<scalar_t>(
             x_vec0 * x_vec0.exp().log1p().tanh(),
             x_vec1 * x_vec1.exp().log1p().tanh()
           );
         });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_cpu", [&]() {
         using Vec = Vectorized<scalar_t>;
@@ -1302,30 +1344,32 @@ void mish_kernel(TensorIteratorBase& iter) {
 }
 
 void mish_backward_kernel(TensorIterator& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "mish_backward_cpu", [&]() {
     using Vec = Vectorized<float>;
     const Vec kOneVec(1.0f);
     cpu_kernel_vec(
         iter,
-        [](BFloat16 dy, BFloat16 x) -> BFloat16 {
+        [](scalar_t dy, scalar_t x) -> scalar_t {
           const float sigmoid =
               1.0f / (1.0f + std::exp(-float(x)));
           const float tanh_softplus = std::tanh(std::log1p(std::exp(float(x))));
           return dy * (tanh_softplus + x * sigmoid * (1.0f - tanh_softplus * tanh_softplus));
         },
-        [kOneVec](Vectorized<BFloat16> dy_vec, Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
+        [kOneVec](Vectorized<scalar_t> dy_vec, Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
           Vectorized<float> x_vec0, x_vec1, dy_vec0, dy_vec1;
-          std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
-          std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
+          std::tie(x_vec0, x_vec1) = convert_to_float<scalar_t>(x_vec);
+          std::tie(dy_vec0, dy_vec1) = convert_to_float<scalar_t>(dy_vec);
           const Vec sigmoid0 = kOneVec / (kOneVec + x_vec0.neg().exp());
           const Vec sigmoid1 = kOneVec / (kOneVec + x_vec1.neg().exp());
           const Vec tanh_softplus0 = x_vec0.exp().log1p().tanh();
           const Vec tanh_softplus1 = x_vec1.exp().log1p().tanh();
-          return convert_float_bfloat16(
+          return convert_from_float<scalar_t>(
             dy_vec0 * (tanh_softplus0 + x_vec0 * sigmoid0 * (kOneVec - tanh_softplus0 * tanh_softplus0)),
             dy_vec1 * (tanh_softplus1 + x_vec1 * sigmoid1 * (kOneVec - tanh_softplus1 * tanh_softplus1))
           );
         });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_backward_cpu", [&]() {
         using Vec = Vectorized<scalar_t>;
@@ -1348,7 +1392,7 @@ void mish_backward_kernel(TensorIterator& iter) {
 }
 
 void prelu_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "prelu_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "prelu_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
     cpu_kernel_vec(
       iter,
@@ -1362,7 +1406,7 @@ void prelu_kernel(TensorIterator& iter) {
 }
 
 void prelu_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "prelu_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "prelu_backward_cpu", [&]() {
     cpu_kernel_multiple_outputs(iter,
       [](scalar_t input, scalar_t weight, scalar_t grad) -> std::tuple<scalar_t, scalar_t> {
         auto mask = input > scalar_t{0};

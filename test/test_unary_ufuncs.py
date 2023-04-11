@@ -212,7 +212,16 @@ class TestUnaryUfuncs(TestCase):
                     rtol=16e-3,
                     atol=1e-5,
                 )
-
+            elif dtype is torch.half:
+                self.assertEqualHelper(
+                    actual,
+                    expected,
+                    msg,
+                    dtype=dtype,
+                    exact_dtype=exact_dtype,
+                    rtol=1.2e-03,
+                    atol=1e-03,
+                )
             else:
                 self.assertEqualHelper(
                     actual,
