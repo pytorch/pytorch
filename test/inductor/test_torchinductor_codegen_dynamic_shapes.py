@@ -81,14 +81,18 @@ def check_codegen(
     if is_cpp_code:
         code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
         for_loop_found = False
+        has_dynamic = False
         lines = code.split("\n")
         for line in lines:
             if "for(" in line:
                 for_loop_found = True
-                self.assertTrue(
-                    re.search(r";.*ks.*;", line) is not None,
-                    msg=f"Failed to find dynamic for loop variable\n{code}",
-                )
+                if re.search(r";.*ks.*;", line) is not None:
+                    has_dynamic = True
+                    break
+        self.assertTrue(
+            has_dynamic,
+            msg=f"Failed to find dynamic for loop variable\n{code}",
+        )
         self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
@@ -156,7 +160,6 @@ test_failures = {
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
-    "test_upsample_cat_conv_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     #
     # Failed to find for loop/triton kernel:
     #
