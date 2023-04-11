@@ -190,7 +190,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
         super().tearDown()
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="Flaky test", version="1.15", dynamic_only=True
+    )
     def test_simple_function(self):
         def func(x):
             # TODO(justinchuby): Replicate torch's type casting policy
@@ -203,7 +205,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="Flaky test", version="1.15", dynamic_only=True
+    )
     def test_func_with_args_and_kwargs(self):
         # Non-tensor optional kwargs are always folded into constant and
         # removed from input list in Dynamo-traced graph, so we can't
@@ -236,7 +240,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, func, (tensor_x,), b=torch.tensor(5.0)
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="Flaky test", version="1.15", dynamic_only=True
+    )
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
@@ -262,7 +268,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, MNISTModel(), (tensor_x,)
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="Flaky test", version="1.15", dynamic_only=True
+    )
     # test single op with no kwargs
     def test_sigmoid(self):
         x = torch.randn(1, 4, 2, 3)
@@ -298,7 +306,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-5,
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="Flaky test", version="1.15", dynamic_only=True
+    )
     def test_add(self):
         class DynamicAdd(torch.nn.Module):
             def forward(self, x, y):
@@ -313,7 +323,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicAdd(), (x, y), additional_test_inputs=[(another_x, another_y)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="Flaky test", version="1.15", dynamic_only=True
+    )
     def test_sigmoid_add(self):
         class DynamicAdd(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -335,7 +347,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="Flaky test", version="1.15", dynamic_only=True
+    )
     def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
             def forward(self, x, y):
@@ -523,7 +537,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="Flaky test", version="1.15", dynamic_only=True
+    )
     def test_view_dynamic_zero_dim(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):
@@ -539,7 +555,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(another_x,)],
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="Flaky test", version="1.15", dynamic_only=True
+    )
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -553,7 +571,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, model, (x,), additional_test_inputs=[(y,)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="Flaky test", version="1.15", dynamic_only=True
+    )
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
         # Download pytorch model
