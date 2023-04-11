@@ -1798,15 +1798,16 @@ class TestSparse(TestSparseBase):
     def test_sparse_sum(self, device, dtype, coalesced):
 
         def run_tests(S, td=None):
-            D = S.coalesce().to_dense().detach().requires_grad_(True)
+            D = S.to_dense().requires_grad_(True)
             if td is None:
                 S_sum = torch.sparse.sum(S)
                 D_sum = D.sum()
                 self.assertEqual(S_sum.item(), D_sum.item())
 
                 def fn(S):
+                    S = S.sparse_mask(S)
                     return torch.sparse.sum(S)
-                gradcheck(fn, (S,), masked=True)
+                gradcheck(fn, (S.clone().requires_grad_(True),))
             else:
                 S_sum = torch.sparse.sum(S, td)
                 D_sum = D.sum(td)
@@ -1814,8 +1815,10 @@ class TestSparse(TestSparseBase):
 
                 def fn(S):
                     res = torch.sparse.sum(S, td)
-                    return res.to_dense(masked_grad=True)
-                gradcheck(fn, (S,), masked=True)
+                    if res.layout != torch.strided:
+                        res = res.sparse_mask(res)
+                    return res.to_dense(masked_grad=False)
+                gradcheck(fn, (S.clone().requires_grad_(True),))
 
         nnz = 10
         sparse_dims = 2
@@ -1851,11 +1854,11 @@ class TestSparse(TestSparseBase):
 
         # test values().sum()
         S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
-        run_tests(S.requires_grad_(True))
+        run_tests(S)
 
         for test_dim in test_dims:
             S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
-            run_tests(S.requires_grad_(True), test_dim)
+            run_tests(S, test_dim)
 
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v, dtype, device, coalesced):
         shape = shape_i + (shape_v)
