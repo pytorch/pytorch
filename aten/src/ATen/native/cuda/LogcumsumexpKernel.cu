@@ -101,18 +101,20 @@ __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::comple
   }
 }
 
+template <typename scalar_t>
+__host__ __device__ scalar_t log_sum_exp_opmath_adapter(const scalar_t x_, const scalar_t y_){
+  const at::opmath_type<scalar_t> x{x_};
+  const at::opmath_type<scalar_t> y{y_};
+  return _log_add_exp_helper(x, y);
+}
+
 void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "logcumsumexp_cuda",
       [&]() {
-        using opmath_t = at::opmath_type<scalar_t>;
-        scalar_t init = -std::numeric_limits<scalar_t>::infinity();
-        auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x_, const scalar_t y_) -> scalar_t {
-          const opmath_t x{x_}, y{y_};
-          return _log_add_exp_helper(x, y);
-        };
-        scan_dim<scalar_t>(self, result, dim, init, log_add_exp);
+        const auto init = -std::numeric_limits<scalar_t>::infinity();
+        scan_dim<scalar_t>(self, result, dim, init, log_sum_exp_opmath_adapter<scalar_t>);
       });
 }
 
