@@ -9,7 +9,6 @@ from onnxscript import evaluator  # type: ignore[import]
 
 import torch
 import torch.fx
-
 from torch.onnx import _constants, _type_utils
 from torch.onnx._internal import _beartype, onnx_proto_utils
 from torch.onnx._internal.fx import diagnostics
