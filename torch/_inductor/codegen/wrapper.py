@@ -327,6 +327,9 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
+    def generate_extern_kernel_alloc(self, output_name, kernel, args):
+        self.writeline(f"{output_name} = {kernel}({', '.join(args)})")
+
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
             args.append(f"out={output_view.codegen_reference()}")
@@ -583,6 +586,9 @@ class WrapperCodeGen(CodeGen):
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
+
+    def val_to_str(self, s):
+        return repr(s)
 
     # The following methods are for memory management
     def make_buffer_allocation(self, buffer):
@@ -865,6 +871,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
         )
 
+    def generate_extern_kernel_alloc(self, output_name, kernel, args):
+        self.writeline(f"auto {output_name} = {kernel}({', '.join(args)});")
+
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
             output_as_strided = f"{output_view.codegen_reference()}"
@@ -938,6 +947,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.writeline(
             f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
+
+    def val_to_str(self, s):
+        if s is None:
+            return self.none_str
+        elif isinstance(s, bool):
+            return "true" if s else "false"
+        elif isinstance(s, str):
+            return f'"{s}"'
+        elif isinstance(s, (List, Tuple)):
+            return self.codegen_shape_tuple(s)
+        else:
+            return repr(s)
 
 
 class CudaWrapperCodeGen(CppWrapperCodeGen):
