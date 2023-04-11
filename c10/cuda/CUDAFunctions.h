@@ -34,6 +34,21 @@ C10_CUDA_API void device_synchronize();
 
 C10_CUDA_API void warn_or_error_on_sync();
 
+// Raw CUDA device management functions
+C10_CUDA_API cudaError_t GetDeviceCount(int* dev_count);
+
+C10_CUDA_API cudaError_t GetDevice(int* device);
+
+C10_CUDA_API cudaError_t SetDevice(int device);
+
+C10_CUDA_API cudaError_t MaybeSetDevice(int device);
+
+C10_CUDA_API int ExchangeDevice(int device);
+
+C10_CUDA_API int MaybeExchangeDevice(int device);
+
+C10_CUDA_API void SetTargetDevice();
+
 enum class SyncDebugMode { L_DISABLED = 0, L_WARN, L_ERROR };
 
 // this is a holder for c10 global state (similar to at GlobalContext)
@@ -95,6 +110,9 @@ C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
   }
   C10_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
+
+C10_CUDA_API bool hasPrimaryContext(int64_t device_index);
+C10_CUDA_API c10::optional<int64_t> getDeviceIndexWithPrimaryContext();
 
 } // namespace cuda
 } // namespace c10

@@ -106,10 +106,6 @@ class AveragedModel(Module):
             self.module = self.module.to(device)
         self.register_buffer('n_averaged',
                              torch.tensor(0, dtype=torch.long, device=device))
-        if avg_fn is None:
-            def avg_fn(averaged_model_parameter, model_parameter, num_averaged):
-                return averaged_model_parameter + \
-                    (model_parameter - averaged_model_parameter) / (num_averaged + 1)
         self.avg_fn = avg_fn
         self.use_buffers = use_buffers
 
@@ -131,8 +127,17 @@ class AveragedModel(Module):
             if self.n_averaged == 0:
                 p_swa.detach().copy_(p_model_)
             else:
-                p_swa.detach().copy_(self.avg_fn(p_swa.detach(), p_model_,
-                                                 self.n_averaged.to(device)))
+                if self.avg_fn is None:
+                    p_swa.detach().copy_(
+                        p_swa.detach()
+                        + (p_model_ - p_swa.detach()) / (self.n_averaged.to(device) + 1)
+                    )
+                else:
+                    p_swa.detach().copy_(
+                        self.avg_fn(
+                            p_swa.detach(), p_model_, self.n_averaged.to(device)
+                        )
+                    )
         if not self.use_buffers:
             # If not apply running averages to the buffers,
             # keep the buffers in sync with the source model.

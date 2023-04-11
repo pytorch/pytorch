@@ -5,7 +5,7 @@ import inspect
 from typing import Dict, List
 
 from .. import variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
@@ -33,19 +33,33 @@ class ConstDictVariable(VariableTracker):
         return self.user_cls
 
     def reconstruct(self, codegen):
-        for key, value in self.items.items():
+        # instructions to load collections.OrderedDict if necessary
+        if self.user_cls is collections.OrderedDict:
+            codegen.extend_output(
+                [
+                    codegen.create_load_python_module(collections, True),
+                    codegen.create_load_attr("OrderedDict"),
+                ]
+            )
+        # instructions to build the dict keys and values
+        for key in self.items.keys():
             if istensor(key):
-                codegen.extend_output(
-                    [
-                        codegen.create_load_global(global_key_name(key), add=True),
-                        create_instruction("CALL_FUNCTION", 0),
-                    ]
+                codegen.append_output(
+                    codegen.create_load_global(global_key_name(key), True, add=True)
                 )
+                codegen.extend_output(create_call_function(0, False))
             else:
                 codegen.append_output(codegen.create_load_const(key))
             codegen(self.items[key])
-
-        return [create_instruction("BUILD_MAP", len(self.items))]
+        # BUILD_MAP and calling collections.OrderedDict if necessary
+        if self.user_cls is collections.OrderedDict:
+            return [
+                create_instruction("BUILD_MAP", arg=len(self.items)),
+                *create_call_function(1, False),
+            ]
+        # BUILD_MAP only if user_cls is dict
+        else:
+            return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
         return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
@@ -367,10 +381,7 @@ class DataClassVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
-        return [
-            codegen.create_load_const(keys),
-            create_instruction("CALL_FUNCTION_KW", len(keys)),
-        ]
+        return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
         self,
@@ -438,3 +449,6 @@ class HFPretrainedConfigVariable(VariableTracker):
         from . import ConstantVariable
 
         return ConstantVariable(getattr(self.obj, name))
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)

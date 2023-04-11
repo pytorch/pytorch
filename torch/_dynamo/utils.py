@@ -10,20 +10,24 @@ import functools
 import gc
 import inspect
 import itertools
-import logging.config
+import logging
 import math
 import operator
 import os
 import pstats
-import re
 import sys
+import textwrap
 import time
 import types
 import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List
+from typing import Any, Dict, Tuple, Union
+
+import torch._logging
+from torch._guards import detect_fake_mode  # noqa: F401
+from . import config
 
 try:
     import numpy as np
@@ -41,12 +45,12 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_flatten, tree_map
-
-from . import config, logging as torchdynamo_logging
+from torch.utils._pytree import tree_map
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
+troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
+nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
+nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +95,7 @@ def dynamo_profiled(func):
 frame_phase_timing = collections.OrderedDict()
 
 curr_frame = 0
+
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def increment_frame():
@@ -159,9 +164,10 @@ def dynamo_timed(original_function=None, phase_name=None):
             key = func.__qualname__
             if key not in compilation_metrics:
                 compilation_metrics[key] = []
-            t0 = time.time()
-            r = func(*args, **kwargs)
-            time_spent = time.time() - t0
+            with torch.profiler.record_function(f"{key} (dynamo_timed)"):
+                t0 = time.time()
+                r = func(*args, **kwargs)
+                time_spent = time.time() - t0
             # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
             compilation_metrics[key].append(time_spent)
             if phase_name:
@@ -196,7 +202,6 @@ def compile_times(repr="str", aggregate=False):
     """
 
     def fmt_fn(values, item_fn=lambda x: x):
-
         if aggregate:
             return item_fn(sum(values))
         return ", ".join(map(item_fn, values))
@@ -255,21 +260,49 @@ class DuplicateWarningChecker:
 graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
-def init_logging():
-    torchdynamo_logging.init_logging(
-        config.log_level, log_file_name=config.log_file_name
-    )
+def setup_compile_debug():
+    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+
+    if compile_debug:
+        torch._logging.set_logs(
+            dynamo=logging.DEBUG,
+            aot=logging.DEBUG,
+            inductor=logging.DEBUG,
+            output_code=True,  # this is off by default
+        )
+        return add_file_handler()
+
+    return contextlib.ExitStack()
+
+
+def reset_graph_break_dup_checker():
     graph_break_dup_warning_checker.reset()
 
 
-def format_graph_tabular(graph):
-    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
-    return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
+def add_file_handler():
+    log_path = os.path.join(get_debug_dir(), "torchdynamo")
+    if not os.path.exists(log_path):
+        os.makedirs(log_path)
+
+    log_file_handler = logging.FileHandler(os.path.join(log_path, "debug.log"))
+    logger = logging.getLogger("torch._dynamo")
+    logger.addHandler(log_file_handler)
+
+    exitstack = contextlib.ExitStack()
+    exitstack.callback(lambda: logger.removeHandler(log_file_handler))
+    return exitstack
 
 
-def format_bytecode(prefix, name, filename, line_no, code):
-    return f"{prefix} {name} {filename}\
- line {line_no} \n{dis.Bytecode(code).dis()}\n "
+def setup_log_file():
+    exitstack = contextlib.ExitStack()
+    if config.log_file_name is not None:
+        log_file_handler = logging.FileHandler(config.log_file_name)
+        for logger in logging.get_loggers():
+            logger.addHandler(log_file_handler)
+            exitstack.callback(lambda: logger.removeHandler(log_file_handler))
+        return exitstack
+
+    return exitstack
 
 
 def gen_record_file_name(exc, code):
@@ -281,7 +314,7 @@ def write_record_to_file(filename, exec_record):
     try:
         if os.path.exists(filename):
             log.warning(
-                f"Unable to write execution record {filename}; file already exists."
+                "Unable to write execution record %s; file already exists.", filename
             )
         else:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -351,7 +384,9 @@ def is_typing(value):
     if sys.version_info < (3, 9):
         return isinstance(value, typing._GenericAlias)
     else:
-        return isinstance(value, typing._SpecialGenericAlias)
+        return isinstance(
+            value, (typing._SpecialGenericAlias, typing._UnionGenericAlias)
+        )
 
 
 def is_numpy_int_type(value):
@@ -524,7 +559,7 @@ def clone_input(x):
 
 
 def clone_inputs(example_inputs):
-    if isinstance(example_inputs, dict):
+    if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
             assert isinstance(value, torch.Tensor)
@@ -742,6 +777,12 @@ tuple_iterator_len = tuple_iterator.__length_hint__
 object_new = object.__new__
 
 
+def nn_module_new(cls):
+    obj = object_new(cls)
+    torch.nn.Module.__init__(obj)
+    return obj
+
+
 def product(it):
     return functools.reduce(operator.mul, it, 1)
 
@@ -752,12 +793,11 @@ def tuple_iterator_getitem(it, index):
 
 
 def enum_repr(value):
-    # Workaround repr(Enum) returning invalid global reference before python 3.11
-    # https://peps.python.org/pep-0663/
-    if sys.version_info < (3, 11):
-        return str(value)
-    else:
-        return repr(value)
+    enum_name = str(value)
+
+    name, val = enum_name.split(".")
+    local_name = f'L["{name}"].{val}'
+    return local_name
 
 
 def dict_param_key_ids(value):
@@ -782,19 +822,6 @@ def dict_const_keys_repr(const_keys):
 
 def global_key_name(key):
     return f"__dict_key_{id(key)}"
-
-
-def rename_implicit(v):
-    """
-    Usage of inline comprehensions generates a implicit ".0" variable that
-    trips up guard generation.  This renames these variables in guards.
-    """
-    m = re.match(r"^[.](\d+)$", v)
-    if m:
-        assert v == ".0", f"currently only .0 supported: {v}"
-        # to support .1 etc see guards.py and _eval_frame.c
-        return f"___implicit{m.group(1)}"
-    return v
 
 
 from torch._subclasses import (  # noqa: F401
@@ -872,7 +899,7 @@ def same(
                     relax_numpy_equality=relax_numpy_equality,
                 )
             ):
-                log.error(f"Accuracy failed for key name {k}")
+                log.error("Accuracy failed for key name %s", k)
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
@@ -886,7 +913,7 @@ def same(
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
             if ref.dtype != res.dtype:
-                log.error(f"dtype mismatch {ref.dtype}, {res.dtype}")
+                log.error("dtype mismatch %s, %s", ref.dtype, res.dtype)
                 return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
@@ -909,7 +936,7 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                log.warning(f"Similarity score={score.cpu().detach().item()}")
+                log.warning("Similarity score=%s", score.cpu().detach().item())
             return score >= 0.99
         else:
             if not exact_dtype:
@@ -933,35 +960,42 @@ def same(
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.
-                    # Similary, for 1x1 kenerls, there seems to be high noise with amp.
+                    # Similary, for 1x1 kernels, there seems to be high noise with amp.
                     multiplier = 3.0
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log.error(
-                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
+                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s",
+                        res_error,
+                        ref_error,
+                        res.size(),
                     )
                     # import pdb; pdb.set_trace()
                 return passes_test
 
-            log.error(f"Accuracy failed: allclose not within tol={tol}")
+            log.error("Accuracy failed: allclose not within tol=%s", tol)
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
         r = ref == res
         if not r:
-            log.error(f"Accuracy failed ({type(ref)}): {ref} != {res}")
+            log.error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
         return r
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error("Accuracy failed (float): {ref} != {res} (within tol={tol})")
+            log.error(
+                "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
+            )
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
-        if relax_numpy_equality:
+        if relax_numpy_equality and not (
+            is_numpy_int_type(res) or is_numpy_float_type(res)
+        ):
             ref = ref.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
-            log.error("Accuracy failed (numpy): {ref} != {res}")
+            log.error("Accuracy failed (numpy): %s != %s", ref, res)
         return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
@@ -1009,7 +1043,6 @@ def disable_cache_limit():
     try:
         yield
     finally:
-        pass
         config.cache_size_limit = prior
 
 
@@ -1018,6 +1051,10 @@ orig_code_map = ExactWeakKeyDictionary()
 
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures = collections.defaultdict(list)
+
+# keep record of compiled code, if we are in "error if recompile"
+# to track code that dynamo has compiled previously
+seen_code_map = ExactWeakKeyDictionary()
 
 
 class CompileProfiler:
@@ -1058,43 +1095,57 @@ class CompileProfiler:
             [format_func_info(code), num_recompiles(code), recompile_reasons(code)]
             for code in gf
         ]
-        rpt = "Torchdynamo Profiler Report\n"
-        if "graph_break" in counters:
-            rpt += "\n"
-            rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
-            rpt += (
-                "You may gain additional insight by passing `nopython=True` to torch._dynamo.optimize, "
-                "to break on the first condition.\n"
-            )
-            graph_breaks = counters["graph_break"]
-            rpt += tabulate(
-                [[msg, graph_breaks[msg]] for msg in graph_breaks],
-                headers=["Graph Break Reason", "Count"],
-            )
 
-        if len(gf):
-            max_recompiles = max([num_recompiles(code) for code in gf])
-            rpt += "\n"
-            rpt += (
-                "These subgraphs were recompiled more than once due to guard failures."
-            )
-            rpt += (
-                "Guard failures indicate some condition assumed to be static by the tracer changed, "
-                "making it unsafe to reuse the compiled program."
-            )
-            rpt += tabulate(
-                summarized_gf,
-                headers=["Function", "Num Recompiles", "Recompile Reasons"],
-            )
-            rpt += "\n"
-            rpt += (
-                f"Set torch._dynamo.config.cache_size_limit to "
-                f"{max_recompiles} to avoid being cache limited.\n"
-            )
-        else:
-            rpt += "No cache-limited recompilations detected.\n"
+        def graph_break_report():
+            if "graph_break" in counters:
+                graph_breaks = counters["graph_break"]
+                return tabulate(
+                    [[msg, graph_breaks[msg]] for msg in graph_breaks],
+                    headers=["Graph Break Reason", "Count"],
+                )
 
-        return rpt
+        def recompilation_report():
+            if len(gf):
+                max_recompiles = max([num_recompiles(code) for code in gf])
+                recomp_table = tabulate(
+                    summarized_gf,
+                    headers=["Function", "Recompiles", "Recompile Reasons"],
+                )
+                return recomp_table + textwrap.dedent(
+                    f"""
+
+                    Set torch._dynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.
+                """
+                )
+
+        report = textwrap.dedent(
+            """
+            Torchdynamo Profiler Report
+            ===========================
+
+            Graph Breaks
+            ------------
+            Graph breaks happen when torchdynamo encounters code it can't safely trace.
+            If you want to find out why breaks are happening, check below for each break reason
+            You may gain additional insight by passing `fullgraph=True` to torch.compile,
+            to stop at the first break.
+
+        """
+        )
+        report += graph_break_report() or "No graph breaks detected."
+        report += textwrap.dedent(
+            """
+
+            Recompilation
+            -------------
+            These subgraphs were recompiled more than once due to guard failures
+            Guard failures indicate some condition assumed to be static by the tracer changed,
+            making it unsafe to reuse the compiled program.
+
+        """
+        )
+        report += recompilation_report() or "No recompilation detected.\n"
+        return report
 
 
 # return same dir unless user changes config between calls
@@ -1139,14 +1190,16 @@ def get_fake_value(node, tx):
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
 
-        if not is_lazy_module(nnmodule):
-            nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
+            nnmodule._infer_parameters(nnmodule, args)
 
-    if op == "call_module" and is_lazy_module(nnmodule):
-        assert nnmodule is not None
-        # In the case of a lazy module, we want to run
-        # the pre-hooks which initialize it
-        nnmodule(*args, **kwargs)
+        # no matter it's lazy module or not, we should copy to fake mode.
+        nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+
     try:
         with tx.fake_mode, enable_python_dispatcher():
             return wrap_fake_exception(
@@ -1166,6 +1219,14 @@ def get_fake_value(node, tx):
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             unimplemented(f"dynamic shape operator: {cause.func}")
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
+        ):
+            unimplemented(
+                f"unsupported operator: {cause.func} (see "
+                "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
+                " for how to fix)"
+            )
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
@@ -1264,23 +1325,6 @@ def assert_no_fake_params_or_buffers(gm):
         ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
-def fake_mode_from_tensors(inputs: List[Any]):
-    """
-    Takes a list of anything, unflattened is fine, returns a fake_mode
-    if any are fake. All fake modes on all fake tensors must be identical.
-    Returns None if no fake_mode is fine
-    """
-    flat_inputs, _ = tree_flatten(inputs)
-    fake_mode = None
-    for flat_input in flat_inputs:
-        if isinstance(flat_input, torch._subclasses.FakeTensor):
-            if fake_mode is None:
-                fake_mode = flat_input.fake_mode
-            else:
-                assert fake_mode is flat_input.fake_mode
-    return fake_mode
-
-
 def fqn(obj: Any):
     """
     Returns the fully qualified name of the object.
@@ -1290,6 +1334,13 @@ def fqn(obj: Any):
 
 def ifdyn(count1, count2):
     if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
+
+
+def ifunspec(count1, count2):
+    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
         return count1
     else:
         return count2
@@ -1325,3 +1376,139 @@ def get_custom_getattr(value: Any):
         # ignore this case of getattr
         getattr_fn = None
     return getattr_fn
+
+
+class TensorStaticReason(enum.Enum):
+    PARAMETER = 2
+    CONFIG_NOT_DYN = 3
+    NOT_TENSOR = 4
+
+
+def tensor_static_reason_to_message(reason: TensorStaticReason):
+    if reason == TensorStaticReason.PARAMETER:
+        return "mark_dynamic on parameter, parameters are always static today."
+    if reason == TensorStaticReason.CONFIG_NOT_DYN:
+        return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
+    if reason == TensorStaticReason.NOT_TENSOR:
+        return "mark_dynamic on a non tensor, how did this happen?"
+    raise AssertionError(f"Illegal reason {reason}")
+
+
+def tensor_always_has_static_shape(
+    tensor: Union[torch.Tensor, Any], is_tensor: bool
+) -> Tuple[bool, TensorStaticReason]:
+    """
+    Given a tensor, source, and is_tensor flag, determine if a shape should be static.
+
+    Args:
+    tensor - the real tensor to evaluate, parameters force a static shape.
+    is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
+    tensors not in a TensorVariable for whatever reason are forced static.
+
+    Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
+    The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
+    """
+    if type(tensor) is torch.nn.Parameter:
+        return True, TensorStaticReason.PARAMETER
+    if config.dynamic_shapes is False:
+        return True, TensorStaticReason.CONFIG_NOT_DYN
+    if not is_tensor:
+        return True, TensorStaticReason.NOT_TENSOR
+    return False, None
+
+
+class LazyString:
+    def __init__(self, func, *args, **kwargs):
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+
+    def __str__(self):
+        return self.func(*self.args, **self.kwargs)
+
+
+def lazy_format_graph_code(name, gm, maybe_id=None):
+    def format_name():
+        if maybe_id is not None:
+            return f"{name} {maybe_id}"
+        else:
+            return name
+
+    return LazyString(
+        lambda: _format_graph_code(
+            f"===== {format_name()} =====\n",
+            gm.forward.__code__.co_filename,
+            gm.print_readable(print_output=False),
+        )
+    )
+
+
+def _format_graph_code(name, filename, graph_str):
+    return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
+
+
+def lazy_format_graph_tabular(fn_name, gm):
+    def inner():
+        try:
+            from tabulate import tabulate  # TODO: Check that this is installed
+        except ImportError:
+            return (
+                "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
+                + format_graph_code(fn_name, gm)
+            )
+
+        node_specs = [
+            [n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes
+        ]
+        graph_str = tabulate(
+            node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
+        )
+        return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
+
+    return LazyString(inner)
+
+
+def format_bytecode(prefix, name, filename, line_no, code):
+    return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
+
+
+def nnmodule_has_hooks(
+    mod,
+    check_forward_hooks=False,
+    check_backward_hooks=False,
+    check_state_dict_hooks=False,
+):
+    """
+    Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
+    hooks executed during module.__call__, and state_dict hooks which are executed separately.
+    """
+    hook_dicts_to_check = []
+    check_all_hooks = (
+        not check_forward_hooks
+        and not check_backward_hooks
+        and not check_state_dict_hooks
+    )
+    if check_forward_hooks or check_all_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_forward_pre_hooks",
+                "_forward_hooks",
+            ]
+        )
+    if check_backward_hooks or check_all_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_backward_pre_hooks",
+                "_backward_hooks",
+            ]
+        )
+    if check_state_dict_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_state_dict_pre_hooks",
+                "_state_dict_hooks",
+                "_load_state_dict_pre_hooks",
+                "_load_state_dict_post_hooks",
+            ]
+        )
+    return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))

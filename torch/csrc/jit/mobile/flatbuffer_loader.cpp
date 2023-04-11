@@ -733,7 +733,7 @@ void FlatbufferLoader::extractJitSourceAndConstants(
     }
   }
   const auto* jit_constants = module_->jit_constants();
-  for (auto i = 0; i < jit_constants->size(); ++i) {
+  for (const auto i : c10::irange(jit_constants->size())) {
     constants->emplace_back(getIValue(jit_constants->Get(i)));
   }
   parseExtraFilesFromVector(module_->jit_sources(), jit_sources);

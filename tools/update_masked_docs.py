@@ -9,7 +9,6 @@ import os
 
 
 def main() -> None:
-
     target = os.path.join("torch", "masked", "_docs.py")
 
     try:

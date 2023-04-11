@@ -1,4 +1,5 @@
 import importlib
+import logging
 import os
 import tempfile
 
@@ -23,6 +24,9 @@ try:
 
 except ImportError:
     _np_dtype = None
+
+
+log = logging.getLogger(__name__)
 
 
 def default_provider(device_type):
@@ -78,8 +82,14 @@ def onnxrt(gm, example_inputs, *, filename=None, provider=None):
 
     def _call(*initial_args):
         binding = session.io_binding()
+        active_inputs = {inp.name for inp in session.get_inputs()}
         args = [a.contiguous() for a in initial_args]
         for name, value in zip(input_names, args):
+            if name not in active_inputs:
+                log.warning(
+                    "input %s skipped as not found in onnx inference session", name
+                )
+                continue
             dev = value.device
             binding.bind_input(
                 name,
@@ -116,8 +126,3 @@ def onnxrt(gm, example_inputs, *, filename=None, provider=None):
         return outputs
 
     return _call
-
-
-@register_backend
-def tensorrt(gm, example_inputs):
-    return onnxrt(gm, example_inputs, provider="TensorrtExecutionProvider")

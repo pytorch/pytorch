@@ -3,7 +3,10 @@
 import tempfile
 import torch
 from copy import deepcopy
-from torch.library import Library
+from torch.library import Library, impl
+from torch.fx.experimental.proxy_tensor import ShapeEnv
+from torch import SymInt
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
@@ -77,7 +80,7 @@ class TestPythonRegistration(TestCase):
 
         def my_sum(*args, **kwargs):
             run[0] = True
-            return args[0]
+            return args[0].clone()
 
         my_lib1 = Library("aten", "IMPL")
         my_lib1.impl('aten::sum', my_sum, "CPU")
@@ -213,7 +216,7 @@ class TestPythonRegistration(TestCase):
 
     def test_extend_library_with_dispatch_key_arg(self):
         def my_sum(*args, **kwargs):
-            return args[0]
+            return args[0].clone()
         my_lib1 = Library("aten", "IMPL", dispatch_key="CPU")
 
         # RuntimeError: Explicitly provided dispatch key (Conjugate) is
@@ -233,7 +236,7 @@ class TestPythonRegistration(TestCase):
         # Example 1
         @torch.library.impl(my_lib1, "sum", "CPU")
         def my_sum(*args, **kwargs):
-            return args[0]
+            return args[0].clone()
 
         x = torch.tensor([1, 2])
         self.assertEqual(torch.ops.foo.sum(x), x)
@@ -246,7 +249,7 @@ class TestPythonRegistration(TestCase):
             if args[0]._is_zerotensor():
                 return torch._efficientzerotensor(args[0].shape)
             else:
-                return args[0]
+                return args[0].clone()
 
         y = torch._efficientzerotensor(3)
         self.assertTrue(torch.ops.foo.sum(y)._is_zerotensor())
@@ -254,6 +257,51 @@ class TestPythonRegistration(TestCase):
 
         del my_lib2
         del my_lib1
+
+    def test_create_new_library_fragment_no_existing(self):
+        my_lib = Library("foo", "FRAGMENT")
+
+        my_lib.define("sum2(Tensor self) -> Tensor")
+
+        @torch.library.impl(my_lib, "sum2", "CPU")
+        def my_sum(*args, **kwargs):
+            return args[0]
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.ops.foo.sum2(x), x)
+
+        del my_lib
+
+    def test_create_new_library_fragment_with_existing(self):
+        my_lib1 = Library("foo", "DEF")
+
+        # Create a fragment
+        my_lib2 = Library("foo", "FRAGMENT")
+
+        my_lib2.define("sum4(Tensor self) -> Tensor")
+
+        @torch.library.impl(my_lib2, "sum4", "CPU")
+        def my_sum4(*args, **kwargs):
+            return args[0]
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.ops.foo.sum4(x), x)
+
+        # Create another fragment
+        my_lib3 = Library("foo", "FRAGMENT")
+
+        my_lib3.define("sum3(Tensor self) -> Tensor")
+
+        @torch.library.impl(my_lib3, "sum3", "CPU")
+        def my_sum3(*args, **kwargs):
+            return args[0]
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.ops.foo.sum3(x), x)
+
+        del my_lib1
+        del my_lib2
+        del my_lib3
 
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     def test_alias_analysis(self):
@@ -281,8 +329,28 @@ class TestPythonRegistration(TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported kind"):
             my_lib1 = Library("myns", "BLA")
 
-        with self.assertRaisesRegex(ValueError, "reserved namespace"):
-            my_lib1 = Library("prim", "DEF")
+        for kind in ('DEF', 'FRAGMENT'):
+            with self.assertRaisesRegex(ValueError, "reserved namespace"):
+                my_lib1 = Library("prim", kind)
+
+    def test_returning_symint(self) -> None:
+        shape_env = ShapeEnv()
+        fake_tensor_mode = FakeTensorMode(shape_env=shape_env)
+
+        ft = fake_tensor_mode.from_tensor(torch.rand(2, 3))
+
+        s0, s1 = ft.shape
+
+        tlib = Library("tlib", "DEF")
+        tlib.define("sqsum(SymInt a, SymInt b) -> SymInt")
+
+        @impl(tlib, "sqsum", "CompositeExplicitAutograd")
+        def sqsum(a: SymInt, b: SymInt):
+            return a * a + b * b
+
+        out = torch.ops.tlib.sqsum.default(s0, s1)
+        out_val = shape_env.evaluate_expr(out.node.expr)
+        self.assertEquals(out_val, 13)
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:

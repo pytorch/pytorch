@@ -138,7 +138,7 @@ struct TORCH_API AccumulateGrad : public Node {
         // shallow copy. We need a shallow copy so that modifying the original
         // grad tensor doesn't modify the grad we accumulate.
         // We only skip clone if indices and values themselves are contiguous
-        // for backward compatiblity reasons. Since without this optimization,
+        // for backward compatibility reasons. Since without this optimization,
         // earlier we would clone the entire SparseTensor which cloned indices
         // and values.
         // For details see https://github.com/pytorch/pytorch/issues/34375.

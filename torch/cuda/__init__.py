@@ -37,6 +37,15 @@ _queued_calls = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 
+_HAS_PYNVML = False
+_PYNVML_ERR = None
+try:
+    import pynvml  # type: ignore[import]
+    _HAS_PYNVML = True
+except ImportError as err:
+    _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
+
+
 
 class _LazySeedTracker:
     # Since seeding is memory-less, only track the latest seed.
@@ -74,6 +83,14 @@ if hasattr(torch._C, '_cuda_exchangeDevice'):
     _exchange_device = torch._C._cuda_exchangeDevice
 else:
     def _exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without CUDA support")
+
+if hasattr(torch._C, '_cuda_maybeExchangeDevice'):
+    _maybe_exchange_device = torch._C._cuda_maybeExchangeDevice
+else:
+    def _maybe_exchange_device(device: int) -> int:
         if device < 0:
             return -1
         raise RuntimeError("PyTorch was compiled without CUDA support")
@@ -296,7 +313,7 @@ class _DeviceGuard:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        torch.cuda._exchange_device(self.prev_idx)
+        self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
         return False
 
 
@@ -316,7 +333,7 @@ class device:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        torch.cuda._exchange_device(self.prev_idx)
+        self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
         return False
 
 
@@ -594,7 +611,7 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
         for idx, uuid in enumerate(uuids):
             if not uuid.startswith(candidate):
                 continue
-            # Ambigous candidate
+            # Ambiguous candidate
             if best_match != -1:
                 return -1
             best_match = idx
@@ -651,7 +668,7 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
         if uuids is None:
             raise RuntimeError("Can't get device UUIDs")
         visible_devices = _transform_uuid_to_ordinals(cast(List[str], visible_devices), uuids)
-    idx_map = {idx: real_idx for idx, real_idx in enumerate(cast(List[int], visible_devices))}
+    idx_map = dict(enumerate(cast(List[int], visible_devices)))
     if idx not in idx_map:
         raise RuntimeError(f"device {idx} is not visible (CUDA_VISIBLE_DEVICES={visible_devices})")
     return idx_map[idx]
@@ -782,6 +799,19 @@ def get_sync_debug_mode() -> int:
     return torch._C._cuda_get_sync_debug_mode()
 
 
+def _get_pynvml_handler(device: Optional[Union[Device, int]] = None):
+    if not _HAS_PYNVML:
+        raise ModuleNotFoundError("pynvml does not seem to be installed or it can't be imported.") from _PYNVML_ERR
+    from pynvml import NVMLError_DriverNotLoaded
+    try:
+        pynvml.nvmlInit()
+    except NVMLError_DriverNotLoaded as e:
+        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
+
+    device = _get_nvml_device_index(device)
+    handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+    return handle
+
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     r"""Returns the percent of time over the past sample period during which global (device)
     memory was being read or written. as given by `nvidia-smi`.
@@ -794,15 +824,8 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    try:
-        import pynvml  # type: ignore[import]
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
-    from pynvml import NVMLError_DriverNotLoaded
-    try:
-        pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded as e:
-        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
+    handle = _get_pynvml_handler()
+
     device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
@@ -820,18 +843,58 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    try:
-        import pynvml  # type: ignore[import]
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
-    from pynvml import NVMLError_DriverNotLoaded
-    try:
-        pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded as e:
-        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
+
+    handle = _get_pynvml_handler(device)
     device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+
+def temperature(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Returns the average temperature of the GPU sensor in Degrees C (Centigrades)
+        over the past sample period as given by `nvidia-smi`.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Warning: Each sample period may be between 1 second and 1/6 second,
+    depending on the product being queried.
+    """
+    handle = _get_pynvml_handler(device)
+    # 0 refers to the temperature sensor for the GPU die.
+    return pynvml.nvmlDeviceGetTemperature(handle, 0)
+
+def power_draw(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Returns the average power draw of the GPU sensor in mW (MilliWatts)
+        over the past sample period as given by `nvidia-smi` for Fermi or newer fully supported devices.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Warning: Each sample period may be between 1 second and 1/6 second,
+    depending on the product being queried.
+    """
+    handle = _get_pynvml_handler(device)
+    return pynvml.nvmlDeviceGetPowerUsage(handle)
+
+def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Returns the clock speed of the GPU SM in Hz Hertz over the past sample period as given by `nvidia-smi`.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Warning: Each sample period may be between 1 second and 1/6 second,
+    depending on the product being queried.
+    """
+    handle = _get_pynvml_handler(device)
+    return pynvml.nvmlDeviceGetClockInfo(handle, 1)
+
+
 
 
 from .memory import *  # noqa: F403
@@ -1045,7 +1108,8 @@ __all__ = [
     'is_current_stream_capturing', 'is_initialized', 'jiterator', 'list_gpu_processes', 'make_graphed_callables',
     'manual_seed', 'manual_seed_all', 'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved',
     'mem_get_info', 'memory', 'memory_allocated', 'memory_cached', 'memory_reserved', 'memory_snapshot',
-    'memory_stats', 'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'nccl', 'nvtx', 'profiler',
-    'random', 'reset_accumulated_memory_stats', 'reset_max_memory_allocated', 'reset_max_memory_cached',
-    'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction', 'set_rng_state',
-    'set_rng_state_all', 'set_stream', 'set_sync_debug_mode', 'sparse', 'stream', 'streams', 'synchronize', 'utilization']
+    'memory_stats', 'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'temperature', 'power_draw',
+    'clock_rate', 'nccl', 'nvtx', 'profiler', 'random', 'reset_accumulated_memory_stats', 'reset_max_memory_allocated',
+    'reset_max_memory_cached', 'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction',
+    'set_rng_state', 'set_rng_state_all', 'set_stream', 'set_sync_debug_mode', 'sparse', 'stream', 'streams',
+    'synchronize', 'utilization']

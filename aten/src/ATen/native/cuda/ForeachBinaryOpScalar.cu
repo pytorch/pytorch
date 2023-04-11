@@ -57,6 +57,7 @@ void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
                                                 /* res_arg_index */ 0>(),
                                                 Op<opmath_t>(),
                           scalar.to<opmath_t>());
+    increment_version(tensors);
 }
 
 template<template<class> class Op>

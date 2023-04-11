@@ -32,8 +32,8 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 import builtins
 
 __all__ = [
-    'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
-    'set_default_device',
+    'typename', 'is_tensor', 'is_storage',
+    'set_default_tensor_type', 'set_default_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
@@ -49,7 +49,7 @@ __all__ = [
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
-    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap'
+    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
 ]
 
 ################################################################################
@@ -246,9 +246,12 @@ class SymInt:
         self.node = node
 
     def __bool__(self):
-        return self.node.bool_()
+        return builtins.bool(self != 0)
 
     def __int__(self):
+        return self.node.int_()
+
+    def __index__(self):
         return self.node.int_()
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
@@ -288,8 +291,6 @@ class SymFloat:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
@@ -337,14 +338,15 @@ class SymBool:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
 
     def __bool__(self):
         return self.node.bool_()
+
+    def __int__(self):
+        return builtins.int(self.node.bool_())
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
     def __and__(self, other) -> "SymBool":
@@ -689,6 +691,8 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
         * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
+        * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -729,6 +733,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
+        * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -916,6 +921,151 @@ def is_warn_always_enabled():
     :func:`torch.set_warn_always` documentation for more details.
     """
     return _C._get_warnAlways()
+
+################################################################################
+# Define error checking functions
+################################################################################
+
+# These error checking functions must be kept consistent with their C++
+# equivalents. Their C++ equivalents are mentioned where applicable.
+
+def _check_with(error_type, cond, message):
+    if not isinstance(cond, builtins.bool):
+        raise TypeError(f'cond must be a bool, but got {type(cond)}')
+
+    if cond:
+        return
+
+    # error_type must be a subclass of Exception and not subclass of Warning
+    assert issubclass(error_type, Exception) and not issubclass(error_type, Warning)
+
+    if message is None:
+        message_evaluated = (
+            'Expected cond to be True, but got False. (Could this error '
+            'message be improved? If so, please report an enhancement request '
+            'to PyTorch.)')
+
+    else:
+        if not callable(message):
+            raise TypeError('message must be a callable')
+
+        message_evaluated = str(message())
+
+    raise error_type(message_evaluated)
+
+def _check(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``RuntimeError``
+
+    C++ equivalent: ``TORCH_CHECK``
+
+    Args:
+        cond (:class:`bool`): If False, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_with(RuntimeError, cond, message)
+
+def _check_index(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``IndexError``
+
+    C++ equivalent: ``TORCH_CHECK_INDEX``
+
+    Args:
+        cond (:class:`bool`): If False, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_with(IndexError, cond, message)
+
+def _check_value(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``ValueError``
+
+    C++ equivalent: ``TORCH_CHECK_VALUE``
+
+    Args:
+        cond (:class:`bool`): If False, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_with(ValueError, cond, message)
+
+def _check_type(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``TypeError``
+
+    C++ equivalent: ``TORCH_CHECK_TYPE``
+
+    Args:
+        cond (:class:`bool`): If False, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_with(TypeError, cond, message)
+
+def _check_not_implemented(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``NotImplementedError``
+
+    C++ equivalent: ``TORCH_CHECK_NOT_IMPLEMENTED``
+
+    Args:
+        cond (:class:`bool`): If False, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_with(NotImplementedError, cond, message)
+
+def _check_tensor_all_with(error_type, cond, message=None):
+    if not torch.is_tensor(cond):
+        raise TypeError(f'cond must be a tensor, but got {type(cond)}')
+
+    if not cond.dtype == torch.bool:
+        raise TypeError(
+            f'cond tensor must have dtype torch.bool, but got {cond.dtype}')
+
+    _check_with(error_type, cond._is_all_true().item(), message)
+
+# C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
+def _check_tensor_all(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``RuntimeError``
+
+    C++ equivalent: ``TORCH_CHECK_TENSOR_ALL``
+
+    Args:
+        cond (:class:`torch.Tensor`): Tensor of dtype ``torch.bool``. If any
+            element is ``False``, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_tensor_all_with(RuntimeError, cond, message)
 
 ################################################################################
 # Define numeric constants
@@ -1323,7 +1473,6 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
-
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
@@ -1337,7 +1486,7 @@ class _TorchCompileInductorWrapper:
             self.config["triton.cudagraphs"] = False
             assert "triton.cudagraphs" not in (
                 options or ()
-            ), "triton.cudagraphs does not support dynamic shapes"
+            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileInductorWrapper) and
@@ -1347,20 +1496,11 @@ class _TorchCompileInductorWrapper:
     def apply_mode(self, mode: Optional[str]):
         if mode is None or mode == "default":
             pass
-        elif mode == "reduce-overhead":
-            self.apply_options({
-                "triton.cudagraphs": True,
-                "size_asserts": False,
-            })
-        elif mode == "max-autotune":
-            self.apply_options({
-                "epilogue_fusion": True,
-                "max_autotune": True,
-                "triton.cudagraphs": True,
-            })
+        elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
+            self.apply_options(torch._inductor.list_mode_options(mode))
         else:
             raise RuntimeError(
-                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
+                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
             )
 
     def apply_options(self, options: Optional[Dict[str, Any]]):
@@ -1405,13 +1545,29 @@ def compile(model: Optional[Callable] = None, *,
        fullgraph (bool): Whether it is ok to break model into several subgraphs
        dynamic (bool): Use dynamic shape tracing
        backend (str or Callable): backend to be used
+        - "inductor" is the default backend, which is a good balance between performance and overhead
+        - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
+        - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
-       options (dict): A dictionary of options to pass to the backend.
+        - "default" is the default mode, which is a good balance between performance and overhead
+        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
+        - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+        - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
+       options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
+        - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
+        - `max_autotune` which will profile to pick the best matmul configuration
+        - `fallback_random` which is useful when debugging accuracy issues
+        - `shape_padding` which pads matrix shapes to better align loads on GPUs especially for tensor cores
+        - `triton.cudagraphs` which will reduce the overhead of python with CUDA graphs
+        - `trace.enabled` which is the most useful debugging flag to turn on
+        - `trace.graph_diagram` which will show you a picture of your graph after fusion
+        - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
 
-        @torch.compile(options={"matmul-padding": True}, fullgraph=True)
+        @torch.compile(options={"triton.cudagraphs": True}, fullgraph=True)
         def foo(x):
             return torch.sin(x) + torch.cos(x)
 
@@ -1434,10 +1590,13 @@ def compile(model: Optional[Callable] = None, *,
     import torch._dynamo
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
+    if torch.backends.mps.is_available():
+        backend = "aot_eager"
     if mode is None and options is None:
         mode = "default"
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
 
@@ -1486,3 +1645,7 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
                   'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
+
+
+from . import _logging
+_logging._init_logs()

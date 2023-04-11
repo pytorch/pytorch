@@ -14,8 +14,8 @@ from itertools import groupby
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not c10d.is_available() or not c10d.is_gloo_available():
+    print("c10d GLOO not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
@@ -37,7 +37,6 @@ from torch.distributed._shard.sharded_tensor import (
     ShardMetadata,
 )
 from torch.nn.parallel import DistributedDataParallel
-from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
 from torch.testing._internal.common_distributed import (
     create_device,
     MultiProcessTestCase,
@@ -50,7 +49,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     run_tests,
-    sandcastle_skip,
+    skip_but_pass_in_sandcastle,
     TestCase,
 )
 
@@ -694,7 +693,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(tensors, outputs)
                 self.assertEqual(result, outputs)
 
-    @sandcastle_skip("intermittent failures on Windows, in CI")
+    @skip_but_pass_in_sandcastle("intermittent failures on Windows, in CI")
     @requires_gloo()
     def test_sparse_allreduce_basics(self):
         self._test_sparse_allreduce_basics(lambda t: t)
@@ -859,7 +858,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         ]
         self._test_scatter_stress(inputs, lambda t: t.clone())
 
-    @sandcastle_skip(
+    @skip_but_pass_in_sandcastle(
         "Test is flaky, see https://github.com/pytorch/pytorch/issues/15963"
     )
     @skip_if_lt_x_gpu(2)
@@ -1766,20 +1765,19 @@ class DistributedDataParallelTest(
         local_shards = [Shard(torch.randn(5, 10, device=device), local_shard_metadata)]
         st = init_from_local_shards(local_shards, [10, 10])
         m = MyModule(st)
-        with _ddp_replicated_tensor(False):
-            DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-                module=m,
-                params_and_buffers_to_ignore={'st'}
-            )
-            # test to make DDP constructor will not fail when module includes a ShardedTensor when ignored
-            DistributedDataParallel(
-                m,
-                device_ids=[device] if device.type == "gpu" else None,
-                process_group=pg,
-                gradient_as_bucket_view=True,
-                broadcast_buffers=False,
-                static_graph=True,
-            )
+        DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+            module=m,
+            params_and_buffers_to_ignore={'st'}
+        )
+        # test to make DDP constructor will not fail when module includes a ShardedTensor when ignored
+        DistributedDataParallel(
+            m,
+            device_ids=[device] if device.type == "gpu" else None,
+            process_group=pg,
+            gradient_as_bucket_view=True,
+            broadcast_buffers=False,
+            static_graph=True,
+        )
 
     def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
@@ -2354,7 +2352,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_gloo()
     def test_sequence_num_incremented_gloo_subgroup(self):
         if self.world_size < 4:
-            return sandcastle_skip("Test requires world_size of at least 4")
+            return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("gloo")
 
     @requires_gloo()
