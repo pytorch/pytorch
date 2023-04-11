@@ -2150,7 +2150,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
         x = torch.ones(6, 4, 4)
         with self.assertRaisesRegex(TypeError, "Cannot determine truth value"):
-            4 < dynamic_dim(x, 0) <= 6
+            4 < dynamic_dim(x, 0) <= 6  # noqa: B015
 
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_range_constraint(self):
