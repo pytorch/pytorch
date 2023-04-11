@@ -600,6 +600,7 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             self.assertTrue(torch.max(after_quant_result - after_quant_result_fx) < 1e-1)
             self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) > 35)
 
+@skipIfNoQNNPACK
 class TestX86InductorQuantizePT2EModels(QuantizationTestCase):
     @skipIfNoX86
     @xfailIfPython311
