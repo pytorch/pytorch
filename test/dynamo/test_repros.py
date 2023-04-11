@@ -1040,6 +1040,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # the operation is between an int and an item() result
         self.assertEqual(cnt.frame_count, ifunspec(6, 5))
 
+    # See https://github.com/pytorch/pytorch/issues/98571
+    def test_cross_entropy_loss_label_smoothing(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x, y):
+                loss_fct = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
+                return loss_fct(x, y)
+
+        x = torch.rand(3, 10)
+        y = torch.randint(high=10, size=(3,))
+        m = Model()
+        m_compiled = torch.compile(m)
+        correct = m(x, y)
+        actual = m_compiled(x, y)
+        self.assertEqual(correct, actual)
+
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
 

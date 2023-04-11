@@ -369,8 +369,7 @@ static inline Tensor scalarToTensor(
     const TensorOptions& options,
     const at::Device& self_device) {
   if (self_device == at::kCPU) {
-    return at::detail::scalar_tensor_static(
-        v, options.dtype_opt()->toScalarType(), self_device);
+    return at::scalar_tensor(v, options.device(self_device));
   } else {
     return impl::scalarToTensorNonNativeDeviceType(v, options);
   }

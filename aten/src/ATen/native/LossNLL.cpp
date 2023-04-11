@@ -557,15 +557,15 @@ Tensor cross_entropy_loss_label_smoothing(
     auto input = at::log_softmax(self, class_dim, self.scalar_type());
     auto nllloss = at::nll_loss_nd_symint(input, target, weight, reduction, ignore_index);
 
-    auto n_classes = input.size(class_dim);
+    auto n_classes = input.sym_size(class_dim);
 
     Tensor smooth_loss;
     if (weight.defined()) {
       // Expand weight to the correct number of dims for broadcasting with input / target
-      auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
+      auto weight_broadcast_shape = c10::SmallVector<c10::SymInt, 5>(input.dim());
       std::fill(weight_broadcast_shape.begin(), weight_broadcast_shape.end(), 1);
-      weight_broadcast_shape[class_dim] = weight.size(0);
-      Tensor weight_ = weight.view(weight_broadcast_shape);
+      weight_broadcast_shape[class_dim] = weight.sym_size(0);
+      Tensor weight_ = weight.view_symint(weight_broadcast_shape);
 
       smooth_loss = -(input * weight_).sum(class_dim);
     } else {
