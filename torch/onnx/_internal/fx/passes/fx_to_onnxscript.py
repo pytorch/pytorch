@@ -6,12 +6,9 @@ import operator
 
 import re
 import types
-import warnings
 from types import FunctionType
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
-import numpy as np
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
@@ -22,8 +19,9 @@ import torch.fx
 from torch._subclasses import fake_tensor
 
 from torch.onnx import _type_utils
-from torch.onnx._internal import _beartype, onnx_proto_utils
-from torch.onnx._internal.fx import diagnostics, function_dispatcher, options
+from torch.onnx._internal import _beartype
+from torch.onnx._internal.exporter import ResolvedExportOptions
+from torch.onnx._internal.fx import diagnostics, function_dispatcher, op_validation
 from torch.utils import _pytree
 
 
@@ -116,7 +114,7 @@ def _location_from_fx_stack_trace(
 @_beartype.beartype
 def _retrieve_or_adapt_input_to_graph_set(
     fx_node_arg: _type_utils.Argument,
-    fx_name_to_onnxscipt_value: Dict[
+    fx_name_to_onnxscript_value: Dict[
         str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
@@ -132,9 +130,9 @@ def _retrieve_or_adapt_input_to_graph_set(
         # 1. fx_node_arg is a torch.fx.Node, which means
         #    fx_node_arg stands for the output of that torch.fx.Node.
         # 2. fx_node_arg (variable in torch.fx.Graph) is be mapped to
-        #    torch.jit.Value, fx_name_to_onnxscipt_value[fx_node_arg.name],
+        #    torch.jit.Value, fx_name_to_onnxscript_value[fx_node_arg.name],
         #    in TorchScript graph.
-        return fx_name_to_onnxscipt_value[onnx_tensor.name]
+        return fx_name_to_onnxscript_value[onnx_tensor.name]
     if isinstance(onnx_tensor, (tuple, list)) and any(
         isinstance(node, torch.fx.Node) and isinstance(node.meta["val"], torch.SymInt)
         for node in onnx_tensor
@@ -143,32 +141,41 @@ def _retrieve_or_adapt_input_to_graph_set(
         # is dynamic, each dimension would be variable (i.e., sym variable in Pytorch
         # FX graph. Note that sym variable is mapped to tensor in ONNX Script world)
         # calculated by other operators.
-        sequence_elements: List[Union[torch.Value, Tuple[torch._C.Value, ...]]] = []
+        sequence_mixed_elements: List[
+            Union[graph_building.TorchScriptTensor, List[int]]
+        ] = []
         for tensor in onnx_tensor:
             if isinstance(tensor, torch.fx.Node) and isinstance(
                 tensor.meta["val"], torch.SymInt
             ):
-                sequence_elements.append(fx_name_to_onnxscipt_value[tensor.name])
-            else:
-                sequence_elements.append(tensor)
+                sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
+            elif isinstance(tensor, int):
+                # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
+                # dim, and onnx-script will promote it to tensot(int64)
+                sequence_mixed_elements.append([tensor])
         # Concat all the elements in the sequence.
         # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
         # so list of sym_ints is concatenated to a tensor before calling ONNX op.
 
         # For example:
-        #    inputs: [2, 4, fx.Node(SymIntA), 1, fx.Node(SymIntB)]
+        #    inputs: [[2], [4], fx.Node(SymIntA), [1], fx.Node(SymIntB)]
         #    outputs: op.Concat([op.Constant(2), op.Constant(4), TorchScriptTensor(A), op.Constant(1), TorchScriptTensor(B)])
 
         # onnx-script auto wraps python number with op.Constants,
         # so we don't need to specifically process them.
         with evaluator.default_as(tracer):
-            return opset18.Concat(*sequence_elements, axis=0)
+            return opset18.Concat(*sequence_mixed_elements, axis=0)
     elif isinstance(onnx_tensor, (tuple, list)) and all(
         isinstance(node, torch.fx.Node) for node in onnx_tensor
     ):
-        sequence_elements: List[Union[torch.Value, Tuple[torch._C.Value, ...]]] = []  # type: ignore[no-redef]
+        sequence_elements: List[
+            Union[
+                graph_building.TorchScriptTensor,
+                Tuple[graph_building.TorchScriptTensor, ...],
+            ]
+        ] = []
         for tensor in onnx_tensor:
-            sequence_elements.append(fx_name_to_onnxscipt_value[tensor.name])
+            sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):
         onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
@@ -177,7 +184,7 @@ def _retrieve_or_adapt_input_to_graph_set(
     return onnx_tensor
 
 
-def _filter_incompatible_and_dtype_convert_kwargs(kwargs):
+def filter_incompatible_and_dtype_convert_kwargs(kwargs):
     """Filter out kwargs that are not supported by onnxscript."""
     filtered = {}
     for key, value in kwargs.items():
@@ -228,8 +235,6 @@ def _fill_tensor_meta(
     if isinstance(expected_values, (list, tuple)) and not isinstance(
         onnxscript_values, (list, tuple)
     ):
-        # TODO(titaiwang): How to annotate type from sequence_type of ONNX?
-        # eg: aten_split
         return
 
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
@@ -242,7 +247,6 @@ def _fill_tensor_meta(
         onnxscript_value.shape = tuple(
             [dim if isinstance(dim, int) else None for dim in expected_value.size()]
         )
-        # TODO(titaiwang): This could break in terms of lacking of type_promotion now.
         onnxscript_value.dtype = expected_value.dtype
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
@@ -251,65 +255,10 @@ def _fill_tensor_meta(
 
 
 @_beartype.beartype
-def _wrap_fx_args_as_torch_args(
-    complete_args: List[_type_utils.Argument],
-    complete_kwargs: Dict[str, _type_utils.Argument],
-) -> Tuple[tuple, dict]:
-    """Prepare torch format args and kwargs for op-level validation Use fake tensor to create real tensor to feed in ops"""
-
-    # NOTE: This function only supports FakeTensor with concrete shapes
-    torch_args: List[_type_utils.Argument] = []
-    for arg in complete_args:
-        if isinstance(arg, torch.fx.Node):
-            with torch.utils._mode_utils.no_dispatch():
-                # eg: aten_where needs BOOL in input_args
-                # fx_name_to_onnxscipt_value could help?
-                fake_tensor = arg.meta["val"]
-                if isinstance(fake_tensor, list):
-                    for meta_value in fake_tensor:
-                        shape = meta_value.shape
-                        dtype = (
-                            meta_value.dtype
-                            if meta_value.dtype
-                            not in {torch.int64, torch.int32, torch.uint8, torch.bool}
-                            else torch.float32
-                        )
-                        torch_args.append(torch.randn(meta_value.shape, dtype=dtype))
-                elif isinstance(fake_tensor, torch.Tensor):
-                    shape = fake_tensor.shape
-                    dtype = (
-                        fake_tensor.dtype
-                        if fake_tensor.dtype
-                        not in {torch.int64, torch.int32, torch.uint8, torch.bool}
-                        else torch.float32
-                    )
-                    if not isinstance(fake_tensor, torch.Tensor):
-                        # aten_sym_size output is a int, not a tensor,
-                        # which stands for the size of one dim.
-                        torch_args.append(fake_tensor)
-                    else:
-                        torch_args.append(torch.randn(shape, dtype=dtype))
-        else:
-            torch_args.append(arg)
-    torch_kwargs = complete_kwargs
-    return (tuple(torch_args), torch_kwargs)
-
-
-@_beartype.beartype
-def _wrap_fx_args_as_onnxscript_args(
+def _fill_in_default_kwargs(
     node: torch.fx.Node,
-    fx_name_to_onnxscipt_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
-    ],
-    tracer: graph_building.TorchScriptTracingEvaluator,
-) -> Tuple[tuple, dict, list, dict]:
-    """Map all FX arguments of a node to arguments in TorchScript graph."""
-
-    # This function assumes the order of arguments in FX op is the
-    # same as the order of arguments in TorchScript op.
-    # (1) Complete the arguments with default values.
-    complete_args: List[_type_utils.Argument] = []
-    complete_kwargs: Dict[str, _type_utils.Argument] = {}
+) -> Tuple[List[_type_utils.Argument], Dict[str, _type_utils.Argument]]:
+    """Find and Fill in the not provided kwargs with default values."""
 
     # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
     # overloadpacket for some reasons.
@@ -319,6 +268,11 @@ def _wrap_fx_args_as_onnxscript_args(
         node_schema = node.target._schema  # type: ignore[union-attr]
     else:
         node_schema = torch.ops.aten.sym_size.int._schema  # type: ignore[union-attr]
+
+    # This function assumes the order of arguments in FX op is the
+    # same as the order of arguments in TorchScript op.
+    complete_args: List[_type_utils.Argument] = []
+    complete_kwargs: Dict[str, _type_utils.Argument] = {}
 
     if inspect.isbuiltin(node.target):
         complete_args = list(node.args)
@@ -331,13 +285,28 @@ def _wrap_fx_args_as_onnxscript_args(
             else:
                 # Get default from schema.
                 complete_kwargs[expected_arg.name] = expected_arg.default_value
+
+    return complete_args, complete_kwargs
+
+
+@_beartype.beartype
+def _wrap_fx_args_as_onnxscript_args(
+    complete_args: List[_type_utils.Argument],
+    complete_kwargs: Dict[str, _type_utils.Argument],
+    fx_name_to_onnxscript_value: Dict[
+        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+    ],
+    tracer: graph_building.TorchScriptTracingEvaluator,
+) -> Tuple[tuple, dict]:
+    """Map all FX arguments of a node to arguments in TorchScript graph."""
+
     onnxscript_args = tuple(
-        _retrieve_or_adapt_input_to_graph_set(arg, fx_name_to_onnxscipt_value, tracer)
+        _retrieve_or_adapt_input_to_graph_set(arg, fx_name_to_onnxscript_value, tracer)
         for arg in complete_args
     )
-    onnxscript_kwargs = _filter_incompatible_and_dtype_convert_kwargs(complete_kwargs)
+    onnxscript_kwargs = filter_incompatible_and_dtype_convert_kwargs(complete_kwargs)
 
-    return (onnxscript_args, onnxscript_kwargs, complete_args, complete_kwargs)
+    return onnxscript_args, onnxscript_kwargs
 
 
 @_beartype.beartype
@@ -349,12 +318,12 @@ def _wrap_fx_args_as_onnxscript_args(
 def _export_fx_node_to_onnxscript(
     node: torch.fx.Node,
     onnxscript_graph: graph_building.TorchScriptGraph,
-    fx_name_to_onnxscipt_value: Dict[
+    fx_name_to_onnxscript_value: Dict[
         str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
-    options: options.ExportOptions,
+    options: ResolvedExportOptions,
 ):
     # Record stack trace of node in diagnostic.
     node_stack_trace = node.stack_trace
@@ -390,13 +359,13 @@ def _export_fx_node_to_onnxscript(
         assert isinstance(output, graph_building.TorchScriptTensor)
         assert isinstance(output, onnxscript.tensor.Tensor)
 
-        fx_name_to_onnxscipt_value[node.name] = output
+        fx_name_to_onnxscript_value[node.name] = output
     elif node.op == "call_function":
         # aten ops and other stateless functions.
         if node.target == operator.getitem and isinstance(
-            fx_name_to_onnxscipt_value[node.args[0].name], tuple  # type: ignore[union-attr]
+            fx_name_to_onnxscript_value[node.args[0].name], tuple  # type: ignore[union-attr]
         ):
-            onnx_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]  # type: ignore[union-attr]
+            onnx_tensor_tuple = fx_name_to_onnxscript_value[node.args[0].name]  # type: ignore[union-attr]
             index = node.args[1]
             output = onnx_tensor_tuple[index]  # type: ignore[index]
             assert (
@@ -406,7 +375,7 @@ def _export_fx_node_to_onnxscript(
                 output
             )
 
-            fx_name_to_onnxscipt_value[node.name] = output
+            fx_name_to_onnxscript_value[node.name] = output
             return
         if node.target == operator.getitem:
             # __getitem__ on Tensor or Sequence of tensors. Not tuple.
@@ -461,12 +430,10 @@ def _export_fx_node_to_onnxscript(
             raise RuntimeError(f"Cannot find function for {exporter_key}")
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
-        (
-            onnx_args,
-            onnx_kwargs,
-            complete_args,
-            complete_kwargs,
-        ) = _wrap_fx_args_as_onnxscript_args(node, fx_name_to_onnxscipt_value, tracer)
+        complete_args, complete_kwargs = _fill_in_default_kwargs(node)
+        onnx_args, onnx_kwargs = _wrap_fx_args_as_onnxscript_args(
+            complete_args, complete_kwargs, fx_name_to_onnxscript_value, tracer
+        )
         with evaluator.default_as(tracer):
             output: Union[  # type: ignore[no-redef]
                 graph_building.TorchScriptTensor,
@@ -475,25 +442,37 @@ def _export_fx_node_to_onnxscript(
         assert (
             output is not None
         ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
-        # TODO(justinchuby): Add diagnostic information.
-        # Assign type and shape obtained from FakeTensorProp.
+        # Assign type and shape from fx graph.
         _fill_tensor_meta(output, node.name, node.meta["val"])
         # One fx node could produce multiple outputs (e.g., tuple of tensors); in
         # that case, v is a tuple of TorchScriptTensors.
         assert isinstance(output, (graph_building.TorchScriptTensor, tuple)), type(
             output
         )
-        if options.op_level_debug:
-            # FIXME(titaiwang): Refactor me with
-            # https://github.com/microsoft/onnx-script/issues/393
-            (torch_args, torch_kwargs) = _wrap_fx_args_as_torch_args(
-                complete_args, complete_kwargs
+        # NOTE(titaiwang): We bypass two kinds of ops as it's not meaningful to
+        # validate them with op level debug.
+        # 1. aten::sym_size: The op is simply get item from a list of tensors.
+        # 2. BuiltinFunction: It doesn't supported tensor
+        if (
+            options.op_level_debug
+            and node.target != torch.ops.aten.sym_size
+            and not isinstance(node.target, types.BuiltinFunctionType)
+        ):
+            node_with_static_shape = node.meta["node_with_static_shape"]
+            (
+                node_with_fixed_shape_args,
+                node_with_fixed_shape_kwargs,
+            ) = _fill_in_default_kwargs(node_with_static_shape)
+            torch_args, torch_kwargs = op_validation.wrap_fx_args_as_torch_args(
+                node_with_fixed_shape_args, node_with_fixed_shape_kwargs
             )
-            _validate_op_between_ort_torch(node, symbolic_fn, torch_args, torch_kwargs)
-        fx_name_to_onnxscipt_value[node.name] = output
+            op_validation.validate_op_between_ort_torch(
+                node_with_static_shape, symbolic_fn, torch_args, torch_kwargs
+            )
+        fx_name_to_onnxscript_value[node.name] = output
     elif node.op == "output":
         if isinstance(node.args[0], torch.fx.Node):
-            onnx_tensor_or_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]
+            onnx_tensor_or_tensor_tuple = fx_name_to_onnxscript_value[node.args[0].name]
             onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
         else:
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
@@ -503,7 +482,7 @@ def _export_fx_node_to_onnxscript(
                 assert isinstance(
                     arg, torch.fx.Node
                 ), f"arg must be a torch.fx.Node, not {type(arg)}"
-                onnx_tensor_or_tensor_tuple = fx_name_to_onnxscipt_value[arg.name]
+                onnx_tensor_or_tensor_tuple = fx_name_to_onnxscript_value[arg.name]
                 onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
     elif node.op == "call_method":
         # TODO(wechi): Support call_method.
@@ -529,7 +508,7 @@ def _export_fx_node_to_onnxscript(
 
         assert isinstance(input_, graph_building.TorchScriptTensor)
         assert isinstance(input_, onnxscript.tensor.Tensor)
-        fx_name_to_onnxscipt_value[node.name] = input_
+        fx_name_to_onnxscript_value[node.name] = input_
         # FIXME: Refactor logic getting 'current_attr'.
         assert isinstance(current_attr, torch.Tensor)
     else:
@@ -537,10 +516,22 @@ def _export_fx_node_to_onnxscript(
         raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
 
 
+@_beartype.beartype
 @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
 def export_fx_to_onnxscript(
-    fx_module_with_metadata: torch.fx.GraphModule, options: options.ExportOptions
+    fx_module_with_metadata: torch.fx.GraphModule,
+    options: ResolvedExportOptions,
 ):
+    """
+    Export a torch.fx.GraphModule to a TorchScript graph with ONNX symbols.
+
+    Args:
+        fx_module_with_metadata: A torch.fx.GraphModule with metadata.
+        export_options: Export options.
+
+    Returns:
+        A TorchScript graph with ONNX symbols.
+    """
     # Initialize the ONNX graph
     onnxscript_graph = graph_building.TorchScriptGraph()
     tracer = graph_building.TorchScriptTracingEvaluator(onnxscript_graph)
@@ -548,106 +539,26 @@ def export_fx_to_onnxscript(
     # In the following loop, a TorchScript graph is created to
     # represent the input FX graph with ONNX symbols (e.g., onnx::add).
     # To connect the values to nodes in the TorchScript graph, we maintian
-    # fx_name_to_onnxscipt_value. Basically, we want to translate
+    # fx_name_to_onnxscript_value. Basically, we want to translate
     #   fx_tensor_x (type: torch.fx.Node) -> fx_node_1 -> fx_tensor_y (type: torch.fx.Node)
     # to
-    #   fx_name_to_onnxscipt_value[fx_tensor_x.name] -> onnx_node_1 -> fx_name_to_onnxscipt_value[fx_tensor_y.name]
-    fx_name_to_onnxscipt_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+    #   fx_name_to_onnxscript_value[fx_tensor_x.name] -> onnx_node_1 -> fx_name_to_onnxscript_value[fx_tensor_y.name]
+    fx_name_to_onnxscript_value: Dict[
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ] = {}
+    # node_fixed_shape is only used on op_level_debug purpose.
     for node in fx_module_with_metadata.graph.nodes:
         _export_fx_node_to_onnxscript(
             node,
             onnxscript_graph,
-            fx_name_to_onnxscipt_value,
+            fx_name_to_onnxscript_value,
             tracer,
             fx_module_with_metadata,
             options,
         )
 
-    # Apply TorchScript's type promotion code.
-    # Ideally, we should implement our type promotion but
-    # to save time, we just reuse.
-    onnxscript_graph.apply(
-        torch._C._jit_pass_onnx_scalar_type_analysis,
-        lowprecision_cast=True,
-        opset_version=options.opset_version,
-    )
-
     return onnxscript_graph
-
-
-@_beartype.beartype
-def _validate_op_between_ort_torch(
-    node: torch.fx.Node,
-    symbolic_fn: Union[onnxscript.OnnxFunction, Callable],
-    torch_args: tuple,
-    torch_kwargs: dict,
-):
-    """Validate the op between ONNX Runtime and PyTorch."""
-    # op-level validation
-    # Symbolic_fn should have the same output as node.target (torch ops)
-    # trace_only function is regular python function
-    function_name = (
-        symbolic_fn.name
-        if isinstance(symbolic_fn, onnxscript.OnnxFunction)
-        else symbolic_fn.__name__
-    )
-    try:
-        with evaluator.default_as(evaluator.ort_evaluator):
-            expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
-            # TODO(titaiwang): Expose _convert_tensor_to_numpy and _convert_kwargs_for_onnx?
-            input_onnx = [
-                onnx_proto_utils._convert_tensor_to_numpy(x) for x in torch_args
-            ]
-            kwargs_onnx = _filter_incompatible_and_dtype_convert_kwargs(torch_kwargs)
-            ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
-
-            # TODO: add pytree structure comparison.
-            flattened_torch_outputs, _ = _pytree.tree_flatten(expected_outputs)
-            flattened_function_outputs, _ = _pytree.tree_flatten(ort_outputs)
-
-            assert flattened_torch_outputs
-            assert len(flattened_torch_outputs) == len(flattened_function_outputs)
-
-            for torch_output, function_output in zip(
-                flattened_torch_outputs, flattened_function_outputs
-            ):
-                try:
-                    if not isinstance(function_output, np.ndarray):
-                        # An onnxscript tensor
-                        function_output = function_output.value
-
-                    # Use torch.testing as opposed to np.testing to ensure dtypes and shapes match
-                    torch.testing.assert_close(
-                        torch.tensor(function_output).cpu(),
-                        torch_output.cpu()
-                        if isinstance(torch_output, torch.Tensor)
-                        else torch.tensor(torch_output).cpu(),
-                        rtol=1e-4,
-                        atol=1e-3,
-                    )
-
-                except AssertionError as e:
-                    warnings.warn(
-                        f"\nSuppressed AssertionError:\n{e}.\n"
-                        f"Op {node.target} has mismatch outputs. "
-                        f"Please check the implementation of {function_name}.\n"
-                    )
-                    diagnostic = diagnostics.export_context().inflight_diagnostic()
-                    diagnostic.with_additional_message(
-                        f"### Validation failed\n"
-                        f"{diagnostics.decorator.format_exception_in_markdown(e)}"
-                    )
-                    diagnostic.level = diagnostics.levels.ERROR
-    except Exception as e:
-        warnings.warn(
-            f"\nORT fails to run on Op {node.target} with error: \n{e}.\n"
-            f"Please check the implementation of {function_name}.\n"
-        )
-        diagnostic = diagnostics.export_context().inflight_diagnostic()
-        diagnostic.with_additional_message(
-            f"### Validation failed\n"
-            f"{diagnostics.decorator.format_exception_in_markdown(e)}"
-        )
-        diagnostic.level = diagnostics.levels.WARNING

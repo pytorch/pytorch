@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -6,7 +7,7 @@ import inspect
 import operator
 import re
 import types
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, List, NamedTuple, Optional, Union
 
 import torch
 
@@ -14,6 +15,11 @@ from torch import SymInt
 from torch._guards import GuardSource
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.symbolic_shapes import (
+    DimConstraint,
+    DimDynamic,
+    RelaxedUnspecConstraint,
+)
 from torch.fx.immutable_collections import immutable_list
 
 from .. import config, mutation_guard, replay_record, skipfiles
@@ -46,7 +52,6 @@ from ..utils import (
     odict_values,
     preserve_rng_state,
     tensor_always_has_static_shape,
-    tensor_static_reason_to_message,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -56,6 +61,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
+from .ctx_manager import CUDAStreamVariable, NullContextVariable
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -64,19 +70,18 @@ from .dicts import (
 )
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lists import (
-    ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
     SizeVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
-    CUDAStreamVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -85,7 +90,7 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
-from .nn_module import UnspecializedNNModuleVariable
+from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
     SymNodeVariable,
     TensorVariable,
@@ -99,6 +104,9 @@ from .torch import (
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+
+
+DimList = List
 
 
 class _missing:
@@ -309,11 +317,11 @@ class VariableBuilder:
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
-            map(
-                lambda k: ConstantVariable.is_literal(k)
+            (
+                ConstantVariable.is_literal(k)
                 or self.tensor_can_be_dict_key(k)
-                or isinstance(k, enum.Enum),
-                value.keys(),
+                or isinstance(k, enum.Enum)
+                for k in value.keys()
             )
         ):
             if not value and self.get_source().is_nn_module():
@@ -434,7 +442,15 @@ class VariableBuilder:
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
             # The autograd.function context
-            return AutogradFunctionContextVariable()
+            return self.tx.output.side_effects.track_object_existing(
+                self.source,
+                value,
+                AutogradFunctionContextVariable(
+                    value,
+                    source=self.source,
+                    guards=make_guards(GuardBuilder.TYPE_MATCH),
+                ),
+            )
         elif (
             isinstance(value, types.MethodType)
             and istype(
@@ -514,6 +530,14 @@ class VariableBuilder:
             return UserMethodVariable(
                 value.__func__,
                 self_obj,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif (
+            istype(value, contextlib.nullcontext)
+            and inspect.getattr_static(value, "enter_result", None) is None
+        ):
+            return NullContextVariable(
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
@@ -611,7 +635,9 @@ class VariableBuilder:
             ).add_guards(guards)
             for i in range(tuple_iterator_len(value))
         ]
-        return ListIteratorVariable(output, mutable_local=MutableLocal(), guards=guards)
+        return TupleIteratorVariable(
+            output, mutable_local=MutableLocal(), guards=guards
+        )
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -646,20 +672,42 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
-        elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
+        elif issubclass(
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
-            if getattr(value, "_is_fsdp_managed_module", False):
-                # Note: we can't do this assert inside FSDP constructor,
-                # since we don't know yet whether dynamo will be used
-                assert getattr(
-                    value, "_fsdp_use_orig_params", False
-                ), "Dynamo only supports FSDP with use_orig_params=True"
-
-            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-            # in fully_sharded_data_parallel.py for more information
             return UnspecializedNNModuleVariable(
                 value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
+        elif getattr(value, "_is_fsdp_managed_module", False):
+            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+            # in fully_sharded_data_parallel.py for more information
+
+            # we can't do this assert inside FSDP constructor,
+            # since we don't know yet whether dynamo will be used
+            assert getattr(
+                value, "_fsdp_use_orig_params", False
+            ), "Dynamo only supports FSDP with use_orig_params=True"
+
+            # Note on FSDP guarding
+            # 1. We expect FSDP wrapping mutates an nn module irreversably (no way to de-wrap).
+            # 2. Eager FSDP already assumes (requires, but without enforcement) that users don't mutate their
+            #    model parameters/structure after FSDP wrapping, because FSDP wouldn't notice or update its FlatParams.
+            #
+            # Due to (1), once we enter this path we expect not to go back nor have to guard on type
+            # or _is_fsdp_managed_module.
+            #
+            # TODO(whc) We could add a guard on the opposite case, where a user compiled/ran
+            # pre-FSDP-wrapped model, then wrapped, to ensure that we recompile with the FSDP handling.
+            #
+            # Due to (2), we skip guards on inner contents of fsdp_managed modules, by using FSDPNNModuleSource as the
+            # guard source.  This behavior is gated on config.skip_fsdp_guards.
+            #
+            # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
+            # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
+            return FSDPManagedNNModuleVariable(
+                value,
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH),
+                source=self.get_source(),
             )
         else:
             return self.tx.output.register_attr_or_module(
@@ -704,7 +752,12 @@ class VariableBuilder:
             )
 
     def wrap_tensor(self, value: torch.Tensor):
-        if self.get_source().guard_source().is_nn_module():
+        source = self.get_source()
+
+        if (
+            source.guard_source().is_nn_module()
+            and not source.guard_source().is_fsdp_module()
+        ):
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
@@ -798,12 +851,41 @@ class VariableBuilder:
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
             ):
+                if value < 0 or torch._dynamo.config.specialize_int:
+                    # Negative values don't create_symbol correctly,
+                    # so make sure we do a constant in this case.
+                    #
+                    # Also, if specialize_int is False, also return
+                    # a constant (but this should have been handled
+                    # in the caller, TBH)
+                    return ConstantVariable(
+                        value=value,
+                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
+
                 shape_env = self.tx.output.shape_env
+
+                # TODO: This should be dynamic, as we in general do not
+                # know if bare integers are actually going to be sizevars
+                # and it is inappropriate to eagerly duck size them with
+                # real sizevars
+                dynamic_dim = DimDynamic.DUCK
+
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, source=self.source), hint=value
+                    # TODO: This is wrong wrong wrong, create_symbol will
+                    # generate something that is non-negative, but this is
+                    # not a sound assumption to make.
+                    # Not fixing as this was a preexisting condition.
+                    shape_env.create_symbol(
+                        value,
+                        source=self.source,
+                        dynamic_dim=dynamic_dim,
+                        constraint_dim=None,
+                    ),
+                    hint=value,
                 )
                 self.tx.output.tracked_fakes.append(
-                    TrackedFake(wrapped_value, self.source)
+                    TrackedFake(wrapped_value, self.source, None)
                 )
             else:
                 wrapped_value = torch.tensor(value)
@@ -829,9 +911,7 @@ class VariableBuilder:
             )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
-                if self.tx.export and not isinstance(
-                    self.get_source(), LocalInputSource
-                ):
+                if self.tx.export and not isinstance(self.get_source(), LocalSource):
                     raise AssertionError(
                         "Dynamo attempts to add additional input during export: value={}, source={}".format(
                             wrapped_value, self.get_source()
@@ -1059,6 +1139,8 @@ def wrap_fx_proxy_cls(
 class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
+    # Is None when fake is SymInt
+    constraint_dims: Optional[DimList[DimConstraint]]
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name()))
@@ -1078,19 +1160,57 @@ def wrap_to_fake_tensor_and_record(
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
 
+        # TODO: index export_constraints ahead of time so we don't have to
+        # do a linear scan every time here
+        t_id = id(e)
+        dim2constraint = {}
+        if tx.output.export_constraints:
+            for constraint in tx.output.export_constraints:
+                if constraint.t_id == t_id:
+                    dim2constraint[constraint.dim] = constraint.constraint_range
+
+        dynamic_dims = None
+        constraint_dims = None
+        if tx.fake_mode.shape_env is not None:
+            dynamic_dims = []
+            constraint_dims = []
+            for i in range(e.dim()):
+                # NB: mark dynamic has precedence over static
+                marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
+                marked_static = i in getattr(e, "_dynamo_static_indices", set())
+
+                # We will process constraints first, as they will imply that we
+                # have a dynamic dimension
+                # Precedence: export constraints > eager constraints
+                constraint = dim2constraint.get(i)
+                if constraint is None:
+                    if marked_dynamic and not config.allow_ignore_mark_dynamic:
+                        constraint = RelaxedUnspecConstraint()
+                constraint_dims.append(constraint)
+
+                # Now, figure out if the dim is dynamic/duck/static
+                if constraint is not None or marked_dynamic:
+                    # NB: We could assert static_shapes is False here, but it
+                    # seems better to allow the user to override policy in this
+                    # case
+                    dynamic = DimDynamic.DYNAMIC
+                elif static_shapes or config.assume_static_by_default or marked_static:
+                    dynamic = DimDynamic.STATIC
+                else:
+                    dynamic = DimDynamic.DUCK
+                dynamic_dims.append(dynamic)
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
-                static_shapes=static_shapes,
                 ignore_subclass=ignore_subclass,
                 source=source,
+                dynamic_dims=dynamic_dims,
+                constraint_dims=constraint_dims,
             )
         )
-        if hasattr(e, "_dynamo_dynamic_indices"):
-            fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
-            assert not static_shapes, tensor_static_reason_to_message(reason)
-        if is_tensor:
-            tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
+        if is_tensor and not (static_shapes and source.is_nn_module()):
+            tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
         return fake_e
     else:
         return e
