@@ -559,7 +559,14 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     } else {
       // convert tensor to scalar outside of try / catch,
       // so that Tensor subclass exceptions will not be caught.
-      if (THPVariable_Check(obj)) {
+      if (THPUtils_checkLongExact(obj)) {
+        // Fast path for plain numbers
+        try {
+          res.emplace_back(THPUtils_unpackIndex(obj));
+        } catch (std::exception& e) {
+          throw_intlist_exception(this, i, obj, idx);
+        }
+      } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
             !at::isIntegralType(
@@ -619,7 +626,14 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
     } else {
       // convert tensor to scalar outside of try / catch,
       // so that Tensor subclass exceptions will not be caught.
-      if (THPVariable_Check(obj)) {
+      if (THPUtils_checkLongExact(obj)) {
+        // Fast path for plain numbers
+        try {
+          res[idx] = THPUtils_unpackIndex(obj);
+        } catch (std::exception& e) {
+          throw_intlist_exception(this, i, obj, idx);
+        }
+      } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
             !at::isIntegralType(

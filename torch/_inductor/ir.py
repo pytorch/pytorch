@@ -2253,7 +2253,9 @@ class ComputedBuffer(Buffer):
         except Exception:
             if config.debug:
                 log.warning(
-                    f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+                    "Did not simplify complex index:\n%s\n%s",
+                    dict(zip(index_vars, sizes)),
+                    memory_addrs,
                 )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
@@ -2716,7 +2718,7 @@ class ExternKernel(InputsKernel):
 
     def canonicalize(self):
         """
-        Manually get cononicalization of the output index
+        Manually get canonicalization of the output index
         """
         # manually generate index formula for conv
         sizevars = V.graph.sizevars
@@ -3482,10 +3484,9 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        bias = None
-        cpp_bias = "at::Tensor()"
-        constant_args = [bias, batch_size]
-        cpp_constant_args = [cpp_bias, str(batch_size)]
+        bias = V.graph.wrapper_code.none_str
+        constant_args = [None, str(batch_size)]
+        cpp_constant_args = [V.graph.wrapper_code.none_str, str(batch_size)]
 
         return MKLPackedLinear(
             layout=FixedLayout(

@@ -177,8 +177,11 @@ def has_tensor_in_frame(frame):
             return True
 
     log.debug(
-        f"skipping because no torch.* {frame.f_code.co_name} \
-            {frame.f_code.co_filename} {frame.f_code.co_firstlineno}"
+        "skipping because no torch.* %s \
+            %s %s",
+        frame.f_code.co_name,
+        frame.f_code.co_filename,
+        frame.f_code.co_firstlineno,
     )
 
     return False
@@ -272,10 +275,14 @@ def convert_frame_assert(
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
-                f"torch._dynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
-                f"   function: {format_func_info(code)}\n"
-                f"   reasons:  {format_guard_failures(code)}\n"
-                f"to diagnose recompilation issues, see {troubleshooting_url}."
+                "torch._dynamo hit config.cache_size_limit (%s)\n"
+                "   function: %s\n"
+                "   reasons:  %s\n"
+                "to diagnose recompilation issues, see %s.",
+                config.cache_size_limit,
+                format_func_info(code),
+                format_guard_failures(code),
+                troubleshooting_url,
             )
             unimplemented("cache_size_limit reached")
 
@@ -364,8 +371,12 @@ def _compile(
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
                 log.debug(
-                    f"Skipping frame {e} {code.co_name} \
-                    {code.co_filename} {code.co_firstlineno}"
+                    "Skipping frame %s %s \
+                    %s %s",
+                    e,
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
                 )
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")
