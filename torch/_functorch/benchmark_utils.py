@@ -1,4 +1,3 @@
-import contextlib
 import time
 import os
 import json
@@ -9,6 +8,14 @@ from torch.profiler import profile, ProfilerActivity
 
 def synchronize():
     pass
+
+
+class NullContext:
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 def dump_chrome_trace(f, input, trace_filename, optimize_ctx, activities, num_runs=1,
@@ -183,7 +190,7 @@ def benchmark_utilization(f, input, trace_folder, optimize_ctx=None, trace_file_
         print("create folder " + trace_folder)
 
     if optimize_ctx is None:
-        optimize_ctx = contextlib.nullcontext()
+        optimize_ctx = NullContext()
 
     chrome_trace_file_name = os.path.join(trace_folder, trace_file_name + ".json")
     total_length = dump_chrome_trace(f, input, chrome_trace_file_name, optimize_ctx,

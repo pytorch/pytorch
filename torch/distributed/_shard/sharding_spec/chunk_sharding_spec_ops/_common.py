@@ -107,7 +107,7 @@ def _handle_col_wise_sharding_base(
         col_dim: dim of result tensor after the operation.
         input: tensor to be applied op on.
         world_size: number of ranks.
-        weight: sharded weight tensor.
+        weight: shareded weight tensor.
         local_shard: col-wise sharded weight tensor.
         pg: process group.
         gathered_inputs: list of inputs from all ranks. If specified, we
@@ -170,7 +170,7 @@ def _result_distribute_with_col_rearrange(results, input, world_size, weight, pg
             We need to distribute them back to their original ranks.
         input: tensor to be applied op to.
         world_size: number of ranks.
-        weight: sharded weight tensor.
+        weight: shareded weight tensor.
         pg: process group.
 
     Return: column rearranged result.

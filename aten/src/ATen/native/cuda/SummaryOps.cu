@@ -20,7 +20,8 @@
 
 namespace at {
 namespace cuda {
-#define RATIO_OF_GMEM_ATOMIC_ADD_TO_SMEM_ATOMIC_ADD 8
+#define THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM 100
+#define THRESH_NUMBER_BINS_FOR_GLOBAL_MEM 1000
 #define FOR_KERNEL_LOOP(i, lim)                                      \
   for (IndexType i = blockIdx.x * blockDim.x + threadIdx.x; i < lim; \
        i += gridDim.x * blockDim.x)
@@ -29,7 +30,7 @@ namespace cuda {
   Memory types used for the 3 histogram implementations.
   See `CUDA_tensor_histogram` below.
  */
-enum class CUDAHistogramMemoryType { SHARED, GLOBAL };
+enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
 namespace {
 template <typename input_t, typename IndexType>
 __device__ static IndexType getBin(
@@ -59,7 +60,7 @@ template <
     int ADims,
     int PDims,
     int BDims,
-    CUDAHistogramMemoryType MemoryType,
+    CUDAHistogramMemoryType MemoryType = CUDAHistogramMemoryType::MULTI_BLOCK,
     typename Op>
 C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
 __global__ void kernelHistogram1D(
@@ -103,6 +104,39 @@ __global__ void kernelHistogram1D(
       const IndexType aOffset =
           detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
       gpuAtomicAddNoReturn(&a.data[aOffset], smem[i]);
+    }
+
+  } else if (MemoryType == CUDAHistogramMemoryType::MULTI_BLOCK) {
+    ////////////////////////// Multi Block memory //////////////////////////
+    // atomically add to block specific global tensor
+    // then atomically add to the global output tensor
+    // compute histogram for the block
+    FOR_KERNEL_LOOP(linearIndex, totalElements) {
+      // Convert `linearIndex` into an offset of `b`
+      const IndexType bOffset =
+          detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
+      const auto bVal = b.data[bOffset];
+      if (bVal >= minvalue && bVal <= maxvalue) {
+        // Use value at `b` as an offset of `p`
+        const IndexType bin =
+            getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
+        const IndexType pIdx = p.strides[0] * blockIdx.x + bin;
+        const IndexType pOffset =
+            detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
+        gpuAtomicAddNoReturn(&p.data[pOffset], getOp(linearIndex));
+      }
+    }
+    __syncthreads();
+    // NOTE: atomically update output bin count.
+    //   Atomic update is imp since __syncthread() will only synchronize threads
+    //   in a given block, not across blocks.
+    const IndexType pIdx = p.strides[0] * blockIdx.x;
+    const IndexType pOffset =
+        detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
+    for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
+      const IndexType aOffset =
+          detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
+      gpuAtomicAddNoReturn(&a.data[aOffset], p.data[pOffset + i]);
     }
 
   } else {
@@ -150,9 +184,22 @@ __global__ void kernelHistogram1D(
     case CUDAHistogramMemoryType::SHARED:                                  \
       HANDLE_CASE(CUDAHistogramMemoryType::SHARED, getOp, sharedMem);      \
       break;                                                               \
+    case CUDAHistogramMemoryType::MULTI_BLOCK:                             \
+      HANDLE_CASE(CUDAHistogramMemoryType::MULTI_BLOCK, getOp, 0);         \
+      break;                                                               \
     default:                                                               \
       HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, getOp, 0);              \
   }
+
+inline int64_t getFreeGlobalMemory() {
+  // no need to use `cudaSetDevice`
+  size_t free_mem, total_mem;
+  cudaMemGetInfo(&free_mem, &total_mem);
+  TORCH_INTERNAL_ASSERT(
+      cudaGetLastError() == cudaSuccess,
+      "CUDA_tensor_histogram failed to get free global memory");
+  return static_cast<int64_t>(free_mem);
+}
 
 /*
   Calculate the frequency of the input values.
@@ -163,10 +210,13 @@ __global__ void kernelHistogram1D(
   See `help torch.bincount` for details on the math.
 
   3 implementations based of input size and memory usage:
-    case: enough shared mem
+    case: #bins < THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM and enough shared mem
         SHARED: Each block atomically adds to it's own **shared** hist copy,
         then atomically updates the global tensor.
-    case: no enough shared mem
+    case: #bins < THRESH_NUMBER_BINS_FOR_GLOBAL_MEM and enough global mem
+        MULTI_BLOCK: Each block atomically adds to it's own **global** hist
+        copy, then atomically updates the global tensor.
+    case: THRESH_NUMBER_BINS_FOR_GLOBAL_MEM <= #bins
         GLOBAL: all threads atomically update to a single **global** hist copy.
  */
 template <typename output_t, typename input_t, bool HasWeights>
@@ -200,27 +250,35 @@ bool CUDA_tensor_histogram(
   CUDAHistogramMemoryType memType = CUDAHistogramMemoryType::GLOBAL;
   auto maxSharedMem = getCurrentDeviceProperties()->sharedMemPerBlock;
   auto sharedMem = nbins * sizeof(output_t) + 8; // 8 guard bytes
+  auto maxGlobalMem = getFreeGlobalMemory();
+  auto multiBlockMem = nbins * grid.x * sizeof(output_t) + 8; // 8 guard bytes
   // determine memory type to use in the kernel
-  if (sharedMem < maxSharedMem) {
-    // Solve equations:
-    // (1) #(smem atomicAdd per SM) = totalElements / min(grid.x, #SM)
-    // (2) #(gmem atomicAdd) = grid.x * nbins
-    // (3) RATIO_OF_GMEM_ATOMIC_ADD_TO_SMEM_ATOMIC_ADD = #(gmem atomicAdd) / #(smem atomicAdd per SM)
-    unsigned optimalGrid = ceil_div<size_t>(RATIO_OF_GMEM_ATOMIC_ADD_TO_SMEM_ATOMIC_ADD * totalElements,
-                                            nbins * getCurrentDeviceProperties()->multiProcessorCount);
-    if (optimalGrid < (unsigned)getCurrentDeviceProperties()->multiProcessorCount) {
-      optimalGrid = 1 + (unsigned)std::sqrt(RATIO_OF_GMEM_ATOMIC_ADD_TO_SMEM_ATOMIC_ADD * totalElements / nbins);
-    }
-    auto optimalSteps = ceil_div<size_t>(totalElements, optimalGrid * block.x);
-    optimalGrid = ceil_div<size_t>(totalElements, optimalSteps * block.x);
-    grid.x = std::min(grid.x, optimalGrid);
+  if (nbins < THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM &&
+      sharedMem < maxSharedMem) {
     memType = CUDAHistogramMemoryType::SHARED;
+  } else if (
+      nbins < THRESH_NUMBER_BINS_FOR_GLOBAL_MEM &&
+      multiBlockMem < static_cast<size_t>(maxGlobalMem / 2)) {
+    // check against half of free mem to be extra safe
+    // due to cached allocator, we may anyway have slightly more free mem
+    memType = CUDAHistogramMemoryType::MULTI_BLOCK;
   }
 
+  // alloc memory for MULTI_BLOCK
   using IndexType = int64_t;
   auto aInfo = detail::getTensorInfo<output_t, IndexType>(a);
   auto bInfo = detail::getTensorInfo<input_t, IndexType>(b);
   detail::TensorInfo<output_t, IndexType> pInfo(nullptr, 0, {}, {});
+  Tensor partial_output;
+  if (memType == CUDAHistogramMemoryType::MULTI_BLOCK) {
+    partial_output = at::zeros(
+        {grid.x, nbins},
+        optTypeMetaToScalarType(a.options().dtype_opt()),
+        a.options().layout_opt(),
+        a.options().device_opt(),
+        a.options().pinned_memory_opt());
+    pInfo = detail::getTensorInfo<output_t, IndexType>(partial_output);
+  }
 
   if (HasWeights) {
     auto cInfo = detail::getTensorInfo<output_t, IndexType>(c);
@@ -240,7 +298,8 @@ bool CUDA_tensor_histogram(
 #undef HANDLE_CASE
 #undef HANDLE_SWITCH_CASE
 #undef FOR_KERNEL_LOOP
-#undef RATIO_OF_GMEM_ATOMIC_ADD_TO_SMEM_ATOMIC_ADD
+#undef THRESH_NUMBER_BINS_FOR_GLOBAL_MEM
+#undef THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM
 } // namespace cuda
 
 namespace {

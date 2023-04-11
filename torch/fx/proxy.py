@@ -201,8 +201,7 @@ class TracerBase:
                     'torch/utils/_python_dispatch.py',
                     'torch/_prims_common/wrappers.py',
                     'torch/_refs/__init__.py',
-                    'torch/_refs/nn/functional/__init__.py',
-                    'torch/utils/_stats.py',
+                    'torch/_refs/nn/functional/__init__.py'
                     ]
         while frame:
             frame = frame.f_back
@@ -441,9 +440,9 @@ class Proxy:
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
-            if isinstance(orig_method, torch._ops.HigherOrderOperator):
-                # TODO: Define how to symbolically trace HigherOrderOperators
-                raise RuntimeError("Unable to symbolically trace HigherOrderOperators")
+            if isinstance(orig_method, torch._ops.PyOperator):
+                # TODO: Define how to symbolically trace PyOperators
+                raise RuntimeError("Unable to symbolically trace PyOperators")
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 

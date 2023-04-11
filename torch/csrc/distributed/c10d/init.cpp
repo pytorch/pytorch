@@ -517,11 +517,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
              const std::shared_ptr<::c10d::Logger> logger) {
             std::weak_ptr<::c10d::Logger> logger_weakref = logger;
             reducer.set_logger(logger_weakref);
-          })
-      .def(
-          "_remove_autograd_hooks",
-          [](::c10d::Reducer& reducer) { reducer.remove_autograd_hooks(); },
-          py::call_guard<py::gil_scoped_release>());
+          });
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(

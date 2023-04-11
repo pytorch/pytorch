@@ -3,6 +3,7 @@ reviewers:
   groups:
     symbolic-shapes:
       - ezyang
+      - Chillee
       - albanD
       - miladm
       - bdhirsh
@@ -15,8 +16,6 @@ reviewers:
       - antoniojkim
       - wconstab
       - SherlockNoMad
-    Chillee:
-      - ezyang
 
 files:
   # none yet, TODO: migrate CODEOWNERS here

@@ -132,8 +132,6 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"mT", "aten"},
            {"mH", "aten"},
            {"is_ort", "prim"},
-           {"itemsize", "prim"},
-           {"nbytes", "prim"},
            {"ndim", "prim"},
            {"name", "prim"},
            {"real", "aten"},

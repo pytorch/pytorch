@@ -189,7 +189,6 @@ class autocast:
             assert dtype is not None
             return
         self.device = device_type
-        self.custom_backend_name = torch._C._get_privateuse1_backend_name()
         if self.device == 'cuda':
             self.fast_dtype = torch.get_autocast_gpu_dtype()
         elif self.device == 'cpu':
@@ -198,22 +197,6 @@ class autocast:
             self.fast_dtype = torch.xpu.get_autocast_xpu_dtype()  # type: ignore[attr-defined]
         elif self.device == 'hpu':
             self.fast_dtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
-        elif self.device == self.custom_backend_name:
-            necessary_funcs = ['is_autocast_enabled', 'set_autocast_enabled', 'get_autocast_dtype',
-                               'set_autocast_dtype', 'get_amp_supported_dtype']
-            message = f"Tried to use AMP with the `{self.custom_backend_name}` backend, but the backend has not "
-            message += "registered a module or  the module miss some necessary funcs. The backend should register "
-            message += "a module by `torch._register_device_module`, and the module must have these funcs: \n"
-            message += "`is_autocast_enabled() -> bool`, `set_autocast_enabled(bool) -> None`, "
-            message += "`get_autocast_dtype() -> torch.dtype`, `set_autocast_dtype(torch.dtype) "
-            message += "-> None` and `get_amp_supported_dtype() -> List[torch.dtype]`. \n"
-
-            assert hasattr(torch, self.custom_backend_name), message
-            self.custom_device_mod = getattr(torch, self.custom_backend_name)
-            for func in necessary_funcs:
-                assert hasattr(self.custom_device_mod, func), message + f"But the func `{func}` is missing. \n"
-
-            self.fast_dtype = self.custom_device_mod.get_autocast_dtype()
         else:
             raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
         self._cache_enabled = torch.is_autocast_cache_enabled()
@@ -246,16 +229,8 @@ class autocast:
                 error_message += 'HPU Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently.'
                 warnings.warn(error_message)
                 enabled = False
-        elif self.device == self.custom_backend_name:
-            supported_dtype = self.custom_device_mod.get_amp_supported_dtype()
-            if self.fast_dtype not in supported_dtype:
-                error_message = f"In {self.custom_backend_name} autocast, but the target dtype is not supported. "
-                error_message += f"Disabling autocast.\n {self.custom_backend_name} Autocast only supports dtypes of "
-                error_message += ", ".join(str(dtype) for dtype in supported_dtype) + " currently."
-                warnings.warn(error_message)
-                enabled = False
         elif self.device == 'cuda':
-            if enabled and self.fast_dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+            if self.fast_dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
                 raise RuntimeError('Current CUDA Device does not support bfloat16. Please switch dtype to float16.')
         self._enabled = enabled
 
@@ -282,12 +257,6 @@ class autocast:
             self.prev_fastdtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
             torch.hpu.set_autocast_hpu_enabled(self._enabled)  # type: ignore[attr-defined]
             torch.hpu.set_autocast_hpu_dtype(self.fast_dtype)  # type: ignore[attr-defined]
-            torch.autocast_increment_nesting()
-        elif self.device == self.custom_backend_name:
-            self.prev = self.custom_device_mod.is_autocast_enabled()
-            self.prev_fastdtype = self.custom_device_mod.get_autocast_dtype()
-            self.custom_device_mod.set_autocast_enabled(self._enabled)
-            self.custom_device_mod.set_autocast_dtype(self.fast_dtype)
             torch.autocast_increment_nesting()
         else:
             self.prev = torch.is_autocast_enabled()
@@ -317,11 +286,6 @@ class autocast:
                 torch.clear_autocast_cache()
             torch.hpu.set_autocast_hpu_enabled(self.prev)            # type: ignore[attr-defined]
             torch.hpu.set_autocast_hpu_dtype(self.prev_fastdtype)    # type: ignore[attr-defined]
-        elif self.device == self.custom_backend_name:
-            if torch.autocast_decrement_nesting() == 0:
-                torch.clear_autocast_cache()
-            self.custom_device_mod.set_autocast_enabled(self._enabled)
-            self.custom_device_mod.set_autocast_dtype(self.fast_dtype)
         else:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()

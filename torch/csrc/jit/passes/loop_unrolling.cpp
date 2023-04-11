@@ -339,7 +339,7 @@ Node* PeelLoop(Node* n, size_t times) {
   // only run until the peeled count
   new_lv.replaceMaxTripCount(min_trip_count);
 
-  // subtract `maxTripCount` of the original loop by the number iterations
+  // substract `maxTripCount` of the original loop by the number iterations
   // the peeled loop runs
   auto new_max_trip_count =
       graph->insert(aten::sub, {orig_loop.maxTripCount(), min_trip_count});

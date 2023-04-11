@@ -133,7 +133,7 @@ struct ParsedArgs {
   PyObject* args[N];
 };
 
-struct PYBIND11_EXPORT PythonArgParser {
+struct PythonArgParser {
   explicit PythonArgParser(
       std::vector<std::string> fmts,
       bool traceable = false);

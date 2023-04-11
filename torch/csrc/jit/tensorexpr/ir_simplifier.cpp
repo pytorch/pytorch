@@ -1903,7 +1903,7 @@ c10::optional<class ModRound> isModRound(TermPtr e) {
         }
       }
 
-      // All non-mod variables are considered as part of the multiplier.
+      // All non-mod vairables are considered as part of the multiplier.
       multiplier = alloc<Mul>(multiplier, m);
     }
   }
@@ -2077,7 +2077,7 @@ ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
 
         // TODO: for now don't attempt partial factorization of this
         // optimization. E.g. it's possible to do: 2 * (x/y) * y + (x%y) => x +
-        // (x/y) * y but unsure thats actually much better, particularly with
+        // (x/y) * y but unsure thats actually much better, particulary with
         // CSE.
         if (!immediateEquals(
                 evaluateOp(alloc<Sub>(r->scalar(), m->scalar())), 0)) {
@@ -2144,7 +2144,7 @@ TermPtr PolynomialBase::factorizePolynomial(PolynomialPtr poly) {
     return nullptr;
   }
 
-  // Create new structure.
+  // Create new struture.
   std::vector<TermPtr> newPolyTerms;
   newPolyTerms.reserve(variables.size());
   for (const auto& t : variables) {
@@ -2386,7 +2386,7 @@ StmtPtr TermExpander::mutate(FreePtr v) {
   return v;
 }
 
-// Combines adjacent Cond nodes with identical conditions.
+// Combines adjactent Cond nodes with identical conditions.
 BlockPtr TermExpander::fuseConditions(BlockPtr v) {
   std::vector<StmtPtr> stmts;
   bool did_anything = false;
@@ -2641,7 +2641,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when x is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For example, -1/6
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) x is not negative
@@ -2654,7 +2654,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when j is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For example, -1/6
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) j is not negative
@@ -2759,7 +2759,7 @@ ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when x is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For example, -1/6
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) x is not negative
@@ -2772,7 +2772,7 @@ ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when j is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For example, -1/6
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, j has to be not negative. d) j is not negative

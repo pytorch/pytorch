@@ -85,7 +85,7 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     into elementwise kernel template, and compiled on the fly. Compiled kernel will be cached in memory, as well as
     local temp dir.
 
-    Jiterator-generated kernels accepts noncontiguous tensors, and supports broadcasting and type promotion.
+    Jiterator-generated kernels accepts noncontiguous tensors, and supports boardcasting and type promotion.
 
     Args:
         code_string (str): CUDA code string to be compiled by jiterator. The entry functor must return by value.

@@ -306,7 +306,6 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     """
     return ProfilerAction.RECORD
 
-
 def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -326,9 +325,8 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
             except Exception as e:
                 raise RuntimeError("Can't create directory: " + dir_name) from e
         if not worker_name:
-            worker_name = f"{socket.gethostname()}_{os.getpid()}"
-        # Use nanosecond here to avoid naming clash when exporting the trace
-        file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
+            worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
+        file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
         if use_gzip:
             file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
@@ -534,13 +532,11 @@ class profile(_KinetoProfile):
         prof.KinetoStepTracker.init_step_count(PROFILER_STEP_NAME)
 
     def __enter__(self):
-        prof._enable_dynamo_cache_lookup_profiler(True)
         self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
-        prof._enable_dynamo_cache_lookup_profiler(False)
         prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
 
     def start(self):

@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+import copy
 import dataclasses
 from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
 from torch.distributed.checkpoint.planner import LoadPlan
@@ -20,10 +21,9 @@ from torch.distributed.checkpoint.metadata import (
     MetadataIndex,
     STATE_DICT_TYPE,
     TensorStorageMetadata,
-    ChunkStorageMetadata,
 )
 from torch.distributed.checkpoint.planner_helpers import (
-    create_read_items_for_chunk_list,
+    _create_sharded_read_items,
     _create_read_items,
 )
 from torch.distributed.remote_device import _remote_device
@@ -168,19 +168,14 @@ class _ReaderWithOffset(DefaultLoadPlanner):
 
             assert len(obj.local_shards()) == 1
             original_shard = obj.local_shards()[0]
-            local_chunks = [
-                ChunkStorageMetadata(
-                    offsets=torch.Size(
-                        _element_wise_add(
-                            original_shard.metadata.shard_offsets, offset
-                        )
-                    ),
-                    sizes=torch.Size(original_shard.metadata.shard_sizes),
-                )
-            ]
+            shard_md = copy.deepcopy(original_shard.metadata)
+            shard_md.shard_offsets = _element_wise_add(
+                shard_md.shard_offsets, offset
+            )
+            local_shards = [Shard(original_shard.tensor, shard_md)]
 
-            reqs = create_read_items_for_chunk_list(
-                fqn, cast(TensorStorageMetadata, md), local_chunks
+            reqs = _create_sharded_read_items(
+                fqn, cast(TensorStorageMetadata, md), local_shards
             )
             # TODO: The ReadItems will have a displaced MetadataIndex, fix it.
             # TODO: we should change _create_sharded_read_items to have more ergonomic API
@@ -207,7 +202,7 @@ def load_sharded_optimizer_state_dict(
     storage_reader: dist_cp.StorageReader,
 ) -> STATE_DICT_TYPE:
     """
-    Loads a state_dict in conjunction with FSDP sharded optimizer state.
+    Loads a state_dict in conjuntion with FSDP sharded optimizer state.
     This is the current recommended way to checkpoint FSDP.
     >>> # xdoctest: +SKIP
     >>> import torch.distributed.checkpoint as dist_cp
@@ -247,7 +242,7 @@ def load_sharded_optimizer_state_dict(
     >>>     )
     >>>
     >>>     flattened_osd = FSDP.optim_state_dict_to_load(
-    >>>        model, optim, optim_state["optimizer"]
+    >>>        optim_state["optimizer"], model, optim
     >>>     )
     >>>
     >>>     optim.load_state_dict(flattened_osd)
@@ -260,8 +255,7 @@ def load_sharded_optimizer_state_dict(
         sharding_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:{i}/cuda:{i % torch.cuda.device_count()}"
-                for i in range(dist.get_world_size())
+                f"rank:{i}/cuda:{i}" for i in range(dist.get_world_size())
             ],
         )
     else:

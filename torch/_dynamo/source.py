@@ -7,10 +7,8 @@ from torch._guards import GuardSource, Source
 
 from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
-from .utils import enum_repr
+from .utils import enum_repr, rename_implicit
 
-# It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
-# so those cases are omitted intentionally
 _GUARD_SOURCE_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL: GuardSource.GLOBAL_NN_MODULE,
@@ -18,22 +16,11 @@ _GUARD_SOURCE_NN_MODULE = {
     GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_NN_MODULE,
 }
 
-_GUARD_SOURCE_FSDP_MODULE = {
-    GuardSource.LOCAL: GuardSource.LOCAL_FSDP_MODULE,
-    GuardSource.GLOBAL: GuardSource.GLOBAL_FSDP_MODULE,
-    GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_FSDP_MODULE,
-    GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
-    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
-    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
-}
-
 _GUARD_SOURCE_NOT_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL,
     GuardSource.GLOBAL: GuardSource.GLOBAL,
     GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL,
     GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL,
-    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL,
-    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL,
 }
 
 
@@ -55,8 +42,6 @@ def is_input_source(source):
         GuardSource.GLOBAL,
         GuardSource.LOCAL_NN_MODULE,
         GuardSource.GLOBAL_NN_MODULE,
-        GuardSource.LOCAL_FSDP_MODULE,
-        GuardSource.GLOBAL_FSDP_MODULE,
     ]
 
 
@@ -71,7 +56,12 @@ class LocalSource(Source):
         return GuardSource.LOCAL
 
     def name(self):
-        return f"L[{repr(self.local_name)}]"
+        return rename_implicit(self.local_name)
+
+
+@dataclasses.dataclass
+class LocalInputSource(LocalSource):
+    pos: int
 
 
 @dataclasses.dataclass
@@ -89,24 +79,7 @@ class RandomValueSource(Source):
         ]
 
     def name(self):
-        return f"random_value_{self.random_call_index}"
-
-
-@dataclasses.dataclass
-class GeneratorStateSource(Source):
-    device: str
-    initial_seed: int
-
-    def guard_source(self):
-        return GuardSource.RANDOM_VALUE
-
-    def reconstruct(self, codegen):
-        # generator state is a torch.ByteTensor, so we reuse TensorVariable reconstruction in codegen.py
-        raise NotImplementedError()
-
-    def name(self):
-        name = f"generator_state_{self.device}_{self.initial_seed}"
-        return f"L[{name}]"
+        return rename_implicit(f"random_value_{self.random_call_index}")
 
 
 @dataclasses.dataclass
@@ -120,7 +93,7 @@ class GlobalSource(Source):
         return GuardSource.GLOBAL
 
     def name(self):
-        return f"G[{repr(self.global_name)}]"
+        return self.global_name
 
 
 @dataclasses.dataclass
@@ -130,14 +103,13 @@ class GlobalWeakRefSource(Source):
     def reconstruct(self, codegen):
         return [
             codegen.create_load_global(self.global_name, True, add=True),
-            *create_call_function(0, False),
-        ]
+        ] + create_call_function(0, False)
 
     def guard_source(self):
         return GuardSource.GLOBAL
 
     def name(self):
-        return f"G[{repr(self.global_name)}]()"
+        return f"{self.global_name}()"
 
 
 @dataclasses.dataclass
@@ -167,12 +139,6 @@ class AttrSource(Source):
         if not self.member.isidentifier():
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
-
-
-@dataclasses.dataclass
-class ParamBufferSource(AttrSource):
-    def guard_source(self):
-        return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
 
 
 class TensorProperty(enum.Enum):
@@ -308,11 +274,13 @@ class GetItemSource(Source):
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
         codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
-        return [
-            *self.base.reconstruct(codegen),
-            codegen.create_load_const(self.index),
-            *create_call_function(2, True),
-        ]
+        return (
+            self.base.reconstruct(codegen)
+            + [
+                codegen.create_load_const(self.index),
+            ]
+            + create_call_function(2, True)
+        )
 
     def name(self):
         return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
@@ -369,22 +337,20 @@ class ODictGetItemSource(Source):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        return [
-            codegen._create_load_const(collections.OrderedDict.__getitem__),
-            *self.base.reconstruct(codegen),
-            codegen.create_load_const(self.index),
-            *create_call_function(2, True),
-        ]
+        return (
+            [codegen._create_load_const(collections.OrderedDict.__getitem__)]
+            + self.base.reconstruct(codegen)
+            + [
+                codegen.create_load_const(self.index),
+            ]
+            + create_call_function(2, True)
+        )
 
     def guard_source(self):
         return self.base.guard_source()
 
     def name(self):
-        if isinstance(self.index, type):
-            rep = f'__load_module("{self.index.__module__}").{self.index.__qualname__}'
-            return f"___odict_getitem({self.base.name()}, {rep})"
-        else:
-            return f"___odict_getitem({self.base.name()}, {self.index!r})"
+        return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass
@@ -404,21 +370,6 @@ class NNModuleSource(Source):
 class NotNNModuleSource(NNModuleSource):
     def guard_source(self):
         return _GUARD_SOURCE_NOT_NN_MODULE[self.inner.guard_source()]
-
-
-@dataclasses.dataclass
-class FSDPNNModuleSource(NNModuleSource):
-    def guard_source(self):
-        return _GUARD_SOURCE_FSDP_MODULE[self.inner.guard_source()]
-
-
-@dataclasses.dataclass
-class DeterministicAlgorithmsSource(Source):
-    def name(self):
-        return ""
-
-    def guard_source(self):
-        return GuardSource.GLOBAL
 
 
 @dataclasses.dataclass

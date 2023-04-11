@@ -18,9 +18,14 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS: dot op doesn't support int64 input")
 
   using namespace mps;
-  using CachedGraph = MPSBinaryCachedGraph;
   auto output = at::native::empty_mps({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* selfTensor_ = nil;
+    MPSGraphTensor* otherTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
@@ -64,7 +69,7 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
                                              toType:getMPSDataType(self)
                                                name:@"castDotProductTensor"];
 
-          newCachedGraph->inputTensor_ = selfTensor;
+          newCachedGraph->selfTensor_ = selfTensor;
           newCachedGraph->otherTensor_ = otherTensor;
           newCachedGraph->outputTensor_ = dotProductTensor;
         }
@@ -73,7 +78,7 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
       cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
     }
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
     Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 

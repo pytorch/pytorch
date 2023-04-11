@@ -4,7 +4,6 @@ from torch._dynamo.testing import make_test_cls_with_patches
 
 try:
     from . import (
-        test_ctx_manager,
         test_export,
         test_functions,
         test_misc,
@@ -13,7 +12,6 @@ try:
         test_subgraphs,
     )
 except ImportError:
-    import test_ctx_manager
     import test_export
     import test_functions
     import test_misc
@@ -31,6 +29,9 @@ ALL_DYNAMIC_XFAILS = {
     "ReproTests": [
         # Could not infer dtype of torch._C.SymIntNode
         "test_convert_boxes_to_pooler_format",
+        # Cannot call sizes() on tensor with symbolic sizes/strides
+        "test_hf_t5_forward",
+        "test_sort_out2",
     ],
     "SubGraphTests": [
         "test_enumerate_not_break_graph",
@@ -40,14 +41,18 @@ ALL_DYNAMIC_XFAILS = {
 XFAIL_HITS = 0
 
 
-def make_dynamic_cls(cls, *, static_default=False):
+def make_dynamic_cls(cls, *, static_default=False, unspec=False):
     suffix = "_dynamic_shapes"
     if static_default:
         suffix += "_static_default"
+    if unspec:
+        suffix += "_unspec"
 
     cls_prefix = "DynamicShapes"
     if static_default:
         cls_prefix = f"StaticDefault{cls_prefix}"
+    if unspec:
+        cls_prefix = f"Unspec{cls_prefix}"
 
     test_class = make_test_cls_with_patches(
         cls,
@@ -55,7 +60,7 @@ def make_dynamic_cls(cls, *, static_default=False):
         suffix,
         (config, "dynamic_shapes", True),
         (config, "assume_static_by_default", static_default),
-        (config, "specialize_int", static_default),
+        (config, "specialize_int", not unspec),
     )
 
     xfail_tests = ALL_DYNAMIC_XFAILS.get(cls.__name__)
@@ -72,7 +77,6 @@ def make_dynamic_cls(cls, *, static_default=False):
 
 
 tests = [
-    test_ctx_manager.CtxManagerTests,
     test_functions.FunctionTests,
     test_misc.MiscTests,
     test_repros.ReproTests,
@@ -82,35 +86,16 @@ tests = [
 ]
 for test in tests:
     make_dynamic_cls(test)
+    make_dynamic_cls(test, unspec=True)
     make_dynamic_cls(test, static_default=True)
 
-assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 2
+assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 3
 
-# Single config failures
+# Unspec only failures
 
 unittest.expectedFailure(
-    DynamicShapesMiscTests.test_slice_input_dynamic_shapes
+    UnspecDynamicShapesMiscTests.test_slice_input_dynamic_shapes_unspec
     # NotImplementedError: SymNodeVariable() is not a constant
-)
-
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_lazy_module1_dynamic_shapes
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-)
-
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_lazy_module2_dynamic_shapes
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-)
-
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_lazy_module3_dynamic_shapes
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-)
-
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_lazy_module4_dynamic_shapes
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
 )
 
 if __name__ == "__main__":

@@ -56,8 +56,14 @@ TORCH_IMPL_FUNC(softmax_mps_out)
   // match")
 
   using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
   MPSStream* stream = getCurrentMPSStream();
+
+  // Derive from MPSCachedGraph
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -166,8 +172,15 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
   TORCH_CHECK(dim_ >= 0 && dim_ < grad.dim(), "Grad:dim must be non-negative and less than input dimensions");
 
   using namespace mps;
-  using CachedGraph = MPSUnaryGradCachedGraph;
   MPSStream* stream = getCurrentMPSStream();
+
+  // Derive from MPSCachedGraph
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* softmaxTensor_ = nil;
+    MPSGraphTensor* gradOutputTensor_ = nil;
+    MPSGraphTensor* gradInputTensor_ = nil;
+  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -201,7 +214,7 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
                                                                       secondaryTensor:gradSubTensor
                                                                                  name:nil];
 
-          newCachedGraph->outputTensor_ = softmaxTensor;
+          newCachedGraph->softmaxTensor_ = softmaxTensor;
           newCachedGraph->gradOutputTensor_ = gradOutputTensor;
           newCachedGraph->gradInputTensor_ = gradInputTensor;
         }
@@ -210,7 +223,7 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
       cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
     }
 
-    Placeholder softmaxPlaceholder = Placeholder(cachedGraph->outputTensor_, output, grad_shape);
+    Placeholder softmaxPlaceholder = Placeholder(cachedGraph->softmaxTensor_, output, grad_shape);
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad, grad_shape);
     Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
 

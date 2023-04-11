@@ -266,7 +266,8 @@ class ChainDataset(IterableDataset):
     def __iter__(self):
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            yield from d
+            for x in d:
+                yield x
 
     def __len__(self):
         total = 0

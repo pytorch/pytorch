@@ -217,7 +217,7 @@ class C10_API SymInt {
     return i > MAX_UNREPRESENTABLE_INT;
   }
 
-  // Return the min representable integer as a SymInt
+  // Return the min represetable integer as a SymInt
   static constexpr int64_t min_representable_int() {
     return MAX_UNREPRESENTABLE_INT + 1;
   }
@@ -234,7 +234,7 @@ class C10_API SymInt {
   //   is_symbolic().  FB only: https://fburl.com/strobelight/5l50ncxd
   //   (you will need to change the time window).
   //
-  // So, the scheme is to reserve large negative numbers (assuming
+  // So, the scheme is to reserve large negative numbers (asssuming
   // two's complement):
   //
   // - 0b0.... means we are a positive int

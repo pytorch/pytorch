@@ -10,8 +10,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
-    parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests
-from torch.testing._internal.common_cuda import TEST_CUDA
+    parametrize, subtest, is_coalesced_indices, suppress_warnings, is_slow_gradcheck_env
+from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
 from distutils.version import LooseVersion
@@ -60,7 +60,7 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
 
 def gradcheck_semantics(test_name='gradcheck'):
     gradcheck_sparse = functools.partial(gradcheck, masked=False)
-    gradcheck_masked = functools.partial(gradcheck, masked=True)
+    gradcheck_masked = functools.partial(gradcheck, masked=True, check_sparse_nnz=True)
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
@@ -91,7 +91,7 @@ class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
             torch.ops.aten._values.default,
         )
 
-class TestSparseLegacyAndDeprecation(TestCase):
+class TestSparseLegacyConstructors(TestCase):
 
     def test_legacy_warnings(self):
 
@@ -142,59 +142,6 @@ class TestSparseLegacyAndDeprecation(TestCase):
 
             # Check warn-once:
             self.assertEqual(len(cm.warnings), 1)
-
-    @parametrize('fast_mode', (True, False))
-    def test_gradcheck_check_sparse_nnz(self, fast_mode):
-        """Tests for deprecated check_sparse_nnz keyword argument of gradcheck.
-
-        Deprecation steps:
-        2.1: Specification of check_sparse_nnz triggers a warning.
-        2.2: Specification of check_sparse_nnz triggers an
-             exception. Remove all check_sparse_nnz usages from
-             gradcheck and delete this test.
-        """
-        def fn(x, masked_grad):
-            return x.to_dense(masked_grad=masked_grad)
-
-        def test(x, masked_grad, masked, check_sparse_nnz):
-            x = x.detach().clone().requires_grad_()
-            torch.autograd.gradcheck(fn, (x, masked_grad), masked=masked, check_sparse_nnz=check_sparse_nnz, fast_mode=fast_mode)
-
-        x = torch.tensor([[0, 2], [3, 4]], dtype=torch.float64).to_sparse()
-
-        for masked_grad, masked, check_sparse_nnz in itertools.product(*[(True, False, None)] * 3):
-            effective_masked_grad = True if masked_grad is None else masked_grad
-            effective_check_sparse_nnz = False if check_sparse_nnz is None else check_sparse_nnz
-            # For BC, the effective masked depends on the value of specified check_sparse_nnz:
-            effective_masked = (check_sparse_nnz if check_sparse_nnz is not None else False) if masked is None else masked
-
-            warn_using_check_sparse_nnz = self.assertWarns(
-                UserWarning,
-                msg=('Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch.'
-                     f' Use masked={effective_check_sparse_nnz} instead.'))
-            raise_on_non_equal_masked_and_check_sparse_nnz = self.assertRaisesRegex(
-                ValueError,
-                f"Expected specified check_sparse_nnz [(]={effective_check_sparse_nnz}[)]"
-                f" to be equal to masked [(]={effective_masked}[)]")
-            raise_jacobian_mismatch = self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 0")
-
-            def run_test():
-                if effective_masked_grad != effective_masked and not fast_mode:
-                    with raise_jacobian_mismatch:
-                        test(x, masked_grad, masked, check_sparse_nnz)
-                else:
-                    test(x, masked_grad, masked, check_sparse_nnz)
-
-            if masked != check_sparse_nnz and None not in {masked, check_sparse_nnz}:
-                # the specified masked and check_sparse_nnz must match
-                with warn_using_check_sparse_nnz:
-                    with raise_on_non_equal_masked_and_check_sparse_nnz:
-                        test(x, masked_grad, masked, check_sparse_nnz)
-            elif check_sparse_nnz is not None:
-                with warn_using_check_sparse_nnz:
-                    run_test()
-            else:
-                self.assertNotWarn(run_test)
 
 class TestSparseBase(TestCase):
     def run(self, result=None):
@@ -466,6 +413,8 @@ class TestSparse(TestSparseBase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
     def test_to_dense_with_gradcheck(self, device, dtype, gradcheck):
+        if not gradcheck.masked and is_slow_gradcheck_env():
+            self.skipTest('FIXME: to_dense_backward supports masked semantics only')
 
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -483,9 +432,9 @@ class TestSparse(TestSparseBase):
                 return
 
             def fn(x):
-                return x.to_dense(masked_grad=gradcheck.masked)
+                return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,))
+            gradcheck(fn, (x,), check_sparse_nnz=True)
 
         for value_type in [torch.double, torch.cdouble]:
             i = self.index_tensor([
@@ -601,6 +550,8 @@ class TestSparse(TestSparseBase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
     def test_to_dense_hybrid(self, device, dtype, gradcheck):
+        if not gradcheck.masked and is_slow_gradcheck_env():
+            self.skipTest('FIXME: to_dense_backward supports masked semantics only')
 
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
@@ -610,9 +561,9 @@ class TestSparse(TestSparseBase):
             self.assertEqual(res, self.safeToDense(x))
 
             def fn(x):
-                return x.to_dense(masked_grad=gradcheck.masked)
+                return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,))
+            gradcheck(fn, (x,), check_sparse_nnz=True)
 
         i = self.index_tensor([
             [0, 1, 2, 2],
@@ -957,6 +908,8 @@ class TestSparse(TestSparseBase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
     def test_permute(self, device, dtype, coalesced, gradcheck):
+        if not gradcheck.masked and is_slow_gradcheck_env():
+            self.skipTest('FIXME: to_dense_backward supports masked semantics only')
         # trivial checks
         s = torch.rand(3, 3, 3, device=device, dtype=dtype).to_sparse()
         with self.assertRaisesRegex(RuntimeError, "does not match the length"):
@@ -988,7 +941,7 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_())
+                    gradcheck(lambda t: t.permute(dims).to_dense(), s.requires_grad_(True), check_sparse_nnz=True)
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
@@ -1365,6 +1318,10 @@ class TestSparse(TestSparseBase):
         IS_WINDOWS and TEST_CUDA,
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
+    @unittest.skipIf(
+        TEST_CUDA and _get_torch_cuda_version() < (10, 1) and not TEST_WITH_ROCM,
+        "bmm sparse-dense requires CUDA 10.1 or greater"
+    )
     @coalescedonoff
     @dtypes(torch.double)
     def test_bmm(self, device, dtype, coalesced):
@@ -1423,6 +1380,10 @@ class TestSparse(TestSparseBase):
         IS_WINDOWS,
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (10, 1) and not TEST_WITH_ROCM,
+        "bmm sparse-dense requires CUDA 10.1 or greater"
+    )
     def test_bmm_deterministic(self, device, dtype, coalesced):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
@@ -1458,7 +1419,7 @@ class TestSparse(TestSparseBase):
 
     @onlyCUDA
     @unittest.skipIf(
-        not IS_WINDOWS or not TEST_WITH_ROCM,
+        not IS_WINDOWS or _get_torch_cuda_version() >= (11, 0),
         "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
     )
     @dtypes(torch.double)
@@ -1468,6 +1429,21 @@ class TestSparse(TestSparseBase):
         with self.assertRaisesRegex(
                 RuntimeError,
                 "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0"):
+            ab = a.bmm(b)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        _get_torch_cuda_version() >= (10, 1),
+        "this test ensures bmm gives error if CUDA version is less than 10.1"
+    )
+    @dtypes(torch.double)
+    def test_bmm_cuda_version_error(self, device, dtype):
+        a = torch.rand(2, 2, 2, dtype=dtype).to_sparse().cuda()
+        b = torch.rand(2, 2, 2, dtype=dtype).cuda()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "bmm sparse-dense requires CUDA 10.1 or greater"):
             ab = a.bmm(b)
 
     @onlyCPU
@@ -1554,14 +1530,11 @@ class TestSparse(TestSparseBase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @coalescedonoff
+    @unittest.skip("See https://github.com/pytorch/pytorch/issues/73145")
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
-    def test_sparse_addmm(self, device, dtype, coalesced):
-        if dtype is torch.bfloat16:
-            # RuntimeError: "addmm_sparse_dense" not implemented for 'BFloat16'
-            self.skipTest('See https://github.com/pytorch/pytorch/issues/73145')
-
+    @gradcheck_semantics()
+    def test_sparse_addmm(self, device, dtype, coalesced, gradcheck):
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
             if alpha_beta is None:
                 alpha = random.random()
@@ -1582,7 +1555,7 @@ class TestSparse(TestSparseBase):
 
             def fn(S, D1, D2, beta=beta, alpha=alpha):
                 return torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
-            gradcheck(fn, (S, D1, D2), masked=True)
+            gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
 
         test_shape(7, 8, 9, 20, False, None)
         test_shape(7, 8, 9, 20, True, None)
@@ -1608,7 +1581,7 @@ class TestSparse(TestSparseBase):
 
             def fn(S, D):
                 return torch.sparse.mm(S, D)
-            gradcheck(fn, (S, D), masked=True)
+            gradcheck(fn, (S, D), check_sparse_nnz=True, masked=True)
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
@@ -1621,16 +1594,16 @@ class TestSparse(TestSparseBase):
         # https://github.com/pytorch/pytorch/issues/79914
         a = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
         b = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
-        gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(masked_grad=gradcheck.masked), [a, b])
+        gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], check_sparse_nnz=True)
 
         def test_shape(sparse_dims, nnz, with_shape):
             a = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
             b = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
 
-            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense(), masked=True)
-            gradcheck(lambda x, y: (x * y).to_dense(), [a, b])
+            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense())
+            gradcheck(lambda x, y: (x * y).to_dense(), [a, b], check_sparse_nnz=True)
             # Issues with 0-dim indices/values
-            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True)
+            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], check_sparse_nnz=True)
 
         # TODO: Re-enable these
         # test_shape(2, 3, [2, 3, 4, 5])
@@ -1805,8 +1778,11 @@ class TestSparse(TestSparseBase):
                 self.assertEqual(S_sum.item(), D_sum.item())
 
                 def fn(S):
-                    return torch.sparse.sum(S)
-                gradcheck(fn, (S,), masked=True)
+                    res = torch.sparse.sum(S)
+                    if res.is_sparse:
+                        res = res.to_dense()
+                    return res
+                gradcheck(fn, (S,), check_sparse_nnz=True, masked=True)
             else:
                 S_sum = torch.sparse.sum(S, td)
                 D_sum = D.sum(td)
@@ -1814,8 +1790,10 @@ class TestSparse(TestSparseBase):
 
                 def fn(S):
                     res = torch.sparse.sum(S, td)
-                    return res.to_dense(masked_grad=True)
-                gradcheck(fn, (S,), masked=True)
+                    if res.is_sparse:
+                        res = res.to_dense()
+                    return res
+                gradcheck(fn, (S,), check_sparse_nnz=True, masked=True)
 
         nnz = 10
         sparse_dims = 2
@@ -2974,7 +2952,7 @@ class TestSparse(TestSparseBase):
             self.skipTest(f'requires_grad==True requires float or complex dtype, got {dtype}')
 
         self._test_empty_full(device, dtype, requires_grad)
-        if torch.cuda.is_available():
+        if torch.cuda.device_count() > 0:
             self._test_empty_full(None, dtype, requires_grad)
             self._test_empty_full(torch.device('cuda:0'), dtype, requires_grad)
 
@@ -3536,7 +3514,7 @@ class TestSparse(TestSparseBase):
 
         # gradient
         t = t.requires_grad_()
-        gradcheck(lambda x: func(x, 0).to_dense(), (t,), masked=True)
+        gradcheck(lambda x: func(x, 0).to_dense(), (t,), masked=True, check_sparse_nnz=True)
 
 
     @dtypes(torch.double, torch.float)
@@ -3627,9 +3605,9 @@ class TestSparse(TestSparseBase):
                     # This is because cuSparse sometimes returns approximate zero values like `~e-323`
                     # TODO: Check this cuSparse issue.
                     # This happens when you do chain multiplication `torch.sparse.mm` operations
-                    gradcheck(fn, (a, b), nondet_tol=1e-5, masked=True)
+                    gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5, masked=True)
                 else:
-                    gradcheck(fn, (a, b), masked=True)
+                    gradcheck(fn, (a, b), check_sparse_nnz=True, masked=True)
                 grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
@@ -3758,8 +3736,8 @@ class TestSparse(TestSparseBase):
         #     if dtype in {torch.double, torch.cdouble}:
         #         xa = x.detach().clone().requires_grad_(True)
         #         ya = y.detach().clone().requires_grad_(True)
-        #         gradcheck(lambda a, b: (a * b).to_dense(), (xa, ya), masked=True)
-        #         gradcheck(lambda a, b: (a * b).to_dense(), (ya, xa), masked=True)
+        #         gradcheck(lambda a, b: (a * b).to_dense(), (xa, ya), check_sparse_nnz=True)
+        #         gradcheck(lambda a, b: (a * b).to_dense(), (ya, xa), check_sparse_nnz=True)
 
         for dim in range(len(shape) + 1):
             sub_shape = shape[dim:]
@@ -4034,7 +4012,7 @@ class TestSparseOneOff(TestCase):
 
 def _sparse_to_dense(tensor):
     if tensor.dtype != torch.bool:
-        return tensor.to_dense(masked_grad=True)
+        return tensor.to_dense()
 
     # to_dense uses coalesce which isn't implemented for bool
     return tensor.to(torch.int8).to_dense().to(torch.bool)
@@ -4128,6 +4106,7 @@ class TestSparseUnaryUfuncs(TestCase):
                 (sparse_input,),
                 check_batched_grad=False,
                 check_grad_dtypes=True,
+                check_sparse_nnz=True,
                 nondet_tol=op.gradcheck_nondet_tol,
                 fast_mode=op.gradcheck_fast_mode,
                 masked=True))
@@ -4444,8 +4423,21 @@ class TestSparseAny(TestCase):
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
             t = t.clone().detach().requires_grad_(True)
-            r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=gradcheck.masked), t)
+            if is_slow_gradcheck_env() and not gradcheck.masked:
+                # TODO: remove this if-block when TODO items below are resolved
+                try:
+                    gradcheck(torch.Tensor.to_dense, t)
+                except RuntimeError as msg:
+                    # TODO: implement non-masked semantics support in to_dense_backward
+                    with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch"):
+                        gradcheck(torch.Tensor.to_dense, t)
+                    self.skipTest('non-masked semantics not supported')
+            r = gradcheck(torch.Tensor.to_dense, t)
             self.assertTrue(r)
+
+        # when the following assert fails, it means that the if-block
+        # above and the assertFalse test below can be safely removed
+        self.assertFalse(is_slow_gradcheck_env() and not gradcheck.masked)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)
@@ -4746,7 +4738,7 @@ class TestSparseAny(TestCase):
             with self.assertRaisesRegex(
                     RuntimeError,
                     r"addmm: computation on (CPU|CUDA) is not implemented for Strided \+ Sparse(Bsr|Bsc) @ Strided"):
-                torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
+                torch.autograd.gradcheck(mm, (x, y), check_sparse_nnz=True, fast_mode=fast_mode, masked=masked)
             self.skipTest('NOT IMPL')
         elif layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and masked:
             with self.assertRaisesRegex(
@@ -4755,10 +4747,16 @@ class TestSparseAny(TestCase):
                     r" grad: Strided, mat1: Sparse(Csc|Bsr|Bsc), mat2: Strided"
                     r"|addmm: computation on (CPU|CUDA) is not implemented for "
                     r"Strided \+ Sparse(Csc|Bsr|Bsc) @ Strided without MKL)"):
-                torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
+                torch.autograd.gradcheck(mm, (x, y), check_sparse_nnz=True, fast_mode=fast_mode, masked=masked)
             self.skipTest('NOT IMPL')
         else:
-            torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
+            if masked:
+                r = torch.autograd.gradcheck(mm, (x, y), check_sparse_nnz=True, fast_mode=fast_mode, masked=masked)
+            else:
+                # Specifying check_sparse_nnz is unnecessary in
+                # non-masked/sparse semantics
+                r = torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
+            self.assertTrue(r)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
@@ -4770,8 +4768,6 @@ instantiate_device_type_tests(TestSparseMaskedReductions, globals(), except_for=
 instantiate_device_type_tests(TestSparse, globals(), except_for='meta')
 
 instantiate_device_type_tests(TestSparseAny, globals(), except_for='meta')
-
-instantiate_parametrized_tests(TestSparseLegacyAndDeprecation)
 
 if __name__ == '__main__':
     run_tests()

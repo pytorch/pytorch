@@ -77,10 +77,6 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
-    # Intersection
-    def __and__(self, other):
-        return ValueRanges(lower=max(self.lower, other.lower), upper=min(self.upper, other.upper))
-
     def is_singleton(self) -> bool:
         return self.lower == self.upper
 

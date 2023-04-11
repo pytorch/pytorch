@@ -489,9 +489,6 @@ void initDispatchBindings(PyObject* module) {
     return c10::toString(k);
   });
   m.def("_dispatch_key_parse", [](c10::DispatchKey k) { return k; });
-  m.def("_to_functionality_key", [](c10::DispatchKey k) {
-    return c10::toFunctionalityKey(k);
-  });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
@@ -511,10 +508,6 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(Python)
       DEF_ONE(FuncTorchDynamicLayerFrontMode)
       DEF_ONE(FuncTorchDynamicLayerBackMode)
-      DEF_ONE(FuncTorchBatchedDecomposition)
-      DEF_ONE(FuncTorchBatched)
-      DEF_ONE(FuncTorchVmapMode)
-      DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)

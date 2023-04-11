@@ -259,7 +259,7 @@ std::array<FunctionalityOffsetAndMask, num_functionality_keys>
 initializeFunctionalityOffsetsAndMasks() {
   std::array<FunctionalityOffsetAndMask, num_functionality_keys>
       offsets_and_masks;
-  // manually set the first entry, which corresponds to Undefined.
+  // manualy set the first entry, which corresponds to Undefined.
   offsets_and_masks[0] = FunctionalityOffsetAndMask(0, 0);
   // loop through every functionality key (aside from Undefined).
   for (const auto functionality_idx : c10::irange(1, num_functionality_keys)) {

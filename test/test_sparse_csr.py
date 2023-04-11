@@ -41,7 +41,9 @@ def _check_cusparse_triangular_solve_available():
 
 def _check_cusparse_spgemm_available():
     # cusparseSpGEMM was added in 11.0
-    return not TEST_WITH_ROCM
+    version = _get_torch_cuda_version()
+    min_supported_version = (11, 0)
+    return version >= min_supported_version
 
 def _check_cusparse_sddmm_available():
     version = _get_torch_cuda_version()
@@ -1458,7 +1460,7 @@ class TestSparseCSR(TestCase):
         expected = ref(c, a, b, alpha, beta)
 
         self.assertEqual(actual, out)
-        self.assertEqual(actual, expected, lambda msg: f"{msg}\na={a}\nc={c}\nb={b}\nalpha={alpha} beta={beta}")
+        self.assertEqual(actual, expected)
 
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
@@ -1543,7 +1545,7 @@ class TestSparseCSR(TestCase):
                 if out is not None:
                     # the ref takes no out kwarg
                     assert isinstance(out, torch.Tensor)
-                    # transpose inplace to propagate out to checking context
+                    # tranpose inplace to propogate out to checking context
                     out.transpose_(-2, -1)
                     return f(tt(c), tt(b), tt(a), alpha=alpha, beta=beta, out=out)
                 else:
@@ -1582,7 +1584,7 @@ class TestSparseCSR(TestCase):
                     return t.cpu().resolve_conj().numpy()
 
             res = _npref_block_addmm_addmv(
-                *(prep_input(t) for t in (c, a, b)),
+                *map(lambda t: prep_input(t), (c, a, b)),
                 alpha,
                 beta
             )
@@ -1630,15 +1632,13 @@ class TestSparseCSR(TestCase):
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @parametrize("noncontiguous", [True, False])
+    @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_addmv(self, device, dtype, index_dtype, block_size, noncontiguous):
         # TODO: Explicitly disable block size 1 support
         # if (TEST_WITH_ROCM or not TEST_CUSPARSE_GENERIC) and block_size == 1:
         #     return
-        def ref_block_addmv(c, a, b, alpha, beta):
-            return _npref_block_addmm_addmv(c, a.to_dense(), b, alpha, beta)
-
         for (m, k) in itertools.product([2, 5], repeat=2):
             nnz = random.randint(0, m * k)
             if not noncontiguous:
@@ -1653,20 +1653,7 @@ class TestSparseCSR(TestCase):
                                             a_data, (m * block_size, k * block_size), check_invariants=False)
             b = make_tensor((k * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
             c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
-            self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device, ref=ref_block_addmv)
-
-    @parametrize("matrix_shape", [(3, 3), (5, 7), (11, 9)], name_fn=lambda x: "shape_{}x{}".format(*x))
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @onlyCPU
-    def test_addmv(self, device, dtype, matrix_shape):
-        mat = torch.randn(matrix_shape, dtype=dtype, device=device)
-        mat[mat.real < 0] = 0
-        sparse_mat = mat.to_sparse_csr()
-        mvec = torch.randn((mat.size(1),), dtype=dtype, device=device)
-        avec = torch.randn((mat.size(0),), dtype=torch.float64, device=device)
-        ref_output = torch.addmv(avec, mat, mvec)
-        output = torch.addmv(avec, sparse_mat, mvec)
-        self.assertEqual(ref_output, output)
+            self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
 
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
@@ -2404,7 +2391,7 @@ class TestSparseCSR(TestCase):
             output.backward(covector)
 
             # Compute dense result and compare with sparse result
-            c1, a1, b1 = (x.detach().to_dense().requires_grad_(True) for x in [c, a, b])
+            c1, a1, b1 = map(lambda x: x.detach().to_dense().requires_grad_(True), [c, a, b])
             dense_output = sample.kwargs['alpha'] * (a1 @ b1) * torch.ones_like(c).to_dense() + sample.kwargs['beta'] * c1
             self.assertEqual(output, dense_output)
             dense_covector = covector.to_dense()
@@ -2479,7 +2466,6 @@ class TestSparseCSR(TestCase):
 
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
-    @precisionOverride({torch.bfloat16: 0.01})
     def test_sparse_mm_reduce_sum(self, device, dtype):
         def run_test(m, n, k, nnz, train):
             sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
@@ -2992,7 +2978,7 @@ class TestSparseCSR(TestCase):
             n_batch = len(shape) - n_dense - 2
             sparse_shape = shape[n_batch: n_batch + 2]
             if layout in (torch.sparse_bsr, torch.sparse_bsc):
-                # for blocked all combinations of 2,1 should be valid blocksizes
+                # for blocked all combinations of 2,1 shoudl be valid blocksizes
                 run_test(shape, 0, index_dtype, n_dense, blocksize=(2, 2))
                 run_test(shape, max(sparse_shape), index_dtype, n_dense, blocksize=(2, 2))
                 run_test(shape, sparse_shape[0] * sparse_shape[1], index_dtype, n_dense, blocksize=(2, 2))

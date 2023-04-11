@@ -22,7 +22,7 @@ from torch.distributed.elastic.utils.logging import get_logger
 
 __all__ = ['LaunchConfig', 'elastic_launch', 'launch_agent']
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 @dataclass
@@ -137,8 +137,8 @@ class elastic_launch:
 def _get_entrypoint_name(
     entrypoint: Union[Callable, str, None], args: List[Any]
 ) -> str:
-    """Retrieve entrypoint name with the rule:
-    1. If entrypoint is a function, use ``entrypoint.__qualname__``.
+    """Retrive entrypoint name with the rule:
+    1. If entrypoint is a function, use ``entrypont.__qualname__``.
     2. If entrypoint is a string, check its value:
         2.1 if entrypoint equals to ``sys.executable`` (like "python"), use the first element from ``args``
             which does not start with hifen letter (for example, "-u" will be skipped).

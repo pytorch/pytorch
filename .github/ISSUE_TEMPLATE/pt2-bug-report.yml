@@ -33,7 +33,7 @@ body:
       label: Minified repro
       description: |
         Please run the minifier on your example and paste the minified code below
-        Learn more here https://pytorch.org/docs/master/compile/troubleshooting.html
+        Learn more here https://pytorch.org/docs/master/dynamo/troubleshooting.html
       placeholder: |
         env TORCHDYNAMO_REPRO_AFTER="aot" python your_model.py
         or

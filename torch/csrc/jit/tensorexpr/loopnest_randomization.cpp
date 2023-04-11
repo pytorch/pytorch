@@ -122,7 +122,7 @@ std::string indexOf(const std::vector<T>& objects, const T& object) {
 } // namespace randomization_helper
 
 void loopnestRandomization(int64_t seed, LoopNest& l) {
-  // This is to help with deterministic testing of randomized infrastructure.
+  // This is to help with determinstic testing of randomized infrastructure.
   // When seed value is 1, we perform preset loop transformations. This allows
   // testing of interface.
   if (seed == 1) {
@@ -132,8 +132,8 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
   std::default_random_engine random_engine(seed);
   std::srand(seed);
-  // Set the maximum allowed number of transformations beyond which it is hard
-  // to track and debug. Arbitrarily choosing 20 as maximum number.
+  // Set the maximum allowed number of transformations beyong which it is hard
+  // to track and debug. Arbitratily choosing 20 as maximum number.
   int max_allowed_transformations = 20;
   int n_transforms = randomization_helper::max_transformations(
       std::rand() % max_allowed_transformations);

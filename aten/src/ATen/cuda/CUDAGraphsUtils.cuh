@@ -22,7 +22,7 @@ using CaptureStatus = c10::cuda::CaptureStatus;
 inline CaptureStatus currentStreamCaptureStatus() {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   // don't create a context if we don't have to
-  if (c10::cuda::hasPrimaryContext(c10::cuda::current_device())) {
+  if (at::cuda::detail::hasPrimaryContext(c10::cuda::current_device())) {
     return c10::cuda::currentStreamCaptureStatusMayInitCtx();
   } else {
     return CaptureStatus::None;

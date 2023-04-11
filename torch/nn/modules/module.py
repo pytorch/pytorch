@@ -2263,7 +2263,8 @@ class Module:
                 if module is None:
                     continue
                 submodule_prefix = prefix + ('.' if prefix else '') + name
-                yield from module.named_modules(memo, submodule_prefix, remove_duplicate)
+                for m in module.named_modules(memo, submodule_prefix, remove_duplicate):
+                    yield m
 
     def train(self: T, mode: bool = True) -> T:
         r"""Sets the module in training mode.

@@ -18,10 +18,7 @@ ARTIFACT_REGEX = re.compile(
 
 
 def upload_dynamo_perf_stats_to_rockset(
-    repo: str,
-    workflow_run_id: int,
-    workflow_run_attempt: int,
-    head_branch: str,
+    repo: str, workflow_run_id: int, workflow_run_attempt: int
 ) -> List[Dict[str, Any]]:
     perf_stats = []
     with TemporaryDirectory() as temp_dir:
@@ -68,7 +65,6 @@ def upload_dynamo_perf_stats_to_rockset(
                                     "runner": runner,
                                     "job_id": job_id,
                                     "filename": filename,
-                                    "head_branch": head_branch,
                                 }
                             )
                             perf_stats.append(row)
@@ -101,15 +97,9 @@ if __name__ == "__main__":
         required=True,
         help="which GitHub repo this workflow run belongs to",
     )
-    parser.add_argument(
-        "--head-branch",
-        type=str,
-        required=True,
-        help="Head branch of the workflow",
-    )
     args = parser.parse_args()
     perf_stats = upload_dynamo_perf_stats_to_rockset(
-        args.repo, args.workflow_run_id, args.workflow_run_attempt, args.head_branch
+        args.repo, args.workflow_run_id, args.workflow_run_attempt
     )
     upload_to_rockset(
         collection="torch_dynamo_perf_stats",

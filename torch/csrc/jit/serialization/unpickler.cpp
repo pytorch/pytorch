@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
-#include <torch/csrc/utils/byte_order.h>
 #include <string>
 
 namespace torch::jit {
@@ -211,7 +210,6 @@ IValue Unpickler::parse_ivalue() {
 double Unpickler::readFloat() {
   AT_ASSERT(sizeof(double) == 8);
   double big_endian = read<double>();
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double little_endian;
 
@@ -223,9 +221,6 @@ double Unpickler::readFloat() {
       reinterpret_cast<char*>(&little_endian));
 
   return little_endian;
-#else /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
-  return big_endian;
-#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
 }
 
 void Unpickler::run() {
@@ -328,21 +323,21 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.emplace_back(int64_t(value));
     } break;
     case PickleOpCode::BININT2: {
-      uint16_t value = from_le16(read<uint16_t>());
+      uint16_t value = read<uint16_t>();
       stack_.emplace_back(int64_t(value));
     } break;
     case PickleOpCode::BININT: {
-      int32_t value = from_le32(read<int32_t>());
+      int32_t value = read<int32_t>();
       stack_.emplace_back(int64_t(value));
     } break;
     case PickleOpCode::LONG1: {
       // Only read LONG1s with 8 as the length
       uint8_t length = read<uint8_t>();
       TORCH_CHECK(length == 8, "Expected length to be 8, got ", int(length));
-      stack_.emplace_back(int64_t(from_le64(read<int64_t>())));
+      stack_.emplace_back(int64_t(read<int64_t>()));
     } break;
     case PickleOpCode::BINUNICODE: {
-      uint32_t length = from_le32(read<uint32_t>());
+      uint32_t length = read<uint32_t>();
       stack_.emplace_back(readBytes(length));
     } break;
     case PickleOpCode::BINFLOAT:

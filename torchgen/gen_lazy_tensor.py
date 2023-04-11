@@ -403,7 +403,8 @@ def run_gen_lazy_tensor(
             fs = list(x.functions()) if isinstance(x, NativeFunctionsGroup) else [x]
             for f in fs:
                 if f.func.name in ops_list:
-                    yield from func(f)
+                    for r in func(f):
+                        yield r
 
     selector = SelectiveBuilder.get_nop_selector()
 

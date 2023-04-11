@@ -92,14 +92,9 @@ jobs:
           esac
 
       - name: Install brew dependencies
-        uses: nick-fields/retry@v2.8.2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            # Install dependencies
-            brew install libtool
+        run: |
+          # Install dependencies
+          brew install libtool
 
       - name: Setup miniconda for iOS
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
@@ -109,17 +104,12 @@ jobs:
           pip-requirements-file: .github/requirements/pip-requirements-iOS.txt
 
       - name: Setup Fastlane
-        uses: nick-fields/retry@v2.8.2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            set -x
-            cd ios/TestApp
-            # install fastlane
-            sudo gem install bundler && bundle install
-            bundle update fastlane
+        run: |
+          set -x
+          cd ios/TestApp
+          # install fastlane
+          sudo gem install bundler && bundle install
+          bundle update fastlane
 
       - name: Build PyTorch Mobile Runtime
         run: |

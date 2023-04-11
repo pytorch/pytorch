@@ -81,15 +81,10 @@ jobs:
       # runners are shared and not ephemeral, so the issue wasn't manifested if the runners with the fix were
       # used
       - name: Install macOS homebrew dependencies
-        uses: nick-fields/retry@v2.8.2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            # Install dependencies
-            brew install libomp
-            brew link --force libomp
+        run: |
+          # Install dependencies
+          brew install libomp
+          brew link --force libomp
 
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
@@ -117,7 +112,6 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
         shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
@@ -126,7 +120,7 @@ jobs:
 
       - name: Print remaining test logs
         shell: bash
-        if: always() && steps.test.conclusion
+        if: always()
         run: |
           cat test/**/*.log || true
 

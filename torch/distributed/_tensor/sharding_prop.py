@@ -1,11 +1,11 @@
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Tuple, Optional
 
 import torch
 import torch.distributed._tensor.api as dtensor
-from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
-from torch.distributed._tensor.op_schema import DTensorSpec, OpSchema, OutputSharding
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
+from torch._ops import OpOverload
+from torch.distributed._tensor.op_schema import OpSchema, OutputSharding, DTensorSpec
 from torch.utils._pytree import tree_map
 
 """
@@ -31,7 +31,10 @@ class ShardingPropagator:
         self.op_to_rules[op_overload] = rule_func
 
     def prepare_op_schema(
-        self, op_call: OpOverload, args: Tuple[object, ...], kwargs: Dict[str, object]
+        self,
+        op_call: OpOverload,
+        args: Tuple[object, ...],
+        kwargs: Dict[str, object]
     ) -> OpSchema:
         """
         This unwrap the args/kwargs DTensor to DTensorSpec and pack them
@@ -45,9 +48,7 @@ class ShardingPropagator:
         if _DEBUG_VERBOSE and torch.distributed.get_rank() == 0:
             print(f"OpSchema({op_schema})")
             local_shapes = tree_map(
-                lambda t: t.to_local().shape
-                if isinstance(t, dtensor.DTensor)
-                else None,
+                lambda t: t.to_local().shape if isinstance(t, dtensor.DTensor) else None,
                 args,
             )
             print(f"    local shapes: {local_shapes}")
@@ -77,14 +78,13 @@ class ShardingPropagator:
         # sharding propagation to get the output sharding
         try:
             output_sharding = sharding_prop_func(op_schema)
-        except NotImplementedError as e:
-            raise e
         except Exception as e:
             raise RuntimeError(
                 f"Sharding propagation failed on op {op_overload}.\n"
                 f"Input schema: {op_schema}.\n"
                 f"Error: {e}"
             ) from e
+
 
         # step 3. if can't get output_spec from sharding
         # propagation (i.e. no rules apply for input
@@ -107,7 +107,7 @@ class ShardingPropagator:
                     output_sharding.schema_suggestions = [op_schema]
             else:
                 # we do auto redistribute on inputs if necessary
-                # to get an eligible input, which we will pick a
+                # to get an eligble input, which we will pick a
                 # schema suggestion base on the redistribute cost.
                 # For now we simply pick the first suggestion.
                 # TODO: implement full auto distribute with a
@@ -131,11 +131,11 @@ class ShardingPropagator:
             if output_spec is not None:
                 assert isinstance(output_nodes, (tuple, list))
                 if isinstance(output_spec, DTensorSpec):
-                    output_spec.tensor_meta = output_nodes[0].meta["tensor_meta"]
+                    output_spec.tensor_meta = output_nodes[0].meta['tensor_meta']
                 elif isinstance(output_spec, (tuple, list)):
                     for i, spec in enumerate(output_spec):
                         if isinstance(spec, DTensorSpec):
-                            spec.tensor_meta = output_nodes[i].meta["tensor_meta"]
+                            spec.tensor_meta = output_nodes[i].meta['tensor_meta']
 
         return output_sharding
 
@@ -151,7 +151,7 @@ class ShardingPropagator:
         # scalar. TODO: figure out a better way to handle this
         skip_prop_list = [
             torch.ops.aten._local_scalar_dense.default,
-            torch.ops.aten.equal.default,
+            torch.ops.aten.equal.default
         ]
         if op_overload in skip_prop_list:
             return None
@@ -165,7 +165,7 @@ class ShardingPropagator:
 
         output = None
         for node in g.graph.nodes:
-            if node.op == "output":
+            if node.op == 'output':
                 output = node
         return output
 

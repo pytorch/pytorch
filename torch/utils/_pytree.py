@@ -51,7 +51,7 @@ def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
-    return dict(zip(context, values))
+    return {key: value for key, value in zip(context, values)}
 
 def _list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
     return d, None

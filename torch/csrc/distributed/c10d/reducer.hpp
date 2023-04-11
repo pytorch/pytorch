@@ -177,8 +177,6 @@ class TORCH_API Reducer {
   // current iteration, which means unused params set has not changed.
   bool ddp_graph_static();
 
-  void remove_autograd_hooks();
-
  protected:
   // Forward declaration.
   struct Bucket;

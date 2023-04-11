@@ -35,7 +35,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     element of :attr:`inputs` can either be a single object as the only argument
     to a module, or a collection of positional arguments.
     """
-    assert len(modules) == len(inputs), f'The number of modules {len(modules)} is not equal to the number of inputs {len(inputs)}'
+    assert len(modules) == len(inputs)
     if kwargs_tup is not None:
         assert len(modules) == len(kwargs_tup)
     else:

@@ -244,21 +244,6 @@
     deprecated: false
     tags: []
 
-- id: FXE0010
-  name: fx-pass
-  short_description:
-    text: FX graph transformation before ONNX export.
-  full_description:
-    text: "ToDo, experimenting diagnostics, placeholder text."
-    markdown: |
-      ToDo, experimenting diagnostics, placeholder text.
-  message_strings:
-    default:
-      text: "ToDo, experimenting diagnostics, placeholder text."
-  help_uri:
-  properties:
-    deprecated: false
-    tags: []
 
 - id: DIAGSYS0001
   name: arg-format-too-verbose

@@ -1,4 +1,3 @@
-import functools
 import logging
 import operator
 import os
@@ -10,7 +9,6 @@ from typing import Dict, List, Optional, Set
 import sympy
 
 import torch
-import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
@@ -25,12 +23,7 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import (
-    CppAotWrapperCodeGen,
-    CppWrapperCodeGen,
-    CudaAotWrapperCodeGen,
-    WrapperCodeGen,
-)
+from .codegen.wrapper import CppAotWrapperCodeGen, CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -39,13 +32,10 @@ from .exc import (
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import (
     FALLBACK_ALLOW_LIST,
-    fallback_handler,
-    fallback_node_due_to_unsupported_type,
     layout_constraints,
     lowerings,
     make_fallback,
     needs_realized_inputs,
-    unsupported_output_tensor,
 )
 from .sizevars import SizeVarAllocator
 from .utils import (
@@ -57,7 +47,6 @@ from .utils import (
 from .virtualized import V
 
 log = logging.getLogger(__name__)
-output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
 def supported_dtype_of_cpp_wrapper(dtype):
@@ -70,22 +59,10 @@ def supported_dtype_of_cpp_wrapper(dtype):
         torch.int8,
         torch.uint8,
         torch.bool,
-        torch.bfloat16,
         # torch.float16, # TODO: implement this
+        # torch.bfloat16, # TODO: implement this
     }
     return dtype in supported_dtype
-
-
-def may_get_constant_buffer_dtype(constant_buffer):
-    assert isinstance(
-        constant_buffer, sympy.Symbol
-    ), "get_constant_buffer_dtype only supports input of sympy.Symbol"
-    if constant_buffer.is_integer:
-        return torch.int64
-    elif constant_buffer.is_float:
-        return torch.float32
-    else:
-        return None
 
 
 def is_magic_method(op):
@@ -110,9 +87,6 @@ class GraphLowering(torch.fx.Interpreter):
             # TODO: this should not be needed once #93059 lands
             # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
             # TODO: make a dedicated UnknownSource for this?
-            # NB: This is using the legacy default behavior from
-            # create_symbolic_sizes_strides_storage_offset but we hope we can
-            # just delete this entirely
             source = ConstantSource(
                 f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
             )
@@ -120,10 +94,7 @@ class GraphLowering(torch.fx.Interpreter):
                 size,
                 stride,
                 _,
-            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(
-                ex,
-                source,
-            )
+            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(ex, source)
 
         size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
@@ -144,7 +115,6 @@ class GraphLowering(torch.fx.Interpreter):
         num_static_inputs=None,
         graph_id=None,
         aot_mode=False,
-        cpp_wrapper=False,
     ):
         super().__init__(gm)
         self.extra_traceback = False  # we do our own error wrapping
@@ -160,7 +130,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
         self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
-        self.device_idxs: Set[int] = set()
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
@@ -174,9 +143,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
-        # TODO: aot_mode and cpp_wrapper are tangled now. Some refactoring is needed.
+        self._can_use_cpp_wrapper = config.cpp_wrapper
         self.aot_mode = aot_mode
-        self.cpp_wrapper = cpp_wrapper
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
@@ -185,10 +153,6 @@ class GraphLowering(torch.fx.Interpreter):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
             log.info(f"Using FallbackKernel: {name}")
-
-    def add_device_idx(self, idx: Optional[int]):
-        if idx is not None:
-            self.device_idxs.add(idx)
 
     @property
     def fake_mode(self):
@@ -250,9 +214,8 @@ class GraphLowering(torch.fx.Interpreter):
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
-        self.cpp_wrapper = False
-        assert not self.aot_mode, "AOT compilation failed"
-        log.debug("Set cpp_wrapper to False due to %s", cond)
+        self._can_use_cpp_wrapper = False
+        log.debug("Set _can_use_cpp_wrapper to False due to %s", cond)
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
@@ -260,7 +223,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
-        if self.cpp_wrapper:
+        if config.cpp_wrapper:
             self.check_buffer_for_cpp_wrapper(buffer)
 
         name = f"buf{len(self.buffers)}"
@@ -330,11 +293,6 @@ class GraphLowering(torch.fx.Interpreter):
             expr = example.node.expr
             self.graph_inputs[target] = expr
             return expr
-        elif isinstance(example, (int, bool, float)):
-            expr = sympy.sympify(example)
-            self.graph_inputs[target] = expr
-            return expr
-        assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
@@ -361,7 +319,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.device_types.add(example.device.type)
-        self.add_device_idx(example.device.index)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -406,10 +363,6 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
-
-        if unsupported_output_tensor(value):
-            return self.add_tensor_constant(value)
-
         with no_dispatch():
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
@@ -477,15 +430,8 @@ class GraphLowering(torch.fx.Interpreter):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
         with ir.IRNode.current_origins(origins):
-            if (
-                n.op == "call_function"
-                and n.target is not operator.getitem
-                and fallback_node_due_to_unsupported_type(n)
-            ):
-                result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args, **kwargs
-                )
-            elif n.op == "call_function" and n.target in layout_constraints:
+            if n.op == "call_function" and n.target in layout_constraints:
+                args, kwargs = self.fetch_args_kwargs_from_env(n)
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
             elif is_magic_method(n.target):
@@ -532,7 +478,7 @@ class GraphLowering(torch.fx.Interpreter):
                         # Currently, it's not very clear why this is helpful.
                         # The general idea here is that even though a node may
                         # have FlexibleLayout, we still often *treat* it as if
-                        # it was contiguous. This appears to sometimes result in
+                        # it was contiguous. This appears to sometime result in
                         # suboptimal behavior.
                         #
                         # When we do a better job selecting layout, we should
@@ -568,38 +514,30 @@ class GraphLowering(torch.fx.Interpreter):
             # Realize if the IRNode already has accumulated lots of reads
             if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
                 # Prevent excessive accumulation in a computed buffer, when
-                # there are multiple branches each with small number of memory
+                # there are multiple branches meach with small number of memory
                 # reads, but they converge to a user.
                 result.realize_hint()
 
         return result
 
-    def check_cpp_codegen_disabled(self):
-        if config.disable_cpp_codegen:
-            self.disable_cpp_wrapper("cpp codegen disabled")
-
     def check_platform(self):
         if sys.platform != "linux":
             self.disable_cpp_wrapper("platform not linux")
 
-    @functools.lru_cache(None)
-    def get_single_device(self):
-        return list(self.device_types)[0] if len(self.device_types) == 1 else None
+    def check_profiler_mark_wrapper_call(self):
+        if config.profiler_mark_wrapper_call:
+            self.disable_cpp_wrapper("profiler not supported")
 
     def check_device_for_cpp_buffer(self):
-        device = self.get_single_device()
-        if self.get_single_device() is None:
-            self.disable_cpp_wrapper("device not CPU or CUDA")
+        if len(self.device_types) == 1:
+            device = self.device_types.pop()
+            if device == "cpu":
+                return
+        self.disable_cpp_wrapper("device not CPU")
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
-            dtype = None
-            if isinstance(value, TensorBox):
-                dtype = value.get_dtype()
-            elif isinstance(value, sympy.Symbol):
-                dtype = may_get_constant_buffer_dtype(value)
-
-            if not supported_dtype_of_cpp_wrapper(dtype):
+            if not supported_dtype_of_cpp_wrapper(value.get_dtype()):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):
@@ -607,29 +545,23 @@ class GraphLowering(torch.fx.Interpreter):
             self.disable_cpp_wrapper("Constants")
 
     def check_cpp_wrapper(self):
-        self.check_cpp_codegen_disabled()
         self.check_platform()
+        self.check_profiler_mark_wrapper_call()
         self.check_device_for_cpp_buffer()
         self.check_input_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
-        if self.aot_mode:
-            device = self.get_single_device()
+        if config.cpp_wrapper:
             self.check_cpp_wrapper()
-            if device == "cpu":
-                self.wrapper_code = CppAotWrapperCodeGen()
+            if self._can_use_cpp_wrapper:
+                self.wrapper_code = (
+                    CppAotWrapperCodeGen() if self.aot_mode else CppWrapperCodeGen()
+                )
+                return
             else:
-                assert device == "cuda", "Non-supported device for AOT compilation"
-                self.wrapper_code = CudaAotWrapperCodeGen()
-        elif self.cpp_wrapper:
-            self.check_cpp_wrapper()
-            if self.cpp_wrapper:
-                self.wrapper_code = CppWrapperCodeGen()
-            else:
-                self.wrapper_code = WrapperCodeGen()
-        else:
-            self.wrapper_code = WrapperCodeGen()
+                assert not self.aot_mode, "Model does not support AOT compilation"
+        self.wrapper_code = WrapperCodeGen()
 
     def codegen(self):
         from .scheduler import Scheduler
@@ -687,13 +619,14 @@ class GraphLowering(torch.fx.Interpreter):
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
-        code, linemap = self.codegen()
-        mod = PyCodeCache.load(code, linemap=linemap)
+        code = self.codegen()
+        if config.debug:
+            print(code)
+
+        mod = PyCodeCache.load(code)
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.debug(f"Output code written to: {mod.__file__}")
-        output_code_log.debug(f"Output code: \n{code}")
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
@@ -704,13 +637,13 @@ class GraphLowering(torch.fx.Interpreter):
         if self.aot_mode:
             from .codecache import AotCodeCache
 
-            code, linemap = self.codegen()
-            output_code_log.debug(f"Output code: \n{code}")
+            code = self.codegen()
+            if config.debug:
+                print(code)
 
-            libpath = AotCodeCache.compile(
-                code, cuda=(self.get_single_device() == "cuda")
-            )
-            return lambda dummy: libpath
+            # return the generated .so file path
+            output_path = AotCodeCache.compile(code)
+            return lambda dummy: output_path
         else:
             return self.compile_to_module().call
 

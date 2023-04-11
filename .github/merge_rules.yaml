@@ -2,7 +2,6 @@
   patterns:
   - .ci/caffe2/*
   - .ci/onnx/*
-  - .ci/docker/common/install_onnx.sh
   - aten/src/ATen/core/interned_strings.h
   - docs/source/onnx.rst
   - docs/source/onnx*
@@ -84,8 +83,8 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-bionic-py3_8-clang8-xla / build
-  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.4xlarge)
+  - pull / linux-bionic-py3_7-clang8-xla / build
+  - pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)
 
 - name: Documentation
   patterns:
@@ -316,7 +315,6 @@
   - aten/src/ATen/autocast_mode.*
   - torch/csrc/jit/passes/autocast.cpp
   - test/test_autocast.py
-  - torch/testing/_internal/autocast_test_lists.py
   approved_by:
   - leslie-fang-intel
   - jgong5

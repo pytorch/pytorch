@@ -1,18 +1,12 @@
-from __future__ import annotations
-
 import weakref
 from weakref import ref
 from _weakrefset import _IterationGuard  # type: ignore[attr-defined]
 from collections.abc import MutableMapping, Mapping
 from typing import Dict
-from torch import Tensor
 import collections.abc as _collections_abc
 
 
-WeakRef = ref
-
-
-__all__ = ['TensorWeakRef', 'WeakIdRef', 'WeakIdKeyDictionary', 'WeakTensorKeyDictionary']
+__all__ = ['WeakIdRef', 'WeakIdKeyDictionary', 'WeakTensorKeyDictionary']
 
 
 # This file defines a variant of WeakKeyDictionary that overrides the hashing
@@ -267,25 +261,3 @@ class WeakIdKeyDictionary(MutableMapping):
 
 # Convenience alias
 WeakTensorKeyDictionary = WeakIdKeyDictionary
-
-
-class TensorWeakRef:
-    """
-    Wrapper around a weak ref of a Tensor that handles the _fix_weakref() call required
-    when unwrapping a Tensor weakref.
-    """
-
-    ref: WeakRef[Tensor]
-
-    def __init__(self, tensor: Tensor):
-        assert isinstance(tensor, Tensor)
-        self.ref = weakref.ref(tensor)
-
-    def __call__(self):
-        out = self.ref()
-        if out is None:
-            return out
-        assert isinstance(out, Tensor)
-        # TODO, add _fix_weakref type binding
-        out._fix_weakref()  # type: ignore[attr-defined]
-        return out

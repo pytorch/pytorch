@@ -457,8 +457,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if self.kwdefaults:
             flags |= 0x02
             codegen(self.kwdefaults)
-        if isinstance(
-            self.annotations, (variables.ConstDictVariable, variables.TupleVariable)
+        if isinstance(self.annotations, variables.ConstDictVariable) or isinstance(
+            self.annotations, variables.TupleVariable
         ):
             flags |= 0x04
             try:
@@ -480,4 +480,4 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen(self.code)
         if sys.version_info < (3, 11):
             codegen(self.fn_name)
-        return [create_instruction("MAKE_FUNCTION", arg=flags)]
+        return [create_instruction("MAKE_FUNCTION", flags)]

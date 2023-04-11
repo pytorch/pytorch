@@ -13,17 +13,14 @@ __all__ = [
     "ShardingFilterIterDataPipe",
 ]
 
-
 class SHARDING_PRIORITIES(IntEnum):
     DEFAULT = 1
     DISTRIBUTED = 2
     MULTIPROCESSING = 3
 
-
 class _ShardingIterDataPipe(IterDataPipe):
-    def apply_sharding(self, num_of_instances: int, instance_id: int, sharding_group: SHARDING_PRIORITIES):
+    def apply_sharding(self, num_of_instances, instance_id, sharding_group):
         raise NotImplementedError
-
 
 @functional_datapipe('sharding_filter')
 class ShardingFilterIterDataPipe(_ShardingIterDataPipe):

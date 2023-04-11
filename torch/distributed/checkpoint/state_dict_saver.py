@@ -38,7 +38,7 @@ def save_state_dict(
         call `save_state_dict` and that all data in state_dict belong to it.
 
     .. note::
-        This function can be used to save a state_dict with an initialized process
+        This function can be used to save a state_dict with an intialized process
         group by passing ``no_dist=True``. This can be used to produce a checkpoint
         that can consumed by load_state_dict is a SPMD fashion.
 
@@ -65,7 +65,7 @@ def save_state_dict(
         >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
         >>> torch.distributed.checkpoint.save_state_dict(
         >>>     state_dict=model_state_dict,
-        >>>     storage_writer=fs_storage_writer,
+        >>>     storage_writer=fs_stroage_writer,
         >>> )
 
     .. note::

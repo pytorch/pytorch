@@ -315,11 +315,8 @@ def is_tensor(ann):
     return False
 
 
-def _fake_rcb(inp):
-    return None
 
-
-def try_ann_to_type(ann, loc, rcb=None):
+def try_ann_to_type(ann, loc):
     if ann is inspect.Signature.empty:
         return TensorType.getInferred()
     if ann is None:
@@ -413,13 +410,13 @@ def try_ann_to_type(ann, loc, rcb=None):
             return torch.jit._script._recursive_compile_class(ann, loc)
 
     # Maybe resolve a NamedTuple to a Tuple Type
-    if rcb is None:
-        rcb = _fake_rcb
-    return torch._C._resolve_type_from_object(ann, loc, rcb)
+    def fake_rcb(key):
+        return None
+    return torch._C._resolve_type_from_object(ann, loc, fake_rcb)
 
 
-def ann_to_type(ann, loc, rcb=None):
-    the_type = try_ann_to_type(ann, loc, rcb)
+def ann_to_type(ann, loc):
+    the_type = try_ann_to_type(ann, loc)
     if the_type is not None:
         return the_type
     raise ValueError(f"Unknown type annotation: '{ann}' at {loc.highlight()}")

@@ -210,7 +210,7 @@ jobs:
 
       - name: Print remaining test logs
         shell: bash
-        if: always() && steps.test.conclusion
+        if: always()
         run: |
           cat test/**/*.log || true
 

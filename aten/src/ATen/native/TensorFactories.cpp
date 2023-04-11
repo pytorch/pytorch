@@ -1241,9 +1241,7 @@ Tensor zeros_like(
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  auto other_options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  // Prefer values passed in explicitly, but default to value from self.
-  auto options = self.options().merge_in(other_options);
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   if (options.layout() == kSparse) {
     TORCH_CHECK(

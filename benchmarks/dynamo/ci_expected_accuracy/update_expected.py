@@ -27,7 +27,7 @@ import requests
 
 # Note: the public query url targets this rockset lambda:
 # https://console.rockset.com/lambdas/details/commons.artifacts
-ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/4ca0033e-0117-41f5-b043-59cde19eff35"
+ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/c021973d-8985-4392-b398-7e2a0e90bf7d"
 
 
 def query_job_sha(repo, sha):
@@ -90,21 +90,19 @@ def download_artifacts_and_extract_csvs(urls):
             for phase in ("training", "inference"):
                 name = f"test/test-reports/{phase}_{subsuite}.csv"
                 df = pd.read_csv(artifact.open(name))
-                prev_df = dataframes.get((suite, phase), None)
-
-                dataframes[(suite, phase)] = (
-                    pd.concat([prev_df, df]) if prev_df is not None else df
-                )
-
+                dataframes[(suite, phase, shard)] = df
     except urllib.error.HTTPError:
         print(f"Unable to download {url}, perhaps the CI job isn't finished?")
     return dataframes
 
 
 def write_filtered_csvs(root_path, dataframes):
-    for (suite, phase), df in dataframes.items():
+    for (suite, phase, shard), df in dataframes.items():
         suite_fn = normalize_suite_filename(suite)
-        out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
+        if "timm" in suite:
+            out_fn = os.path.join(root_path, f"{phase}_{suite_fn}{shard - 1}.csv")
+        else:
+            out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
         df.to_csv(out_fn, index=False, columns=["name", "graph_breaks"])
 
 

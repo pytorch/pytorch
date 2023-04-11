@@ -136,7 +136,7 @@ if True:
         opinfo_ops = [remove_suffix(i.strip(), '.default') for i in f.readlines()]
     with open('count_ops.txt', 'r') as f:
         opinfo_counts = [i.strip() for i in f.readlines()]
-        opinfo_counts = defaultdict(int, dict(zip(opinfo_ops, opinfo_counts)))
+        opinfo_counts = defaultdict(int, {k: v for k, v in zip(opinfo_ops, opinfo_counts)})
 
     def count_fn(x):
         return opinfo_counts[x['full_name']]

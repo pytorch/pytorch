@@ -32,14 +32,13 @@ void checkLongTensor(const Tensor& tensor) {
 // must be a CPU int64 tensor.
 // See NOTE [ device and dtype of a PackedSequence ]
 std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Tensor& _lengths, bool batch_first) {
-  TORCH_CHECK(_input.numel() > 0, "Cannot pack empty tensors.");
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto lengths_t = _lengths.contiguous();
   checkLongTensor(lengths_t);
 
   int64_t batch_size = input.size(1);
   int64_t * lengths = lengths_t.data_ptr<int64_t>();
-
+  TORCH_CHECK(input.numel() > 0, "Cannot pack empty tensors.");
   TORCH_CHECK(lengths_t.size(0) == batch_size,
            "Expected `len(lengths)` to be equal to batch_size, but got ", lengths_t.size(0),
            " (batch_size=", batch_size, ")");

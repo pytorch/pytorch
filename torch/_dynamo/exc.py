@@ -1,6 +1,5 @@
 import os
 import textwrap
-from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
@@ -27,13 +26,6 @@ class SkipFrame(TorchDynamoException):
 
 class TorchRuntimeError(TorchDynamoException):
     pass
-
-
-class InvalidBackend(TorchDynamoException):
-    def __init__(self, name):
-        super().__init__(
-            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
-        )
 
 
 class ResetRequired(TorchDynamoException):
@@ -72,28 +64,6 @@ class Unsupported(TorchDynamoException):
     def add_to_stats(self, category="unimplemented"):
         self.category = category
         counters[category][self.msg] += 1
-
-
-class RecompileError(TorchDynamoException):
-    pass
-
-
-class UserErrorType(Enum):
-    DYNAMIC_CONTROL_FLOW = auto()
-    ANTI_PATTERN = auto()
-
-
-class UserError(Unsupported):
-    def __init__(self, error_type: UserErrorType, msg):
-        """
-        Type of errors that would be valid in Eager, but not supported in TorchDynamo.
-        The error message should tell user about next actions.
-
-        error_type: Type of user error
-        msg: Actionable error message
-        """
-        super().__init__(msg)
-        self.error_type = error_type
 
 
 def unimplemented(msg: str):
@@ -189,14 +159,8 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = str(
-            format_bytecode(
-                "WON'T CONVERT",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                code,
-            )
+        msg = format_bytecode(
+            "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
         )
         msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
         msg += format_exc()

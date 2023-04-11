@@ -20,6 +20,14 @@ export PYTORCH_FINAL_PACKAGE_DIR_WIN
 
 mkdir -p "$TMP_DIR"/build/torch
 
+# This directory is used only to hold "pytorch_env_restore.bat", called via "setup_pytorch_env.bat"
+CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
+mkdir -p "$CI_SCRIPTS_DIR"
+
+if [ -n "$(ls "$CI_SCRIPTS_DIR"/*)" ]; then
+    rm "$CI_SCRIPTS_DIR"/*
+fi
+
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
 if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
@@ -34,8 +42,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-python -m pip install pytest-rerunfailures==10.3
-
 run_tests() {
     # Run nvidia-smi if available
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
@@ -45,7 +51,9 @@ run_tests() {
         fi
     done
 
-    if [[ $NUM_TEST_SHARDS -eq 1 ]]; then
+    if [[ "${TEST_CONFIG}" == *functorch* ]]; then
+        "$SCRIPT_HELPERS_DIR"/install_test_functorch.bat
+    elif [[ $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat

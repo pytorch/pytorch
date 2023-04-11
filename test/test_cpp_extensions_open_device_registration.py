@@ -105,7 +105,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                                     "Please register a generator to the PrivateUse1 dispatch key"):
             gen_ = torch.Generator(device=device)
 
-        module.register_generator()
+        module.register_genertor()
 
         gen = torch.Generator(device=device)
         self.assertTrue(gen.device == device)
@@ -113,24 +113,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # generator can be registered only once
         with self.assertRaisesRegex(RuntimeError,
                                     "Only can register a generator to the PrivateUse1 dispatch key once"):
-            module.register_generator()
-
-        # check whether print tensor.type() meets the expectation
-        torch.utils.rename_privateuse1_backend('foo')
-        dtypes = {
-            torch.bool: 'torch.foo.BoolTensor',
-            torch.double: 'torch.foo.DoubleTensor',
-            torch.float32: 'torch.foo.FloatTensor',
-            torch.half: 'torch.foo.HalfTensor',
-            torch.int32: 'torch.foo.IntTensor',
-            torch.int64: 'torch.foo.LongTensor',
-            torch.int8: 'torch.foo.CharTensor',
-            torch.short: 'torch.foo.ShortTensor',
-            torch.uint8: 'torch.foo.ByteTensor',
-        }
-        for tt, dt in dtypes.items():
-            test_tensor = torch.empty(4, 4, dtype=tt, device=device)
-            self.assertTrue(test_tensor.type() == dt)
+            module.register_genertor()
 
 if __name__ == "__main__":
     common.run_tests()

@@ -276,7 +276,7 @@ TORCH_API Tensor Reduce(
     const BufHandle& buffer,
     const std::vector<ExprHandle>& reduce_dims);
 
-// Overload for the common case of all dimensions of a previously Computed
+// Overload for the common case of all dimensions of a prevously Computed
 // Tensor.
 TORCH_API Tensor Reduce(
     const std::string& func_name,

@@ -665,6 +665,11 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
     # Creates device-specific test cases
     for base in desired_device_type_test_bases:
+        # Special-case for ROCm testing -- only test for 'cuda' i.e. ROCm device by default
+        # The except_for and only_for cases were already checked above. At this point we only need to check 'cuda'.
+        if TEST_WITH_ROCM and base.device_type != 'cuda':
+            continue
+
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupport runtime class:
@@ -1230,7 +1235,9 @@ def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
 def has_cusolver():
-    return not TEST_WITH_ROCM
+    version = _get_torch_cuda_version()
+    # cuSolver is disabled on cuda < 10.1.243
+    return version >= (10, 2)
 
 # Skips a test on CUDA if cuSOLVER is not available
 def skipCUDAIfNoCusolver(fn):

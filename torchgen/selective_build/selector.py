@@ -85,7 +85,7 @@ class SelectiveBuilder:
             di_list = data["debug_info"]
             assert isinstance(di_list, list)
 
-            debug_info = tuple((str(x) for x in di_list))
+            debug_info = tuple(map(lambda x: str(x), di_list))
 
         operators = {}
         operators_dict = data.get("operators", {})
@@ -99,7 +99,7 @@ class SelectiveBuilder:
         assert isinstance(kernel_metadata_dict, dict)
 
         for k, v in kernel_metadata_dict.items():
-            kernel_metadata[str(k)] = [str(dtype) for dtype in v]
+            kernel_metadata[str(k)] = list(map(lambda dtype: str(dtype), v))
 
         custom_classes = data.get("custom_classes", [])
         custom_classes = set(custom_classes)  # type: ignore[arg-type]

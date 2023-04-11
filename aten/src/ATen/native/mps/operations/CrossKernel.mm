@@ -4,7 +4,6 @@
 #include <ATen/native/mps/OperationUtils.h>
 
 namespace at::native {
-namespace {
 
 static const char* METAL_CROSS = R"CROSS_METAL(
 
@@ -200,7 +199,7 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
     }
   });
 }
-} // anonymous namespace
 
 REGISTER_DISPATCH(cross_stub, &cross_mps_impl);
+
 } // namespace at::native

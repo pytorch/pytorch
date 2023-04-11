@@ -38,6 +38,7 @@ class DTensorInitOpsTest(DTensorTestBase):
 
 
 class DTensorConstructorTest(DTensorTestBase):
+
     @property
     def world_size(self):
         return 4
@@ -110,9 +111,9 @@ class DTensorConstructorTest(DTensorTestBase):
     @with_comms
     def test_zeros_submesh(self):
         # default world_size is 4
-        # construct a cuda device 1d mesh, with no sub pg initialized
+        # construct a cuda device 1d mesh
         sub_mesh_list = [0, 3]
-        mesh = DeviceMesh(self.device_type, sub_mesh_list, _init_process_groups=False)
+        mesh = DeviceMesh(self.device_type, sub_mesh_list)
         placements = [Shard(0)]
         size = [32, 3]
         dist_tensor = zeros(size, device_mesh=mesh, placements=placements)
@@ -126,7 +127,7 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual(local_tensor.size(), torch.Size([0]))
             self.assertEqual(local_tensor, torch.tensor([]))
 
-        # construct a cuda device 1d mesh: unevenly, with subpg initialized
+        # construct a cuda device 1d mesh: unevenly
         sub_mesh_list = [0, 1, 3]
         mesh = DeviceMesh(self.device_type, sub_mesh_list)
         placements = [Shard(0)]
@@ -146,9 +147,9 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual(local_tensor.size(), torch.Size([0]))
             self.assertEqual(local_tensor, torch.tensor([]))
 
-        # construct a cuda device 2d mesh, with no subpg initialized
+        # construct a cuda device 2d mesh
         sub_mesh_list = [[0], [3]]
-        mesh = DeviceMesh(self.device_type, sub_mesh_list, _init_process_groups=False)
+        mesh = DeviceMesh(self.device_type, sub_mesh_list)
         placements = [Shard(0), Shard(1)]
         size = [32, 3]
         dist_tensor = zeros(size, device_mesh=mesh, placements=placements)

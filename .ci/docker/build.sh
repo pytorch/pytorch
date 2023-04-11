@@ -88,6 +88,20 @@ _UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
+  pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.6.2
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
   pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
     CUDA_VERSION=11.7.0
     CUDNN_VERSION=8
@@ -203,6 +217,16 @@ case "$image" in
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.6
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)

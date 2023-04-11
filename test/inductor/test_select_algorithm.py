@@ -9,14 +9,10 @@ import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
-from torch._inductor.autotune_process import BenchmarkRequest
-
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.backends.cuda.matmul.allow_tf32 = False
-
-aten = torch.ops.aten
 
 
 def patches(fn):
@@ -184,118 +180,6 @@ class TestSelectAlgorithm(TestCase):
         )
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-
-    @patches
-    def test_convolution1(self):
-        @torch.compile
-        def foo(x, w, b):
-            return aten.convolution(
-                x + 1,
-                w,
-                b,
-                stride=(2, 3),
-                padding=(4, 5),
-                dilation=(1, 1),
-                transposed=False,
-                output_padding=(0, 0),
-                groups=1,
-            )
-
-        foo(
-            torch.randn(2, 33, 34, 41, device="cuda"),
-            torch.randn(34, 33, 3, 3, device="cuda"),
-            torch.randn(34, device="cuda"),
-        )
-        # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-
-    @patches
-    def test_mm_dropout(self):
-        @torch.compile
-        def fn(x1, x2, seed):
-            mm_4 = torch.ops.aten.mm.default(x2, x1)
-            rnd = torch.ops.prims.philox_rand_like.default(mm_4, seed, 0)
-            return mm_4 * rnd
-
-        # sizes picked so triton autotuning wins
-        fn(
-            torch.randn(512, 1024, dtype=torch.float16, device="cuda"),
-            torch.randn(384, 512, dtype=torch.float16, device="cuda"),
-            torch.tensor(12345, device="cuda"),
-        )
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-
-    @patches
-    @torch._inductor.config.patch(conv_1x1_as_mm=False)
-    def test_convolution2(self):
-        @torch.compile
-        def foo(x, w, b):
-            return aten.convolution(
-                x,
-                w,
-                b,
-                stride=(1, 1),
-                padding=(0, 0),
-                dilation=(1, 1),
-                transposed=False,
-                output_padding=(0, 0),
-                groups=1,
-            )
-
-        foo(
-            torch.randn(1, 33, 16, 16, device="cuda"),
-            torch.randn(34, 33, 1, 1, device="cuda"),
-            torch.randn(34, device="cuda"),
-        )
-        # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-
-    @patches
-    @torch._inductor.config.patch(conv_1x1_as_mm=True)
-    def test_convolution_as_mm(self):
-        @torch.compile
-        def foo(x, w, b):
-            return aten.convolution(
-                x + 1,
-                w,
-                b,
-                stride=(1, 1),
-                padding=(0, 0),
-                dilation=(1, 1),
-                transposed=False,
-                output_padding=(0, 0),
-                groups=1,
-            )
-
-        foo(
-            torch.randn(2, 33, 16, 16, device="cuda"),
-            torch.randn(34, 33, 1, 1, device="cuda"),
-            torch.randn(34, device="cuda"),
-        )
-        # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-
-    def test_TritonTemplateCaller_str(self):
-        """
-        Make sure str(TritonTemplateCaller) does not raise exceptions.
-        """
-        module_path = "abc.py"
-        bmreq = BenchmarkRequest(
-            module_path=module_path,
-            module_cache_key=None,
-            kernel_name=None,
-            grid=None,
-            extra_args=None,
-            num_stages=None,
-            num_warps=None,
-            input_tensors=None,
-            output_tensor=None,
-        )
-        caller = select_algorithm.TritonTemplateCaller(
-            None, None, None, None, "extra", bmreq
-        )
-        caller_str = str(caller)
-        self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
 if __name__ == "__main__":
