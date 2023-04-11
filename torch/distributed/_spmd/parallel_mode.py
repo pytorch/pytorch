@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
 import torch.utils._pytree as pytree
+from torch._subclasses import FakeTensorMode
 from torch.distributed._spmd.distribute import _convert_to_distributed, Schema
 from torch.distributed._tensor import DeviceMesh, Placement, Replicate, Shard
 
@@ -51,9 +52,15 @@ class DTensorFallbackMode(ParallelMode):
     a transitent mode before we move to the new data parallel expansion.
     """
 
-    def __init__(self, custom_passes: Callable[[GraphModule], GraphModule] = None):
+    def __init__(
+        self, custom_passes: Optional[Callable[[GraphModule], GraphModule]] = None
+    ):
         self._placements_override: Dict[int, List[Placement]] = {}
-        self._gm_passes: Callable[[GraphModule], GraphModule] = custom_passes
+        if custom_passes is not None:
+            self._gm_passes: Callable[[GraphModule], GraphModule] = custom_passes
+        else:
+            # TODO: add a few default passes here.
+            self._gm_passes = lambda gm: gm
 
     def partition(
         self,
@@ -103,7 +110,10 @@ class DTensorFallbackMode(ParallelMode):
                 inps.append(torch.empty(0))
                 schemas.append(shard_schema)
 
-        return _convert_to_distributed(gm, inps, schemas, _allow_partial=False)
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            fake_inps = [torch.empty_like(inp) for inp in inps]
+
+        return _convert_to_distributed(gm, fake_inps, schemas, _allow_partial=False)[0]
 
     def transform_and_compile(self, gm: GraphModule) -> GraphModule:
         """
