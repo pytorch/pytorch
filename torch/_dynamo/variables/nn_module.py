@@ -216,7 +216,8 @@ class NNModuleVariable(VariableTracker):
                 # unroll Sequential()
                 assert not kwargs
                 (arg,) = args
-                for child_name, submod in mod.named_children(remove_duplicate=False):
+                for i, submod in enumerate(mod):
+                    child_name = str(i)
                     tx.call_function(
                         tx.output.register_attr_or_module(
                             submod,
@@ -409,7 +410,7 @@ class NNModuleVariable(VariableTracker):
         if name == "named_children":
             assert not (args or kwargs)
             result = []
-            for name, submod in module.named_children(**get_kwargs("remove_duplicate")):
+            for name, submod in module.named_children():
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_parameters":
