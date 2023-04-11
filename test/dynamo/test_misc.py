@@ -4326,10 +4326,8 @@ def fn():
                 z *= 3
             return z
 
-        # TODO remove condition once 3.11 is fully supported
-        if sys.version_info < (3, 11):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
-            self.assertEqual(opt_f(None, torch.ones(2)), 6)
+        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+        self.assertEqual(opt_f(None, torch.ones(2)), 6)
 
         if sys.version_info >= (3, 11):
             insts = bytecode_transformation.cleaned_instructions(f.__code__)
