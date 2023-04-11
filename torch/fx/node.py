@@ -405,7 +405,7 @@ class Node:
         Make target printouts more user-friendly.
         1) builtins will be printed as `builtins.xyz`
         2) operators will be printed as `operator.xyz`
-        3) other callables will be printed with qualfied name, e.g. torch.add
+        3) other callables will be printed with qualified name, e.g. torch.add
         """
         if isinstance(target, str):
             return target
