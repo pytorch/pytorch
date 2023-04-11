@@ -12,6 +12,7 @@ from torch.distributed._tensor.random import (
     _calc_shard_linear_idx,
     _get_rng_offset,
     get_rng_state,
+    is_rng_supported_mesh,
     manual_seed,
 )
 
@@ -24,6 +25,63 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
     with_comms,
 )
+
+
+class DistTensorRandomInitTest(DTensorTestBase):
+    def _run_init_op(self, init_op, *args, **kwargs):
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+        input_size = (8, 4)
+
+        # NOTE: currently random initialization on cuda device has different
+        # behavior from other devices. Unify the test once the behavior is unified.
+        if not is_rng_supported_mesh(device_mesh):
+            input_tensor = torch.randn(*input_size, device=self.device_type)
+            dtensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
+            local_tensor_clone = torch.clone(input_tensor)
+            torch.manual_seed(self.rank)
+            local_tensor_clone = init_op(local_tensor_clone, *args, **kwargs)
+            torch.manual_seed(self.rank)
+            dtensor = init_op(dtensor, *args, **kwargs)
+            self.assertEqual(local_tensor_clone, dtensor.to_local())
+        else:
+            # initialize rng state
+            manual_seed(1234, device_mesh)
+
+            # create DTensor from Tensor
+            _tensor = torch.empty(*input_size, device="cuda")
+            dtensor = DTensor.from_local(_tensor, device_mesh, [Shard(1)])
+
+            # DTensor random init
+            dtensor = init_op(dtensor, *args, **kwargs)
+            local_tensor = dtensor.to_local()
+
+            # allgather the local tensors
+            dtensor = dtensor.redistribute(device_mesh, [Replicate()])
+            local_tensor_gathered = dtensor.to_local()
+
+            # compare with local tensors from other ranks
+            for other_rank in range(self.world_size):
+                if self.rank != other_rank:
+                    slice_idx = [
+                        slice(input_size[0]),
+                        slice(
+                            other_rank * input_size[1], (other_rank + 1) * input_size[1]
+                        ),
+                    ]
+                    # other rank should have a different local tensor
+                    self.assertNotEqual(local_tensor_gathered[slice_idx], local_tensor)
+
+    @with_comms
+    def test_init_ops(self):
+        self._run_init_op(
+            torch.nn.init.kaiming_uniform_,
+            a=0,
+            mode="fan_in",
+            nonlinearity="leaky_relu",
+        )
+        self._run_init_op(torch.nn.init.normal_, mean=1.5, std=0.8)
+        self._run_init_op(torch.nn.init.uniform_, a=0, b=1.2)
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
@@ -59,42 +117,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
         manual_seed(1234, device_mesh)
         with self.assertRaisesRegex(RuntimeError, "different seed values"):
             manual_seed(self.rank, device_mesh)
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_deterministic_uniform_1d(self):
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        size = [4, 1]
-
-        # initialize rng state
-        manual_seed(1234, device_mesh)
-        self.check_rng_state(1234, 0, device_mesh)
-        _tensor = torch.empty(*size, device="cuda")
-        dtensor = DTensor.from_local(_tensor, device_mesh, [Shard(1)])
-
-        # get rng offset for checking correctness
-        global_size = dtensor.numel()
-        state = get_rng_state(device_mesh)
-        offset = state[-8:].view(torch.int64)[0].item()
-        offset_after_op = offset + global_size
-
-        # random op call
-        dtensor.uniform_(0, 1)
-
-        # check rng offset is correctly synchroized after perform op
-        self.check_rng_state(1234, offset_after_op, device_mesh)
-
-        # allgather the local tensors
-        dtensor = dtensor.redistribute(device_mesh, [Replicate()])
-        local_tensor = dtensor.to_local()
-
-        # compare with local tensors from other ranks
-        for other_rank in range(self.world_size):
-            if self.rank != other_rank:
-                # other rank should have a different local tensor
-                self.assertNotEqual(
-                    local_tensor[:, self.rank], local_tensor[:, other_rank]
-                )
 
     @with_comms
     @skip_unless_torch_gpu
