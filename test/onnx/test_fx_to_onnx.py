@@ -5,14 +5,14 @@ import pytorch_test_common
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.onnx import dynamo_export, ExportOptions
+from torch.onnx._internal import fx as fx_onnx
 from torch.testing._internal import common_utils
 
 
 class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
-        self.export_options = ExportOptions()
+        self.opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
 
     def test_simple_function(self):
         def func(x):
@@ -20,12 +20,10 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             z = y.relu()
             return (y, z)
 
-        _ = dynamo_export(
-            func, torch.randn(1, 1, 2), export_options=self.export_options
-        )
+        _ = fx_onnx.export(func, torch.randn(1, 1, 2), opset_version=self.opset_version)
 
     @unittest.skip(
-        "max_pool2d is not supported in ATen Lib: https://github.com/microsoft/onnx-script/issues/585"
+        "Conv Op is not supported at the time. https://github.com/microsoft/onnx-script/issues/397"
     )
     def test_mnist(self):
         class MNISTModel(nn.Module):
@@ -50,7 +48,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        _ = dynamo_export(MNISTModel(), tensor_x, export_options=self.export_options)
+        _ = fx_onnx.export(MNISTModel(), tensor_x, opset_version=self.opset_version)
 
     def test_trace_only_op_with_evaluator(self):
         model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
@@ -66,18 +64,17 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     torch.argmax(input, dim=1, keepdim=True),
                 )
 
-        _ = dynamo_export(
-            ArgminArgmaxModel(), model_input, export_options=self.export_options
+        _ = fx_onnx.export(
+            ArgminArgmaxModel(), model_input, opset_version=self.opset_version
         )
 
     def test_multiple_outputs_op_with_evaluator(self):
         class TopKModel(torch.nn.Module):
             def forward(self, x):
-                values, _ = torch.topk(x, 3)
-                return torch.sum(values)
+                return torch.topk(x, 3)
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
-        _ = dynamo_export(TopKModel(), x, export_options=self.export_options)
+        _ = fx_onnx.export(TopKModel(), x, opset_version=self.opset_version)
 
 
 if __name__ == "__main__":

@@ -305,7 +305,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
       ".");
 
   // create a contiguous output
-  const Tensor& self_sizemat = self_ptr->get_nested_sizes();
+  const Tensor& self_sizemat = self_ptr->get_nested_size_tensor();
   Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
   int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
 
@@ -342,9 +342,9 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
 
   std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
   std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
-  const int64_t *self_offsets_ptr = self_ptr->get_storage_offsets().data_ptr<int64_t>();
-  const int64_t *mat2_offsets_ptr = mat2_ptr->get_storage_offsets().data_ptr<int64_t>();
-  const int64_t *out_offsets_ptr = out_ptr->get_storage_offsets().data_ptr<int64_t>();
+  const std::vector<int64_t>& self_offsets = self_ptr->get_storage_offsets();
+  const std::vector<int64_t>& mat2_offsets = mat2_ptr->get_storage_offsets();
+  const std::vector<int64_t>& out_offsets = out_ptr->get_storage_offsets();
 
 #ifndef USE_ROCM
 #ifndef _WIN32
@@ -368,9 +368,9 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
           const int64_t &mat2_size1 = mat2_shape[1];
           gemm_sizes.push_back(
               cutlass::gemm::GemmCoord(self_size0, mat2_size1, self_size1));
-          aptr[i] = self_buffer.data_ptr<scalar_t>() + self_offsets_ptr[i];
-          bptr[i] = mat2_buffer.data_ptr<scalar_t>() + mat2_offsets_ptr[i];
-          dptr[i] = out_buffer.data_ptr<scalar_t>() + out_offsets_ptr[i];
+          aptr[i] = self_buffer.data_ptr<scalar_t>() + self_offsets[i];
+          bptr[i] = mat2_buffer.data_ptr<scalar_t>() + mat2_offsets[i];
+          dptr[i] = out_buffer.data_ptr<scalar_t>() + out_offsets[i];
           all_row_major = all_row_major && (self_strides[i][1] == 1);
           all_row_major = all_row_major && (mat2_strides[i][1] == 1);
           lda[i] = self_strides[i][0];
@@ -405,9 +405,9 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   for (int64_t i = 0; i < ntensors; i++) {
     at::mm_out(
         output_unbind[i],
-        self_buffer.as_strided(self_sizes[i], self_strides[i], self_offsets_ptr[i]),
+        self_buffer.as_strided(self_sizes[i], self_strides[i], self_offsets[i]),
         mat2_buffer.as_strided(
-            mat2_sizes[i], mat2_strides[i], mat2_offsets_ptr[i]));
+            mat2_sizes[i], mat2_strides[i], mat2_offsets[i]));
   }
   return output;
 }

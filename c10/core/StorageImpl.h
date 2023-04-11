@@ -81,6 +81,16 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     size_bytes_is_symbolic_ = false;
   }
 
+  template <typename T>
+  inline T* data() const {
+    return unsafe_data<T>();
+  }
+
+  template <typename T>
+  inline T* unsafe_data() const {
+    return static_cast<T*>(this->data_ptr_.get());
+  }
+
   // Destructor doesn't call release_resources because it's
   // unnecessary; don't forget to change that if needed!
   void release_resources() override {
@@ -110,7 +120,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return resizable_;
   };
 
-  at::DataPtr& mutable_data_ptr() {
+  at::DataPtr& data_ptr() {
     return data_ptr_;
   };
 
@@ -129,12 +139,13 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_ = std::move(data_ptr);
   }
 
-  const void* data() const {
+  // TODO: Return const ptr eventually if possible
+  void* data() {
     return data_ptr_.get();
   }
 
-  void* mutable_data() {
-    return data_ptr_.mutable_get();
+  void* data() const {
+    return data_ptr_.get();
   }
 
   at::DeviceType device_type() const {

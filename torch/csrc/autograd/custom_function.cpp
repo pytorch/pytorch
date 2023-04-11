@@ -474,7 +474,7 @@ void check_variable_result(
     throw std::runtime_error(ss.str());
   }
 
-  if (original.sym_sizes().vec() != result.sym_sizes().vec()) {
+  if (original.sizes().vec() != result.sizes().vec()) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the size of value";
     throw std::runtime_error(ss.str());

@@ -18,7 +18,7 @@ from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import SymNode, \
     FloorDiv, ShapeEnv, sym_sqrt, sym_float, to_node, GuardOnDataDependentSymNode, \
-    guard_bool, guard_int, guard_float, DimDynamic
+    guard_bool, guard_int, guard_float
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch import SymBool, SymInt, SymFloat, sym_int
 
@@ -112,27 +112,14 @@ class FakeSymbolicTensor(torch.Tensor):
 
 def create_symbolic_tensor(name, arg, shape_env):
     from torch._dynamo.source import ConstantSource
-
-    constraint_dims = [None] * arg.dim()
-    dynamic_dims = [DimDynamic.DUCK] * arg.dim()
     sym_shapes, sym_strides, sym_storage_offset = \
-        shape_env.create_symbolic_sizes_strides_storage_offset(
-            arg,
-            source=ConstantSource(name),
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims
-        )
+        shape_env.create_symbolic_sizes_strides_storage_offset(arg, source=ConstantSource(name))
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
 def create_symint(shape_env, i: int):
     from torch._dynamo.source import ConstantSource
     return shape_env.create_symintnode(
-        shape_env.create_symbol(
-            i,
-            source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
-            dynamic_dim=DimDynamic.DUCK,
-            constraint_dim=None,
-        ),
+        shape_env.create_symbol(i, source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}")),
         hint=i
     )
 
@@ -349,11 +336,17 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s1/2), 3)""")
 
+        a2 = create_symint(shape_env, -3)
+        r = sym_int(a2 / 2)
+        self.assertEqual(guard_int(r), -1)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(ceiling(-s2/2), -1)""")
+
         a3 = create_symint(shape_env, 3)
         r = sym_int(2.0 * sym_float(a3))
         self.assertEqual(guard_int(r), 6)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(2*s2, 6)""")
+        self.assertExpectedInline(str(shape_env.guards[3][0]), """Eq(2*s2, 6)""")
 
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
@@ -487,7 +480,7 @@ class f(torch.nn.Module):
         sym_size_2: Sym(s1) = torch.ops.aten.sym_size(a_1, 1)
         sym_size_3: Sym(s1) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
         add_1: Sym(2*s1) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
-        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
+        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
         getitem: f32[s0 + s2, 2*s1] = native_dropout[0]
         getitem_1: b8[s0 + s2, 2*s1] = native_dropout[1];  native_dropout = None
@@ -497,9 +490,8 @@ class f(torch.nn.Module):
 class TestSymNumberMagicMethods(TestCase):
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
         # Helper function
-        # NB: don't use one as that will get specialized
-        seed_node = (create_symint(shape_env, 2) / 2.).node
-        bool_seed_node = (create_symint(shape_env, 2) == 2).node
+        seed_node = (create_symint(shape_env, 1) / 1.).node
+        bool_seed_node = (create_symint(shape_env, 1) == 1).node
 
         def get_sym_inp(inp):
             # NB: this must come before int

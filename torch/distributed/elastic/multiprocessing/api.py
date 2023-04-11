@@ -266,7 +266,7 @@ class PContext(abc.ABC):
         A timeout value of zero simply queries the status of the processes (e.g. equivalent
         to a poll).
 
-        ..note: Multiprocessing library registers SIGTERM and SIGINT signal handlers that raise
+        ..note: Multiprocesing library registers SIGTERM and SIGINT signal handlers that raise
                 ``SignalException`` when the signals received. It is up to the consumer of the code
                 to properly handle the exception. It is important not to swallow the exception otherwise
                 the process would not terminate. Example of the typical workflow can be:
@@ -322,7 +322,7 @@ class PContext(abc.ABC):
         meta resources (e.g. redirect, error_file files).
 
         Args:
-            death_sig: Death signal to terminate processes.
+            death_sig: Death signal to terminate porcesses.
             timeout: Time to wait for processes to finish, if process is
                 still alive after this time, it will be terminated via SIGKILL.
         """
@@ -513,7 +513,7 @@ class MultiprocessContext(PContext):
 
     def pids(self) -> Dict[int, int]:
         assert self._pc is not None  # assertion for mypy type checking
-        return dict(enumerate(self._pc.pids()))
+        return {local_rank: pid for local_rank, pid in enumerate(self._pc.pids())}
 
     def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
         if not self._pc:
@@ -525,7 +525,7 @@ class MultiprocessContext(PContext):
                     os.kill(proc.pid, death_sig)
                 except ProcessLookupError:
                     # If the process exited because of some reason,
-                    # `ProcessLookupError` will be raised, it is safe to ignore it.
+                    # `ProcessLookupError` will be rasied, it is safe to ignore it.
                     pass
         end = time.monotonic() + timeout
         for proc in self._pc.processes:
@@ -542,7 +542,7 @@ class MultiprocessContext(PContext):
                     os.kill(proc.pid, _get_kill_signal())
                 except ProcessLookupError:
                     # If the process exited because of some reason,
-                    # `ProcessLookupError` will be raised, it is safe to ignore it.
+                    # `ProcessLookupError` will be rasied, it is safe to ignore it.
                     pass
             proc.join()
 

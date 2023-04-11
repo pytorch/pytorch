@@ -29,7 +29,6 @@ def define_targets(rules):
             "//conditions:default": [],
         }),
     )
-
     rules.filegroup(
         name = "headers",
         srcs = rules.glob(

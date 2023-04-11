@@ -45,7 +45,7 @@ bool FunctionalToInplaceRewriter::CanBeInplace(Node* node) {
     return false;
   }
 
-  // If x has more than one use, skip the conversion.
+  // If x has more than one use, skip the converson.
   // TODO: Use liveness analysis to catch more general scenario
   return (input->uses().size() == 1);
 }

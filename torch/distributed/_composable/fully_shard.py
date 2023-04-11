@@ -45,7 +45,6 @@ def fully_shard(
     device_id: Optional[Union[int, torch.device]] = None,
     param_init_fn: Optional[Callable[[nn.Module], None]] = None,
     sync_module_states: bool = False,
-    forward_prefetch: bool = False,
 ) -> nn.Module:
     """
     Applies ``FullyShardedDataParallel` (FSDP) semantics to ``module``.
@@ -74,9 +73,7 @@ def fully_shard(
         forward_prefetch_limit,
     )
     state = _init_runtime_state(state)
-    state = _init_prefetching_state(
-        state, BackwardPrefetch.BACKWARD_PRE, forward_prefetch=forward_prefetch
-    )
+    state = _init_prefetching_state(state, BackwardPrefetch.BACKWARD_PRE, False)
     state = _init_buffer_state(state, module)
     state = _init_param_handles_from_module(
         state,

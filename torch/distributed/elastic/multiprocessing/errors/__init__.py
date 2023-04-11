@@ -67,7 +67,7 @@ from .handlers import get_error_handler  # noqa: F401
 
 __all__ = ["ProcessFailure", "ChildFailedError", "record", "ErrorHandler", "get_error_handler"]
 
-log = get_logger(__name__)
+log = get_logger()
 
 
 JSON = Dict

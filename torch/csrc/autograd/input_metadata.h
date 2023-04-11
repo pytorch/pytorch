@@ -93,7 +93,8 @@ struct InputMetadata {
         grad.is_nested() == is_nested_tensor(),
         "Both grad and InputMetadata need to be either nested or non nested tensors.")
     if (grad.is_nested()) {
-      return at::native::get_nested_sizes(grad).is_same_size(shape_as_tensor());
+      return at::native::get_nested_size_tensor(grad).is_same_size(
+          shape_as_tensor());
     }
     return grad.sym_sizes().equals(shape_as_dim_vector());
   }
@@ -122,7 +123,7 @@ struct InputMetadata {
     std::stringstream ss;
     ss << "invalid gradient at index " << index << " - got ";
     if (grad.is_nested()) {
-      ss << at::native::get_nested_sizes(grad);
+      ss << at::native::get_nested_size_tensor(grad);
     } else {
       ss << grad.sym_sizes();
     }
@@ -141,7 +142,7 @@ struct InputMetadata {
   }
   MetadataShape compute_variant_shape(const at::Tensor& input) {
     if (input.is_nested()) {
-      auto nested_size = at::native::get_nested_sizes(input);
+      auto nested_size = at::native::get_nested_size_tensor(input);
       return MetadataShape{c10::in_place_type<at::Tensor>, nested_size};
     }
     return MetadataShape{c10::in_place_type<SymIntSmallVec>, input.sym_sizes()};

@@ -23,7 +23,7 @@ def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
 def conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs):
     args = expanded_args_and_kwargs[:len(expanded_args_and_kwargs) - len(kwarg_names)]
     kwargs = expanded_args_and_kwargs[len(expanded_args_and_kwargs) - len(kwarg_names):]
-    kwargs = dict(zip(kwarg_names, kwargs))
+    kwargs = {name: arg for (name, arg) in zip(kwarg_names, kwargs)}
 
     return conv_normalizer(*args, **kwargs)
 

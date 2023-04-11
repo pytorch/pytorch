@@ -313,4 +313,5 @@ if(HIP_FOUND)
   find_library(ROCM_HIPRTC_LIB ${hip_library_name} HINTS ${HIP_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
+  set(roctracer_INCLUDE_DIRS ${ROCTRACER_PATH}/include)
 endif()

@@ -21,10 +21,6 @@ def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
     return x._typed_storage()._data_ptr() == y._typed_storage()._data_ptr()
 
 
-def _same_storage_as_data_ptr(x: torch.Tensor, data_ptr: int) -> bool:
-    return x._typed_storage()._data_ptr() == data_ptr
-
-
 def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.cuda.Stream) -> None:
     with no_dispatch():
         tensor.record_stream(cast(torch._C.Stream, stream))

@@ -328,7 +328,7 @@ class FileSystemWriter(StorageWriter):
         Initialize the writer pointing to `path`
 
         Args:
-            path: directory where the checkpoint will be written to.
+            path: diretory where the checkpoint will be writen to.
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
@@ -506,7 +506,7 @@ class FileSystemReader(StorageReader):
         fut.set_result(None)
         return fut
 
-    # Implementing the abstract function in StorageReader
+    # Implementating the abstract function in StorageReader
     def read_metadata(self) -> Metadata:
         with (self.path / ".metadata").open("rb") as metadata_file:
             return pickle.load(metadata_file)

@@ -179,15 +179,3 @@ def pytest_pycollect_makemodule(module_path, path, parent) -> Module:
         mod = Module.from_parent(parent, path=module_path)
         mod._getobj = MethodType(lambda x: sys.modules['__main__'], mod)
         return mod
-
-
-@pytest.hookimpl(hookwrapper=True)
-def pytest_report_teststatus(report, config):
-    # Add the test time to the verbose output, unforunately I don't think this
-    # includes setup or teardown
-    pluggy_result = yield
-    outcome, letter, verbose = pluggy_result.get_result()
-    if verbose:
-        pluggy_result.force_result(
-            (outcome, letter, f"{verbose} [{report.duration:.4f}s]")
-        )

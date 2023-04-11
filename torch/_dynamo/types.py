@@ -66,7 +66,6 @@ class DynamoGuardHook(Protocol):
         guard_fn: GuardFn,
         code: types.CodeType,
         f_locals: Dict[str, object],
-        index: int,
         last: bool,
     ) -> None:
         ...

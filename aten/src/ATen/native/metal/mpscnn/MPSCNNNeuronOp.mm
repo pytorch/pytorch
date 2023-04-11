@@ -1,11 +1,6 @@
 #import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNNeuronOp.h>
 
-#include <c10/macros/Macros.h>
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-declarations")
-
 @implementation MPSCNNNeuronOp
 
 + (MPSCNNNeuronHardSigmoid*)hardSigmoid API_AVAILABLE(ios(11.0), macos(10.13)) {
@@ -74,8 +69,6 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-declarations")
 }
 
 @end
-
-C10_CLANG_DIAGNOSTIC_POP()
 
 API_AVAILABLE(ios(11.3), macos(10.13), macCatalyst(13.0))
 @implementation MPSCNNNeuronOpDescriptor

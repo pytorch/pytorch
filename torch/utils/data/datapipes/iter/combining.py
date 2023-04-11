@@ -50,7 +50,8 @@ class ConcaterIterDataPipe(IterDataPipe):
 
     def __iter__(self) -> Iterator:
         for dp in self.datapipes:
-            yield from dp
+            for data in dp:
+                yield data
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):
@@ -97,7 +98,7 @@ class ForkerIterDataPipe(IterDataPipe):
         copy: Optional[Literal["shallow", "deep"]] = None
     ):
         if num_instances < 1:
-            raise ValueError(f"Expected `num_instances` larger than 0, but {num_instances} is found")
+            raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
         if num_instances == 1:
             return datapipe
         container = _ForkerIterDataPipe(datapipe, num_instances, buffer_size, copy)
@@ -190,7 +191,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 if self.buffer and self.child_pointers[instance_id] <= self.leading_ptr:
                     idx = self.child_pointers[instance_id] - self.slowest_ptr - 1
                     return_val = self.buffer[idx]
-                else:  # Retrieve one element from main datapipe
+                else:  # Retreive one element from main datapipe
                     self.leading_ptr = self.child_pointers[instance_id]
                     try:
                         return_val = next(self._datapipe_iterator)  # type: ignore[arg-type]
@@ -384,7 +385,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
     def __new__(cls, datapipe: IterDataPipe, num_instances: int,
                 classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool = False, buffer_size: int = 1000):
         if num_instances < 1:
-            raise ValueError(f"Expected `num_instances` larger than 0, but {num_instances} is found")
+            raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
 
         _check_unpickable_fn(classifier_fn)
 
@@ -560,7 +561,8 @@ class MultiplexerIterDataPipe(IterDataPipe):
                 except StopIteration:
                     self.buffer.clear()
                     return
-            yield from self.buffer
+            for value in self.buffer:
+                yield value
             self.buffer.clear()
 
     def __len__(self):

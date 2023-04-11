@@ -3,7 +3,7 @@
 import functorch
 from unittest.mock import patch
 import functools
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests
 import test_aotdispatch
 
 
@@ -34,8 +34,7 @@ def make_functionalize_test(cls):
             setattr(FunctionalizeTest, name, None)
             setattr(FunctionalizeTest, new_name, fn)
 
-    # https://github.com/pytorch/pytorch/issues/96560
-    return skipIfRocm(FunctionalizeTest)
+    return FunctionalizeTest
 
 
 FunctionalizeTestPythonKeyAOT = make_functionalize_test(test_aotdispatch.TestAOTAutograd)

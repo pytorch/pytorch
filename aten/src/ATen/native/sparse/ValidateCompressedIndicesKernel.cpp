@@ -1,7 +1,8 @@
 #include <ATen/native/sparse/ValidateCompressedIndicesCommon.h>
 #include <ATen/native/cpu/Loops.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -42,4 +43,4 @@ void _validate_compressed_sparse_indices_cpu(
       is_crow, cidx, idx, cdim, dim, nnz);
 }
 
-} //namespace at::native
+}}

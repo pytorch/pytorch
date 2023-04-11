@@ -265,7 +265,7 @@ def expires(
     """
     if client is None:
         if _timer_client is None:
-            raise RuntimeError("Configure timer client before using countdown timers.")
+            raise RuntimeError("Configure timer client before using coundown timers.")
         client = _timer_client
     if scope is None:
         # grab the caller file + lineno

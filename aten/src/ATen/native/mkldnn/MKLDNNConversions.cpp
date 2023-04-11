@@ -23,7 +23,7 @@ namespace at { namespace native {
 
 #if AT_MKLDNN_ENABLED()
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
   TORCH_CHECK(mkldnn_tensor.scalar_type() == ScalarType::Float ||
               mkldnn_tensor.scalar_type() == ScalarType::BFloat16,
               "mkldnn_to_dense expects float or bfloat16 tensor input");
@@ -168,31 +168,6 @@ Tensor mkldnn_reorder_conv3d_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
-Tensor mkldnn_reorder_linear_weight(
-    const Tensor& self,
-    c10::optional<int64_t> batch_size_opt) {
-  if (self.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_reorder_linear_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
-  auto out_features = self.size(0);
-  auto in_features = self.size(1);
-  auto w = itensor_from_mkldnn(self);
-  ideep::dims input_size;
-  auto dtype = w.get_data_type();
-  if (batch_size_opt.has_value()) {
-    input_size = {batch_size_opt.value(), in_features};
-  }
-  auto packed_desc = ideep::inner_product_forward::expected_weights_desc(
-      {out_features, in_features},
-      input_size,
-      /* weight dtype */ dtype,
-      /* src dtype */ dtype);
-  ideep::tensor result;
-  result.init(packed_desc);
-  result.feed_from(w);
-  return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
-}
 
 ideep::tensor::desc get_conv_transpose_expected_weights_desc(
     const ideep::tensor::dims& weights_dims,
@@ -232,6 +207,7 @@ ideep::tensor::desc get_conv_transpose_expected_weights_desc(
         src_dims);
   }
 }
+
 
 Tensor mkldnn_reorder_conv_transpose2d_weight(
     const Tensor& self,
@@ -289,14 +265,11 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_transpose_weight"),
       TORCH_FN(mkldnn_reorder_conv_transpose2d_weight));
-  m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_linear_weight"),
-      TORCH_FN(mkldnn_reorder_linear_weight));
 }
 
 #else
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
   TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
@@ -369,5 +342,4 @@ TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
 }
 
 #endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
-
 }}

@@ -1345,24 +1345,6 @@ static PyObject* THPVariable_device(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_get_nbytes(THPVariable* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "nbytes");
-  }
-  return PyLong_FromSize_t(THPVariable_Unpack(self).nbytes());
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "itemsize");
-  }
-  return PyLong_FromSize_t(THPVariable_Unpack(self).itemsize());
-  END_HANDLE_TH_ERRORS
-}
-
 int THPVariable_set_real(PyObject* self, PyObject* real, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
@@ -1481,8 +1463,6 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
     {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
     {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
-    {"nbytes", (getter)THPVariable_get_nbytes, nullptr, nullptr, nullptr},
-    {"itemsize", (getter)THPVariable_get_itemsize, nullptr, nullptr, nullptr},
     {"names",
      (getter)THPVariable_get_names,
      (setter)THPVariable_set_names,

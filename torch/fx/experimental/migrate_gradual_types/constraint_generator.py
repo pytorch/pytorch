@@ -527,8 +527,8 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(operator.gt)
 def gt_inference_rule(n: Node, symbols, constraints, counter):
-    assert isinstance(n.args[0], (Node, int))
-    assert isinstance(n.args[1], (Node, int))
+    assert isinstance(n.args[0], Node) or isinstance(n.args[0], int)
+    assert isinstance(n.args[1], Node) or isinstance(n.args[1], int)
 
     # We make sure this node will not be used again. We do not
     # generate a constraint about that node. Only about the operands.
@@ -586,8 +586,8 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(operator.eq)
 def eq_inference_rule(n: Node, symbols, constraints, counter):
-    assert isinstance(n.args[0], (Node, int))
-    assert isinstance(n.args[1], (Node, int))
+    assert isinstance(n.args[0], Node) or isinstance(n.args[0], int)
+    assert isinstance(n.args[1], Node) or isinstance(n.args[1], int)
 
     e1 = symbols[n.args[0]] if isinstance(n.args[0], Node) else n.args[0]
     e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]
@@ -640,9 +640,9 @@ def neq_inference_rule(n: Node, symbols, constraints, counter):
     # implementing for size 3 and 4
     if len(n.args[1]) == 3:
 
-        assert isinstance(n.args[1][0], (Node, int))
-        assert isinstance(n.args[1][1], (Node, int))
-        assert isinstance(n.args[1][2], (Node, int))
+        assert isinstance(n.args[1][0], Node) or isinstance(n.args[1][0], int)
+        assert isinstance(n.args[1][1], Node) or isinstance(n.args[1][1], int)
+        assert isinstance(n.args[1][2], Node) or isinstance(n.args[1][2], int)
 
         lhs = symbols[n.args[0]]
 
@@ -674,10 +674,10 @@ def neq_inference_rule(n: Node, symbols, constraints, counter):
 
     elif len(n.args[1]) == 4:
 
-        assert isinstance(n.args[1][0], (Node, int))
-        assert isinstance(n.args[1][1], (Node, int))
-        assert isinstance(n.args[1][2], (Node, int))
-        assert isinstance(n.args[1][3], (Node, int))
+        assert isinstance(n.args[1][0], Node) or isinstance(n.args[1][0], int)
+        assert isinstance(n.args[1][1], Node) or isinstance(n.args[1][1], int)
+        assert isinstance(n.args[1][2], Node) or isinstance(n.args[1][2], int)
+        assert isinstance(n.args[1][3], Node) or isinstance(n.args[1][3], int)
 
         lhs = symbols[n.args[0]]
 
@@ -722,8 +722,8 @@ def neq_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(operator.lt)
 def lt_inference_rule(n: Node, symbols, constraints, counter):
-    assert isinstance(n.args[0], (Node, int))
-    assert isinstance(n.args[1], (Node, int))
+    assert isinstance(n.args[0], Node) or isinstance(n.args[0], int)
+    assert isinstance(n.args[1], Node) or isinstance(n.args[1], int)
 
     # We make sure this node will not be used again. We do not
     # generate a constraint about that node. Only about the operands.
@@ -845,7 +845,7 @@ def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
         else:
             raise NotImplementedError('Method not yet implemented')
 
-    elif isinstance(n.args[0], Node) and isinstance(n.args[1], (int, float)):
+    elif isinstance(n.args[0], Node) and (isinstance(n.args[1], int) or isinstance(n.args[1], float)):
         if isinstance(symbols[n.args[0]], TVar):
             my_output, counter = gen_tvar(counter)
             symbols[n] = my_output
@@ -861,7 +861,7 @@ def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
                       BinConstraintD(0, my_output, op_leq)])
             return [c], counter
 
-    elif isinstance(n.args[1], Node) and isinstance(n.args[0], (int, float)):
+    elif isinstance(n.args[1], Node) and (isinstance(n.args[0], int) or isinstance(n.args[1], float)):
         if isinstance(symbols[n.args[1]], TVar):
             my_output, counter = gen_tvar(counter)
             symbols[n] = my_output

@@ -1,14 +1,15 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("@pytorch//third_party:substitution.bzl", "header_template_rule")
 load("@pytorch//:tools/bazel.bzl", "rules")
 load("@pytorch//tools/rules:cu.bzl", "cu_library")
 load("@pytorch//tools/config:defs.bzl", "if_cuda")
-load("@pytorch//:aten.bzl", "generate_aten", "intern_build_aten_ops")
-load(":build.bzl", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON", "define_targets")
-load(":build_variables.bzl", "jit_core_sources", "lazy_tensor_ts_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs")
-load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cuda_sources")
+load("@pytorch//:aten.bzl", "intern_build_aten_ops", "generate_aten")
+load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON")
+load(":build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
+load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
 
 define_targets(rules = rules)
 
@@ -111,17 +112,16 @@ generate_aten(
         generated_cuda_cpp +
         aten_ufunc_generated_cpu_sources("aten/src/ATen/{}") +
         aten_ufunc_generated_cpu_kernel_sources("aten/src/ATen/{}") +
-        aten_ufunc_generated_cuda_sources("aten/src/ATen/{}") + [
-            "aten/src/ATen/Declarations.yaml",
-        ]
+        aten_ufunc_generated_cuda_sources("aten/src/ATen/{}") +
+        ["aten/src/ATen/Declarations.yaml"]
     ),
     generator = "//torchgen:gen",
 )
 
 filegroup(
     name = "cpp_generated_code",
-    srcs = GENERATED_AUTOGRAD_CPP,
     data = [":generate-code"],
+    srcs = GENERATED_AUTOGRAD_CPP,
 )
 
 exports_files(
@@ -183,10 +183,7 @@ filegroup(
 
 filegroup(
     name = "aten_native_mkl_cpp",
-    srcs = glob([
-        "aten/src/ATen/native/mkl/*.cpp",
-        "aten/src/ATen/mkl/*.cpp",
-    ]),
+    srcs = glob(["aten/src/ATen/native/mkl/*.cpp", "aten/src/ATen/mkl/*.cpp"]),
 )
 
 filegroup(
@@ -263,7 +260,6 @@ header_template_rule(
     include = "aten/src",
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
-        "@AT_MKLDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
         "@AT_FFTW_ENABLED@": "0",
@@ -298,14 +294,13 @@ cc_library(
     hdrs = [
         "torch/csrc/Export.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
-    ] + glob(
-        [
-            "aten/src/**/*.h",
-            "aten/src/**/*.hpp",
-            "aten/src/ATen/cuda/**/*.cuh",
-            "aten/src/ATen/native/**/*.cuh",
-            "aten/src/THC/*.cuh",
-        ],
+    ] + glob([
+        "aten/src/**/*.h",
+        "aten/src/**/*.hpp",
+        "aten/src/ATen/cuda/**/*.cuh",
+        "aten/src/ATen/native/**/*.cuh",
+        "aten/src/THC/*.cuh",
+    ],
     ) + [
         ":aten_src_ATen_config",
         ":generated_aten_cpp",
@@ -314,7 +309,7 @@ cc_library(
         "aten/src",
     ],
     deps = [
-        "//c10",
+        "//c10:headers",
     ],
 )
 
@@ -329,13 +324,13 @@ ATEN_COPTS = COMMON_COPTS + [
 
 intern_build_aten_ops(
     copts = ATEN_COPTS,
-    extra_impls = aten_ufunc_generated_cpu_kernel_sources("aten/src/ATen/{}"),
     deps = [
         ":aten_headers",
+        "@sleef",
         "@fbgemm",
         "@mkl",
-        "@sleef",
     ],
+    extra_impls = aten_ufunc_generated_cpu_kernel_sources("aten/src/ATen/{}"),
 )
 
 cc_library(
@@ -349,9 +344,9 @@ cc_library(
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
         ":aten_native_mkldnn_cpp",
-        ":aten_native_nested_cpp",
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
+        ":aten_native_nested_cpp",
         ":aten_native_transformers_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
@@ -383,10 +378,10 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
-        "//c10",
         "@cuda",
         "@cuda//:cuda_driver",
         "@cuda//:nvrtc",
+        "//c10:headers",
     ],
     alwayslink = True,
 )
@@ -449,6 +444,44 @@ CAFFE2_COPTS = COMMON_COPTS + [
     "-fno-math-errno",
     "-fno-trapping-math",
 ]
+
+proto_library(
+    name = "caffe2_proto_source",
+    srcs = glob([
+        "caffe2/proto/*.proto",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+cc_proto_library(
+    name = "caffe2_protos",
+    deps = [":caffe2_proto_source"],
+)
+
+header_template_rule(
+    name = "caffe2_core_macros_h",
+    src = "caffe2/core/macros.h.in",
+    out = "caffe2/core/macros.h",
+    substitutions = {
+        "@CAFFE2_VERSION_MAJOR@": "1",
+        "@CAFFE2_VERSION_MINOR@": "3",
+        "@CAFFE2_VERSION_PATCH@": "0",
+        "cmakedefine": "define",
+        "#define CAFFE2_FORCE_FALLBACK_CUDA_MPI": "/* #undef CAFFE2_FORCE_FALLBACK_CUDA_MPI */",
+        "#define CAFFE2_HAS_MKL_DNN": "/* #undef CAFFE2_HAS_MKL_DNN */",
+        "#define CAFFE2_HAS_MKL_SGEMM_PACK": "/* #undef CAFFE2_HAS_MKL_SGEMM_PACK */",
+        "#define CAFFE2_THREADPOOL_MAIN_IMBALANCE": "/* #undef CAFFE2_THREADPOOL_MAIN_IMBALANCE */",
+        "#define CAFFE2_THREADPOOL_STATS": "/* #undef CAFFE2_THREADPOOL_STATS */",
+        "#define CAFFE2_USE_ACCELERATE": "/* #undef CAFFE2_USE_ACCELERATE */",
+        "#define CAFFE2_USE_EIGEN_FOR_BLAS": "/* #undef CAFFE2_USE_EIGEN_FOR_BLAS */",
+        "#define CAFFE2_USE_FBCODE": "/* #undef CAFFE2_USE_FBCODE */",
+        "#define CAFFE2_USE_GOOGLE_GLOG": "/* #undef CAFFE2_USE_GOOGLE_GLOG */",
+        "#define CAFFE2_USE_LITE_PROTO": "/* #undef CAFFE2_USE_LITE_PROTO */",
+        "#define CAFFE2_USE_MKL\n": "/* #undef CAFFE2_USE_MKL */\n",
+        "#define CAFFE2_USE_NVTX": "/* #undef CAFFE2_USE_NVTX */",
+        "#define CAFFE2_USE_TRT": "/* #undef CAFFE2_USE_TRT */",
+    },
+)
 
 filegroup(
     name = "caffe2_contrib_srcs",
@@ -1005,6 +1038,7 @@ filegroup(
         "caffe2/utils/math/utils.cc",
         "caffe2/utils/math_cpu.cc",
         "caffe2/utils/murmur_hash3.cc",
+        "caffe2/utils/proto_convert.cc",
         "caffe2/utils/proto_utils.cc",
         "caffe2/utils/proto_wrap.cc",
         "caffe2/utils/signal_handler.cc",
@@ -1253,17 +1287,18 @@ cc_library(
         "caffe2/perfkernels/common.h",
         "caffe2/perfkernels/embedding_lookup.h",
         "caffe2/perfkernels/embedding_lookup_idx.h",
-        "caffe2/utils/cpuid.h",
         "caffe2/utils/fixed_divisor.h",
+        "caffe2/utils/cpuid.h",
     ] + glob([
         "caffe2/utils/threadpool/*.h",
+        "caffe2/proto/*.h",
     ]),
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
     deps = [
-        ":caffe2_core_macros",
-        "//c10",
-        "//caffe2/proto:caffe2_pb",
+        ":caffe2_protos",
+        ":caffe2_core_macros_h",
+        "//c10:headers",
     ],
 )
 
@@ -1292,46 +1327,42 @@ genrule(
 
 cc_library(
     name = "caffe2_headers",
-    hdrs = glob(
-        [
-            "caffe2/contrib/aten/*.h",
-            "caffe2/contrib/gloo/*.h",
-            "caffe2/core/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Converters/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Generated/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Graph/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Representations/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Support/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Transformations/*.h",
-            "caffe2/core/nomnigraph/tests/*.h",
-            "caffe2/db/*.h",
-            "caffe2/distributed/*.h",
-            "caffe2/ideep/*.h",
-            "caffe2/ideep/operators/*.h",
-            "caffe2/ideep/operators/quantization/*.h",
-            "caffe2/ideep/utils/*.h",
-            "caffe2/onnx/*.h",
-            "caffe2/operators/*.h",
-            "caffe2/operators/rnn/*.h",
-            "caffe2/opt/*.h",
-            "caffe2/perfkernels/*.h",
-            "caffe2/predictor/*.h",
-            "caffe2/predictor/emulator/*.h",
-            "caffe2/quantization/server/*.h",
-            "caffe2/queue/*.h",
-            "caffe2/serialize/*.h",
-            "caffe2/sgd/*.h",
-            "caffe2/share/contrib/depthwise/*.h",
-            "caffe2/transforms/*.h",
-            "caffe2/utils/*.h",
-            "caffe2/utils/math/*.h",
-            "caffe2/utils/threadpool/*.h",
-            "modules/**/*.h",
-        ],
-        exclude = [
-            "caffe2/core/macros.h",
-        ],
-    ) + if_cuda(glob([
+    hdrs = glob([
+        "caffe2/contrib/aten/*.h",
+        "caffe2/contrib/gloo/*.h",
+        "caffe2/core/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Converters/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Generated/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Graph/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Representations/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Support/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Transformations/*.h",
+        "caffe2/core/nomnigraph/tests/*.h",
+        "caffe2/db/*.h",
+        "caffe2/distributed/*.h",
+        "caffe2/ideep/*.h",
+        "caffe2/ideep/operators/*.h",
+        "caffe2/ideep/operators/quantization/*.h",
+        "caffe2/ideep/utils/*.h",
+        "caffe2/onnx/*.h",
+        "caffe2/operators/*.h",
+        "caffe2/operators/rnn/*.h",
+        "caffe2/opt/*.h",
+        "caffe2/perfkernels/*.h",
+        "caffe2/predictor/*.h",
+        "caffe2/predictor/emulator/*.h",
+        "caffe2/proto/*.h",
+        "caffe2/quantization/server/*.h",
+        "caffe2/queue/*.h",
+        "caffe2/serialize/*.h",
+        "caffe2/sgd/*.h",
+        "caffe2/share/contrib/depthwise/*.h",
+        "caffe2/transforms/*.h",
+        "caffe2/utils/*.h",
+        "caffe2/utils/math/*.h",
+        "caffe2/utils/threadpool/*.h",
+        "modules/**/*.h",
+    ]) + if_cuda(glob([
         "caffe2/**/*.cuh",
         "caffe2/image/*.h",
     ])) + [":generated_caffe2_aten_op_headers"],
@@ -1339,13 +1370,12 @@ cc_library(
     includes = [
         "caffe2/contrib/aten",
         "caffe2/core/nomnigraph/include",
+        "third_party/miniz-2.1.0",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":caffe2_core_macros",
         ":caffe2_for_aten_headers",
-        "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:cc_proto",
+        ":caffe2_protos",
     ],
 )
 
@@ -1401,22 +1431,20 @@ cc_library(
     linkstatic = 1,
     visibility = ["//visibility:public"],
     deps = [
-        ":caffe2_core_macros",
-        ":caffe2_dnnlowp_avx2_ops",
         ":caffe2_headers",
+        ":caffe2_dnnlowp_avx2_ops",
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
-        "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:cc_proto",
+        ":caffe2_protos",
         "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",
-        "@fmt",
         "@foxi",
         "@gloo",
         "@onnx",
+        "@fmt",
     ] + if_cuda(
         [
             ":caffe2_cuda_cpp",
@@ -1445,12 +1473,7 @@ cc_library(
 
 cu_library(
     name = "caffe2_cuda",
-    # one may think that `quantization_gpu.cu` could be a separate kernel,
-    # however that leads to de-registration problem that's described in
-    # https://github.com/pytorch/pytorch/issues/79236
-    # To solve it we add it into the `caffe2_cuda`,
-    # this is also aligned with the CMake build.
-    srcs = [":caffe2_cu_srcs"] + ["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"],
+    srcs = [":caffe2_cu_srcs"],
     copts = CAFFE2_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
     deps = [
@@ -1564,22 +1587,25 @@ cc_library(
             "torch/lib/libshm/*.h",
         ],
         exclude = [
-            "torch/csrc/*/generated/*.h",
+            "torch/csrc/autograd/generated/VariableType.h",
+            "torch/csrc/autograd/generated/RegistrationDeclarations.h",
+            "torch/csrc/autograd/generated/variable_factories.h",
+            "torch/csrc/autograd/generated/Functions.h",
         ] + torch_cuda_headers,
     ) + GENERATED_AUTOGRAD_CPP + [":version_h"],
     includes = [
-        "third_party/kineto/libkineto/include",
         "torch/csrc",
         "torch/csrc/api/include",
         "torch/csrc/distributed",
         "torch/lib",
         "torch/lib/libshm",
+        "third_party/kineto/libkineto/include",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
         ":caffe2_headers",
-        "//c10",
+        "//c10:headers",
         "@com_github_google_flatbuffers//:flatbuffers",
         "@local_config_python//:python_headers",
         "@onnx",
@@ -1597,18 +1623,22 @@ TORCH_COPTS = COMMON_COPTS + [
     "-fno-trapping-math",
 ]
 
-torch_sources = {
-    k: ""
-    for k in (
-        libtorch_core_sources +
-        libtorch_distributed_sources +
-        torch_cpp_srcs +
-        libtorch_extra_sources +
-        jit_core_sources +
-        lazy_tensor_ts_sources +
-        GENERATED_AUTOGRAD_CPP
-    )
-}.keys()
+cu_library(
+    name = "torch_distributed_cuda",
+    srcs = ["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"],
+    deps = [":torch_headers"],
+)
+
+torch_sources = ({
+    k: "" for k in (
+    libtorch_core_sources +
+    libtorch_distributed_sources +
+    torch_cpp_srcs +
+    libtorch_extra_sources +
+    jit_core_sources +
+    lazy_tensor_ts_sources +
+    GENERATED_AUTOGRAD_CPP)
+}).keys()
 
 cc_library(
     name = "torch",
@@ -1628,9 +1658,9 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
-        "//caffe2/proto:torch_cc_proto",
         "@kineto",
     ] + if_cuda([
+        ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",
         "@cutlass",
     ]),
@@ -1654,7 +1684,7 @@ cc_library(
         # We need the filegroup here because the raw list causes Bazel
         # to see duplicate files. It knows how to deduplicate with the
         # filegroup.
-        ":cpp_generated_code",
+        ":cpp_generated_code"
     ],
     includes = [
         "torch/csrc/api/include",
@@ -1672,8 +1702,8 @@ cc_library(
     name = "torch_python",
     srcs = libtorch_python_core_sources + GENERATED_AUTOGRAD_PYTHON,
     deps = [
-        ":shm",
         ":torch",
+        ":shm",
         "@pybind11",
     ],
 )
@@ -1682,7 +1712,7 @@ pybind_extension(
     name = "_C",
     srcs = ["torch/csrc/stub.c"],
     deps = [
-        ":torch_python",
+        ":torch_python"
     ],
 )
 
@@ -1717,32 +1747,31 @@ cpp_api_tests = glob(
 )
 
 cc_test(
-    name = "integration_test",
-    size = "medium",
-    srcs = ["test/cpp/api/integration.cpp"],
-    data = [
-        ":download_mnist",
-    ],
-    tags = [
+      name = "integration_test",
+      size = "medium",
+      srcs = ["test/cpp/api/integration.cpp"],
+      deps = [
+          ":test_support",
+          "@com_google_googletest//:gtest_main",
+      ],
+      tags = [
         "gpu-required",
-    ],
-    deps = [
-        ":test_support",
-        "@com_google_googletest//:gtest_main",
-    ],
+      ],
+      data = [
+        ":download_mnist",
+      ],
 )
 
 [
-    cc_test(
-        name = paths.split_extension(paths.basename(filename))[0].replace("-", "_") + "_test",
-        size = "medium",
-        srcs = [filename],
-        deps = [
-            ":test_support",
-            "@com_google_googletest//:gtest_main",
-        ],
-    )
-    for filename in cpp_api_tests
+  cc_test(
+      name = paths.split_extension(paths.basename(filename))[0].replace("-","_") + "_test",
+      size = "medium",
+      srcs = [filename],
+      deps = [
+          ":test_support",
+          "@com_google_googletest//:gtest_main",
+      ],
+  ) for filename in cpp_api_tests
 ]
 
 test_suite(
@@ -1796,18 +1825,15 @@ cc_test(
 cc_test(
     name = "jit_tests",
     size = "small",
-    srcs = glob(
-        [
-            "test/cpp/jit/*.cpp",
-            "test/cpp/jit/*.h",
-            "test/cpp/tensorexpr/*.cpp",
-            "test/cpp/tensorexpr/*.h",
-        ],
-        exclude = [
-            # skip this since <pybind11/embed.h> is not found in OSS build
-            "test/cpp/jit/test_exception.cpp",
-        ],
-    ),
+    srcs = glob([
+        "test/cpp/jit/*.cpp",
+        "test/cpp/jit/*.h",
+        "test/cpp/tensorexpr/*.cpp",
+        "test/cpp/tensorexpr/*.h",
+    ], exclude=[
+        # skip this since <pybind11/embed.h> is not found in OSS build
+        "test/cpp/jit/test_exception.cpp",
+    ]),
     linkstatic = True,
     tags = [
         "exclusive",
@@ -1822,18 +1848,15 @@ cc_test(
 cc_test(
     name = "lazy_tests",
     size = "small",
-    srcs = glob(
-        [
-            "test/cpp/lazy/*.cpp",
-            "test/cpp/lazy/*.h",
-        ],
-        exclude = [
-            # skip these since they depend on generated LazyIr.h which isn't available in bazel yet
-            "test/cpp/lazy/test_ir.cpp",
-            "test/cpp/lazy/test_lazy_ops.cpp",
-            "test/cpp/lazy/test_lazy_ops_util.cpp",
-        ],
-    ),
+    srcs = glob([
+        "test/cpp/lazy/*.cpp",
+        "test/cpp/lazy/*.h",
+    ], exclude=[
+        # skip these since they depend on generated LazyIr.h which isn't available in bazel yet
+        "test/cpp/lazy/test_ir.cpp",
+        "test/cpp/lazy/test_lazy_ops.cpp",
+        "test/cpp/lazy/test_lazy_ops_util.cpp",
+    ]),
     linkstatic = True,
     tags = [
         "exclusive",

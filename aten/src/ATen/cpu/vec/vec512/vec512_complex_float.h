@@ -806,7 +806,7 @@ public:
     return scaled_values.exp();
   }
   Vectorized<c10::complex<float>> expm1() const {
-    return map(std::expm1);
+    AT_ERROR("not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> sin() const {
     return map(std::sin);
@@ -879,7 +879,7 @@ public:
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF));
   }
   Vectorized<c10::complex<float>> operator!=(const Vectorized<c10::complex<float>>& other) const {
-    auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_NEQ_UQ);
+    auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_NEQ_OQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF));
   }
   Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& other) const {

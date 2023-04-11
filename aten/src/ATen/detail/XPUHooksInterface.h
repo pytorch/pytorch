@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/dlpack.h>
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 
@@ -12,11 +13,6 @@
 namespace at {
 class Context;
 }
-
-// We use forward declaration here instead of #include <ATen/dlpack.h> to avoid
-// leaking DLPack implementation detail to every project that includes `ATen/Context.h`, which in turn
-// would lead to a conflict when linked with another project using DLPack (for example TVM)
-struct DLDevice_;
 
 namespace at {
 
@@ -49,23 +45,22 @@ struct TORCH_API XPUHooksInterface {
   }
 
   virtual Device getATenDeviceFromDLPackDevice(
-      const DLDevice_& dl_device,
+      const DLDevice& dl_device,
       void* data) const {
     TORCH_CHECK(
         false,
         "Cannot get XPU device without Intel Extension for Pytorch. ",
         XPU_HELP);
-  }
+  };
 
-  virtual DLDevice_& getDLPackDeviceFromATenDevice(
-      DLDevice_& dl_device,
+  virtual DLDevice getDLPackDeviceFromATenDevice(
       const Device& aten_device,
       void* data) const {
     TORCH_CHECK(
         false,
         "Cannot get XPU DL device without Intel Extension for Pytorch. ",
         XPU_HELP);
-  }
+  };
 };
 
 struct TORCH_API XPUHooksArgs {};

@@ -116,20 +116,19 @@ def conv_backward_flop(
 
     return flop_count
 
-def sdpa_flop_count(query_shape, key_shape, value_shape):
+def sdpa_flop_count(query_shape, key_shape):
     """
     Count flops for self-attention.
     NB: We can assume that value_shape == key_shape
     """
-    b, h, s_q, d_q = query_shape
-    _b2, _h2, s_k, _d2 = key_shape
-    _b3, _h3, _s3, d_v = value_shape
-    assert b == _b2 == _b3 and h == _h2 == _h3 and d_q == _d2 and s_k == _s3 and d_q == _d2
+    b, h, s, d = query_shape
+    _b2, _h2, s2, _d2 = key_shape
+    assert b == _b2 and h == _h2 and d == _d2
     total_flops = 0
-    # q: [b, h, s_q, d_q] @ k: [b, h, d_q, s_k] -> scores: [b, h, s_q, s_k]
-    total_flops += bmm_flop((b * h, s_q, d_q), (b * h, d_q, s_k))
-    # scores: [b, h, s_q, s_k] @ v: [b, h, s_k, d_v] -> out: [b, h, s_q, d_v]
-    total_flops += bmm_flop((b * h, s_q, s_k), (b * h, s_k, d_v))
+    # q: [b, h, s, d] @ k: [b, h, d, s2] -> scores: [b, h, s, s2]
+    total_flops += bmm_flop((b * h, s, d), (b * h, d, s2))
+    # scores: [b, h, s, s2] @ v: [b, h, s2, d] -> out: [b, h, s, d]
+    total_flops += bmm_flop((b * h, s, s2), (b * h, s2, d))
     return total_flops
 
 
@@ -139,33 +138,32 @@ def sdpa_flop(query_shape, key_shape, value_shape, *args, out=None, **kwargs) ->
     Count flops for self-attention.
     """
     # NB: We aren't accounting for causal attention here
-    return sdpa_flop_count(query_shape, key_shape, value_shape)
+    return sdpa_flop_count(query_shape, key_shape)
 
 
-def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape):
+def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape):
     total_flops = 0
-    b, h, s_q, d_q = query_shape
-    _b2, _h2, s_k, _d2 = key_shape
-    _b3, _h3, _s3, d_v = value_shape
-    _b4, _h4, _s4, _d4 = grad_out_shape
-    assert b == _b2 == _b3 == _b4 and h == _h2 == _h3 == _h4 and d_q == _d2
-    assert d_v == _d4 and s_k == _s3 and s_q == _s4
+    b, h, s, d = query_shape
+    _b2, _h2, s2, _d2 = key_shape
+    _b3, _h3, _s3, _d3 = grad_out_shape
+    assert b == _b2 == _b3 and h == _h2 == _h3 and d == _d2 == _d3
+    assert s == _s3
     total_flops = 0
     # Step 1: We recompute the scores matrix.
-    # q: [b, h, s_q, d_q] @ k: [b, h, d_q, s_k] -> scores: [b, h, s_q, s_k]
-    total_flops += bmm_flop((b * h, s_q, d_q), (b * h, d_q, s_k))
+    # q: [b, h, s, d] @ k: [b, h, d, s2] -> scores: [b, h, s, s2]
+    total_flops += bmm_flop((b * h, s, d), (b * h, d, s2))
 
     # Step 2: We propagate the gradients through the score @ v operation.
-    # gradOut: [b, h, s_q, d_v] @ v: [b, h, d_v, s_k] -> gradScores: [b, h, s_q, s_k]
-    total_flops += bmm_flop((b * h, s_q, d_v), (b * h, d_v, s_k))
-    # scores: [b, h, s_k, s_q] @ gradOut: [b, h, s_q, d_v] -> gradV: [b, h, s_k, d_v]
-    total_flops += bmm_flop((b * h, s_k, s_q), (b * h, s_q, d_v))
+    # gradOut: [b, h, s, d] @ v: [b, h, d, s2] -> gradScores: [b, h, s, s2]
+    total_flops += bmm_flop((b * h, s, d), (b * h, d, s2))
+    # scores: [b, h, s2, s] @ gradOut: [b, h, s, d] -> gradV: [b, h, s2, d]
+    total_flops += bmm_flop((b * h, s2, s), (b * h, s, d))
 
     # Step 3: We propagate th gradients through the k @ v operation
-    # gradScores: [b, h, s_q, s_k] @ k: [b, h, s_k, d_q] -> gradQ: [b, h, s_q, d_q]
-    total_flops += bmm_flop((b * h, s_q, s_k), (b * h, s_k, d_q))
-    # q: [b, h, d_q, s_q] @ gradScores: [b, h, s_q, s_k] -> gradK: [b, h, d_q, s_k]
-    total_flops += bmm_flop((b * h, d_q, s_q), (b * h, s_q, s_k))
+    # gradScores: [b, h, s, s2] @ k: [b, h, s2, d] -> gradQ: [b, h, s, d]
+    total_flops += bmm_flop((b * h, s, s2), (b * h, s2, d))
+    # q: [b, h, d, s] @ gradScores: [b, h, s, s2] -> gradK: [b, h, d, s2]
+    total_flops += bmm_flop((b * h, d, s), (b * h, s, s2))
     return total_flops
 
 
@@ -173,7 +171,7 @@ def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *arg
     """
     Count flops for self-attention backward.
     """
-    return sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
+    return sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape)
 
 flop_mapping = {
     aten.mm: mm_flop,

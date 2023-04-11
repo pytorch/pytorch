@@ -45,7 +45,6 @@ jobs:
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
-      keep-going: ${{ steps.filter.outputs.keep-going }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -83,7 +82,6 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body }}
       PYTORCH_RETRY_TEST_CASES: 1
       PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-      CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
     steps:
       - name: Clean up leftover processes on MacOS pet runner
         continue-on-error: true
@@ -130,15 +128,10 @@ jobs:
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Install macOS homebrew dependencies
-        uses: nick-fields/retry@v2.8.2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            # Install dependencies
-            brew install libomp
-            brew link --force libomp
+        run: |
+          # Install dependencies
+          brew install libomp
+          brew link --force libomp
 
       - name: Parse ref
         id: parse-ref
@@ -185,7 +178,7 @@ jobs:
 
       - name: Print remaining test logs
         shell: bash
-        if: always() && steps.test.conclusion
+        if: always()
         run: |
           cat test/**/*.log || true
 

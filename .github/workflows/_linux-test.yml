@@ -90,16 +90,8 @@ jobs:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        id: install-nvidia-driver
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
-
-      - name: Lock NVIDIA A100 40GB Frequency
-        run: |
-          sudo nvidia-smi -pm 1
-          sudo nvidia-smi -ac 1215,1410
-          nvidia-smi
-        if: contains(matrix.runner, 'a100')
 
       - name: Start monitoring script
         id: monitor-script
@@ -226,7 +218,7 @@ jobs:
 
       - name: Print remaining test logs
         shell: bash
-        if: always() && steps.test.conclusion
+        if: always()
         run: |
           cat test/**/*.log || true
 
@@ -271,34 +263,3 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
-
-      # NB: We are currently having an intermittent GPU-related issue on G5 runners with
-      # A10G GPU. Once this happens, trying to reset the GPU as done in setup-nvidia does
-      # not seem to help. Here are some symptoms:
-      #   * Calling nvidia-smi timeouts after 60 second
-      #   * Fail to run nvidia-smi with an unable to determine the device handle for GPU
-      #     unknown error
-      #   * Test fails with a missing CUDA GPU error when initializing CUDA in PyTorch
-      #   * Run docker --gpus all fails with error response from daemon
-      #
-      # As both the root cause and recovery path are unclear, let's take the runner out of
-      # service so that it doesn't get any more jobs
-      - name: Check NVIDIA driver installation step
-        if:
-          failure() &&
-          ((steps.install-nvidia-driver.conclusion && steps.install-nvidia-driver.conclusion == 'failure') || (contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')))
-        shell: bash
-        env:
-          RUNNER_WORKSPACE: ${{ runner.workspace }}
-        run: |
-          set +e
-          set -x
-
-          nvidia-smi
-          NVIDIA_SMI_STATUS=$?
-
-          # These are acceptable return code from nvidia-smi as copied from setup-nvidia GitHub action
-          if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
-            echo "NVIDIA driver installation has failed, shutting down the runner..."
-            .github/scripts/stop_runner_service.sh
-          fi

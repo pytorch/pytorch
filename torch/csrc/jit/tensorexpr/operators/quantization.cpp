@@ -707,7 +707,7 @@ Tensor computeUpsampleNearest2d(
   auto scale_h =
       promoteToDtype(input_height, ScalarType::Double) / output_height;
   auto scale_w = promoteToDtype(input_width, ScalarType::Double) / output_width;
-  // TODO: will repetitive if in idx calculation will be taken out of the loop?
+  // TODO: will repetetive if in idx calculation will be taken out of the loop?
   auto compute_nearest_idx =
       [](ExprHandle scale, ExprHandle dst_index, ExprHandle input_size) {
         return Min::make(

@@ -259,7 +259,7 @@ class _OverlapInfo:
         assert (
             len(self.broadcast_handles) == self.num_bucket_assignments
         ), f"Missing at least one broadcast handle on rank {dist.get_rank()}"
-        _ = [x.wait() for x in self.broadcast_handles]
+        _ = list(map(lambda x: x.wait(), self.broadcast_handles))
         self.broadcast_handles.clear()
 
     def clear_per_iter_info(self) -> None:
@@ -807,7 +807,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         handles = []
         for rank in range(self.world_size):
             handles.extend(self._broadcast_params_from_rank(rank))
-        _ = [x.wait() for x in handles]
+        _ = list(map(lambda x: x.wait(), handles))
 
     @property
     def _device_to_params_per_rank(

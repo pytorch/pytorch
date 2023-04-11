@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <ATen/core/Generator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/Registry.h>
@@ -9,14 +10,14 @@
 #include <functional>
 #include <memory>
 
-// Forward-declares at::Context, at::Generator and at::cuda::NVRTC
+// Forward-declares at::cuda::NVRTC
+namespace at { namespace cuda {
+struct NVRTC;
+}} // at::cuda
+
 namespace at {
 class Context;
-struct Generator;
-namespace cuda {
-struct NVRTC;
-} // namespace cuda
-} // namespace at
+}
 
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {

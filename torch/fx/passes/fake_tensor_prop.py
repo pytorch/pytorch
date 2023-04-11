@@ -3,9 +3,7 @@ from typing import Optional
 import torch.fx
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
-from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
-from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
-from torch.fx.node import map_aggregate
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 __all__ = ['FakeTensorProp']
 
@@ -31,29 +29,10 @@ class FakeTensorProp(torch.fx.Interpreter):
 
     def run_node(self, n: Node):
         result = super().run_node(n)
-
-        def extract_val(obj):
-            if isinstance(obj, FakeTensor):
-                return snapshot_fake(obj)
-            elif isinstance(obj, torch.Tensor):
-                return snapshot_fake(self._mode.from_tensor(obj))
-            elif isinstance(obj, py_sym_types):
-                return obj
-            else:
-                return None
-
-        meta = map_aggregate(result, extract_val)
-        if meta is not None:
-            n.meta['val'] = meta
+        n.meta['val'] = result
         return result
 
     def propagate(self, *args):
-        fake_args = [
-            self._mode.from_tensor(a) if isinstance(a, torch.Tensor) else a
-            for a in args
-        ]
-        return self.propagate_dont_convert_inputs(*fake_args)
-
-    def propagate_dont_convert_inputs(self, *args):
         with self._mode:
-            return super().run(*args)
+            fake_args = [self._mode.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
+            return super().run(*fake_args)

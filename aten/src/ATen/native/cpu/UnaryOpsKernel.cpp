@@ -35,25 +35,22 @@ inline namespace CPU_CAPABILITY {
 using namespace vec;
 
 static void sigmoid_kernel(TensorIteratorBase& iter) {
-  const auto dtype = iter.common_dtype();
-  if (at::isReducedFloatingType(dtype)) {
-    AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "sigmoid_cpu_reduced_float", [&]() {
-      cpu_kernel_vec(
-          iter,
-          [=](scalar_t a) -> scalar_t {
-            float a0 = static_cast<float>(a);
-            return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
-          },
-          [=](Vectorized<scalar_t> a) {
-            Vectorized<float> a0, a1;
-            std::tie(a0, a1) = convert_to_float<scalar_t>(a);
-            a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
-            a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
-            return convert_from_float<scalar_t>(a0, a1);
-          });
-    });
+  if (iter.common_dtype() == kBFloat16) {
+    cpu_kernel_vec(
+        iter,
+        [=](BFloat16 a) -> BFloat16 {
+          float a0 = static_cast<float>(a);
+          return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
+        },
+        [=](Vectorized<BFloat16> a) {
+          Vectorized<float> a0, a1;
+          std::tie(a0, a1) = convert_bfloat16_float(a);
+          a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
+          a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
+          return convert_float_bfloat16(a0, a1);
+        });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(dtype, "sigmoid_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "sigmoid_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [=](scalar_t a) -> scalar_t {
@@ -777,7 +774,7 @@ IMPLEMENT_FLOAT_KERNEL(erfinv)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(exp)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(expm1)
+IMPLEMENT_FLOAT_KERNEL(expm1)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(floor)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)

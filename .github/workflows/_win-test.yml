@@ -34,7 +34,6 @@ jobs:
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
-      keep-going: ${{ steps.filter.outputs.keep-going }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -158,7 +157,6 @@ jobs:
           PYTHON_VERSION: 3.8
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VS_VERSION: "16.8.6"
@@ -201,7 +199,7 @@ jobs:
 
       - name: Print remaining test logs
         shell: bash
-        if: always() && steps.test.conclusion
+        if: always()
         run: |
           cat test/**/*.log || true
 
@@ -230,15 +228,6 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-
-      - name: Uninstall PyTorch
-        if: always()
-        continue-on-error: true
-        shell: bash
-        run: |
-          # This step removes PyTorch installed by the test to give a clean slate
-          # to the next job
-          python3 -mpip uninstall -y torch
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win

@@ -701,15 +701,6 @@ See :func:`torch.as_strided`
 )
 
 add_docstr_all(
-    "as_strided_",
-    r"""
-as_strided_(size, stride, storage_offset=None) -> Tensor
-
-In-place version of :meth:`~Tensor.as_strided`
-""",
-)
-
-add_docstr_all(
     "atan",
     r"""
 atan() -> Tensor
@@ -5369,15 +5360,9 @@ See :func:`torch.topk`
 add_docstr_all(
     "to_dense",
     r"""
-to_dense(dtype=None, *, masked_grad=True) -> Tensor
+to_dense() -> Tensor
 
 Creates a strided copy of :attr:`self` if :attr:`self` is not a strided tensor, otherwise returns :attr:`self`.
-
-Keyword args:
-    {dtype}
-    masked_grad (bool, optional): If set to ``True`` (default) and
-      :attr:`self` has a sparse layout then the backward of
-      :meth:`to_dense` returns ``grad.sparse_mask(self)``.
 
 Example::
 
@@ -6590,7 +6575,7 @@ Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
 add_docstr_all(
     "is_sparse",
     r"""
-Is ``True`` if the Tensor uses sparse COO storage layout, ``False`` otherwise.
+Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
 """,
 )
 
@@ -6612,22 +6597,6 @@ add_docstr_all(
     "ndim",
     r"""
 Alias for :meth:`~Tensor.dim()`
-""",
-)
-
-add_docstr_all(
-    "itemsize",
-    r"""
-Alias for :meth:`~Tensor.element_size()`
-""",
-)
-
-add_docstr_all(
-    "nbytes",
-    r"""
-Returns the number of bytes consumed by the "view" of elements of the Tensor
-if the Tensor does not use sparse storage layout.
-Defined to be :meth:`~Tensor.numel()` * :meth:`~Tensor.element_size()`
 """,
 )
 

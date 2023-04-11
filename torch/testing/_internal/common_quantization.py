@@ -21,8 +21,7 @@ from torch.ao.quantization import (
 from torch.ao.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_weight_only_qconfig, \
-    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, quantize, \
-    QConfigMapping, get_default_qconfig_mapping, get_default_qat_qconfig_mapping
+    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, quantize
 from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_qconfig_propagation_list,
@@ -355,22 +354,6 @@ def skipIfNoONEDNN(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def skipIfNoX86(fn):
-    reason = 'Quantized operations require X86.'
-    if isinstance(fn, type):
-        if 'x86' not in torch.backends.quantized.supported_engines:
-            fn.__unittest_skip__ = True
-            fn.__unittest_skip_why__ = reason
-        return fn
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if 'x86' not in torch.backends.quantized.supported_engines:
-            raise unittest.SkipTest(reason)
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
 try:
     import torchvision  # noqa: F401
     HAS_TORCHVISION = True
@@ -425,7 +408,7 @@ class QuantizationTestCase(TestCase):
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
-            modules for quantization preparation, e.g.
+            modules for quantization prepration, e.g.
             quant, dequant and observer
         """
         self.assertFalse(hasattr(module, 'quant'))
@@ -441,7 +424,7 @@ class QuantizationTestCase(TestCase):
 
     def checkHasPrepModules(self, module):
         r"""Checks the module contains child
-            modules for quantization preparation, e.g.
+            modules for quantization prepration, e.g.
             quant, dequant and observer
         """
         self.assertTrue(hasattr(module, 'module'))
@@ -450,7 +433,7 @@ class QuantizationTestCase(TestCase):
 
     def checkObservers(self, module, propagate_qconfig_list=None, prepare_custom_config_dict=None):
         r"""Checks the module or module's leaf descendants
-            have observers in preparation for quantization
+            have observers in preperation for quantization
         """
         if propagate_qconfig_list is None:
             propagate_qconfig_list = get_default_qconfig_propagation_list()
@@ -878,7 +861,7 @@ class QuantizationTestCase(TestCase):
                     expected_node: NodeSpec
                         e.g. NodeSpec.call_function(torch.quantize_per_tensor)
                     expected_node_occurrence: a dict from NodeSpec to
-                        expected number of occurrences (int)
+                        expected number of occurences (int)
                         e.g. {NodeSpec.call_function(torch.quantize_per_tensor) : 1,
                                 NodeSpec.call_method('dequantize'): 1}
                     expected_node_list: a list of NodeSpec, used to check the order
@@ -904,7 +887,7 @@ class QuantizationTestCase(TestCase):
                        "quantized_reference": ...,  # the quantized reference model
                        "result": ...,  # the result for either quantized or
                                        # quantized_reference model depending on the
-                                       # is_reference argument
+                                       # is_reference arguemnt
                    }
             """
             # TODO: make img_data a single example instead of a list
@@ -912,14 +895,13 @@ class QuantizationTestCase(TestCase):
                 inputs = inputs[0]
 
             if quant_type == QuantType.QAT:
-                qconfig_mapping = get_default_qat_qconfig_mapping(torch.backends.quantized.engine)
+                qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
                 model.train()
             elif quant_type == QuantType.STATIC:
-                qconfig_mapping = get_default_qconfig_mapping(torch.backends.quantized.engine)
+                qconfig = get_default_qconfig(torch.backends.quantized.engine)
                 model.eval()
             else:
                 qconfig = default_dynamic_qconfig
-                qconfig_mapping = QConfigMapping().set_global(qconfig)
                 model.eval()
 
             if quant_type == QuantType.QAT:
@@ -927,16 +909,12 @@ class QuantizationTestCase(TestCase):
             else:
                 prepare = prepare_fx
 
+            qconfig_dict = {"": qconfig}
             # overwrite qconfig_dict with custom_qconfig_dict
             if custom_qconfig_dict is not None:
-                assert type(custom_qconfig_dict) in (QConfigMapping, dict), \
-                    'custom_qconfig_dict should be a QConfigMapping or a dict'
-                if isinstance(custom_qconfig_dict, QConfigMapping):
-                    qconfig_mapping = custom_qconfig_dict
-                else:
-                    qconfig_mapping = QConfigMapping.from_dict(custom_qconfig_dict)
+                qconfig_dict = custom_qconfig_dict
             prepared = prepare(
-                model, qconfig_mapping,
+                model, qconfig_dict,
                 example_inputs=inputs,
                 prepare_custom_config=prepare_custom_config,
                 backend_config=backend_config)

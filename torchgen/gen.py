@@ -1452,7 +1452,7 @@ def get_native_function_declarations(
         ns_helper = NamespaceHelper(
             namespace_str=namespace,
             entity_name="",
-            max_level=4,
+            max_level=3,
         )
         # Convert to a set first to remove duplicate kernel names. Backends are
         # allowed to repeat kernel names; only generate the declaration once!

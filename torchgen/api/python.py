@@ -315,7 +315,7 @@ class PythonOutArgument(PythonArgument):
                 outputs=outputs,
             )
         elif size > 1:
-            if any((not a.type.is_tensor_like() for a in outputs)):
+            if any(map(lambda a: not a.type.is_tensor_like(), outputs)):
                 raise RuntimeError(f"Unsupported output type: {outputs}")
             return PythonOutArgument(
                 name="out",
@@ -390,9 +390,9 @@ class PythonSignature:
     # signature_str_pyi().
     def signature_str(self, *, skip_outputs: bool = False, symint: bool = True) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
-        schema_formals: List[str] = [
-            a.argument_str(method=self.method, symint=symint) for a in args
-        ]
+        schema_formals: List[str] = list(
+            map(lambda a: a.argument_str(method=self.method, symint=symint), args)
+        )
         positional_argc = len(self.input_args)
         if len(schema_formals) > positional_argc:
             schema_formals.insert(positional_argc, "*")
@@ -401,9 +401,9 @@ class PythonSignature:
 
     def signature_str_pyi(self, *, skip_outputs: bool = False) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
-        schema_formals: List[str] = [
-            a.argument_str_pyi(method=self.method) for a in args
-        ]
+        schema_formals: List[str] = list(
+            map(lambda a: a.argument_str_pyi(method=self.method), args)
+        )
         positional_argc = len(self.input_args)
         if len(schema_formals) > positional_argc:
             schema_formals.insert(positional_argc, "*")
@@ -418,9 +418,9 @@ class PythonSignature:
     def signature_str_pyi_vararg(self, *, skip_outputs: bool = False) -> Optional[str]:
         # only pyi uses vararg signatures
         args = self.arguments(skip_outputs=skip_outputs)
-        schema_formals: List[str] = [
-            a.argument_str_pyi(method=self.method) for a in args
-        ]
+        schema_formals: List[str] = list(
+            map(lambda a: a.argument_str_pyi(method=self.method), args)
+        )
         # vararg only applies to pyi signatures. vararg variants are not generated for all signatures
         num_args = self.arguments_count()
         num_positionalargs = len(self.input_args)
@@ -478,9 +478,9 @@ class PythonSignatureDeprecated(PythonSignature):
 
     def signature_str_pyi(self, *, skip_outputs: bool = False) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
-        schema_formals: List[str] = [
-            a.argument_str_pyi(method=self.method, deprecated=True) for a in args
-        ]
+        schema_formals: List[str] = list(
+            map(lambda a: a.argument_str_pyi(method=self.method, deprecated=True), args)
+        )
         positional_argc = len(self.input_args)
         if len(schema_formals) > positional_argc:
             schema_formals.insert(positional_argc, "*")
@@ -815,7 +815,9 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.ScalarType)),
                 default="None",
                 default_init=(
-                    None if is_like_or_new_function else topt_default_init("dtype")
+                    "self.scalar_type()"
+                    if is_like_or_new_function
+                    else topt_default_init("dtype")
                 ),
             )
         )
@@ -825,7 +827,9 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.Layout)),
                 default="None",
                 default_init=(
-                    None if is_like_or_new_function else topt_default_init("layout")
+                    "self.layout()"
+                    if is_like_or_new_function
+                    else topt_default_init("layout")
                 ),
             )
         )
@@ -835,7 +839,7 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.Device)),
                 default="None",
                 default_init=(
-                    None
+                    "self.device()"
                     if is_like_or_new_function
                     else (
                         topt_default_init("device")
@@ -882,10 +886,10 @@ def signature_from_schema(
 
 
 def namedtuple_fieldnames(returns: Tuple[Return, ...]) -> List[str]:
-    if len(returns) <= 1 or all((r.name is None for r in returns)):
+    if len(returns) <= 1 or all(map(lambda r: r.name is None, returns)):
         return []
     else:
-        if any((r.name is None for r in returns)):
+        if any(map(lambda r: r.name is None, returns)):
             # When building on Windows, `PyStructSequence_UnnamedField` could not be
             # resolved by the linker for some reason, which cause error in building:
             #
@@ -897,7 +901,7 @@ def namedtuple_fieldnames(returns: Tuple[Return, ...]) -> List[str]:
             # or none of them.
             raise ValueError("Unnamed field is not supported by codegen")
 
-        return [str(r.name) for r in returns]
+        return list(map(lambda r: str(r.name), returns))
 
 
 def argument_type_str_pyi(t: Type) -> str:
@@ -916,7 +920,7 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.str:
             ret = "str"
         elif t.name == BaseTy.Scalar:
-            ret = "Union[Number, _complex]"
+            ret = "Number"
         elif t.name == BaseTy.ScalarType:
             ret = "_dtype"
         elif t.name == BaseTy.bool:
@@ -1157,7 +1161,7 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
     # mutable reference to temporary.  Maybe we could assign it to a
     # variable itself.)
     returns_without_annotation = tuple(
-        (Return(r.name, r.type, None) for r in f.func.returns)
+        map(lambda r: Return(r.name, r.type, None), f.func.returns)
     )
     return_str = cpp.returns_type(returns_without_annotation, symint=True).cpp_type()
     if return_str not in SUPPORTED_RETURN_TYPES:
@@ -1189,7 +1193,7 @@ def cpp_dispatch_exprs(
     exprs: Tuple[str, ...] = tuple()
     if not isinstance(python_signature, PythonSignatureDeprecated):
         # By default the exprs are consistent with the C++ signature.
-        exprs = tuple((a.name for a in cpp_args))
+        exprs = tuple(map(lambda a: a.name, cpp_args))
     else:
         # For deprecated python signature we may need fill in some constants.
         exprs = tuple(
@@ -1252,7 +1256,10 @@ def arg_parser_unpack_method(
         elif t.name == BaseTy.int:
             return "toInt64"
         elif t.name == BaseTy.SymInt:
-            return "toSymInt" if symint else "toInt64"
+            if symint:
+                return "toSymInt"
+            else:
+                return "toInt64"
         elif t.name == BaseTy.bool:
             return "toBoolWithDefault" if has_default_init else "toBool"
         elif t.name == BaseTy.float:
@@ -1285,7 +1292,10 @@ def arg_parser_unpack_method(
     elif isinstance(t, ListType):
         if str(t.elem) == "Tensor":
             # accept and use definite size
-            return f"tensorlist_n<{t.size}>" if t.size is not None else "tensorlist"
+            if t.size is not None:
+                return f"tensorlist_n<{t.size}>"
+            else:
+                return "tensorlist"
         elif str(t.elem) == "Tensor?":
             return "list_of_optional_tensors"
         elif str(t.elem) == "Dimname":
@@ -1294,12 +1304,15 @@ def arg_parser_unpack_method(
         elif str(t.elem) == "int":
             # accept definite size
             return "intlist"
-        elif str(t.elem) == "float":
+        elif str(t) == "float[]":
             return "doublelist"
         elif str(t.elem) == "SymInt":
             # accept definite size
-            return "symintlist" if symint else "intlist"
-        elif str(t.elem) == "Scalar":
+            if symint:
+                return "symintlist"
+            else:
+                return "intlist"
+        elif str(t) == "Scalar[]":
             return "scalarlist"
     raise RuntimeError(f"type '{t}' is not supported by PythonArgParser")
 
@@ -1406,7 +1419,7 @@ def dispatch_lambda_exprs(
         lambda_args_exprs["self"] = "self"
 
     # 2. special packing/checking for TensorOptions.
-    tensor_options_args_names = [a.name for a in ps.tensor_options_args]
+    tensor_options_args_names = list(map(lambda a: a.name, ps.tensor_options_args))
     if has_toptions:
         if f.func.is_out_fn():
             raise RuntimeError(f"{f.func}: tensor options with output arg")
@@ -1420,7 +1433,7 @@ def dispatch_lambda_exprs(
                     f"{f.func}: unrecognized type '{str(a.type)}' for tensor options field '{a.name}'"
                 )
         if not all(
-            (a in tensor_options_args_names for a in TENSOR_OPTIONS_FIELDS.keys())
+            map(lambda a: a in tensor_options_args_names, TENSOR_OPTIONS_FIELDS.keys())
         ):
             raise RuntimeError(
                 f"{f.func}: incomplete tensor options args: {tensor_options_args_names}"
@@ -1448,7 +1461,9 @@ torch::utils::maybe_initialize_cuda(options);
                 raise RuntimeError(
                     f"{f.func}: dtype in tensor_options_args without output arg"
                 )
-            if not all((a in tensor_options_args_names for a in ("layout", "device"))):
+            if not all(
+                map(lambda a: a in tensor_options_args_names, ("layout", "device"))
+            ):
                 raise RuntimeError(
                     f"{f.func}: incomplete tensor options for output check"
                 )
@@ -1467,6 +1482,6 @@ check_out_type_matches({arg_parser_outputs['out'].expr}, {arg_parser_outputs['dt
             )
 
     return DispatchLambdaArgumentExprs(
-        exprs=tuple((lambda_args_exprs[a.name] for a in lambda_args)),
+        exprs=tuple(map(lambda a: lambda_args_exprs[a.name], lambda_args)),
         inits=inits,
     )

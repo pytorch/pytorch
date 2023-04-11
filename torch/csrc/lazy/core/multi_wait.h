@@ -6,7 +6,6 @@
 #pragma once
 
 #include <condition_variable>
-#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>

@@ -40,11 +40,9 @@
 #include <functional>
 #include <memory>
 
-namespace c10::cuda::_internal {
-void setHasPrimaryContext(bool (*func)(int64_t));
-}
-
-namespace at::cuda::detail {
+namespace at {
+namespace cuda {
+namespace detail {
 
 const at::cuda::NVRTC& nvrtc();
 int64_t current_device();
@@ -54,29 +52,6 @@ static void (*magma_init_fn)() = nullptr;
 void set_magma_init_fn(void (*fn)()) {
   magma_init_fn = fn;
 }
-
-namespace {
-bool _hasPrimaryContext(int64_t device_index) {
-  TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
-  unsigned int ctx_flags;
-  // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
-  // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
-  int ctx_is_active = 0;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
-  return ctx_is_active == 1;
-}
-
-// Register hasPrimaryContext back to c10::cuda
-struct _Initializer {
-  _Initializer() {
-      c10::cuda::_internal::setHasPrimaryContext(_hasPrimaryContext);
-  }
-  ~_Initializer() {
-      c10::cuda::_internal::setHasPrimaryContext(nullptr);
-  }
-} initializer;
-} // anonymous namespace
 
 // Sets the CUDA_MODULE_LOADING environment variable
 // if it's not set by the user.
@@ -234,8 +209,36 @@ int64_t CUDAHooks::current_device() const {
   return at::cuda::detail::current_device();
 }
 
+bool hasPrimaryContext(int64_t device_index) {
+  TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
+              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
+  unsigned int ctx_flags;
+  // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
+  // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
+  int ctx_is_active = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
+  return ctx_is_active == 1;
+}
+
 bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
-  return _hasPrimaryContext(device_index);
+  return at::cuda::detail::hasPrimaryContext(device_index);
+}
+
+c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
+  // check current device first
+  int64_t current_device_index = current_device();
+  if (current_device_index >= 0) {
+    if (hasPrimaryContext(current_device_index)) {
+      return current_device_index;
+    }
+  }
+  for (const auto device_index : c10::irange(at::cuda::device_count())) {
+    if (device_index == current_device_index) continue;
+    if (hasPrimaryContext(device_index)) {
+      return device_index;
+    }
+  }
+  return c10::nullopt;
 }
 
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
@@ -440,4 +443,6 @@ using at::RegistererCUDAHooksRegistry;
 
 REGISTER_CUDA_HOOKS(CUDAHooks);
 
-} // namespace at::cuda::detail
+} // namespace detail
+} // namespace cuda
+} // namespace at

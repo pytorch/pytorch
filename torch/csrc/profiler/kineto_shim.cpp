@@ -17,7 +17,7 @@ namespace kineto {
 
 #ifdef USE_KINETO
 namespace {
-const std::set<libkineto::ActivityType> kCpuTypes{
+const std::set<libkineto::ActivityType> cpuTypes{
     libkineto::ActivityType::CPU_OP,
     libkineto::ActivityType::CPU_INSTANT_EVENT,
     libkineto::ActivityType::USER_ANNOTATION,
@@ -27,18 +27,18 @@ const std::set<libkineto::ActivityType> kCpuTypes{
     libkineto::ActivityType::PYTHON_FUNCTION,
 };
 
-const std::set<libkineto::ActivityType> kCudaTypes = {
+const std::set<libkineto::ActivityType> cudaTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
     libkineto::ActivityType::GPU_MEMSET,
     libkineto::ActivityType::CONCURRENT_KERNEL,
-    // CUDA_RUNTIME appears in both kCpuTypes and kCudaTypes.
+    // CUDA_RUNTIME appears in both cpuTypes and cudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
 };
-const std::set<libkineto::ActivityType> kXpuTypes = {
+const std::set<libkineto::ActivityType> xpuTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
     libkineto::ActivityType::GPU_MEMSET,
     libkineto::ActivityType::CONCURRENT_KERNEL,
-    // XPU_RUNTIME appears in both kCpuTypes and kXpuTypes.
+    // XPU_RUNTIME appears in both cpuTypes and xpuTypes.
     libkineto::ActivityType::XPU_RUNTIME,
 };
 } // namespace
@@ -65,7 +65,6 @@ void addMetadata(
 #ifdef USE_KINETO
   // ActivityTraceInterface returns const pointers, so we have to cast away the
   // constness to add metadata.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<activity_t*>(activity)->addMetadata(key, value);
 #endif // USE_KINETO
 }
@@ -97,7 +96,6 @@ activity_t* TraceWrapper::addCPUActivity(
   auto& act = libkineto::CpuTraceBuffer::toRef(cpu_trace_->activities.back());
   act.device = device_and_resource.device;
   act.resource = device_and_resource.resource;
-  // NOLINTNEXTLINE
   act.id = correlation_id;
   act.startTime = start_time;
   if (type != libkineto::ActivityType::CPU_INSTANT_EVENT) {
@@ -157,19 +155,25 @@ class ExperimentalConfigWrapper {
       const torch::profiler::impl::ExperimentalConfig& config)
       : config_(config) {}
 
-  bool assertValid() {
-    return !config_.profiler_metrics.empty();
+  bool assertValid(const ActivitySet& activities) {
+    // Kineto supports reading performance events per kernel/iteration
+    // using CUPTI Range based profiler API. In this mode however we
+    // do not trace CPU or GPU events.
+    bool cupti_range_profiler = !config_.profiler_metrics.empty();
+    if (cupti_range_profiler &&
+        activities.count(torch::autograd::profiler::ActivityType::CPU)) {
+      LOG(WARNING)
+          << "Cannot run range profiler with CPU activities, please only"
+          << " use CUDA activity type";
+      return false;
+    }
+    return cupti_range_profiler;
   }
 
-  void prepareTraceWithExperimentalOptions(bool add_cpu_activity) {
+  void prepareTraceWithExperimentalOptions() {
 #ifdef USE_KINETO
     std::set<libkineto::ActivityType> k_activities{
         libkineto::ActivityType::CUDA_PROFILER_RANGE};
-
-    // Only add CPU activities if we are measuring per kernel ranges
-    if (add_cpu_activity && config_.profiler_measure_per_kernel) {
-      k_activities.insert(kCpuTypes.begin(), kCpuTypes.end());
-    }
 
     const size_t num_metrics = config_.profiler_metrics.size();
     std::stringstream configss;
@@ -215,24 +219,21 @@ void prepareTrace(
   }
 
   std::set<libkineto::ActivityType> k_activities;
-  bool has_cpu_activity =
-      activities.count(torch::autograd::profiler::ActivityType::CPU);
-
-  if (has_cpu_activity) {
-    k_activities.insert(kCpuTypes.begin(), kCpuTypes.end());
+  if (activities.count(torch::autograd::profiler::ActivityType::CPU)) {
+    k_activities.insert(cpuTypes.begin(), cpuTypes.end());
   }
   if (activities.count(torch::autograd::profiler::ActivityType::XPU)) {
-    k_activities.insert(kXpuTypes.begin(), kXpuTypes.end());
+    k_activities.insert(xpuTypes.begin(), xpuTypes.end());
   }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
-    k_activities.insert(kCudaTypes.begin(), kCudaTypes.end());
+    k_activities.insert(cudaTypes.begin(), cudaTypes.end());
   }
 
   ExperimentalConfigWrapper configWrap(config);
 
   // Experimental Configuration options are present
-  if (config && configWrap.assertValid()) {
-    configWrap.prepareTraceWithExperimentalOptions(has_cpu_activity);
+  if (config && configWrap.assertValid(activities)) {
+    configWrap.prepareTraceWithExperimentalOptions();
     return;
   }
 

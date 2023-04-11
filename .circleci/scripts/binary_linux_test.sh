@@ -38,6 +38,10 @@ fi
 EXTRA_CONDA_FLAGS=""
 NUMPY_PIN=""
 PROTOBUF_PACKAGE="defaults::protobuf"
+if [[ "\$python_nodot" = *311* ]]; then
+  # Numpy is yet not avaiable on default conda channel
+  EXTRA_CONDA_FLAGS="-c=malfet"
+fi
 
 if [[ "\$python_nodot" = *310* ]]; then
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
@@ -77,7 +81,6 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       "numpy\${NUMPY_PIN}" \
       mkl>=2018 \
       ninja \
-      sympy \
       typing-extensions \
       ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then

@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch._dynamo.utils import detect_fake_mode
+from torch._dynamo.utils import fake_mode_from_tensors
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -283,51 +283,10 @@ class PackedLinear(nn.Linear):
 
 
 class LinearUnary(nn.Linear):
-    def __init__(self, linear: nn.Module, unary: Optional[nn.Module], input_size: list):
-        super().__init__(
-            linear.in_features,
-            linear.out_features,
-            linear.bias is not None,
-            linear.weight.device,
-            linear.weight.dtype,
-        )
-        self._update_module_params(linear, unary, input_size)
-
-    def _update_module_params(self, linear, unary, input_size):
-        self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.attr = "none"
-        self.scalars = []
-        self.algorithm = ""
-        if unary is not None:
-            self.attr, self.scalars, self.algorithm = unary_modules_map[
-                unary.__class__
-            ](unary)
-        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1])
-        self.packed_weight = torch.nn.Parameter(
-            torch.ops.mkldnn._reorder_linear_weight(
-                self.weight.to_mkldnn(), self.batch_size
-            ),
-            requires_grad=self.weight.requires_grad,
-        )
-
-    def forward(self, input):
-        y = torch.ops.mkldnn._linear_pointwise(
-            input,
-            self.packed_weight,
-            self.bias,
-            self.attr,
-            self.scalars,
-            self.algorithm,
-        )
-        return y
-
-
-class LinearBinary(nn.Linear):
     def __init__(
         self,
         linear: nn.Module,
-        binary_op_name: str,
-        input_size: list,
+        unary: nn.Module,
     ):
         super().__init__(
             linear.in_features,
@@ -336,22 +295,40 @@ class LinearBinary(nn.Linear):
             linear.weight.device,
             linear.weight.dtype,
         )
-        self._update_module_params(linear, binary_op_name, input_size)
+        self._update_module_params(linear, unary)
 
-    def _update_module_params(self, linear, binary_op_name, input_size):
+    def _update_module_params(self, linear, unary):
         self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.attr = binary_op_name
-        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1])
-        self.packed_weight = torch.nn.Parameter(
-            torch.ops.mkldnn._reorder_linear_weight(
-                self.weight.to_mkldnn(), self.batch_size
-            ),
-            requires_grad=self.weight.requires_grad,
+        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
+            unary
         )
+
+    def forward(self, input):
+        y = torch.ops.mkldnn._linear_pointwise(
+            input, self.weight, self.bias, self.attr, self.scalars, self.algorithm
+        )
+        return y
+
+
+class LinearBinary(nn.Linear):
+    def __init__(self, linear: nn.Module, binary_op_name: str):
+        super().__init__(
+            linear.in_features,
+            linear.out_features,
+            linear.bias is not None,
+            linear.weight.device,
+            linear.weight.dtype,
+        )
+        self._update_module_params(linear, binary_op_name)
+
+    def _update_module_params(self, linear, binary_op_name):
+        self.__dict__ = copy.deepcopy(linear.__dict__)
+
+        self.attr = binary_op_name
 
     def forward(self, input, other):
         y = torch.ops.mkldnn._linear_pointwise(
-            input, other, self.packed_weight, self.bias, self.attr
+            input, other, self.weight, self.bias, self.attr
         )
         return y
 
@@ -480,19 +457,23 @@ def fused_conv_binary_unary_eval(
 
 def packed_linear_eval(linear: nn.Module, input_size: list):
     assert not (linear.training), "Fusion only for eval!"
-    if linear.weight.dtype == torch.bfloat16:
-        return LinearUnary(linear, None, input_size)
     return PackedLinear(linear, input_size)
 
 
 def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module, input_size: list):
     assert not (linear.training), "Fusion only for eval!"
-    return LinearUnary(linear, unary, input_size)
+    return LinearUnary(
+        linear,
+        unary,
+    )
 
 
 def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
     assert not (linear.training), "Fusion only for eval!"
-    linear_binary = LinearBinary(linear, attr, input_size)
+    linear_binary = LinearBinary(
+        linear,
+        attr,
+    )
     return linear_binary
 
 
@@ -524,7 +505,7 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # For binary fusion, we need to check inputs info to make sure
     # the binary inputs have same tensor info(device, dtype, and layout).
 
-    fake_mode = detect_fake_mode(example_inputs)
+    fake_mode = fake_mode_from_tensors(example_inputs)
     ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
     gm = fuse_unary(gm)
     gm = fuse_binary(gm)
@@ -762,12 +743,9 @@ def pack_module(gm: torch.fx.GraphModule):
                 if cur_module.training:
                     continue
                 computation_node_input_meta = node.args[0].meta.get("tensor_meta")
-                # for fp32 linear, only packed when has mkl
-                if (
-                    computation_node_input_meta.dtype == torch.float32
-                    and type(cur_module) in [torch.nn.Linear]
-                    and not torch._C.has_mkl
-                ):
+                if computation_node_input_meta.dtype != torch.float32:
+                    continue
+                if type(cur_module) in [torch.nn.Linear] and not torch._C.has_mkl:
                     continue
                 computation_node_input_size = computation_node_input_meta.shape
                 if (

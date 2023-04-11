@@ -188,7 +188,8 @@ class OptimizeIndexing:
     @property
     def all_nodes(self):
         for graph in self.all_graphs:
-            yield from graph.nodes
+            for node in graph.nodes:
+                yield node
 
     def swap_submodules(self, submodules):
         keys = list(submodules.keys())

@@ -126,14 +126,14 @@ enum class Activation {
 cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
   switch (a) {
     case Activation::None:
-      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS;
     case Activation::RELU:
-      return cuda::blas::GEMMAndBiasActivationEpilogue::RELU;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS_RELU;
     case Activation::GELU:
-      return cuda::blas::GEMMAndBiasActivationEpilogue::GELU;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS_GELU;
     default:
       TORCH_CHECK(false);
-      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS;
   }
 }
 #endif
@@ -158,7 +158,15 @@ uint8_t getAlignment(const Tensor &t) {
   return alignment;
 }
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
+Tensor& addmm_out_cuda_impl(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Activation activation = Activation::None,
+    bool allow_extended = false) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -317,7 +325,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               // path until we confirm which version it's working in.
               activation != Activation::GELU
               ? activation_to_gemm_and_blas_arg(activation)
-              : cuda::blas::GEMMAndBiasActivationEpilogue::None
+              : cuda::blas::GEMMAndBiasActivationEpilogue::BIAS
 #endif
           );
         });
@@ -672,6 +680,7 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
   }
 }
 
+
 Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   // NOTE: cuBLAS is currently broken for some combination of transposed inputs.
   TORCH_CHECK(self.dim() == 2, "Expected self to be of dimension 2 but got ", self.dim());
@@ -714,18 +723,22 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
   int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
 
-  at::cuda::blas::int8_gemm(
+  at::cuda::blas::gemm_and_bias<int8_t, int32_t, std::nullptr_t>(
       transpose_mat1,
       transpose_mat2,
       m,
       n,
       k,
+      1.0,
       mat1_->data_ptr<int8_t>(),
       mat1_ld,
       mat2_->data_ptr<int8_t>(),
       mat2_ld,
+      nullptr,
       result_->data_ptr<int32_t>(),
-      result_ld);
+      result_ld,
+      cuda::blas::GEMMAndBiasActivationEpilogue::NONE,
+      false /* use_heuristic */);
 
   if (!result.is_same(*result_)) {
     result.copy_(*result_);

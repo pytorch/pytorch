@@ -19,7 +19,6 @@ from torch._prims_common import (
     is_integer_dtype,
 )
 from torch._subclasses.meta_utils import MetaConverter
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -29,8 +28,6 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
-
-DimList = List
 
 log = logging.getLogger(__name__)
 
@@ -71,11 +68,6 @@ class DynamicOutputShapeException(RuntimeError):
 
 @dataclass
 class DataDependentOutputException(RuntimeError):
-    func: OpOverload
-
-
-@dataclass
-class UnsupportedOperatorException(RuntimeError):
     func: OpOverload
 
 
@@ -250,8 +242,6 @@ class FakeTensorConverter:
         ignore_subclass=False,
         *,
         source=None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -285,8 +275,6 @@ class FakeTensorConverter:
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -322,8 +310,6 @@ class FakeTensorConverter:
         shape_env=None,
         ignore_subclass=False,
         source=None,
-        dynamic_dims=None,
-        constraint_dims=None,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -332,8 +318,6 @@ class FakeTensorConverter:
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
         )
 
 
@@ -1042,7 +1026,6 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
     ):
-        log.info("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
 
@@ -1122,13 +1105,7 @@ class FakeTensorMode(TorchDispatchMode):
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
         ):
-            assert all(
-                t.constant is not None for t in flat_arg_fake_tensors
-            ), "f{func} should not have fake inputs without constants"
-            const_args, const_kwargs = pytree.tree_map_only(
-                FakeTensor, lambda t: t.constant, (args, kwargs)
-            )
-            out = func(*const_args, **const_kwargs)
+            out = func(*args, **kwargs)
             if self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
                 # compute here
@@ -1154,7 +1131,6 @@ class FakeTensorMode(TorchDispatchMode):
             assert (
                 len(kwargs) == 0 and len(args) == 1 and type(args[0]) is torch.Tensor
             ), f"{args} {kwargs}"
-
             return converter(self, args[0])
 
         args, kwargs = self.validate_and_convert_non_fake_tensors(
@@ -1264,8 +1240,8 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
-            if has_symbolic_sizes or not self.allow_fallback_kernels:
-                raise UnsupportedOperatorException(func)
+            if not self.allow_fallback_kernels:
+                raise not_implemented_error
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)
@@ -1411,27 +1387,20 @@ class FakeTensorMode(TorchDispatchMode):
     def from_tensor(
         self,
         tensor,
-        *,
         static_shapes=False,
         ignore_subclass=False,
         source: Optional[Source] = None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
-        shape_env = self.shape_env
         if static_shapes:
-            assert (
-                dynamic_dims is None
-            ), "cannot set both static_shapes and dynamic_dims"
-            shape_env = None
+            return self.fake_tensor_converter(
+                self, tensor, ignore_subclass=ignore_subclass, source=source
+            )
         return self.fake_tensor_converter(
             self,
             tensor,
-            shape_env=shape_env,
+            shape_env=self.shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
         )
 
 

@@ -2424,24 +2424,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::nbytes(Tensor a) -> int"),
-        [](Stack& stack) {
-          at::Tensor a;
-          pop(stack, a);
-          const auto nbytes = static_cast<int64_t>(a.nbytes());
-          push(stack, nbytes);
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::itemsize(Tensor a) -> int"),
-        [](Stack& stack) {
-          at::Tensor a;
-          pop(stack, a);
-          const auto itemsize = static_cast<int64_t>(a.itemsize());
-          push(stack, itemsize);
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::index(Device self) -> int?"),
         [](Stack& stack) {
           auto d = pop(stack).toDevice();
