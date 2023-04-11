@@ -10,6 +10,7 @@ from typing import Dict, Optional, Set
 import torch
 import torch._logging
 from torch._guards import tracing
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
@@ -299,6 +300,17 @@ def convert_frame_assert(
         global initial_deterministic_algorithms_state
         initial_deterministic_algorithms_state = (
             torch.are_deterministic_algorithms_enabled()
+        )
+
+        signpost_event(
+            "dynamo",
+            "_convert_frame_assert._compile",
+            {
+                "co_name": code.co_name,
+                "co_filename": code.co_filename,
+                "co_firstlineno": code.co_firstlineno,
+                "cache_size": cache_size,
+            },
         )
 
         return _compile(
