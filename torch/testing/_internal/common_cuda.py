@@ -3,7 +3,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import TEST_NUMBA, IS_WINDOWS, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_NUMBA, TEST_WITH_ROCM
 import inspect
 import contextlib
 
@@ -180,11 +180,7 @@ def _get_torch_rocm_version():
     return tuple(int(x) for x in rocm_version.split("."))
 
 def _check_cusparse_generic_available():
-    version = _get_torch_cuda_version()
-    min_supported_version = (10, 1)
-    if IS_WINDOWS:
-        min_supported_version = (11, 0)
-    return version >= min_supported_version
+    return not TEST_WITH_ROCM
 
 def _check_hipsparse_generic_available():
     if not TEST_WITH_ROCM:
