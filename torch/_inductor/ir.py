@@ -3484,9 +3484,10 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        bias = V.graph.wrapper_code.none_str
-        constant_args = [None, str(batch_size)]
-        cpp_constant_args = [V.graph.wrapper_code.none_str, str(batch_size)]
+        bias = None
+        cpp_bias = "at::Tensor()"
+        constant_args = [bias, batch_size]
+        cpp_constant_args = [cpp_bias, str(batch_size)]
 
         return MKLPackedLinear(
             layout=FixedLayout(
