@@ -22,7 +22,7 @@ sparse_defaults = {
     "zeros_per_block": 4,
 }
 
-def _get_model_and_sparsifier_and_sparse_config(qconfig=None):
+def _get_model_and_pruner_and_sparse_config(qconfig=None):
     model = nn.Sequential(
         nn.Linear(4, 4),  # 0
         nn.ReLU(),
@@ -37,7 +37,7 @@ def _get_model_and_sparsifier_and_sparse_config(qconfig=None):
         model[4].qconfig = qconfig
         model[5].qconfig = qconfig
 
-    sparsifier = pruning.WeightNormSparsifier(**sparse_defaults)
+    pruner = pruning.WeightNormPruner(**sparse_defaults)
 
     sparse_config = [
         {
@@ -48,7 +48,7 @@ def _get_model_and_sparsifier_and_sparse_config(qconfig=None):
         },
         {"tensor_fqn": "0.weight"},
     ]
-    return model, sparsifier, sparse_config
+    return model, pruner, sparse_config
 
 def _squash_mask_calibrate_and_convert(model, sparsifier, input):
     sparsifier.step()
@@ -71,7 +71,7 @@ class TestComposability(TestCase):
             mod,
             sparsifier,
             sparse_config,
-        ) = _get_model_and_sparsifier_and_sparse_config(tq.get_default_qconfig("fbgemm"))
+        ) = _get_model_and_pruner_and_sparse_config(tq.get_default_qconfig("fbgemm"))
 
         tq.prepare(mod, inplace=True)
         sparsifier.prepare(mod, config=sparse_config)
@@ -100,7 +100,7 @@ class TestComposability(TestCase):
             mod,
             sparsifier,
             sparse_config,
-        ) = _get_model_and_sparsifier_and_sparse_config(tq.get_default_qconfig("fbgemm"))
+        ) = _get_model_and_pruner_and_sparse_config(tq.get_default_qconfig("fbgemm"))
 
         sparsifier.prepare(mod, config=sparse_config)
         tq.prepare(mod, inplace=True)
@@ -131,7 +131,7 @@ class TestComposability(TestCase):
             mod,
             sparsifier,
             sparse_config,
-        ) = _get_model_and_sparsifier_and_sparse_config(tq.get_default_qconfig("fbgemm"))
+        ) = _get_model_and_pruner_and_sparse_config(tq.get_default_qconfig("fbgemm"))
 
         sparsifier.prepare(mod, config=sparse_config)
         tq.prepare(mod, inplace=True)
@@ -169,7 +169,7 @@ class TestComposability(TestCase):
             mod,
             sparsifier,
             sparse_config,
-        ) = _get_model_and_sparsifier_and_sparse_config(tq.get_default_qconfig("fbgemm"))
+        ) = _get_model_and_pruner_and_sparse_config(tq.get_default_qconfig("fbgemm"))
         sparsifier.prepare(mod, config=sparse_config)
         tq.fuse_modules(mod, [["5", "6"]], inplace=True)
         mod[5].qconfig = tq.get_default_qconfig("fbgemm")
@@ -198,7 +198,7 @@ class TestComposability(TestCase):
             mod,
             sparsifier,
             _,
-        ) = _get_model_and_sparsifier_and_sparse_config(tq.get_default_qconfig("fbgemm"))
+        ) = _get_model_and_pruner_and_sparse_config(tq.get_default_qconfig("fbgemm"))
         tq.fuse_modules(mod, [["5", "6"]], inplace=True)
 
         # its absolutely broken by fusion but will still work if you put the correct fqn in
@@ -250,7 +250,7 @@ class TestComposability(TestCase):
             mod,
             sparsifier,
             sparse_config,
-        ) = _get_model_and_sparsifier_and_sparse_config(
+        ) = _get_model_and_pruner_and_sparse_config(
             tq.get_default_qat_qconfig("fbgemm")
         )
         sparsifier.prepare(mod, config=sparse_config)
@@ -275,7 +275,7 @@ class TestComposability(TestCase):
 
     # This tests whether performing qat prepare before sparse prepare causes issues.
     def test_qat_prep_before_s_prep(self):
-        mod, sparsifier, _ = _get_model_and_sparsifier_and_sparse_config(
+        mod, sparsifier, _ = _get_model_and_pruner_and_sparse_config(
             tq.get_default_qat_qconfig("fbgemm")
         )
         tq.prepare_qat(mod, inplace=True)
@@ -337,7 +337,7 @@ class TestFxComposability(TestCase):
             mod,
             sparsifier,
             _,
-        ) = _get_model_and_sparsifier_and_sparse_config()
+        ) = _get_model_and_pruner_and_sparse_config()
 
         example = torch.randn(1, 4, 4, 4)
         qconfig = tq.get_default_qconfig("fbgemm")
@@ -396,7 +396,7 @@ class TestFxComposability(TestCase):
             mod,
             sparsifier,
             _,
-        ) = _get_model_and_sparsifier_and_sparse_config()
+        ) = _get_model_and_pruner_and_sparse_config()
 
         example = torch.randn(1, 4, 4, 4)
         qconfig = tq.get_default_qconfig("fbgemm")
@@ -455,7 +455,7 @@ class TestFxComposability(TestCase):
             mod,
             sparsifier,
             sparse_config,
-        ) = _get_model_and_sparsifier_and_sparse_config()
+        ) = _get_model_and_pruner_and_sparse_config()
         sparsifier.prepare(mod, config=sparse_config)
 
         example = torch.randn(1, 4, 4, 4)
@@ -500,7 +500,7 @@ class TestFxComposability(TestCase):
             mod,
             sparsifier,
             sparse_config,
-        ) = _get_model_and_sparsifier_and_sparse_config()
+        ) = _get_model_and_pruner_and_sparse_config()
         sparsifier.prepare(mod, config=sparse_config)
 
         example = torch.randn(1, 4, 4, 4)
@@ -546,7 +546,7 @@ class TestFxComposability(TestCase):
             mod,
             sparsifier,
             sparse_config,
-        ) = _get_model_and_sparsifier_and_sparse_config()
+        ) = _get_model_and_pruner_and_sparse_config()
         sparsifier.prepare(mod, config=sparse_config)
 
         example = torch.randn(1, 4, 4, 4)
