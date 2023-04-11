@@ -6,7 +6,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 def _attach_model_to_data_sparsifier(module, data_sparsifier, config=None):
     """Attaches a data sparsifier to all the layers of the module.
-    Essentialy, loop over all the weight parameters in the module and
+    Essentially, loop over all the weight parameters in the module and
     attach it to the data sparsifier.
     Note::
         The '.' in the layer names are replaced with '_' (refer to _get_valid_name() below)
