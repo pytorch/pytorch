@@ -2020,14 +2020,6 @@ class TestSparse(TestSparseBase):
             return res
 
         def f(x, y):
-            # x and y might contain materialized zeroes
-            # which might get matched in `sparse_mask`.
-            # The problem is that `to_dense` kills all zero values,
-            # even if there explicit indices for them.
-            # This disrupts parametrizations induces by the indices.
-            # Hence, we have to remove zero values to comply with this
-            # semantics.
-            x = remove_zeros(x)
             y = remove_zeros(y)
             return x.sparse_mask(y).to_dense(masked_grad=False)
 
