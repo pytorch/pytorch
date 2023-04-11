@@ -10,7 +10,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Dict, Optional, Tuple, Union, List
+from typing import Any, Callable, Dict, Optional, Tuple, Union, List
 
 import torch
 from torch._C._distributed_c10d import (
@@ -331,7 +331,7 @@ class P2POp:
     A class to build point-to-point operations for ``batch_isend_irecv``.
 
     This class builds the type of P2P operation, communication buffer, peer rank,
-    Process Group group, and tag. Instances of this class will be passed to
+    Process Group, and tag. Instances of this class will be passed to
     ``batch_isend_irecv`` for point-to-point communications.
 
     Args:
@@ -345,20 +345,22 @@ class P2POp:
         tag (int, optional): Tag to match send with recv.
     """
 
-    def __init__(self, op, tensor, peer, group=None, tag=0):
+    def __init__(self, op: Callable, tensor: torch.Tensor, peer: int,
+                 group: Optional[ProcessGroup] = None, tag: int = 0):
         self.op = op
         self.tensor = tensor
         self.peer = peer
         self.group = group
         self.tag = tag
 
-    def __new__(cls, op, tensor, peer, group=None, tag=0):
+    def __new__(cls, op: Callable, tensor: torch.Tensor, peer: int,
+                group: Optional[ProcessGroup] = None, tag: int = 0):
         _check_op(op)
         _check_single_tensor(tensor, "tensor")
         return object.__new__(cls)
 
 
-class CollOp:
+class _CollOp:
     """
     A class to capture collective operations.
 
@@ -366,15 +368,18 @@ class CollOp:
         op (Callable): A collective function, e.g. ``torch.distributed.all_reduce``.
         tensor (Tensor): Tensor to operate on.
         dst_tensor (Tensor, optional): Provided when source and destinaton tensors are not the same.
-        redop_or_root: Store reduce operation or root rank.
+        redop (ReduceOp, optional): reduce operation.
+        root (int, optional): root of broadcast or reduce.
         async_op (bool, optional): Whether this op should be an async op
     """
 
-    def __init__(self, op, tensor, dst_tensor=None, redop_or_root=None, async_op=False):
+    def __init__(self, op: Callable, tensor: torch.Tensor, dst_tensor: Optional[torch.Tensor] = None,
+                 redop: Optional[ReduceOp] = None, root: Optional[int] = None, async_op: bool = False):
         self.op = op
         self.tensor = tensor
         self.dst_tensor = dst_tensor
-        self.redop_or_root = redop_or_root
+        self.redop = redop
+        self.root = root
         self.async_op = async_op
 
 
@@ -388,7 +393,7 @@ _pg_backend_config: Dict[ProcessGroup, str] = {}
 _group_count = 0
 _tags_to_pg: Dict[str, List[ProcessGroup]] = {}
 _pg_to_tag: Dict[ProcessGroup, str] = {}
-_pg_coalesce_state: Dict[ProcessGroup, List[Union[CollOp, P2POp]]] = {}
+_pg_coalesce_state: Dict[ProcessGroup, List[Union[_CollOp, P2POp]]] = {}
 
 class _World:
     """
@@ -482,7 +487,7 @@ class _World:
         return _pg_to_tag
 
     @property
-    def pg_coalesce_state(self) -> Dict[ProcessGroup, List[Union[CollOp, P2POp]]]:
+    def pg_coalesce_state(self) -> Dict[ProcessGroup, List[Union[_CollOp, P2POp]]]:
         global _pg_coalesce_state
         return _pg_coalesce_state
 
@@ -1493,6 +1498,10 @@ def _coalescing_manager(group: Optional[ProcessGroup] = None, device: Optional[t
         >>>         dist.all_reduce(tensors[i], async_op=True)
         >>> for req in reqs:
         >>>     req.wait()
+
+    .. warning::
+       :func:`_coalescing_manager` currently do not support coalescing all-reduces with different reduce operators, e.g.
+       `ReduceOp.SUM` and `ReduceOp.PRODUCT`.
     """
     if group is None:
         group = _get_default_group()
@@ -1819,9 +1828,9 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     if group in _world.pg_coalesce_state.keys():
         # We are in coalescing context, do not issue single operation, just append a collective representation
-        coll = CollOp(all_reduce, tensor, None, op, async_op)
+        coll = _CollOp(all_reduce, tensor, None, op, None, async_op)
         _world.pg_coalesce_state[group].append(coll)
-        return
+        return None
 
     work = group.allreduce([tensor], opts)
 
