@@ -147,8 +147,13 @@ class DeviceMesh(object):
             ), f"Default PG backend: {world_backend} not supporting CUDA!"
             if not default_initialized:
                 # automatically set the current cuda device base on num of gpu devices available in each host
-                # NOTE: This device selection would only work for homogenous hardware.
+                # NOTE: This device selection would only work for homogeneous hardware.
                 torch.cuda.set_device(get_rank() % torch.cuda.device_count())
+            # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
+            # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
+            # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
+            # this attribute, so we will implement this logic once we figure out the answer.
+            self._seed = torch.cuda.initial_seed()
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"
@@ -236,9 +241,8 @@ class DeviceMesh(object):
             raise RuntimeError("DeviceMesh process groups not initialized!")
         return self._dim_groups
 
-    # pyre-fixme[3]: Return type must be annotated.
-    def size(self, dim: int = 0):
-        return self.mesh.size(dim)
+    def size(self, dim: Optional[int] = None) -> int:
+        return self.mesh.numel() if dim is None else self.mesh.size(dim)
 
     @property
     def ndim(self) -> int:
