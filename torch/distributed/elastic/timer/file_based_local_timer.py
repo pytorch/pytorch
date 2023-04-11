@@ -178,9 +178,10 @@ class FileTimerServer:
 
     def start(self) -> None:
         log.info(
-            f"Starting {type(self).__name__}..."
-            f" max_interval={self._max_interval},"
-            f" daemon={self._daemon}"
+            "Starting %s..."
+            " max_interval=%s,"
+            " daemon=%s",
+            type(self).__name__, self._max_interval, self._daemon
         )
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=self._daemon)
         log.info("Starting watchdog thread...")
@@ -233,7 +234,7 @@ class FileTimerServer:
         now = time.time()
         reaped_worker_pids = set()
         for worker_pid, expired_timers in self.get_expired_timers(now).items():
-            log.info(f"Reaping worker_pid=[{worker_pid}]." f" Expired timers: {self._get_scopes(expired_timers)}")
+            log.info("Reaping worker_pid=[%s]." " Expired timers: %s", worker_pid, self._get_scopes(expired_timers))
             reaped_worker_pids.add(worker_pid)
             # In case we have multiple expired timers, we find the first timer
             # with a valid signal (>0) in the expiration time order.
@@ -328,5 +329,5 @@ class FileTimerServer:
             log.info("Process with pid=%s does not exist. Skipping", worker_pid)
             return True
         except Exception as e:
-            log.error(f"Error terminating pid={worker_pid}", exc_info=e)
+            log.error("Error terminating pid=%s", worker_pid, exc_info=e)
         return False
