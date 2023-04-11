@@ -1972,6 +1972,15 @@ Tensor max_pool_double_backward(
   }
 }
 
+Tensor max_pool2d_double_backward() {
+  TORCH_CHECK(
+      false,
+      "max_pool2d with `return_indices=False` is not infinitely differentiable.",
+      " If you want to calculate higher order derivatives, e.g. second order,",
+      " set `return_indices=True`.");
+  return Tensor();
+}
+
 Tensor glu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
