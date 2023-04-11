@@ -602,54 +602,51 @@ class TestQuantizePT2EModels(QuantizationTestCase):
 class TestX86InductorQuantizePT2EModels(QuantizationTestCase):
     @skipIfNoX86
     @xfailIfPython311
-    def test_relu_with_quantizer_api(self):
+    def test_conv2d_with_quantizer_api(self):
         class Mod(torch.nn.Module):
-            def __init__(self, inplace_relu=False) -> None:
+            def __init__(self, ) -> None:
                 super().__init__()
-                self.relu = torch.nn.ReLU(inplace=inplace_relu)
+                self.conv = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1))
 
             def forward(self, x):
-                return self.relu(x)
+                return self.conv(x)
 
-        inplace_relu_list = [False]
         with override_quantized_engine("x86"):
             with torch.no_grad():
-                for inplace_relu in inplace_relu_list:
-                    m = Mod(inplace_relu=inplace_relu).eval()
-                    m_copy = copy.deepcopy(m)
-                    example_inputs = (torch.randn(2, 3, 16, 16),)
-                    # program capture
-                    m, guards = torchdynamo.export(
-                        m,
-                        *copy.deepcopy(example_inputs),
-                        aten_graph=True,
-                        tracing_mode="real",
-                    )
+                m = Mod().eval()
+                m_copy = copy.deepcopy(m)
+                example_inputs = (torch.randn(2, 3, 16, 16),)
+                # program capture
+                m, guards = torchdynamo.export(
+                    m,
+                    *copy.deepcopy(example_inputs),
+                    aten_graph=True,
+                    tracing_mode="real",
+                )
 
-                    before_fusion_result = m(*example_inputs)
-                    import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
-                    quantizer = X86InductorQuantizer()
-                    operator_spec = xiq.get_default_x86_inductor_operator_spec()
-                    quantizer.set_global(operator_spec)
-                    m = prepare_pt2e_quantizer(m, quantizer)
-                    # # checking that we inserted observers correctly for maxpool operator (input and
-                    # # output share observer instance)
-                    # self.assertEqual(id(m.activation_post_process_3), id(m.activation_post_process_2))
-                    after_prepare_result = m(*example_inputs)
-                    m = convert_pt2e(m)
-                    # print("model after convert_pt2e is: {}".format(m), flush=True)
-                    node_occurrence = {
-                        # one for input and weight of the conv, one for output for the conv
-                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
-                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
-                    }
-                    node_list = [
-                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
-                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                        ns.call_function(torch.ops.aten.relu.default),
-                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
-                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                    ]
-                    self.checkGraphModuleNodes(m,
-                                               expected_node_occurrence=node_occurrence,
-                                               expected_node_list=node_list)
+                before_fusion_result = m(*example_inputs)
+                import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+                quantizer = X86InductorQuantizer()
+                operator_spec = xiq.get_default_x86_inductor_operator_spec()
+                quantizer.set_global(operator_spec)
+                # Insert Observer
+                m = prepare_pt2e_quantizer(m, quantizer)
+                after_prepare_result = m(*example_inputs)
+                m = convert_pt2e(m)
+                node_occurrence = {
+                    # one for input and weight of the conv, one for output for the conv
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
+                }
+                node_list = [
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                    ns.call_function(torch.ops.aten.convolution.default),
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ]
+                self.checkGraphModuleNodes(m,
+                                           expected_node_occurrence=node_occurrence,
+                                           expected_node_list=node_list)

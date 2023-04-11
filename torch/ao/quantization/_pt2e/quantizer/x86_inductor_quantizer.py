@@ -14,6 +14,8 @@ from typing import List, Optional
 from torch.fx import Node
 from torch.ao.quantization.observer import (
     HistogramObserver,
+    PerChannelMinMaxObserver,
+    PlaceholderObserver,
 )
 
 __all__ = [
@@ -22,7 +24,7 @@ __all__ = [
 ]
 
 def supported_quantized_operators() -> List[str]:
-    supported_operators = ["relu", ]
+    supported_operators = ["conv2d", ]
     return copy.deepcopy(supported_operators)
 
 def _get_act_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
@@ -42,6 +44,30 @@ def _get_act_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
     else:
         # TODO: extend this helper function to support dynamic quantization
         raise Exception("Unsupported tensor_spec for activation: {}".format(tensor_spec))
+
+def _get_weight_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
+    if operator_spec is None:
+        return None
+    assert operator_spec is not None
+    tensor_spec: TensorSpec = operator_spec.weight
+    qdtype = _TORCH_DTYPE_TO_QDTYPE[tensor_spec.dtype]
+    if tensor_spec.qscheme == torch.per_channel_symmetric:
+        return PerChannelMinMaxObserver.with_args(
+            qscheme=tensor_spec.qscheme,
+            dtype=qdtype,
+            quant_min=tensor_spec.quant_min,
+            quant_max=tensor_spec.quant_max,
+        )
+    else:
+        raise Exception("Unsupported tensor_spec for weight: {}".format(tensor_spec))
+
+def _get_bias_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
+    if operator_spec is None:
+        return None
+    assert operator_spec is not None
+    tensor_spec: TensorSpec = operator_spec.bias
+    assert tensor_spec.dtype == torch.float, "Only float dtype for bias is supported for bias right now"
+    return PlaceholderObserver.with_args(dtype=tensor_spec.dtype)
 
 def get_default_x86_inductor_operator_spec():
     # Copy from x86 default qconfig from torch/ao/quantization/qconfig.py
@@ -123,20 +149,26 @@ class X86InductorQuantizer(Quantizer):
         # can take precedence over single operator pattern in this way
         for node in reversed(model.graph.nodes):
             for op in ops:
-                if op == "relu":
-                    self._annotate_relu(node, global_spec)
+                if op == "conv2d":
+                    self._annotate_conv2d(node, global_spec)
         return model
 
-    def _annotate_relu(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
-        if node.op != "call_function" or node.target not in [torch.ops.aten.relu_.default, torch.ops.aten.relu.default]:
+    def _annotate_conv2d(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+        conv_node = node
+        if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
             return
-        relu_node = node
-        if _is_annotated([relu_node, ]):
+        # skip annotation if it is already annotated
+        if _is_annotated([conv_node]):
             return
-
-        relu_node.meta["target_dtype_info"] = {
+        conv_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(operator_spec),
+            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(operator_spec),
             "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
+            "weight_index": 1,
+            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
+            "bias_index": 2,
             "_annotated": True,
         }
 
