@@ -54,8 +54,10 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
-    format_graph_code,
-    format_graph_tabular,
+    lazy_format_graph_code,
+    lazy_format_graph_tabular,
+    nnmodule_doc_url_msg,
+    nnmodule_has_hooks,
     same,
 )
 from .variables.base import VariableTracker
@@ -117,6 +119,9 @@ class GraphCompileReason:
 
     reason: str
     user_stack: List[traceback.FrameSummary]
+
+    # Indicates if this was a graph compile reason due to graph break.
+    graph_break: bool = True
 
 
 def _get_gen_rand_values_fn(random_calls):
@@ -258,7 +263,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
-        self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -332,7 +336,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.remove_node(node)
                 self.real_value_cache.pop(node, None)
                 removed_nodes += 1
-        log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
+        log.debug("restore_graphstate: removed %s nodes", removed_nodes)
 
     def add_grapharg(self, arg: GraphArg):
         curr_pos = len(self.graphargs)
@@ -382,26 +386,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
 
-    @staticmethod
-    def module_has_hooks(mod, only_check_unsupported=False):
-        supported_hooks = [
-            "_forward_pre_hooks",
-            "_forward_hooks",
-        ]
-        unsupported_hooks = [
-            "_backward_pre_hooks",
-            "_backward_hooks",
-            "_state_dict_pre_hooks",
-            "_state_dict_hooks",
-            "_load_state_dict_pre_hooks",
-            "_load_state_dict_post_hooks",
-        ]
-        check_hooks = unsupported_hooks
-        if not only_check_unsupported:
-            check_hooks += supported_hooks
-
-        return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
-
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
@@ -433,10 +417,24 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if self.module_has_hooks(target, only_check_unsupported=True):
+            if nnmodule_has_hooks(target, check_forward_hooks=True):
                 torch._logging.warning_once(
-                    log, "nn.Module hooks are not fully supported, they may be ignored"
+                    log,
+                    "nn.Module forward/_pre hooks are only partially supported, and were detected in your model. "
+                    "In particular, if you do not change/remove hooks after calling .compile(), you can disregard this "
+                    "warning, and otherwise you may need to set torch._dynamo.config.skip_nnmodule_hook_guards=False "
+                    "to ensure recompiling after changing hooks."
+                    f"{nnmodule_doc_url_msg} ",
                 )
+            if nnmodule_has_hooks(
+                target, check_backward_hooks=True, check_state_dict_hooks=True
+            ):
+                torch._logging.warning_once(
+                    log,
+                    "nn.Module state_dict and backward hooks are not yet supported by torch.compile, "
+                    f"but were detected in your model and will be silently ignored. {nnmodule_doc_url_msg}",
+                )
+
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
@@ -515,18 +513,20 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
+        self, tx, partial_convert=False, reason: GraphCompileReason = None
     ):
         """
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
+        assert reason is not None
+
         from .eval_frame import disable
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
 
-        log.debug(f"COMPILING GRAPH due to {reason}")
+        log.debug("COMPILING GRAPH due to %s", reason)
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
@@ -591,14 +591,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             rand_fn = disable(_get_gen_rand_values_fn(tx.random_calls))
             self.install_global(rand_fn_name, rand_fn)
             codegen = PyCodegen(tx, root)
-            random_calls_instructions.extend(
-                [
-                    codegen.create_load_global("random", True, add=True),
-                    codegen.create_load_attr("setstate"),
-                    codegen.create_load_const(tx.output.initial_random_state),
-                ]
-                + create_call_function(1, False),
-            )
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
             )
@@ -696,8 +688,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
-        graph_code_log.debug(format_graph_code(name, gm))
-        graph_tabular_log.debug(format_graph_tabular(name, gm))
+        graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
+        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)
@@ -814,7 +806,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
             if arg.uses == 0:
-                log.debug(f"REMOVE UNUSED GRAPHARG {arg.source.name()}")
+                log.debug("REMOVE UNUSED GRAPHARG %s", arg.source.name())
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.remove_node(node)
