@@ -68,7 +68,9 @@ def lower_to_inductor(
             attrs[node.target] = getattr(gm, node.target)
         node_mapping[node] = subgraph.node_copy(node, lambda n: node_mapping[n])
 
-    output_args = tuple(node_mapping[n] for n in orig_output_args)
+    output_args = tuple(
+        node_mapping[n] if n is not None else None for n in orig_output_args
+    )
     subgraph.output(result=output_args)
 
     # Remove unused placeholders from the subgraph. This is required as the
