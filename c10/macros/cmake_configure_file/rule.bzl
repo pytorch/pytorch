@@ -48,7 +48,7 @@ Args:
             allow_single_file = True,
         ),
         "tool": attr.label(
-            default = Label(":tool"),
+            default = Label("//c10/macros/cmake_configure_file:tool"),
             executable = True,
             allow_files = True,
             cfg = "exec",
