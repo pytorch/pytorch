@@ -346,7 +346,10 @@ class QNNPackQuantizer(Quantizer):
             return
         view_node = addmm_node.args[1]
         assert isinstance(view_node, Node)
-        if view_node.op != "call_function" or view_node.target not in [torch.ops.aten.view.default, torch.ops.aten.view_copy.default]:
+        if view_node.op != "call_function" or view_node.target not in [
+                torch.ops.aten.view.default,
+                torch.ops.aten.view_copy.default
+        ]:
             return
         t_node = addmm_node.args[2]
         assert isinstance(t_node, Node)
