@@ -1,3 +1,5 @@
+import functools
+
 import torch
 
 from .. import ir
@@ -494,6 +496,7 @@ if torch._C.has_mkldnn:
                     unary_attr=UnaryAttr("relu"),
                 )
 
+    @functools.lru_cache(None)
     def _mkldnn_fusion_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_unary_fusion()
