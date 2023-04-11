@@ -767,16 +767,16 @@ class VariableBuilder:
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
-                source=self.get_source(),
+                source=source,
                 # Guards are done inside register_attr_or_module
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
 
-        if is_constant_source(self.get_source()):
+        if is_constant_source(source):
             return self.tx.output.register_attr_or_module(
                 value,
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                source=self.get_source(),
+                source=source,
                 # Guards are added inside register_attr_or_module
             )
 
@@ -803,9 +803,9 @@ class VariableBuilder:
             assert type(value) in (torch.Tensor, torch.nn.Parameter)
             ignore_subclass = False
 
-        is_duplicate_tensor = self.get_source() in self.tx.output.input_source_to_var
+        is_duplicate_tensor = source in self.tx.output.input_source_to_var
         if is_duplicate_tensor:
-            return self.tx.output.input_source_to_var[self.get_source()]
+            return self.tx.output.input_source_to_var[source]
 
         tensor_proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
@@ -817,9 +817,9 @@ class VariableBuilder:
             guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
-            source=self.get_source(),
+            source=source,
         )
-        self.tx.output.input_source_to_var[self.get_source()] = tensor_variable
+        self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
 
@@ -830,9 +830,7 @@ class VariableBuilder:
         if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             fake_tensor_value = example_value
 
-        self.tx.output.add_grapharg(
-            GraphArg(self.get_source(), value, False, fake_tensor_value)
-        )
+        self.tx.output.add_grapharg(GraphArg(source, value, False, fake_tensor_value))
 
         if type(value) in config.traceable_tensor_subclasses:
             subclass_torch_function__func = value.__torch_function__.__func__
@@ -842,7 +840,7 @@ class VariableBuilder:
             # on the default inherited from torch.Tensor
             return TensorWithTFOverrideVariable(
                 tensor_variable,
-                self.get_source(),
+                source,
                 subclass_torch_function__func,
                 subclass_type,
             )
