@@ -2354,6 +2354,7 @@
   # is True:
   result: leaky_relu_backward(grad_output_t, self_p, negative_slope, self_is_result)
 
+# This derivative is mps-only, and `max_pool2d_double_backward` just raises an error.
 - name: max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   grad_output: max_pool2d_double_backward()
   self: zeros_like(self)
