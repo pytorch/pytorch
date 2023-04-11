@@ -1012,8 +1012,7 @@ op_db: List[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         promotes_int_to_float=True,
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         skips=(
             # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
             DecorateInfo(
@@ -1204,8 +1203,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.logsumexp",
-        dtypes=all_types_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and(torch.half, torch.bfloat16),
         method_variant=None,
         nan_policy="propagate",
         supports_out=False,

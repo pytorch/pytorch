@@ -12,6 +12,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/core/TensorBase.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -151,7 +152,7 @@ static void threshold_kernel(
     TensorIteratorBase& iter,
     const Scalar& threshold_scalar,
     const Scalar& value_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "threshold_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "threshold_cpu", [&] {
     using Vec = Vectorized<scalar_t>;
     scalar_t threshold = threshold_scalar.to<scalar_t>();
     Vec threshold_v = Vec(threshold);
@@ -766,23 +767,25 @@ void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
-  if (iter.dtype() == kBFloat16) {
-    auto min_val = min.to<float>();
-    auto max_val = max.to<float>();
-    cpu_kernel_vec(
-        iter,
-        [=](BFloat16 grad_val, BFloat16 self_val) -> BFloat16 {
-          return (float(self_val) <= min_val || float(self_val) >= max_val) ? BFloat16(0) : grad_val;
-        },
-        [=](Vectorized<BFloat16> grad_val, Vectorized<BFloat16> self_val) -> Vectorized<BFloat16> {
-          Vectorized<float> grad_val0, grad_val1, self_val0, self_val1;
-          std::tie(grad_val0, grad_val1) = convert_bfloat16_float(grad_val);
-          std::tie(self_val0, self_val1) = convert_bfloat16_float(self_val);
-          return convert_float_bfloat16(
-            ((self_val0 > min_val) & (self_val0 < max_val)) & grad_val0,
-            ((self_val1 > min_val) & (self_val1 < max_val)) & grad_val1
-          );
-        });
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&]() {
+      auto min_val = min.to<float>();
+      auto max_val = max.to<float>();
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t grad_val, scalar_t self_val) -> scalar_t {
+            return (float(self_val) <= min_val || float(self_val) >= max_val) ? scalar_t(0) : grad_val;
+          },
+          [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
+            Vectorized<float> grad_val0, grad_val1, self_val0, self_val1;
+            std::tie(grad_val0, grad_val1) = convert_to_float<scalar_t>(grad_val);
+            std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
+            return convert_from_float<scalar_t>(
+              ((self_val0 > min_val) & (self_val0 < max_val)) & grad_val0,
+              ((self_val1 > min_val) & (self_val1 < max_val)) & grad_val1
+            );
+          });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
     auto min_val = min.to<scalar_t>();
