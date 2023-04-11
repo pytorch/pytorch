@@ -1246,7 +1246,7 @@ class CppVecKernel(CppKernel):
             # TODO(Leslie): Optimize the implementation of store_float_as_uint8
             # * Pattern match of quantization op in the loop body.
             # * Skip the explicit saturation and clamp inside store_float_as_uint8.
-            line = f"{value}.store_float_as_uint8({var_expr});"
+            line = f"at::vec::store_float_as_uint8({value}, {var_expr});"
         else:
             line = f"{value}.store({var_expr});"
         if non_contiguous:
@@ -1977,12 +1977,8 @@ class CppVecKernelChecker(CppVecKernel):
                     elif dtype == torch.bool:
                         pass
                     elif dtype == torch.uint8:
-
-                        def is_store_float_as_uint8(node):
-                            return all(usr.target in ["store"] for usr in node.users)
-
-                        opt_ctx.is_store_float_as_uint8 = is_store_float_as_uint8(
-                            cur_node
+                        opt_ctx.is_store_float_as_uint8 = all(
+                            usr.target in ["store"] for usr in cur_node.users
                         )
                         if not opt_ctx.is_store_float_as_uint8:
                             self.disable_vec(f"to_dtype: dtype {dtype}")

@@ -56,6 +56,39 @@ struct Vectorizedqi {
   }
 };
 
+template <>
+inline Vectorized<int32_t> pack_saturate_and_clamp<int32_t>(
+    Vectorized<int32_t> first,
+    Vectorized<int32_t> second,
+    int32_t min_val,
+    int32_t max_val) {
+  // This function is for linkage only, will not be used
+  AT_ERROR("pack_saturate_and_clamp<int32_t> is not supported");
+}
+
+template <>
+inline Vectorized<int8_t> pack_saturate_and_clamp<int8_t>(
+    Vectorized<int8_t> first,
+    Vectorized<int8_t> second,
+    int8_t min_val,
+    int8_t max_val) {
+  __m512i packed_and_sat = _mm512_packs_epi16(first, second);
+  return _mm512_max_epi8(
+      _mm512_set1_epi8(min_val),
+      _mm512_min_epi8(packed_and_sat, _mm512_set1_epi8(max_val)));
+}
+
+template <>
+inline Vectorized<uint8_t> pack_saturate_and_clamp<uint8_t>(
+    Vectorized<uint8_t> first,
+    Vectorized<uint8_t> second,
+    uint8_t min_val,
+    uint8_t max_val) {
+  __m512i packed_and_sat = _mm512_packus_epi16(first, second);
+  return _mm512_max_epu8(
+      _mm512_set1_epi8(min_val),
+      _mm512_min_epu8(packed_and_sat, _mm512_set1_epi8(max_val)));
+}
 
 template <typename T>
 inline void __attribute__((always_inline)) QuantizeAvx512(
