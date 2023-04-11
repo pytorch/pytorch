@@ -33,7 +33,7 @@ class AST_Rewriter(ast.NodeTransformer):
         source_ast = ast.parse(normalized_str)
         dest_ast = ast.fix_missing_locations(self.visit(source_ast))
 
-        # Pull out the compiled fucntion from the newly-created Module
+        # Pull out the compiled function from the newly-created Module
         code = compile(dest_ast, "", "exec")
         globals_dict = copy.copy(fn.__globals__)
         keys_before = set(globals_dict.keys())
