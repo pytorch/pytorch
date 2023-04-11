@@ -372,15 +372,18 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     return c10::fetch_and_cast<T>(op.tensor_base().scalar_type(), op.data);
   }
 
-  /// Return scalar value from original_tensor_base if it is defined. When common_dtype
-  /// is Half, casting scalar input to common_dtype might overflow. If the scalar is
-  //  aleady given in the type of Half, then return scalar value from tensor_base.
+  /// Return scalar value from original_tensor_base if it is defined. When
+  /// common_dtype is Half, casting scalar input to common_dtype might overflow.
+  /// If the scalar is aleady given in the type of Half, then return scalar
+  /// value from tensor_base.
   template <typename T>
   T original_scalar_value(int arg) {
     auto& original_tensor_base = operands_[arg].original_tensor_base();
     if (original_tensor_base.defined()) {
-      TORCH_INTERNAL_ASSERT(original_tensor_base.scalar_type() != common_dtype());
-      return c10::fetch_and_cast<T>(original_tensor_base.scalar_type(), original_tensor_base.data_ptr());
+      TORCH_INTERNAL_ASSERT(
+          original_tensor_base.scalar_type() != common_dtype());
+      return c10::fetch_and_cast<T>(
+          original_tensor_base.scalar_type(), original_tensor_base.data_ptr());
     } else {
       return scalar_value<T>(arg);
     }
