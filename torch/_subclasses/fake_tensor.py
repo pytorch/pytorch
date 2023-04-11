@@ -17,6 +17,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_float_dtype,
     is_integer_dtype,
+    is_boolean_dtype,
 )
 from torch._subclasses.meta_utils import MetaConverter
 from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
@@ -428,6 +429,8 @@ def local_scalar_dense(fake_mode, func, arg):
         return fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
         return fake_mode.shape_env.create_unbacked_symint()
+    elif is_boolean_dtype(arg.dtype):
+        return fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
 
