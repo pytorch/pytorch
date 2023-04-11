@@ -647,7 +647,7 @@ class Reduction(Loops):
         num_inner = 0
         for i in indices:
             i = V.graph.sizevars.simplify_with_ranges(i, ranges)
-            strides = V.graph.sizevars.stride_hints(i, reduction_vars)
+            strides = V.graph.sizevars.stride_hints(i, reduction_vars, ranges.keys())
             outer = all([s > 1 for s in strides])
             if outer:
                 num_outer += 1
@@ -2168,9 +2168,9 @@ class ComputedBuffer(Buffer):
             ):
                 reordering_reindex[i] = reads_buf.iter_reordering_reindex
 
-        def simplify_and_reorder(x_vars, sizes, reordering_reindex=None):
+        def simplify_and_reorder(x_vars, support_vars, sizes, reordering_reindex=None):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, sizes, memory_addrs, reordering_reindex
+                x_vars, support_vars, sizes, memory_addrs, reordering_reindex
             )
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
@@ -2186,11 +2186,12 @@ class ComputedBuffer(Buffer):
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex, reindex1
 
+        support_vars = index_vars + reduce_vars
         iter_ranges, iter_reindex, iter_reordering_reindex = simplify_and_reorder(
-            index_vars, index_size, reordering_reindex
+            index_vars, support_vars, index_size, reordering_reindex
         )
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
-            reduce_vars, reduce_size
+            reduce_vars, support_vars, reduce_size
         )
 
         # remember the reordering if not have loop collapse.
@@ -2207,7 +2208,12 @@ class ComputedBuffer(Buffer):
 
     @staticmethod
     def _apply_loop_reordering(
-        index_vars, sizes, memory_addrs, reordering_reindex=None, priority_idx=None
+        index_vars,
+        support_vars,
+        sizes,
+        memory_addrs,
+        reordering_reindex=None,
+        priority_idx=None,
     ):
         """
         Shuffle the order of loops around to hopefully improve performance.
@@ -2219,7 +2225,8 @@ class ComputedBuffer(Buffer):
 
         try:
             strides = [
-                V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs
+                V.graph.sizevars.stride_hints(expr, index_vars, support_vars)
+                for expr in memory_addrs
             ]
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
                 index_vars

@@ -317,7 +317,7 @@ class SizeVarAllocator:
         try:
             return int(out)
         except Exception:
-            log.warning(f"failed on: {out}")
+            log.debug(f"failed on: {out}")
             raise
 
     def size_hints(self, exprs: List[Expr]) -> int:
@@ -344,12 +344,20 @@ class SizeVarAllocator:
     def make_stride_vars_cache(self):
         cache = self._lru_cache(self._stride_vars)
 
-        def stride_vars(index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
-            return cache(index, tuple(vars))
+        def stride_vars(
+            index: Expr,
+            vars: List[sympy.Symbol],
+            support_vars: List[sympy.Symbol] = None,
+        ) -> List[Expr]:
+            if not support_vars:
+                support_vars = vars
+            return cache(index, tuple(vars), tuple(support_vars))
 
         return stride_vars
 
-    def _stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
+    def _stride_vars(
+        self, index: Expr, vars: List[sympy.Symbol], support_vars: List[sympy.Symbol]
+    ) -> List[Expr]:
         """Convert an indexing expression back into strides
 
         NOTE: This is only valid if the index is a standard strided offset
@@ -360,15 +368,23 @@ class SizeVarAllocator:
         strides = []
         index = self.simplify(index)
         # remove any offset
-        index = index - sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
+        index = index - sympy_subs(
+            index, {v: sympy.Integer(0) for v in support_vars if v != 0}
+        )
         for i in range(len(vars)):
             # drop all the other dims
+            subs = {
+                support_vars[j]: sympy.Integer(0)
+                for j in range(len(support_vars))
+                if vars[i] != support_vars[j] and support_vars[j] != 0
+            }
+
             index_dim = sympy_subs(
                 index,
                 {
-                    vars[j]: sympy.Integer(0)
-                    for j in range(len(vars))
-                    if i != j and vars[j] != 0
+                    support_vars[j]: sympy.Integer(0)
+                    for j in range(len(support_vars))
+                    if vars[i] != support_vars[j] and support_vars[j] != 0
                 },
             )
             v = vars[i]
@@ -387,12 +403,17 @@ class SizeVarAllocator:
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
 
-    def stride_hints(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
+    def stride_hints(
+        self,
+        index: Expr,
+        vars: List[sympy.Symbol],
+        support_vars: List[sympy.Symbol] = None,
+    ) -> List[int]:
         for v in index.free_symbols:
             if v.name.startswith("indirect"):
                 index = sympy_subs(index, {v: 0})
         result = []
-        for s in self.stride_vars(index, vars):
+        for s in self.stride_vars(index, vars, support_vars):
             try:
                 result.append(self.size_hint(s))
             except TypeError:
