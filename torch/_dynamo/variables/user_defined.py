@@ -3,6 +3,7 @@ import contextlib
 import functools
 import importlib
 import inspect
+import itertools
 import random
 import types
 from typing import Dict, List
@@ -301,6 +302,40 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.TorchVariable(obj.__class__).call_function(
                     tx, args, kwargs
                 )
+        elif (
+            istype(self.value, functools.partial)
+            and is_allowed(self.value.func)
+            and all(
+                variables.ConstantVariable.is_literal(v)
+                for v in itertools.chain(self.value.args, self.value.keywords.values())
+            )
+        ):
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            options.setdefault("guards", set())
+            if self.source:
+                options["guards"].add(
+                    AttrSource(self.source, "func").make_guard(GuardBuilder.ID_MATCH)
+                )
+                options["guards"].add(
+                    AttrSource(self.source, "args").make_guard(
+                        GuardBuilder.CONSTANT_MATCH
+                    )
+                )
+                options["guards"].add(
+                    AttrSource(self.source, "keywords").make_guard(
+                        GuardBuilder.CONSTANT_MATCH
+                    )
+                )
+
+            partial_args = [variables.ConstantVariable(v) for v in self.value.args]
+            partial_args.extend(args)
+            partial_kwargs = {
+                k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
+            }
+            partial_kwargs.update(kwargs)
+            return variables.TorchVariable(self.value.func, **options).call_function(
+                tx, partial_args, partial_kwargs
+            )
 
         return super().call_function(tx, args, kwargs)
 

@@ -34,6 +34,7 @@ def _rematerialize_optimizer(
     param_group = opt.param_groups[0]
     orig_params = param_group["params"]
     # FIXME(@mrshenli): exclude buffers
+    print(f"setting optimizer to use parm0 {params}")
     param_group["params"] = params.values()
 
     try:
@@ -58,6 +59,15 @@ def train_step_compiler(backend_compile_fn):
     """
 
     def _compile_fn(mod: fx.GraphModule, fake_inputs: List[torch.Tensor]):
+        """
+        Step 1: Assert inputs (from user) are already Fake, and user their FakeTensorMode
+                (created by dynamo) to fakeify the module's parameters
+        """
+        # at input dynamo puts two copies e.g.
+        #   L__model___layers_0.weight
+        #   model.layers.0.weight
+        # both as realtensor on passed in graphmodule.  `model` comes from having model as input to train_step.
+
         print(mod.graph)
         torch.set_grad_enabled(True)
         torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
@@ -68,24 +78,30 @@ def train_step_compiler(backend_compile_fn):
         ), "Expected a valid FakeTensorMode on dynamo inputs"
 
         def fakeify_inputs(flat_args):
+            already_fake = {}
             def convert(idx, x):
                 # todo: do we expect symint inputs?
                 assert isinstance(x, torch.Tensor)
-                return fake_mode.from_tensor(x, static_shapes=False)
+                if x not in already_fake:
+                    # Since we do have duplicate names from dynamo refering to the same tensor,
+                    # ensure that we never make more than one faketensor for a given real tensor!
+                    already_fake[x] = fake_mode.from_tensor(x, static_shapes=False)
+                return already_fake[x]
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
-        # OK whats going on dynamo? when i simplify to single-layer model, i get 2 variants of each name?
-        # (Pdb) p params.keys()
-        # dict_keys(['model_lay.weight', 'model_lay.bias', 'model.lay.weight', 'model.lay.bias'])
+        # problem: if i don't remove duplicates here, stateless.Parametrize gets confused by presence of duplicates
+        # duplicates come from dynamo.  it adds `model` key which contains one set of references to all params/buffers,
+        # and then it also adds individual keys for names actually traced by dynamo.
         params = {
-            **dict(mod.named_parameters(remove_duplicate=False)),
-            **dict(mod.named_buffers(remove_duplicate=False)),
+            **dict(mod.named_parameters(remove_duplicate=True)),
+            **dict(mod.named_buffers(remove_duplicate=True)),
         }
         params_flat, params_spec = pytree.tree_flatten(params)
         params_len = len(params_flat)
         fake_params_flat = fakeify_inputs(params_flat)
 
+        # TODO fix dynamo's "list of optimizers" on the module, and iterate them instead of hardcoding here
         opt = mod.__optimizer_0
 
 
@@ -123,18 +139,15 @@ def train_step_compiler(backend_compile_fn):
         # real_inputs = [
         #     torch.randn(i.shape, dtype=i.dtype, device=dev) for i in fake_inputs
         # ]
-        # print(f"compiled param0 {params_flat[0]}")
-        for fake_param in fake_params_flat:
-            print(f"{id(fake_param)}")
+
         fake_mode.allow_non_fake_inputs = True
         first_loss = functional_call(*fake_params_flat + fake_inputs)
         fake_mode.allow_non_fake_inputs = False
-        # print(f"compiled param0 {params_flat[0]}, first_loss:  {first_loss}")
+
         # Convert the fake optimizer states to real
         for fake_param, state_dict in opt.state.items():
-            print(f"fake: {id(fake_param)}")
             for name, state in state_dict.items():
-                # # some of the states are singleton cpu tensors...
+                # some of the states are singleton cpu tensors...
                 if isinstance(state, FakeTensor):
                     # can we assume always init with zeros?
                     state_dict[name] = torch.zeros(state.shape, dtype=state.dtype, device=dev)
@@ -142,7 +155,6 @@ def train_step_compiler(backend_compile_fn):
         # Build a mapping to use for reparametrizing the optimizer during tracing
         named_states = {}
         for n, p in pytree.tree_unflatten(fake_params_flat, params_spec).items():
-        # for n, p in params.items():
             if p in opt.state:
                 named_states[n] = opt.state[p]  # type: ignore[index]
 
@@ -178,8 +190,8 @@ def train_step_compiler(backend_compile_fn):
 
         fx_g = make_fx(functional_call_2)(*full_fake_args)
         torch.set_grad_enabled(False)
-        print("fx_g")
-        print(fx_g)
+        # print(f"fx_g: {fx_g}")
+
         """
         Step 3: Functionalize the resulting flattend graph, producing code with copy_ ops
                 as an epilogue for any inplace/mutating ops such as optimizer update.
@@ -190,13 +202,12 @@ def train_step_compiler(backend_compile_fn):
 
         with torch.inference_mode():
             functional_fx_g = make_fx(functionalize(retraced_f))(*full_fake_args)
+            # print(f"functional_fx_g.graph {functional_fx_g.graph}")
 
         """
         Step 4: Reverse the calling-convention change we made above with _reparametrize_module,
                 and return a function that accepts the arguments as originally provided by dynamo
         """
-        print("functional_fx_g.graph")
-        print(functional_fx_g.graph)
 
         def call_without_params(*runtime_args):
             with torch.no_grad():

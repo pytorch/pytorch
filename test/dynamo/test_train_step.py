@@ -147,23 +147,23 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_optimizer = deepcopy(optimizer)
         inputs = [torch.randn((128, 10)).cuda()]
 
-        # warm up the eager one too, so it matches compile
-        # first_loss = train_step(model, optimizer, inputs)
-        correct_loss = train_step(model, optimizer, inputs)
+        opt_train_step = torch.compile(
+            train_step, backend="train_step_eager", fullgraph=True
+        )
+        for step in range(10):
+            correct_loss = train_step(model, optimizer, inputs)
+            opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
+            self.assertEqual(correct_loss, opt_loss)
+
         correct_params = {
             name: param.clone().detach() for name, param in model.named_parameters()
         }
 
-        opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", fullgraph=True
-        )
-        opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
         opt_params = {
             name: param.clone().detach() for name, param in opt_model.named_parameters()
         }
 
         self.assertTrue(same(correct_loss, opt_loss))
-        breakpoint()
         for name in correct_params:
             self.assertTrue(name in opt_params)
             self.assertTrue(same(correct_params[name], opt_params[name]))
@@ -193,7 +193,14 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_train_step = torch.compile(
             train_step, backend="train_step_eager", fullgraph=True
         )
-        opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
+
+        loss = []
+        for step in range(10):
+            opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
+            loss.append(opt_loss)
+            if step > 0:
+                # in practice, this model loss goes 684, 458, 264, 125, ... so this check should not be too noisy
+                self.assertTrue(loss[-2] > loss[-1])
 
 
 if __name__ == "__main__":
