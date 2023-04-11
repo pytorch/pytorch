@@ -3026,6 +3026,14 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(x / s, x / y)
         self.assertEqual(s / x, y / x)
 
+        if dtype == torch.half:
+            x = torch.tensor([3388.], dtype=dtype, device=device)
+            self.assertEqual(x.div(524288.0), x.mul(1 / 524288.0))
+            self.assertEqual(x.div(-524288.0, rounding_mode='trunc'), torch.tensor([0.], dtype=dtype, device=device))
+            self.assertEqual(x.div(-524288.0, rounding_mode='floor'), torch.tensor([-1.], dtype=dtype, device=device))
+            y = torch.tensor([0.01], dtype=dtype, device=device)
+            self.assertEqual(y.div(1 / 65536.0), y.mul(65536.0))
+
     # TODO: update make_tensor to support extremal additions and remove this in favor of make_tensor
     def _generate_input(self, shape, dtype, device, with_extremal):
         if shape == ():
