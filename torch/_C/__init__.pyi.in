@@ -1103,6 +1103,8 @@ class _LinalgBackend:
 
 class ConvBackend(Enum): ...
 
+class Tag(Enum): ...
+
 # Defined in `valgrind.h` and `callgrind.h` respectively.
 def _valgrind_supported_platform() -> _bool: ...  # NVALGRIND
 def _valgrind_toggle() -> None: ...  # CALLGRIND_TOGGLE_COLLECT
@@ -1544,6 +1546,7 @@ class _CudaDeviceProperties:
     total_memory: _int
     is_integrated: _int
     is_multi_gpu_board: _int
+    max_threads_per_multi_processor: _int
 
 # Defined in torch/csrc/cuda/python_comm.cpp
 def _broadcast(tensor: Tensor, devices: List[_int]) -> List[Tensor]: ...

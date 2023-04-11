@@ -1034,6 +1034,20 @@ class FakeTensor(torch.Tensor):
 # memory should not significantly incraese.
 
 
+@contextlib.contextmanager
+def disable_fake_tensor_mode_tracing():
+    modes = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+    fake_tensor_modes = [m for m in modes if isinstance(m, FakeTensorMode)]
+    olds = [m.enable_tracing for m in fake_tensor_modes]
+    for fake_mode in fake_tensor_modes:
+        fake_mode.enable_tracing = False
+    try:
+        yield
+    finally:
+        for fake_mode, old in zip(fake_tensor_modes, olds):
+            fake_mode.enable_tracing = old
+
+
 class FakeTensorMode(TorchDispatchMode):
     def __init__(
         self,
@@ -1041,6 +1055,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_fallback_kernels=True,
         allow_non_fake_inputs=False,
         shape_env=None,
+        enable_tracing=True,
     ):
         log.info("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
@@ -1067,9 +1082,12 @@ class FakeTensorMode(TorchDispatchMode):
         self.in_kernel_invocation = False
 
         self.shape_env = shape_env
+        self.enable_tracing = enable_tracing
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if not self.enable_tracing:
+            return func(*args, **kwargs)
         try:
             return self.dispatch(func, types, args, kwargs)
         except TypeError:

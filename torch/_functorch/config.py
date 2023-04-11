@@ -14,6 +14,8 @@ use_functionalize = True
 
 use_fake_tensor = True
 
+functionalize_rng_ops = False
+
 # can be useful for debugging if we are incorrectly creating meta fake tensors
 fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
 

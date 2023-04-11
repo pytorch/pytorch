@@ -28,6 +28,7 @@ def get_rng_state(device: Union[int, str, torch.device] = 'cuda') -> Tensor:
     if idx is None:
         idx = current_device()
     default_generator = torch.cuda.default_generators[idx]
+    # breakpoint()
     return default_generator.get_state()
 
 
@@ -48,20 +49,25 @@ def set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'cu
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
     """
-    new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
-    if isinstance(device, str):
-        device = torch.device(device)
-    elif isinstance(device, int):
-        device = torch.device('cuda', device)
+    # Disable fake tensor tracing for set_rng_state as set_state with fake
+    # tensor is wrong/nonsensical. A better way could be to override
+    # set_rng_state while tracing.
+    from torch._subclasses.fake_tensor import disable_fake_tensor_mode_tracing
+    with disable_fake_tensor_mode_tracing():
+        new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
+        if isinstance(device, str):
+            device = torch.device(device)
+        elif isinstance(device, int):
+            device = torch.device('cuda', device)
 
-    def cb():
-        idx = cast(torch.device, device).index
-        if idx is None:
-            idx = current_device()
-        default_generator = torch.cuda.default_generators[idx]
-        default_generator.set_state(new_state_copy)
+        def cb():
+            idx = cast(torch.device, device).index
+            if idx is None:
+                idx = current_device()
+            default_generator = torch.cuda.default_generators[idx]
+            default_generator.set_state(new_state_copy)
 
-    _lazy_call(cb)
+        _lazy_call(cb)
 
 
 def set_rng_state_all(new_states: Iterable[Tensor]) -> None:

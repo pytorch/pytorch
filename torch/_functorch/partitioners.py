@@ -84,11 +84,15 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
 
 
 def _is_primal(node):
-    return node.op == "placeholder" and "tangents" not in node.target
+    return node.op == "placeholder" and "tangents" not in node.target and "bwd_seed" not in node.target and "bwd_base_offset" not in node.target  # noqa: B950
 
 
 def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
+
+
+def _is_bwd_seed_offset(node):
+    return node.op == "placeholder" and ("bwd_seed" in node.target or "bwd_base_offset" in node.target)
 
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
@@ -102,10 +106,15 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
+    bwd_seed_offset_inputs = list(filter(_is_bwd_seed_offset, joint_module.graph.nodes))
+
     # Construct the forward module
     # Keep symints separate from tensors, passed between fwd/bwd graphs, and in the right order.
     fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values + saved_sym_nodes)
-    bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_sym_nodes + saved_values + tangent_inputs, bwd_outputs)
+    bwd_graph = _extract_graph_with_inputs_outputs(
+        joint_module.graph,
+        bwd_seed_offset_inputs + saved_sym_nodes + saved_values + tangent_inputs, bwd_outputs
+    )
 
     # This is to filter out saved values that don't actually end up being used by the backwards pass
     for node in bwd_graph.nodes:
@@ -123,7 +132,10 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
     fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values + saved_sym_nodes)
-    bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_sym_nodes + saved_values + tangent_inputs, bwd_outputs)
+    bwd_graph = _extract_graph_with_inputs_outputs(
+        joint_module.graph,
+        bwd_seed_offset_inputs + saved_sym_nodes + saved_values + tangent_inputs, bwd_outputs
+    )
 
     fwd_module = fx.GraphModule(joint_module, fwd_graph)
     bwd_module = fx.GraphModule(joint_module, bwd_graph)
