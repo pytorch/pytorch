@@ -13,6 +13,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -403,6 +404,10 @@ Tensor isfinite(const Tensor& self) {
 
 void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
+}
+
+void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
+  TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
 
 // Sorting-based algorithm for isin(); used when the number of test elements is large.

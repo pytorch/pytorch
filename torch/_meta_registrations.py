@@ -138,6 +138,15 @@ def meta_randperm(n, *, generator=None, out):
     return out
 
 
+@register_meta(aten._assert_async.default)
+def assert_async(val):
+    return
+
+@register_meta(aten._assert_async.msg)
+def assert_async_meta(val, assert_msg):
+    return
+
+
 @register_meta(aten.randint.default)
 def meta_randint(
     high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None

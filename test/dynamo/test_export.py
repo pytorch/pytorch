@@ -2400,6 +2400,47 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
+    @config.patch(assume_static_by_default=False)
+    def test_export_persist_assert(self):
+        def f(x):
+            assert x.shape[0] > 4, "Shape must be more than 4"
+            return x.cos() + x.sin()
+
+        gm, guard = torch._dynamo.export(
+            f, torch.randn(5, 4, 6), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        def has_aten_op(gm, op):
+            for node in gm.graph.nodes:
+                if node.target == op:
+                    return True
+            return False
+
+        self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
+
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
+
+        with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
+            gm(torch.randn(3, 4, 5))
+
+    def test_export_input_constrain_assert(self):
+        def f(x, y):
+            return x.cos().sum() + y.sin().sum()
+
+        x = torch.randn(5, 4, 6)
+        y = torch.randn(6, 4, 7)
+
+        constraint = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
+
+        gm, guard = torch._dynamo.export(
+            f, x, y, aten_graph=True, tracing_mode="symbolic", constraints=constraint
+        )
+
+        gm(torch.randn(3, 4, 5), torch.randn(6, 4, 7))
+
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
