@@ -11,7 +11,6 @@ import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import detect_fake_mode
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
@@ -699,13 +698,13 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
-            fake_tensor_mode = detect_fake_mode(args)
+            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
                 fake_tensor_mode = FakeTensorMode(
                     allow_fallback_kernels=True,
                     allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
-            fake_tensor_mode = detect_fake_mode(args)
+            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
                 shape_env = ShapeEnv()
                 fake_tensor_mode = FakeTensorMode(
