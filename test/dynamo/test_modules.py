@@ -772,6 +772,24 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
         return x
 
 
+class SequentialWithDuplicatedModule(torch.nn.Module):
+    # Sequential module(self.layer) contains three duplicated ReLU module.
+    def __init__(self):
+        super(SequentialWithDuplicatedModule, self).__init__()
+        self.relu = torch.nn.ReLU()
+        self.layer = torch.nn.Sequential(
+            torch.nn.Linear(10, 20),
+            self.relu,
+            torch.nn.Linear(20, 20),
+            self.relu,
+            torch.nn.Linear(20, 10),
+            self.relu,
+        )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -840,6 +858,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
     test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
+    test_sequential_with_duplicated_module = make_test(SequentialWithDuplicatedModule())
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()

@@ -2173,7 +2173,7 @@ class Module:
         for name, module in self.named_children():
             yield module
 
-    def named_children(self) -> Iterator[Tuple[str, 'Module']]:
+    def named_children(self, remove_duplicate: bool = True) -> Iterator[Tuple[str, 'Module']]:
         r"""Returns an iterator over immediate children modules, yielding both
         the name of the module as well as the module itself.
 
@@ -2190,9 +2190,12 @@ class Module:
         """
         memo = set()
         for name, module in self._modules.items():
-            if module is not None and module not in memo:
-                memo.add(module)
-                yield name, module
+            if module is not None:
+                if not remove_duplicate:
+                    yield name, module
+                elif remove_duplicate and module not in memo:
+                    memo.add(module)
+                    yield name, module
 
     def modules(self) -> Iterator['Module']:
         r"""Returns an iterator over all modules in the network.
