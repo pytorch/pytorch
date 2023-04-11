@@ -74,12 +74,12 @@ def supported_symmetric_quantized_operators() -> List[str]:
     supported_operators = ["conv2d", "linear", "add", "maxpool2d", "hardtanh", "mean", "adaptive_avgpool2d"]
     return copy.deepcopy(supported_operators)
 
-def get_supported_symmetric_quantized_spec_and_operators() -> List[OperatorQSpecAndOperators]:
-    supported_spec_and_operators: List[OperatorQSpecAndOperators] = []
+def get_supported_symmetric_quantized_operator_qspec_and_operators() -> List[OperatorQSpecAndOperators]:
+    supported_operator_qspec_and_operators: List[OperatorQSpecAndOperators] = []
     for operator_qspec in [get_default_symmetric_qnnpack_operator_qspec(), get_default_per_channel_symmetric_qnnpack_operator_qspec()]:
         ops = supported_symmetric_quantized_operators()
-        supported_spec_and_operators.append(OperatorQSpecAndOperators(operator_qspec, ops))
-    return copy.deepcopy(supported_spec_and_operators)
+        supported_operator_qspec_and_operators.append(OperatorQSpecAndOperators(operator_qspec, ops))
+    return copy.deepcopy(supported_operator_qspec_and_operators)
 
 def get_default_symmetric_qnnpack_operator_qspec():
     act_qspec = QuantizationSpec(
