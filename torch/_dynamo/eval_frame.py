@@ -533,7 +533,7 @@ def explain(f, *args, **kwargs):
 
         op_count += len(ops)
         ops_per_graph.append(ops)
-        if gm.compile_subgraph_reason is not None:
+        if gm.compile_subgraph_reason.graph_break:
             break_reasons.append(gm.compile_subgraph_reason)
         return gm.forward
 

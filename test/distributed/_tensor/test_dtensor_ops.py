@@ -242,8 +242,6 @@ dtensor_fails = {
     xfail("linalg.vector_norm"),
     xfail("linspace"),
     xfail("log_normal"),
-    xfail("log_softmax"),
-    xfail("log_softmax", "with_dtype"),
     xfail("logcumsumexp"),
     xfail("logdet"),
     xfail("logspace"),
