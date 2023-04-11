@@ -402,12 +402,6 @@ class SizeVarAllocator:
         )
         for i in range(len(vars)):
             # drop all the other dims
-            subs = {
-                support_vars[j]: sympy.Integer(0)
-                for j in range(len(support_vars))
-                if vars[i] != support_vars[j] and support_vars[j] != 0
-            }
-
             index_dim = sympy_subs(
                 index,
                 {
