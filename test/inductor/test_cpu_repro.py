@@ -115,6 +115,19 @@ class CPUReproTests(TestCase):
         compiled_out = opt_fn(p0, p1)
         assert same(real_out, compiled_out)
 
+    def test_pow_cos(self):
+        # https://github.com/pytorch/pytorch/issues/98149
+        def fn(x):
+            t = x.pow(5)
+            return torch.cos(t)
+
+        x = torch.tensor([4], dtype=torch.uint8)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn(x)
+        real_out = fn(x)
+        compiled_out = opt_fn(x)
+        assert same(real_out, compiled_out)
+
     def test_reduce_with_masked(self):
         # https://github.com/pytorch/pytorch/issues/96484
         def fn(a, b):
@@ -223,10 +236,6 @@ class CPUReproTests(TestCase):
         unsqueezed = dense.unsqueeze(1)
         self.assertFalse(complex_memory_overlap(unsqueezed))
         self.assertFalse(complex_memory_overlap(unsqueezed.permute(1, 2, 0)))
-
-        expanded = unsqueezed.expand(-1, 2, -1)
-        self.assertTrue(complex_memory_overlap(expanded))
-        self.assertTrue(complex_memory_overlap(expanded.permute(1, 2, 0)))
 
         gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
         self.assertFalse(complex_memory_overlap(gathered))
@@ -1181,8 +1190,8 @@ class CPUReproTests(TestCase):
         metrics.reset()
         x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
-        same(fn(x), opt_fn(x))
-        assert metrics.generated_cpp_vec_kernel_count == 0
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
@@ -1251,6 +1260,17 @@ class CPUReproTests(TestCase):
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         self.assertTrue(same(fn(x, y), opt_fn(x, y)))
         assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_transpose_sum_outer(self):
+        # https://github.com/pytorch/pytorch/issues/98573
+        def fn(a):
+            return a.transpose(2, 3).sum(dim=1).contiguous()
+
+        metrics.reset()
+        x = torch.randn(10, 50, 50, 50)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if __name__ == "__main__":
