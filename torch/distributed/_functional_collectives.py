@@ -109,7 +109,7 @@ class AsyncCollectiveTensor(torch.Tensor):
     Use it inside functional collective pytorch wrappers like the following:
     def functional_collective(self, group, tag):
         tag, rankset, group_size = _expand_group(group, tag)
-        tensor = torch._C._nn.{collective}(self, tag, rankset, group_size)
+        tensor = torch.ops.c10d_functional.{collective}(self, tag, rankset, group_size)
         res = AsyncCollectiveTensor(tensor)
         _register_wrapper_tensor(res, tensor)
         return res
@@ -188,18 +188,16 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
 def _reduce_scatter_tensor(
     input: torch.Tensor,
     reduceOp: str,
-    scatter_dim: int,
     tag: str,
     ranks: List[int],
     group_size: int,
 ):
     # TODO add dim support?
-    assert scatter_dim == 0, "Only scatter_dim = 0 is supported for now."
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
     assert group is not None
     op = _str_to_reduce_op(reduceOp)
     out_size = list(input.size())
-    out_size[scatter_dim] //= group_size
+    out_size[0] //= group_size
     out_tensor = input.new_empty(out_size)
     work = dist.reduce_scatter_tensor(
         out_tensor, input, op=op, group=group, async_op=True
@@ -275,7 +273,7 @@ def wait_tensor(tensor):
 
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
-    return torch._C._nn.wait_tensor(tensor)  # type: ignore[attr-defined]
+    return torch.ops.c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
@@ -296,7 +294,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+    tensor = torch.ops.c10d_functional.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     return _maybe_wrap_tensor(tensor)
 
 
@@ -325,7 +323,7 @@ def all_gather_tensor(
     """
     assert self.is_contiguous()
     tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch._C._nn.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
+    tensor = torch.ops.c10d_functional.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
     res: torch.Tensor = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
@@ -342,7 +340,7 @@ def reduce_scatter_tensor(
 ):
     """
     Reduces the tensor data across all machines in such a way that all get
-    the final result, then scatter the results to correponding ranks.
+    the final result, then scatter the results to corresponding ranks.
 
 
     The input tensor is left unmodified.
@@ -363,26 +361,49 @@ def reduce_scatter_tensor(
         tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
         self = torch.cat(tensor_list)
 
-    tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, 0, tag, rankset, group_size)  # type: ignore[attr-defined]
+    tensor = torch.ops.c10d_functional.reduce_scatter_tensor(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     res = _maybe_wrap_tensor(tensor)
     return res
 
+c10_lib = torch.library.Library("c10d_functional", "DEF")
+c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
 
-c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
-c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
+# We now register meta kernels to deal with tracing
+def _all_reduce_meta(self, *args):
+    return torch.empty_like(self)
+
+def _wait_tensor_meta(self, *args):
+    return torch.empty_like(self)
+
+def _all_gather_into_tensor_meta(shard, tag, rankset, group_size):
+    out_size = list(shard.size())
+    out_size[0] *= group_size
+    return shard.new_empty(out_size)
+
+def _reduce_scatter_tensor_meta(input, reduce_op, tag, rankset, group_size):
+    out_size = list(input.size())
+    out_size[0] //= group_size
+    return input.new_empty(out_size)
+
 
 def _register_ops():
-    c10_lib_cpu.impl("all_reduce", _all_reduce)
-    c10_lib_cuda.impl("all_reduce", _all_reduce)
+    ops_defs = [
+        "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+        "wait_tensor(Tensor self) -> Tensor",
+        "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
+        "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+    ]
 
-    c10_lib_cpu.impl("wait_tensor", _wait_tensor)
-    c10_lib_cuda.impl("wait_tensor", _wait_tensor)
+    my_module = sys.modules[__name__]
+    for op_def in ops_defs:
+        op_name = op_def[0:op_def.index('(')]
+        backend_impl = getattr(my_module, f"_{op_name}")
+        meta_impl = getattr(my_module, f"_{op_name}_meta")
+        c10_lib.define(op_def)
+        c10_lib_impl.impl(op_name, backend_impl, "CompositeExplicitAutograd")
+        c10_lib_impl.impl(op_name, meta_impl, "Meta")
 
-    c10_lib_cpu.impl("all_gather_into_tensor", _all_gather_into_tensor)
-    c10_lib_cuda.impl("all_gather_into_tensor", _all_gather_into_tensor)
 
-    c10_lib_cpu.impl("reduce_scatter_tensor", _reduce_scatter_tensor)
-    c10_lib_cuda.impl("reduce_scatter_tensor", _reduce_scatter_tensor)
 
 if sys.executable != 'torch_deploy':
     _register_ops()

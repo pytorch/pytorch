@@ -133,7 +133,7 @@ struct ParsedArgs {
   PyObject* args[N];
 };
 
-struct PythonArgParser {
+struct PYBIND11_EXPORT PythonArgParser {
   explicit PythonArgParser(
       std::vector<std::string> fmts,
       bool traceable = false);
@@ -559,7 +559,14 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     } else {
       // convert tensor to scalar outside of try / catch,
       // so that Tensor subclass exceptions will not be caught.
-      if (THPVariable_Check(obj)) {
+      if (THPUtils_checkLongExact(obj)) {
+        // Fast path for plain numbers
+        try {
+          res.emplace_back(THPUtils_unpackIndex(obj));
+        } catch (std::exception& e) {
+          throw_intlist_exception(this, i, obj, idx);
+        }
+      } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
             !at::isIntegralType(
@@ -619,7 +626,14 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
     } else {
       // convert tensor to scalar outside of try / catch,
       // so that Tensor subclass exceptions will not be caught.
-      if (THPVariable_Check(obj)) {
+      if (THPUtils_checkLongExact(obj)) {
+        // Fast path for plain numbers
+        try {
+          res[idx] = THPUtils_unpackIndex(obj);
+        } catch (std::exception& e) {
+          throw_intlist_exception(this, i, obj, idx);
+        }
+      } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
             !at::isIntegralType(
@@ -700,14 +714,7 @@ inline at::ScalarType PythonArgs::scalartypeWithDefault(
   return scalartype(i);
 }
 
-inline at::ScalarType PythonArgs::scalartype(int i) {
-  if (!args[i]) {
-    auto scalartype = signature.params[i].default_scalartype;
-    return (scalartype == at::ScalarType::Undefined)
-        ? torch::tensors::get_default_scalar_type()
-        : scalartype;
-  }
-  PyObject* obj = args[i];
+inline at::ScalarType toScalarType(PyObject* obj) {
   if (obj == (PyObject*)&PyFloat_Type) {
     return at::ScalarType::Double;
   }
@@ -718,6 +725,17 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
     return at::ScalarType::Long;
   }
   return reinterpret_cast<THPDtype*>(obj)->scalar_type;
+}
+
+inline at::ScalarType PythonArgs::scalartype(int i) {
+  if (!args[i]) {
+    auto scalartype = signature.params[i].default_scalartype;
+    return (scalartype == at::ScalarType::Undefined)
+        ? torch::tensors::get_default_scalar_type()
+        : scalartype;
+  }
+  PyObject* obj = args[i];
+  return toScalarType(obj);
 }
 
 inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {

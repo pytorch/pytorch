@@ -6059,6 +6059,168 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     for input_requires_grad in [False, True]:
                         test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
+    def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self):
+
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
+        def normalize_indices(indices_unnormalized: torch.Tensor, dim_size: int, align_corners: bool):
+            if align_corners:
+                indices_normalized = 2 * indices_unnormalized / (dim_size - 1) - 1
+            else:
+                indices_normalized = (indices_unnormalized * 2 + 1) / dim_size - 1
+            return indices_normalized
+
+        test_dim_size = 10
+        non_test_dim_size = 9
+        step_size = 0.1
+
+        batch_size = 1
+        channel_size = 1
+
+        mode = 'nearest'
+        for device in device_list:
+            for padding_mode in ('zeros', 'border', 'reflection'):
+                for align_corners in (True, False):
+                    # Unnormalized inquiry indices
+                    inquiry_indices_unnormalized = torch.arange(
+                        0,
+                        test_dim_size - 1 + step_size, step_size,
+                        dtype=torch.float32,
+                        device=device
+                    )
+                    # Note that even though we are trying to create normalized indices
+                    # which results in x.0 and x.5 indices after unnormalization,
+                    # because of the numerical error,
+                    # the rounding direction might not always be expected as designed.
+                    # The best we could do is to ensure the rounding behaviors across
+                    # different implementations for different dimensions are
+                    # exactly the same.
+                    inquiry_indices = normalize_indices(
+                        indices_unnormalized=inquiry_indices_unnormalized,
+                        dim_size=test_dim_size,
+                        align_corners=align_corners
+                    )
+                    num_inqueries = inquiry_indices.shape[0]
+                    inquiry_fixed_indices = torch.full((num_inqueries,), 0.5, dtype=torch.float32, device=device)
+                    array_data = torch.rand(test_dim_size, dtype=torch.float32, device=device)
+                    # 2D grid sample x-dim interpolation
+                    # The input_tensor_2d_x is of shape
+                    # [batch_size, channel_size, non_test_dim_size, test_dim_size]
+                    input_tensor_2d_x = array_data.reshape(1, test_dim_size).repeat(
+                        batch_size,
+                        channel_size,
+                        non_test_dim_size,
+                        1
+                    )
+                    # The grid_tensor_2d_x is of shape
+                    # [batch_size, 1, num_inqueries]
+                    grid_tensor_2d_x = torch.cat(
+                        tensors=(
+                            inquiry_indices.reshape(num_inqueries, 1),
+                            inquiry_fixed_indices.reshape(num_inqueries, 1),
+                        ),
+                        dim=1
+                    ).repeat(batch_size, 1, 1, 1)
+                    # The output_tensor_2d_x is of shape
+                    # [batch_size, channel_size, 1, num_inqueries]
+                    output_tensor_2d_x = F.grid_sample(
+                        input=input_tensor_2d_x,
+                        grid=grid_tensor_2d_x,
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    )
+                    # 2D grid sample y-dim interpolation
+                    # The input_tensor_2d_y is of shape
+                    # [batch_size, channel_size, test_dim_size, non_test_dim_size]
+                    input_tensor_2d_y = torch.transpose(input_tensor_2d_x, 3, 2)
+                    # The grid_tensor_2d_y is of shape
+                    # [batch_size, 1, num_inqueries]
+                    grid_tensor_2d_y = torch.index_select(
+                        grid_tensor_2d_x,
+                        -1,
+                        torch.tensor([1, 0], dtype=torch.int64, device=device)
+                    )
+                    # The output_tensor_2d_y is of shape
+                    # [batch_size, channel_size, 1, num_inqueries]
+                    output_tensor_2d_y = F.grid_sample(
+                        input=input_tensor_2d_y,
+                        grid=grid_tensor_2d_y,
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    )
+                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_2d_y[0, 0, 0, :], atol=0, rtol=0)
+                    # 3D grid sample x-dim interpolation
+                    # The input_tensor_3d_x is of shape
+                    # [batch_size, channel_size, non_test_dim_size, non_test_dim_size, test_dim_size]
+                    input_tensor_3d_x = array_data.reshape(1, test_dim_size).repeat(
+                        batch_size, channel_size, non_test_dim_size, non_test_dim_size, 1)
+                    # The grid_tensor_3d_x is of shape
+                    # [batch_size, 1, 1, num_inqueries]
+                    grid_tensor_3d_x = torch.cat(
+                        tensors=(
+                            inquiry_indices.reshape(num_inqueries, 1),
+                            inquiry_fixed_indices.reshape(num_inqueries, 1),
+                            inquiry_fixed_indices.reshape(num_inqueries, 1),
+                        ),
+                        dim=1
+                    ).repeat(batch_size, 1, 1, 1, 1)
+                    # The output_tensor_3d_x is of shape
+                    # [batch_size, channel_size, 1, 1, num_inqueries]
+                    output_tensor_3d_x = F.grid_sample(
+                        input=input_tensor_3d_x,
+                        grid=grid_tensor_3d_x,
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    )
+                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_x[0, 0, 0, 0, :], atol=0, rtol=0)
+                    # 3D grid sample y-dim interpolation
+                    # The input_tensor_3d_y is of shape
+                    # [batch_size, channel_size, non_test_dim_size, test_dim_size, non_test_dim_size]
+                    input_tensor_3d_y = torch.transpose(input_tensor_3d_x, 4, 3)
+                    # The grid_tensor_3d_y is of shape
+                    # [batch_size, 1, 1, num_inqueries]
+                    grid_tensor_3d_y = torch.index_select(
+                        grid_tensor_3d_x,
+                        -1,
+                        torch.tensor([1, 0, 2], dtype=torch.int64, device=device)
+                    )
+                    # The output_tensor_3d_y is of shape
+                    # [batch_size, channel_size, 1, 1, num_inqueries]
+                    output_tensor_3d_y = F.grid_sample(
+                        input=input_tensor_3d_y,
+                        grid=grid_tensor_3d_y,
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    )
+                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_y[0, 0, 0, 0, :], atol=0, rtol=0)
+                    # 3D grid sample z-dim interpolation
+                    # The input_tensor_3d_z is of shape
+                    # [batch_size, channel_size, non_test_dim_size, non_test_dim_size, test_dim_size]
+                    input_tensor_3d_z = torch.transpose(input_tensor_3d_x, 4, 2)
+                    # The grid_tensor_3d_z is of shape
+                    # [batch_size, 1, 1, num_inqueries]
+                    grid_tensor_3d_z = torch.index_select(
+                        grid_tensor_3d_x,
+                        -1,
+                        torch.tensor([1, 2, 0], dtype=torch.int64, device=device)
+                    )
+                    # The output_tensor_3d_z is of shape
+                    # [batch_size, channel_size, 1, 1, num_inqueries]
+                    output_tensor_3d_z = F.grid_sample(
+                        input=input_tensor_3d_z,
+                        grid=grid_tensor_3d_z,
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    )
+                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_z[0, 0, 0, 0, :], atol=0, rtol=0)
+
     def test_affine_grid(self):
         # test known input on CPU
         input = torch.arange(1., 7).view(1, 2, 3)
@@ -8947,7 +9109,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
             v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
             v(lambda: F.gaussian_nll_loss(input, input, var, reduction=reduction))
-            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input, reduction=reduction))
+            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.gt(0).double(), reduction=reduction))
             v(lambda: F.binary_cross_entropy_with_logits(input, input, reduction=reduction))
 
             zeros = torch.zeros_like(input).to(torch.int64)
