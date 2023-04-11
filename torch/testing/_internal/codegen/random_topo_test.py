@@ -128,7 +128,7 @@ def random_topology_test(seed, *inp_tensor_list):
                     print("binary, op_2_index {0}, rh_index ?{1}".format(op_2_index, rh_index))
         else:
             # binary operation, we just randomly pick two candidates.
-            # this is not the most efficient way to close dependecy, as we could have
+            # this is not the most efficient way to close dependency, as we could have
             # two candidate that are actually connected
             cand_index = np.random.randint(0, len(candidate))
             if cand_index == index:

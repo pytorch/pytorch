@@ -39,5 +39,15 @@
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.6.21/Linux_arm64/actionlint",
             "hash": "025ac157db121b33971ef24af72d73d71cda3cb1e3a94795bb2708ef4032ca76"
         }
+    },
+    "bazel": {
+        "Darwin": {
+            "download_url": "https://ossci-macos.s3.amazonaws.com/bazel-4.2.1-darwin-x86_64",
+            "hash": "74d93848f0c9d592e341e48341c53c87e3cb304a54a2a1ee9cff3df422f0b23c"
+        },
+        "Linux": {
+            "download_url": "https://ossci-linux.s3.amazonaws.com/bazel-4.2.1-linux-x86_64",
+            "hash": "1a4f3a3ce292307bceeb44f459883859c793436d564b95319aacb8af1f20557c"
+        }
     }
 }

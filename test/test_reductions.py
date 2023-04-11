@@ -1434,7 +1434,7 @@ class TestReductions(TestCase):
         vals = [[True, True], [True, False], [False, False], []]
         for val in vals:
             result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool).item()
-            expect = np.prod(np.array(val), dtype=np.bool)
+            expect = np.prod(np.array(val), dtype=bool)
             self.assertEqual(result, expect)
 
             result = torch.prod(torch.tensor(val, device=device)).item()

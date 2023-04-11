@@ -169,6 +169,7 @@ def get_decompositions(
 import torch._decomp.decompositions
 import torch._refs
 
+
 # This list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
@@ -182,6 +183,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.addcmul,
             aten.addcmul_,
             aten.addr,
+            aten.aminmax,
             aten.avg_pool2d_backward,
             aten.binary_cross_entropy,
             aten.binary_cross_entropy_backward,
@@ -254,13 +256,14 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.mse_loss_backward,
             aten.mv,
             aten.mvlgamma,
+            aten.nansum,
             aten.nan_to_num,
             aten.narrow,
             aten.native_batch_norm,
             aten.native_batch_norm_backward,
             aten._native_batch_norm_legit,
-            aten._native_batch_norm_legit_no_training,
             aten._native_batch_norm_legit_functional,
+            aten._native_batch_norm_legit_no_training,
             aten.native_dropout_backward,
             aten.native_group_norm,
             aten.native_group_norm_backward,
@@ -309,8 +312,10 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.trace,
             aten.transpose.int,
             aten.tril.default,
+            aten.triu.default,
             aten.unfold,
             aten.unfold_backward,
+            aten.unfold_copy,
             aten.upsample_bilinear2d,
             aten.upsample_bilinear2d.vec,
             aten.upsample_nearest2d_backward,

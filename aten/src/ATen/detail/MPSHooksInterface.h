@@ -63,7 +63,7 @@ struct TORCH_API MPSHooksInterface {
 
 struct TORCH_API MPSHooksArgs {};
 
-C10_DECLARE_REGISTRY(MPSHooksRegistry, MPSHooksInterface, MPSHooksArgs);
+TORCH_DECLARE_REGISTRY(MPSHooksRegistry, MPSHooksInterface, MPSHooksArgs);
 #define REGISTER_MPS_HOOKS(clsname) \
   C10_REGISTER_CLASS(MPSHooksRegistry, clsname, clsname)
 

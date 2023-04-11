@@ -36,6 +36,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/reportMemoryUsage_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/scalar_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/scalar_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/StorageUtils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/stride_properties_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test_parallel.cpp

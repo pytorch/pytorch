@@ -106,7 +106,6 @@ def parse_native_functions_keys(
     backend_yaml_path: str,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
 ) -> Tuple[List[OperatorName], List[Any], List[OperatorName]]:
-
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
         for f in concatMap(
@@ -404,8 +403,7 @@ def run_gen_lazy_tensor(
             fs = list(x.functions()) if isinstance(x, NativeFunctionsGroup) else [x]
             for f in fs:
                 if f.func.name in ops_list:
-                    for r in func(f):
-                        yield r
+                    yield from func(f)
 
     selector = SelectiveBuilder.get_nop_selector()
 

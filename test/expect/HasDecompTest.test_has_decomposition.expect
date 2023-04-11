@@ -347,6 +347,8 @@ aten::_index_put_impl_
 aten::_indices
 aten::_indices_copy
 aten::_indices_copy.out
+aten::_int_mm
+aten::_int_mm.out
 aten::_is_all_true
 aten::_is_any_true
 aten::_linalg_check_errors
@@ -390,8 +392,6 @@ aten::_mps_convolution_transpose.out
 aten::_native_batch_norm_legit.no_stats_out
 aten::_native_batch_norm_legit.out
 aten::_native_batch_norm_legit_no_training.out
-aten::_native_decoder_only_multi_head_attention
-aten::_native_decoder_only_multi_head_attention.out
 aten::_native_multi_head_attention
 aten::_native_multi_head_attention.out
 aten::_neg_view
@@ -408,10 +408,11 @@ aten::_nested_tensor_from_mask.out
 aten::_nested_tensor_from_mask_left_aligned
 aten::_nested_tensor_from_tensor_list
 aten::_nested_tensor_from_tensor_list.out
-aten::_nested_tensor_offsets
 aten::_nested_tensor_size
 aten::_nested_tensor_size.out
 aten::_nested_tensor_softmax_with_shape
+aten::_nested_tensor_storage_offsets
+aten::_nested_tensor_storage_offsets.out
 aten::_nested_tensor_strides
 aten::_nested_tensor_strides.out
 aten::_nested_view_from_buffer
@@ -491,6 +492,8 @@ aten::_test_autograd_multiple_dispatch.fullcoverage_out
 aten::_test_autograd_multiple_dispatch_view
 aten::_test_autograd_multiple_dispatch_view_copy
 aten::_test_autograd_multiple_dispatch_view_copy.out
+aten::_test_functorch_fallback
+aten::_test_functorch_fallback.out
 aten::_test_optional_filled_intlist
 aten::_test_optional_filled_intlist.out
 aten::_test_optional_floatlist
@@ -511,8 +514,6 @@ aten::_to_dense
 aten::_to_dense.out
 aten::_transform_bias_rescale_qkv
 aten::_transform_bias_rescale_qkv.out
-aten::_transformer_decoder_only_layer_fwd
-aten::_transformer_decoder_only_layer_fwd.out
 aten::_transformer_encoder_layer_fwd
 aten::_transformer_encoder_layer_fwd.out
 aten::_trilinear
@@ -568,17 +569,12 @@ aten::adaptive_max_pool3d_backward
 aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
 aten::addbmm.out
-aten::addmv
-aten::addmv.out
 aten::addr_
 aten::affine_grid_generator
 aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
-aten::all_reduce
 aten::allclose
-aten::aminmax
-aten::aminmax.out
 aten::angle
 aten::angle.out
 aten::argmax
@@ -698,8 +694,6 @@ aten::cummax
 aten::cummax.out
 aten::cummin
 aten::cummin.out
-aten::cumprod
-aten::cumprod.out
 aten::deg2rad
 aten::deg2rad.out
 aten::deg2rad_
@@ -719,6 +713,8 @@ aten::embedding_renorm_
 aten::empty.memory_format
 aten::empty.names
 aten::empty.names_out
+aten::empty_permuted
+aten::empty_permuted.out
 aten::empty_quantized
 aten::empty_quantized.out
 aten::equal
@@ -889,6 +885,7 @@ aten::median.out
 aten::min
 aten::min.dim
 aten::min.dim_min
+aten::min.unary_out
 aten::miopen_batch_norm
 aten::miopen_batch_norm.out
 aten::miopen_batch_norm_backward
@@ -957,8 +954,6 @@ aten::nanmedian
 aten::nanmedian.dim
 aten::nanmedian.dim_values
 aten::nanmedian.out
-aten::nansum
-aten::nansum.out
 aten::native_group_norm.out
 aten::native_norm
 aten::native_norm.ScalarOpt_dim_dtype
@@ -968,6 +963,8 @@ aten::nll_loss2d_forward
 aten::nll_loss2d_forward.output
 aten::nonzero
 aten::nonzero.out
+aten::nonzero_static
+aten::nonzero_static.out
 aten::normal_functional
 aten::ones.names
 aten::ones.names_out
@@ -1341,7 +1338,6 @@ aten::view_copy
 aten::view_copy.dtype
 aten::view_copy.dtype_out
 aten::view_copy.out
-aten::wait_tensor
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out

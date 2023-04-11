@@ -58,6 +58,7 @@ void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
                                                               /* r_args_depth */ 1,
                                                               /* res_arg_index */ 0>(),
                                     Op<opmath_t>());
+    increment_version(tensors);
 }
 
 template<template<class> class Op>
@@ -131,7 +132,7 @@ FOREACH_BINARY_OP_SCALARLIST(all_types_complex_half_bfloat16, pow, power_functor
 // In the case of subtraction, we dont allow scalar to be boolean following the torch.sub logic
 void foreach_tensor_sub_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     check_foreach_api_restrictions(tensors, scalars);
-    for (int i = 0; i < tensors.size(); i++) {
+    for (const auto i: c10::irange(tensors.size())) {
         sub_check(tensors[i], scalars[i]);
     }
 
@@ -146,7 +147,7 @@ void foreach_tensor_sub_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef
 
 std::vector<Tensor> foreach_tensor_sub_scalarlist_kernel_cuda(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     check_foreach_api_restrictions(tensors, scalars);
-    for (int i = 0; i < tensors.size(); i++) {
+    for (const auto i: c10::irange(tensors.size())) {
         sub_check(tensors[i], scalars[i]);
     }
 

@@ -1481,16 +1481,22 @@ Vectorized<uint8_t> inline operator<<(const Vectorized<uint8_t>& a, const Vector
 
 template <>
 Vectorized<int64_t> inline operator>>(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
-  // No vector instruction for right shifting int64_t, so emulating it
+  // No vector instruction for right arithmetic shifting int64_t, so emulating it
   // instead.
 
+  // Clamp the shift values such that shift values < 0 and > 64 are changed to 64
+  // which results in -1 for negative input and 0 for non-negative input.
+  __m256i zero = _mm256_set1_epi64x(0);
+  __m256i max_shift = _mm256_set1_epi64x(64);
+  __m256i mask = _mm256_or_si256(_mm256_cmpgt_epi64(zero, b), _mm256_cmpgt_epi64(b, max_shift));
+  __m256i shift = _mm256_blendv_epi8(b, max_shift, mask);
   // Shift the number logically to the right, thus filling the most
   // significant bits with 0s.  Then, replace these bits with the sign
   // bit.
-  __m256i sign_bits = _mm256_cmpgt_epi64(_mm256_set1_epi64x(0), a);
-  __m256i b_inv_mod_64 = _mm256_sub_epi64(_mm256_set1_epi64x(64), b);
-  __m256i sign_ext = _mm256_sllv_epi64(sign_bits, b_inv_mod_64);
-  __m256i c = _mm256_srlv_epi64(a, b);
+  __m256i sign_bits = _mm256_cmpgt_epi64(zero, a);
+  __m256i sign_shift = _mm256_sub_epi64(max_shift, shift);
+  __m256i sign_ext = _mm256_sllv_epi64(sign_bits, sign_shift);
+  __m256i c = _mm256_srlv_epi64(a, shift);
   c = _mm256_or_si256(c, sign_ext);
 
   return c;

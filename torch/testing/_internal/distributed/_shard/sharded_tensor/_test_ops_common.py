@@ -86,7 +86,7 @@ def generate_local_weight_sharding_params_for_test(
         local_weight: weight matrix to be sharded.
         sharded_dim: The dimension which we shard on.
         gpu_num: number of ranks.
-        spec: shareding spec.
+        spec: sharding spec.
         rank: # of cuda process.
 
     Returns:
