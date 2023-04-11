@@ -191,7 +191,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         super().tearDown()
 
     @pytorch_test_common.skip_min_ort_version(
-        reason="Flaky test", version="1.15", dynamic_only=True
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     def test_simple_function(self):
         def func(x):
@@ -206,7 +208,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
 
     @pytorch_test_common.skip_min_ort_version(
-        reason="Flaky test", version="1.15", dynamic_only=True
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     def test_func_with_args_and_kwargs(self):
         # Non-tensor optional kwargs are always folded into constant and
@@ -241,7 +245,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_min_ort_version(
-        reason="Flaky test", version="1.15", dynamic_only=True
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     def test_mnist(self):
         class MNISTModel(nn.Module):
@@ -269,7 +275,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_min_ort_version(
-        reason="Flaky test", version="1.15", dynamic_only=True
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     # test single op with no kwargs
     def test_sigmoid(self):
@@ -285,14 +293,15 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, SigmoidModel(), (x,))
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "_aten_convolution_onnx: _add_attribute_to_torchscript_node()"
-        " parameter value=[None, None] violates type hint"
-        "typing.Union[float, int, str, bytes, typing.Sequence[float],"
-        " typing.Sequence[int], torch.Tensor], as [None, None]:"
+    @unittest.skip(
+        "RuntimeError: false INTERNAL ASSERT FAILED at "
+        "'/home/titaiwang/pytorch/build/aten/src/ATen/RegisterFunctionalization_0.cpp':3725,"
+        " please report a bug to PyTorch. mutating a non-functional tensor with a "
+        "functional tensor is not allowed. Please ensure that all of your inputs are "
+        "wrapped inside of a functionalize() call."
     )
     @skip_if_no_torchvision
-    def test_shufflenet_v2_dynamic_axes(self):
+    def test_shufflenet_v2(self):
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
         test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
@@ -307,7 +316,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_min_ort_version(
-        reason="Flaky test", version="1.15", dynamic_only=True
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     def test_add(self):
         class DynamicAdd(torch.nn.Module):
@@ -324,7 +335,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_min_ort_version(
-        reason="Flaky test", version="1.15", dynamic_only=True
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     def test_sigmoid_add(self):
         class DynamicAdd(torch.nn.Module):
@@ -348,7 +361,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_min_ort_version(
-        reason="Flaky test", version="1.15", dynamic_only=True
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
@@ -364,9 +379,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicMatMul(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "fx.graph: doesn't handle scalar like normal tensor, so this is not yet "
-        "supported! TypeError: forward() takes 1 positional argument but 2 were given"
+    @unittest.skip(
+        "RuntimeError: The two modules have different number of arguments. module: 1, reference_module: 0"
     )
     def test_scalar_tensor(self):
         class test(torch.nn.Module):
@@ -384,12 +398,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "_aten_convolution_onnx: _add_attribute_to_torchscript_node()"
-        " parameter value=[None, None] violates type hint"
-        "typing.Union[float, int, str, bytes, typing.Sequence[float],"
-        " typing.Sequence[int], torch.Tensor], as [None, None]:"
-    )
     def test_transpose_infer_shape(self):
         class TransposeModule(torch.nn.Module):
             def __init__(self):
@@ -409,7 +417,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test("torch._dynamo.exc.TorchRuntimeError")
+    @unittest.skip("torch._dynamo.exc.TorchRuntimeError")
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
             def forward(self, d1, d2):
@@ -450,7 +458,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     # TODO(titaiwang): This is also detected flaky in static shape:
     # https://github.com/pytorch/pytorch/issues/98622
-    @pytorch_test_common.skip_min_ort_version(reason="SegFault", version="1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=False,
+    )
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x):
@@ -461,9 +473,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, MutationModel(), (torch.randn(12),), input_mutation=True
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "fx.graph: doesn't handle scalar like normal tensor, so this is not yet"
-        "supported! TypeError: forward() takes 1 positional argument but 2 were given"
+    @unittest.skip(
+        "RuntimeError: The two modules have different number of arguments. module: 1, reference_module: 0"
     )
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
@@ -483,7 +494,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
+    @unittest.skip(
         "fx.graph: torch._subclasses.fake_tensor.DataDependentOutputException: "
         "aten._local_scalar_dense.default"
     )
@@ -502,10 +513,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "ATenLib: INVALID_ARGUMENT : Failed to load model with error: "
-        "ONNX Schema aten_copy: failed validating the check: !(it.GetName().empty())"
-    )
+    @unittest.skip("RuntimeError: Unknown call_function target: aten.copy.default")
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -521,7 +529,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(reason="Flaky test. Fixed in ORT==1.15")
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -538,7 +550,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_min_ort_version(
-        reason="Flaky test", version="1.15", dynamic_only=True
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     def test_view_dynamic_zero_dim(self):
         class ViewModel(torch.nn.Module):
@@ -556,7 +570,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_min_ort_version(
-        reason="Flaky test", version="1.15", dynamic_only=True
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
@@ -572,7 +588,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_min_ort_version(
-        reason="Flaky test", version="1.15", dynamic_only=True
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"

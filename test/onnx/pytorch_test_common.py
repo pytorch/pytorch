@@ -158,7 +158,7 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
     return skip_dec
 
 
-# TODO(titaiwang): dynamic_only is pecific to the situation that dynamic fx exporter
+# TODO(titaiwang): dynamic_only is specific to the situation that dynamic fx exporter
 # is not yet supported by ORT until 1.15.0. Remove dynamic_only once ORT 1.15.0 is released.
 def skip_min_ort_version(reason: str, version: str, dynamic_only: bool = False):
     def skip_dec(func):
