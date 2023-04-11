@@ -39,10 +39,6 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
-        if torch._C.has_mkldnn:
-            from .mkldnn_fusion import _mkldnn_fusion_init
-
-            _mkldnn_fusion_init()
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
 
