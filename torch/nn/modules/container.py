@@ -10,7 +10,7 @@ from torch._jit_internal import _copy_to_script_wrapper
 
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
 
-__all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList', 'ParameterDict']
+__all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList', 'ParameterDict', 'ParallelAdd']
 
 T = TypeVar('T', bound=Module)
 
@@ -916,3 +916,149 @@ class ParameterDict(Module):
     def __ior__(self, other : 'ParameterDict') -> 'ParameterDict':
         self.update(other)
         return self
+
+class ParallelAdd(Module):
+    r"""A container that runs the modules separately, then sums the results.
+    Modules will be added to it in the order they are passed in the
+    constructor. Alternatively, an ``OrderedDict`` of modules can be
+    passed in. The ``forward()`` method of ``Sequential`` accepts any
+    input and forwards it to all contained modules. It then
+    adds together the output to tensors of each module to give the final result.
+
+    """
+
+    _modules: Dict[str, Module]  # type: ignore[assignment]
+
+    @overload
+    def __init__(self, *args: Module) -> None:
+        ...
+
+    @overload
+    def __init__(self, arg: 'OrderedDict[str, Module]') -> None:
+        ...
+
+    def __init__(self, *args):
+        super().__init__()
+        if len(args) == 1 and isinstance(args[0], OrderedDict):
+            for key, module in args[0].items():
+                self.add_module(key, module)
+        else:
+            for idx, module in enumerate(args):
+                self.add_module(str(idx), module)
+
+    def _get_item_by_idx(self, iterator, idx) -> T:
+        """Get the idx-th item of the iterator"""
+        size = len(self)
+        idx = operator.index(idx)
+        if not -size <= idx < size:
+            raise IndexError('index {} is out of range'.format(idx))
+        idx %= size
+        return next(islice(iterator, idx, None))
+
+    @_copy_to_script_wrapper
+    def __getitem__(self, idx: Union[slice, int]) -> Union['ParallelAdd', T]:
+        if isinstance(idx, slice):
+            return self.__class__(OrderedDict(list(self._modules.items())[idx]))
+        else:
+            return self._get_item_by_idx(self._modules.values(), idx)
+
+    def __setitem__(self, idx: int, module: Module) -> None:
+        key: str = self._get_item_by_idx(self._modules.keys(), idx)
+        return setattr(self, key, module)
+
+    def __delitem__(self, idx: Union[slice, int]) -> None:
+        if isinstance(idx, slice):
+            for key in list(self._modules.keys())[idx]:
+                delattr(self, key)
+        else:
+            key = self._get_item_by_idx(self._modules.keys(), idx)
+            delattr(self, key)
+        # To preserve numbering
+        str_indices = [str(i) for i in range(len(self._modules))]
+        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
+
+    @_copy_to_script_wrapper
+    def __len__(self) -> int:
+        return len(self._modules)
+
+    def __add__(self, other) -> 'ParallelAdd':
+        if isinstance(other, ParallelAdd):
+            ret = ParallelAdd()
+            for layer in self:
+                ret.append(layer)
+            for layer in other:
+                ret.append(layer)
+            return ret
+        else:
+            raise ValueError('add operator supports only objects '
+                             'of ParallelAdd class, but {} is given.'.format(
+                                 str(type(other))))
+
+    def pop(self, key: Union[int, slice]) -> Module:
+        v = self[key]
+        del self[key]
+        return v
+
+    def __iadd__(self, other) -> 'ParallelAdd':
+        if isinstance(other, ParallelAdd):
+            offset = len(self)
+            for i, module in enumerate(other):
+                self.add_module(str(i + offset), module)
+            return self
+        else:
+            raise ValueError('add operator supports only objects '
+                             'of ParallelAdd class, but {} is given.'.format(
+                                 str(type(other))))
+
+    @_copy_to_script_wrapper
+    def __dir__(self):
+        keys = super().__dir__()
+        keys = [key for key in keys if not key.isdigit()]
+        return keys
+
+    @_copy_to_script_wrapper
+    def __iter__(self) -> Iterator[Module]:
+        return iter(self._modules.values())
+
+    def forward(self, input) -> torch.Tensor:
+        total = None
+        for module in self:
+            result = module(input)
+            assert isinstance(result, torch.Tensor), "forward method expects contained modules to return objects of class Tensor"
+            if total is None:
+                total = result
+            else:
+                total = total + result
+        if total is None:
+            assert False, "ParallelAdd container should contain at least one module."
+        return total
+
+    def append(self, module: Module) -> 'ParallelAdd':
+        r"""Appends a given module to the end.
+
+        Args:
+            module (nn.Module): module to append
+        """
+        self.add_module(str(len(self)), module)
+        return self
+
+    def insert(self, index: int, module: Module) -> 'ParallelAdd':
+        if not isinstance(module, Module):
+            raise AssertionError(
+                'module should be of type: {}'.format(Module))
+        n = len(self._modules)
+        if not (-n <= index <= n):
+            raise IndexError(
+                'Index out of range: {}'.format(index))
+        if index < 0:
+            index += n
+        for i in range(n, index, -1):
+            self._modules[str(i)] = self._modules[str(i - 1)]
+        self._modules[str(index)] = module
+        return self
+
+    def extend(self, sequential) -> 'ParallelAdd':
+        for layer in sequential:
+            self.append(layer)
+        return self
+
