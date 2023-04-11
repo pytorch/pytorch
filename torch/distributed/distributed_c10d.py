@@ -468,49 +468,50 @@ def _get_pg_device(group: ProcessGroup):
     return torch.device("cpu")
 
 
-def _store_based_barrier(rank, store, timeout):
+def _store_based_barrier(rank, store, timeout, logging_interval=timedelta(seconds=10)):
     """
     Barrier based on store which is used for synchronizing processes after
     ``init_process_group`` or ``new_group``. Intended to be used only with
     those two methods and is not a generic alternative to ``barrier()``.
     """
-    store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _world.group_count)
+    store_key = f"{STORE_BASED_BARRIER_PREFIX}:{_world.group_count}"
     store.add(store_key, 1)
     logger.info("Added key: %s to store for rank: %s", store_key, rank)
 
     # Now wait for all workers to check in with the store.
     world_size = get_world_size()
-    # Use 'add' instead of 'get' since for some store implementations 'add'
-    # doesn't work well with 'get'. Ideally the store implementations should
-    # be fixed, but for backward compatibility reasons it is risky to change
-    # the store implementations. Once, we completely migrate away from these
-    # legacy stores, we can use 'get' here instead.
     worker_count = store.add(store_key, 0)
-    start = time.time()
-    log_time = time.time()
-    while worker_count != world_size:
-        time.sleep(0.01)
-        worker_count = store.add(store_key, 0)
 
-        # Print status periodically to keep track.
-        if timedelta(seconds=(time.time() - log_time)) > timedelta(seconds=10):
+    last_worker_key = f"{store_key}:last_worker"
+    if worker_count == world_size:
+        store.set(last_worker_key, "1")
+
+    start = time.time()
+    while True:
+        try:
+            # This will throw an exception after the logging_interval in which we print out
+            # the status of the group or time out officially, throwing runtime error
+            store.wait([last_worker_key], logging_interval)
+            break
+        except RuntimeError as e:
+            worker_count = store.add(store_key, 0)
+            # Print status periodically to keep track.
             logger.info(
                 "Waiting in store based barrier to initialize process group for "
-                "rank: %s, key: %s (world_size=%s, worker_count=%s, timeout=%s)",
+                "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s)",
                 rank, store_key, world_size, worker_count, timeout
             )
-            log_time = time.time()
 
-        if timedelta(seconds=(time.time() - start)) > timeout:
-            raise RuntimeError(
-                "Timed out initializing process group in store based barrier on "
-                "rank: {}, for key: {} (world_size={}, worker_count={}, timeout={})".format(
-                    rank, store_key, world_size, worker_count, timeout
+            if timedelta(seconds=(time.time() - start)) > timeout:
+                raise RuntimeError(
+                    "Timed out initializing process group in store based barrier on "
+                    "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={})".format(
+                        rank, store_key, world_size, worker_count, timeout
+                    )
                 )
-            )
 
     logger.info(
-        f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes."
+        "Rank %s: Completed store-based barrier for key:%s with %s nodes.", rank, store_key, world_size
     )
 
 
@@ -1042,6 +1043,9 @@ def _new_process_group_helper(
             backend_type = ProcessGroup.BackendType.MPI
             if not backend_class:
                 return GroupMember.NON_GROUP_MEMBER
+            # create new process group with accurate rank and size
+            if pg.rank() == -1 and pg.size() == -1:
+                pg = ProcessGroup(backend_prefix_store, backend_class.rank(), backend_class.size(), base_pg_options)
         elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
@@ -2061,6 +2065,11 @@ def all_gather_object(object_list, obj, group=None):
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
 
+    .. warning::
+        Calling :func:`all_gather_object` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`all_gather` instead.
+
     Example::
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
@@ -2148,6 +2157,11 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    .. warning::
+        Calling :func:`gather_object` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`gather` instead.
 
     Example::
         >>> # xdoctest: +SKIP("need process group init")
@@ -2256,6 +2270,11 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
 
+    .. warning::
+        Calling :func:`broadcast_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`broadcast` instead.
+
     Example::
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
@@ -2351,6 +2370,11 @@ def scatter_object_list(
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    .. warning::
+        Calling :func:`scatter_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`scatter` instead.
 
     Example::
         >>> # xdoctest: +SKIP("need process group init")

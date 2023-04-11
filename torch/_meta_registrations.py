@@ -88,6 +88,27 @@ def meta_take(self, index, *, out=None):
     return result
 
 
+@register_meta(
+    [aten.cummax.default, aten.cummax.out, aten.cummin.default, aten.cummin.out]
+)
+@out_wrapper("values", "indices")
+def cummaxmin(self, dim):
+    values = torch.empty(self.shape, device=self.device, dtype=self.dtype)
+    indices = torch.empty(self.shape, device=self.device, dtype=torch.int64)
+    if self.numel() != 0 and self.ndim != 0:
+        # Checks that dim is within bounds
+        maybe_wrap_dim(dim, self.ndim)
+    return values, indices
+
+
+@register_meta([aten.logcumsumexp.default, aten.logcumsumexp.out])
+@out_wrapper()
+def logcumsumexp(self, dim):
+    # Checks that dim is within bounds
+    maybe_wrap_dim(dim, self.ndim)
+    return torch.empty_like(self).contiguous()
+
+
 @register_meta([aten._fft_c2c.default, aten._fft_c2c.out])
 @out_wrapper()
 def meta_fft_c2c(self, dim, normalization, forward):
@@ -1096,6 +1117,11 @@ def vdot(self, other):
 
     dot_check(self, other)
     return self.new_empty(())
+
+
+@register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
+def nonzero_static(self, *, size: int, fill_value: int = -1):
+    return self.new_empty((size, self.dim()), dtype=torch.long)
 
 
 # Leaving this function around because a python implementation
@@ -3123,30 +3149,6 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
-
-
-@register_meta(aten.all_reduce)
-def all_reduce_meta(self, reduceOp, tag, rankset, group_size):
-    return torch.empty_like(self)
-
-
-@register_meta(aten.all_gather_into_tensor)
-def all_gather_into_tensor_meta(shard, tag, rankset, group_size):
-    out_size = list(shard.size())
-    out_size[0] *= group_size
-    return shard.new_empty(out_size)
-
-
-@register_meta(aten.reduce_scatter_tensor)
-def reduce_scatter_tensor_meta(input, reduce_op, scatter_dim, tag, rankset, group_size):
-    out_size = list(input.size())
-    out_size[scatter_dim] //= group_size
-    return input.new_empty(out_size)
-
-
-@register_meta(aten.wait_tensor)
-def wait_tensor_meta(self):
-    return torch.empty_like(self)
 
 
 activate_meta()
