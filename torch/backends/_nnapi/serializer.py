@@ -491,7 +491,7 @@ class _NnapiSerializer:
                 raise Exception("Flexible size is not supported for this operand.")
             if s < 0:
                 # runtime flex
-                LOG.warning(f"Operand {oper} has runtime flex shape")
+                LOG.warning("Operand %s has runtime flex shape", oper)
         return op_id, oper
 
     def get_tensor_operand_or_constant(self, jitval, dim_order=DimOrder.PRESUMED_CONTIGUOUS):
