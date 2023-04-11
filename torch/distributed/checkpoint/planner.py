@@ -181,7 +181,7 @@ class SavePlanner(abc.ABC):
     @abc.abstractmethod
     def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
         """
-        Intialize this planner to save ``state_dict``.
+        Initialize this planner to save ``state_dict``.
 
         Implementations should save those values as they won't be provided lated in the save process.
 
@@ -230,7 +230,7 @@ class SavePlanner(abc.ABC):
 
         Called on each rank multiple times, at least once per WriteItem in the final SavePlan.
 
-        This method should be idepotent and thread-save. StorageWriter implementations
+        This method should be idempotent and thread-save. StorageWriter implementations
         are free to call it as frequently as they need.
 
         Any transformation that allocates memory should be lazily done when his method
