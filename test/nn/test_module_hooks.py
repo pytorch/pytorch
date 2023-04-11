@@ -713,6 +713,36 @@ class TestModuleGlobalHooks(TestCase):
         test_fwd.remove()
         test_bwd.remove()
 
+    def test_module_global_hook_registration(self):
+        def clear_hooks():
+            torch.nn.modules.module._global_backward_hooks.clear()
+            torch.nn.modules.module._global_forward_hooks.clear()
+            torch.nn.modules.module._global_forward_pre_hooks.clear()
+            torch.nn.modules.module._global_backward_pre_hooks.clear()
+            torch.nn.modules.module._update_has_global_hooks()
+
+        count = [0]
+        a = torch.rand(10, requires_grad=True)
+        lin = torch.nn.Linear(10, 10)
+
+        def hook(*_unused_args):
+            count[0] += 1
+
+        register_hook_fns = [
+            torch.nn.modules.module.register_module_forward_hook,
+            torch.nn.modules.module.register_module_forward_pre_hook,
+            torch.nn.modules.module.register_module_full_backward_hook,
+            torch.nn.modules.module.register_module_full_backward_pre_hook
+        ]
+
+        for register_hook_fn in register_hook_fns:
+            register_hook_fn(hook)
+            out = lin(a)
+            out.sum().backward()
+            self.assertTrue(count[0], 1)
+            count = [0]
+            clear_hooks()
+
     def test_module_global_hook_invalid_outputs(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
