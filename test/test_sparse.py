@@ -2013,23 +2013,13 @@ class TestSparse(TestSparseBase):
         sparse_dims = len(shape)
         nnzs = (0, 5, 25)
 
-        def remove_zeros(t):
-            res = t.to_dense().to_sparse(t.sparse_dim())
-            with torch.no_grad():
-                res._coalesced_(t.is_coalesced())
-            return res
-
-        def f(x, y):
-            y = remove_zeros(y)
-            return x.sparse_mask(y).to_dense(masked_grad=False)
-
         for nnz in nnzs:
             for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
                 lhs, _, _ = self._gen_sparse(sparse_dims, nnz, shape, dtype, device, lhs_is_coalesced)
                 lhs.requires_grad_(True)
                 rhs, _, _ = self._gen_sparse(sparse_dims, nnz, shape, dtype, device, rhs_is_coalesced)
-                gradcheck(f, (lhs, rhs))
-                gradcheck(f, (lhs, lhs.detach()))
+                gradcheck(lambda t: t.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,))
+                gradcheck(lambda t: t.sparse_mask(lhs.detach()).to_dense(masked_grad=False), (lhs,))
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
