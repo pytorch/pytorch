@@ -4,9 +4,14 @@ import unittest
 
 from torch.distributed._spmd.graph_utils import dump_graphs_to_files
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed._tensor.common_dtensor import DTensorTestBase
 
 
-class GraphUtilsTest(unittest.TestCase):
+class GraphUtilsTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 1
+
     def test_dump_graphs(self):
         class FakeGraph:
             def __init__(self, postfix):
