@@ -63,14 +63,14 @@ _reduce_ops = {
 }
 
 class AllToAll:
+    @torch.no_grad()
     def work(self, data):
         world_size = len(data)
         for dest_rank in range(world_size):
             output_tensor_list, _ = data[dest_rank]
             for src_rank in range(world_size):
                 _, input_tensor_list = data[src_rank]
-                with torch.no_grad():
-                    output_tensor_list[src_rank].copy_(input_tensor_list[dest_rank])
+                output_tensor_list[src_rank].copy_(input_tensor_list[dest_rank])
 
 class AllReduce:
     def __init__(self, op):
@@ -80,17 +80,18 @@ class AllReduce:
             )
         self.op = op.op
 
+    @torch.no_grad()
     def work(self, data):
         tensors = []
         for src_rank in range(0, len(data)):
             tensors.append(data[src_rank][0])
         res = _reduce_ops[self.op](tensors)
-        with torch.no_grad():
-            for src_rank in range(len(data)):
-                data[src_rank][0].copy_(res)
+        for src_rank in range(len(data)):
+            data[src_rank][0].copy_(res)
 
 
 class AllGather:
+    @torch.no_grad()
     def work(self, data):
         for src_rank in range(len(data)):
             in_tensor_list = data[src_rank][1]
@@ -100,13 +101,13 @@ class AllGather:
 
             for dest in data:
                 dest_tensor = dest[0][0][src_rank]
-                with torch.no_grad():
-                    dest_tensor.copy_(src_tensor)
+                dest_tensor.copy_(src_tensor)
 
 class Scatter:
     def __init__(self, src):
         self.src = src
 
+    @torch.no_grad()
     def work(self, data):
         src_in_tensor_list = data[self.src][1]
         # Can't handle scatter with multiple input tensor list
@@ -118,14 +119,14 @@ class Scatter:
             # Can't handle scatter with multiple output tensor
             assert len(out_tensor_list) == 1
             dest_tensor = out_tensor_list[0]
-            with torch.no_grad():
-                dest_tensor.copy_(src_in_tensors[rank])
+            dest_tensor.copy_(src_in_tensors[rank])
 
 
 class Gather:
     def __init__(self, dst):
         self.dst = dst
 
+    @torch.no_grad()
     def work(self, data):
         # Can't handle gather with multiple tensor lists
         assert len(data[self.dst][0]) == 1
@@ -135,8 +136,7 @@ class Gather:
             # Can't handle gather with multiple tensor lists
             assert len(src_in_tensor_list) == 1
             dest_tensor = out_tensor_list[rank]
-            with torch.no_grad():
-                dest_tensor.copy_(src_in_tensor_list[0])
+            dest_tensor.copy_(src_in_tensor_list[0])
 
 class ReduceScatter:
     def __init__(self, op):
@@ -144,6 +144,7 @@ class ReduceScatter:
             raise NotImplementedError("ReduceScatter only supports SUM on threaded pg for now.")
         self.op = op
 
+    @torch.no_grad()
     def work(self, data):
         start_reduction = [False for _ in range(len(data))]
         for each_rank_data in data:
@@ -155,24 +156,22 @@ class ReduceScatter:
                 # Can't handle reduce_scatter with multiple output tensor
                 assert len(dest_tensor_on_rank_i) == 1
                 if not start_reduction[i]:
-                    with torch.no_grad():
-                        dest_tensor_on_rank_i[0].copy_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].copy_(to_scatter[i])
                     start_reduction[i] = True
                 else:
-                    with torch.no_grad():
-                        dest_tensor_on_rank_i[0].add_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].add_(to_scatter[i])
 
 class Broadcast:
     def __init__(self, src):
         self.src = src
 
+    @torch.no_grad()
     def work(self, data):
         in_tensor_list = flatten_list(data[self.src])
         for i in range(len(data)):
             out_tensor_list = flatten_list(data[i])
             for j in range(len(in_tensor_list)):
-                with torch.no_grad():
-                    out_tensor_list[j].copy_(in_tensor_list[j])
+                out_tensor_list[j].copy_(in_tensor_list[j])
 
 
 class Collective:
