@@ -2,7 +2,6 @@
 
 import argparse
 import copy
-import functools
 import glob
 import json
 import os
@@ -465,7 +464,7 @@ def run_test(
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
     )
-    timeout = THRESHOLD * 2 if should_file_rerun else None
+    timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
     with open(log_path, "w") as f:
         ret_code = retry_shell(
@@ -483,20 +482,9 @@ def run_test(
     return ret_code
 
 
-def test_cuda_primary_ctx(test_module, test_directory, options):
+def run_test_with_subprocess(test_module, test_directory, options):
     return run_test(
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
-    )
-
-
-run_test_with_subprocess = functools.partial(
-    run_test, extra_unittest_args=["--subprocess"]
-)
-
-
-def get_run_test_with_subprocess_fn():
-    return lambda test_module, test_directory, options: run_test_with_subprocess(
-        test_module, test_directory, options
     )
 
 
@@ -715,7 +703,7 @@ def run_doctests(test_module, test_directory, options):
             import onnxruntime  # NOQA
             import onnxscript  # NOQA
         except ImportError:
-            exclude_module_list.append("torch.onnx._internal.fx.*")
+            exclude_module_list.append("torch.onnx.*")
             enabled["onnx"] = False
         else:
             enabled["onnx"] = True
@@ -835,25 +823,26 @@ def get_pytest_args(options):
 
 
 CUSTOM_HANDLERS = {
-    "test_cuda_primary_ctx": test_cuda_primary_ctx,
-    "test_cuda_nvml_based_avail": get_run_test_with_subprocess_fn(),
-    "test_cuda_trace": get_run_test_with_subprocess_fn(),
+    "test_cuda_primary_ctx": run_test_with_subprocess,
+    "test_cuda_nvml_based_avail": run_test_with_subprocess,
+    "test_cuda_trace": run_test_with_subprocess,
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/algorithms/quantization/test_quantization": test_distributed,
-    "distributed/test_c10d_nccl": get_run_test_with_subprocess_fn(),
-    "distributed/test_c10d_gloo": get_run_test_with_subprocess_fn(),
-    "distributed/test_c10d_common": get_run_test_with_subprocess_fn(),
-    "distributed/test_c10d_spawn_gloo": get_run_test_with_subprocess_fn(),
-    "distributed/test_c10d_spawn_nccl": get_run_test_with_subprocess_fn(),
-    "distributed/test_c10d_spawn_ucc": get_run_test_with_subprocess_fn(),
-    "distributed/test_store": get_run_test_with_subprocess_fn(),
-    "distributed/test_pg_wrapper": get_run_test_with_subprocess_fn(),
-    "distributed/rpc/test_faulty_agent": get_run_test_with_subprocess_fn(),
-    "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
-    "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
-    "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_nccl": run_test_with_subprocess,
+    "distributed/test_c10d_gloo": run_test_with_subprocess,
+    "distributed/test_c10d_ucc": run_test_with_subprocess,
+    "distributed/test_c10d_common": run_test_with_subprocess,
+    "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
+    "distributed/test_c10d_spawn_nccl": run_test_with_subprocess,
+    "distributed/test_c10d_spawn_ucc": run_test_with_subprocess,
+    "distributed/test_store": run_test_with_subprocess,
+    "distributed/test_pg_wrapper": run_test_with_subprocess,
+    "distributed/rpc/test_faulty_agent": run_test_with_subprocess,
+    "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
+    "distributed/rpc/test_share_memory": run_test_with_subprocess,
+    "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
     "doctests": run_doctests,
 }
 

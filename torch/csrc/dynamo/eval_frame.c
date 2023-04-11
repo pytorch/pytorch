@@ -300,8 +300,6 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 // Flag to just run a frame normally
 #define SKIP_CODE ((void*)0x1)
 
-static PyObject* noargs = NULL; /* cached empty tuple */
-static PyObject* dotzerokey = NULL; /* ".0" */
 static PyObject* guard_fail_hook = NULL;
 static PyObject* guard_error_hook = NULL;
 static PyObject* profiler_start_hook = NULL;
@@ -520,17 +518,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     return Py_None;
   }
   PyObject *f_locals = frame->f_locals;
-  PyObject* dotzero = PyDict_GetItem(f_locals, dotzerokey);
-  PyObject* valid = NULL;
-  if (unlikely(dotzero != NULL)) {
-    // .0 is a special variable name used for implicit args
-    PyObject* args = PyTuple_Pack(1, dotzero);
-    if (args == NULL) return NULL;
-    valid = PyObject_Call(e->check_fn, args, f_locals);
-    Py_DECREF(args);
-  } else {
-    valid = PyObject_Call(e->check_fn, noargs, f_locals);
-  }
+  PyObject* valid = PyObject_CallOneArg(e->check_fn, f_locals);
   if (unlikely(valid == NULL)) {
     if (guard_error_hook != NULL) {
       PyObject *type, *value, *traceback;
@@ -602,6 +590,14 @@ inline static PyObject* eval_custom_code(
   PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
   #if IS_PYTHON_3_11_PLUS
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
+  Py_XINCREF(frame->f_func->func_closure);
+  shadow->f_func->func_closure = frame->f_func->func_closure;
+  // NOTE: in Python 3.11.1+, PyFrame_New changes prev_instr, causing
+  // Python runtime errors, so we revert the change.
+  // See https://github.com/python/cpython/pull/97886.
+  // TODO if there are more shadow frame related bugs in the future,
+  // consider not using PyFrame_New.
+  shadow->prev_instr = _PyCode_CODE(shadow->f_code) - 1;
   #else
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
   #endif
@@ -1022,8 +1018,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   Py_INCREF(Py_None);
   eval_frame_callback_set(Py_None);
 
-  noargs = PyTuple_New(0);
-  dotzerokey = PyUnicode_InternFromString(".0");
   PyObject* module = PyModule_Create(&_module);
 
 #if IS_PYTHON_3_11_PLUS
