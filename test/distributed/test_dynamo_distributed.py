@@ -627,7 +627,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         model = DuplicateModule()
         fsdp_model = FSDP(copy.deepcopy(model), use_orig_params=True)
-        fsdp_model = torch.compile(fsdp_model)
+        fsdp_model = torch._dynamo.optimize("aot_eager")(fsdp_model)
         inp = torch.randn((2, 3), device="cuda")
         local_out = model(inp)
         fsdp_out = fsdp_model(inp)
