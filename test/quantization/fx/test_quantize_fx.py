@@ -92,6 +92,7 @@ from torch.ao.quantization.backend_config.native import (
 
 from torch.ao.quantization.qconfig_mapping import (
     _get_symmetric_qnnpack_qconfig_mapping,
+    _get_symmetric_qnnpack_qat_qconfig_mapping,
     _GLOBAL_DICT_KEY,
     _MODULE_NAME_DICT_KEY,
     _MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY,
@@ -1227,6 +1228,354 @@ class TestQuantizeFx(QuantizationTestCase):
                         model.load_state_dict(state_dict)
                         module = getattr(model, module_name)
                         self.assertTrue(torch.equal(prev_scale, module.weight_scale))
+
+
+            checkWeightQParams(qr)
+            qr = copy.deepcopy(qr)
+            # make sure the qparams are preserved after copy
+            checkWeightQParams(qr)
+
+            checkSerDeser(qr, is_dynamic)
+
+    def _get_conv_transpose_test_cases(self, use_relu, is_reference):
+        """ Returns a list of test cases, with format:
+        is_dynamic, ModuleClass, module_constructor_inputs,
+        inputs, quantized_node, weight_prepack_op
+        """
+        class FunctionalConvTranspose1d(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+                self.stride = 1
+                self.padding = 0
+                self.output_padding = 0
+                self.dilation = 1
+                self.groups = 1
+
+            def forward(self, x):
+                y = F.conv_transpose1d(
+                    x,
+                    self.weight,
+                    None,
+                    self.stride,
+                    self.padding,
+                    self.output_padding,
+                    self.groups,
+                    self.dilation
+                )
+                if use_relu:
+                    y = F.relu(y)
+                return y
+
+        class ConvTranspose1d(torch.nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.deconv = torch.nn.ConvTranspose1d(*args)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                y = self.deconv(x)
+                if use_relu:
+                    y = self.relu(y)
+                return y
+
+        conv_transpose1d_input = torch.rand(1, 3, 224)
+        conv_transpose1d_weight = torch.rand(3, 3, 3)
+        conv_transpose1d_module_args = (3, 3, 3)
+
+        class FunctionalConvTranspose2d(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+                self.stride = (1, 1)
+                self.padding = (0, 0)
+                self.output_padding = (0, 0)
+                self.dilation = (1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                y = F.conv_transpose2d(
+                    x,
+                    self.weight,
+                    None,
+                    self.stride,
+                    self.padding,
+                    self.output_padding,
+                    self.groups,
+                    self.dilation
+                )
+                if use_relu:
+                    y = F.relu(y)
+                return y
+
+        class ConvTranspose2d(torch.nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.deconv = torch.nn.ConvTranspose2d(*args)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                y = self.deconv(x)
+                if use_relu:
+                    y = self.relu(y)
+                return y
+
+        conv_transpose2d_input = torch.rand(1, 3, 224, 224)
+        conv_transpose2d_weight = torch.rand(3, 3, 3, 3)
+        conv_transpose2d_module_args = (3, 3, 3)
+
+        class FunctionalConvTranspose3d(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+                self.stride = (1, 1, 1)
+                self.padding = (0, 0, 0)
+                self.output_padding = (0, 0, 0)
+                self.dilation = (1, 1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                y = F.conv_transpose3d(
+                    x,
+                    self.weight,
+                    None,
+                    self.stride,
+                    self.padding,
+                    self.output_padding,
+                    self.groups,
+                    self.dilation
+                )
+                if use_relu:
+                    y = F.relu(y)
+                return y
+
+        class ConvTranspose3d(torch.nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.deconv = torch.nn.ConvTranspose3d(*args)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                y = self.deconv(x)
+                if use_relu:
+                    y = self.relu(y)
+                return y
+
+        conv_transpose3d_input = torch.rand(1, 3, 32, 224, 224)
+        conv_transpose3d_weight = torch.rand(3, 3, 3, 3, 3)
+        conv_transpose3d_module_args = (3, 3, 3)
+
+        # is_dynamic, ModuleClass, module_constructor_inputs,
+        # inputs, quantized_node, weight_prepack_node
+        tests = [
+            (
+                False,
+                FunctionalConvTranspose1d,
+                (conv_transpose1d_weight,),
+                (conv_transpose1d_input,),
+                ns.call_function(
+                    torch.nn.functional.conv_transpose1d if is_reference else torch.ops.quantized.conv_transpose1d
+                ),
+                ns.call_function(torch.ops.quantized.conv_transpose1d_prepack),
+            ),
+            (
+                False,
+                FunctionalConvTranspose2d,
+                (conv_transpose2d_weight,),
+                (conv_transpose2d_input,),
+                ns.call_function(
+                    torch.nn.functional.conv_transpose2d if is_reference else torch.ops.quantized.conv_transpose2d
+                ),
+                ns.call_function(torch.ops.quantized.conv_transpose2d_prepack),
+            ),
+            (
+                False,
+                FunctionalConvTranspose3d,
+                (conv_transpose3d_weight,),
+                (conv_transpose3d_input,),
+                ns.call_function(
+                    torch.nn.functional.conv_transpose3d if is_reference else torch.ops.quantized.conv_transpose3d),
+                ns.call_function(torch.ops.quantized.conv_transpose3d_prepack),
+            ),
+            (
+                False,
+                ConvTranspose1d,
+                conv_transpose1d_module_args,
+                (conv_transpose1d_input,),
+                ns.call_module(nnqr.ConvTranspose1d if is_reference else nnq.ConvTranspose1d),
+                None
+            ),
+            (
+                False,
+                ConvTranspose2d,
+                conv_transpose2d_module_args,
+                (conv_transpose2d_input,),
+                ns.call_module(nnqr.ConvTranspose2d if is_reference else nnq.ConvTranspose2d),
+                None
+            ),
+            (
+                False,
+                ConvTranspose3d,
+                conv_transpose3d_module_args,
+                (conv_transpose3d_input,),
+                ns.call_module(nnqr.ConvTranspose3d if is_reference else nnq.ConvTranspose3d),
+                None
+            ),
+        ]
+        return tests
+
+    @skipIfNoFBGEMM
+    def test_conv_transpose_not_reference(self):
+        """ Test quantizing transposed conv
+        """
+        tests = self._get_conv_transpose_test_cases(use_relu=False, is_reference=False)
+        for (is_dynamic, ModuleClass, module_constructor_inputs,
+             inputs, quantized_node, weight_prepack_node) in tests:
+            quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
+            node_occurrence = {}
+            if weight_prepack_node:
+                node_occurrence[weight_prepack_node] = 0
+            self.checkGraphModeFxOp(
+                ModuleClass(*module_constructor_inputs),
+                inputs, quant_type,
+                expected_node=quantized_node,
+                expected_node_occurrence=node_occurrence,
+                is_reference=False)
+
+    @skipIfNoFBGEMM
+    def test_conv_transpose_reference(self):
+        """ Test quantizing transposed conv with reference option
+        """
+        tests = self._get_conv_transpose_test_cases(use_relu=False, is_reference=True)
+
+        def _get_keys(prefix, is_dynamic):
+            all_keys = [prefix + "." + k for k in ["weight_qscheme", "weight_dtype"]]
+            if not is_dynamic:
+                all_keys.extend([prefix + "." + k for k in ["weight_scale", "weight_zero_point"]])
+            return all_keys
+
+        for (is_dynamic, ModuleClass, module_constructor_inputs,
+             inputs, quantized_node, weight_prepack_node) in tests:
+            quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
+            node_occurrence = {}
+            if weight_prepack_node:
+                node_occurrence[weight_prepack_node] = 0
+            result_dict = self.checkGraphModeFxOp(
+                ModuleClass(*module_constructor_inputs),
+                inputs, quant_type,
+                expected_node=quantized_node,
+                expected_node_occurrence=node_occurrence,
+                is_reference=True)
+            qr = result_dict["quantized_reference"]
+
+            def checkWeightQParams(model):
+                module_name = "deconv"
+                if hasattr(model, module_name):
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_qscheme"))
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_scale"))
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_zero_point"))
+                    self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
+
+            def checkSerDeser(model, is_dynamic):
+                module_name = "deconv"
+                if hasattr(model, module_name):
+                    # make sure seralization works
+                    state_dict = copy.deepcopy(model.state_dict())
+                    all_keys = _get_keys(module_name, is_dynamic)
+                    for key in all_keys:
+                        self.assertTrue(key in state_dict)
+                    # check load_state_dict restores states
+                    module = getattr(model, module_name)
+                    prev_scale = module.weight_scale
+                    module.weight_scale = None
+                    model.load_state_dict(state_dict)
+                    module = getattr(model, module_name)
+                    self.assertTrue(torch.equal(prev_scale, module.weight_scale))
+
+
+            checkWeightQParams(qr)
+            qr = copy.deepcopy(qr)
+            # make sure the qparams are preserved after copy
+            checkWeightQParams(qr)
+
+            checkSerDeser(qr, is_dynamic)
+
+    def test_conv_transpose_relu_not_reference(self):
+        """ Test quantizing transposed conv + relu
+            Fusion with relu is not supported.
+        """
+        tests = self._get_conv_transpose_test_cases(use_relu=True, is_reference=False)
+        for (is_dynamic, ModuleClass, module_constructor_inputs,
+             inputs, quantized_node, weight_prepack_node) in tests:
+            quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
+            node_occurrence = {}
+            if weight_prepack_node:
+                node_occurrence[weight_prepack_node] = 0
+            if quantized_node.op == 'call_module':
+                node_occurrence[ns.call_module(nn.ReLU)] = 1
+            else:
+                node_occurrence[ns.call_function(F.relu)] = 1
+            self.checkGraphModeFxOp(
+                ModuleClass(*module_constructor_inputs),
+                inputs, quant_type,
+                expected_node=quantized_node,
+                expected_node_occurrence=node_occurrence,
+                is_reference=False)
+
+    @skipIfNoFBGEMM
+    def test_conv_transpose_relu_reference(self):
+        """ Test quantizing transposed conv with reference option
+            Fusion with relu is not supported.
+        """
+        tests = self._get_conv_transpose_test_cases(use_relu=True, is_reference=True)
+
+        def _get_keys(prefix, is_dynamic):
+            all_keys = [prefix + "." + k for k in ["weight_qscheme", "weight_dtype"]]
+            if not is_dynamic:
+                all_keys.extend([prefix + "." + k for k in ["weight_scale", "weight_zero_point"]])
+            return all_keys
+
+        for (is_dynamic, ModuleClass, module_constructor_inputs,
+             inputs, quantized_node, weight_prepack_node) in tests:
+            quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
+            node_occurrence = {}
+            if weight_prepack_node:
+                node_occurrence[weight_prepack_node] = 0
+            if quantized_node.op == 'call_module':
+                node_occurrence[ns.call_module(nn.ReLU)] = 1
+            else:
+                node_occurrence[ns.call_function(F.relu)] = 1
+            result_dict = self.checkGraphModeFxOp(
+                ModuleClass(*module_constructor_inputs),
+                inputs, quant_type,
+                expected_node=quantized_node,
+                expected_node_occurrence=node_occurrence,
+                is_reference=True)
+            qr = result_dict["quantized_reference"]
+
+            def checkWeightQParams(model):
+                module_name = "deconv"
+                if hasattr(model, module_name):
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_qscheme"))
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_scale"))
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_zero_point"))
+                    self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
+
+            def checkSerDeser(model, is_dynamic):
+                module_name = "deconv"
+                if hasattr(model, module_name):
+                    # make sure seralization works
+                    state_dict = copy.deepcopy(model.state_dict())
+                    all_keys = _get_keys(module_name, is_dynamic)
+                    for key in all_keys:
+                        self.assertTrue(key in state_dict)
+                    # check load_state_dict restores states
+                    module = getattr(model, module_name)
+                    prev_scale = module.weight_scale
+                    module.weight_scale = None
+                    model.load_state_dict(state_dict)
+                    module = getattr(model, module_name)
+                    self.assertTrue(torch.equal(prev_scale, module.weight_scale))
 
 
             checkWeightQParams(qr)
@@ -5630,6 +5979,38 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
             model(*example_inputs)
 
+    def test_symmetric_qnnpack_qat_qconfig_mapping(self):
+        """
+        Test whether `torch.ao.quantization.qconfig_mapping._get_symmetric_qnnpack_qat_qconfig_mapping`
+        works with the QNNPACK BackendConfig.
+        """
+        if "qnnpack" not in supported_qengines:
+            return
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+
+            def forward(self, x):
+                return self.linear(x)
+
+        with override_quantized_engine("qnnpack"):
+            qconfig_mapping = _get_symmetric_qnnpack_qat_qconfig_mapping()
+            example_inputs = (torch.rand((1, 30), dtype=torch.float),)
+            backend_config = get_qnnpack_backend_config()
+            model = MyModel()
+            model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
+            model(*example_inputs)
+            model = convert_fx(model, backend_config=backend_config)
+            expected_node_occurrence = {
+                ns.call_module(torch.ao.nn.quantized.Linear) : 1,
+                ns.call_module(torch.nn.Linear) : 0,
+            }
+            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+            model(*example_inputs)
+
+
     def test_get_executorch_backend_config(self):
         from torch.ao.quantization.backend_config import get_executorch_backend_config
         # make sure this runs
@@ -6170,6 +6551,48 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, input):
                 return self.op(input, self.weight, bias=None, stride=[1] * self.dim,
                                padding=[0] * self.dim, dilation=[1] * self.dim, groups=1)
+
+        for dimension in [1, 2, 3]:
+            model = Mod(3, 16, 3, dimension)
+            model.eval()
+            qconfig_mapping = get_default_qconfig_mapping()
+            input_shape = (1, 3, *([8] * dimension))
+            example_inputs = torch.randn(input_shape)
+            prepared_model = prepare_fx(model, qconfig_mapping, example_inputs)
+            prepared_model(example_inputs)
+            quantized_model = convert_fx(prepared_model)
+            # This should pass
+            quantized_model(example_inputs)
+            # Ensure the quantized model has the expected op
+            node_occurrence = {
+                ns.call_function(dim_to_qop[dimension]): 1,
+            }
+            self.checkGraphModuleNodes(quantized_model, expected_node_occurrence=node_occurrence)
+
+    def test_lowering_functional_conv_transpose_with_kwargs(self):
+        dim_to_op = {
+            1: F.conv_transpose1d,
+            2: F.conv_transpose2d,
+            3: F.conv_transpose3d,
+        }
+        dim_to_qop = {
+            1: torch.ops.quantized.conv_transpose1d,
+            2: torch.ops.quantized.conv_transpose2d,
+            3: torch.ops.quantized.conv_transpose3d,
+        }
+
+        class Mod(nn.Module):
+            def __init__(self, in_channels, out_channels, kernel_size, dimension):
+                super().__init__()
+                self.dim = dimension
+                self.op = dim_to_op[dimension]
+                kernel_sizes = [kernel_size] * self.dim
+                self.weight = nn.Parameter(torch.randn(in_channels, out_channels, *kernel_sizes))
+
+            def forward(self, input):
+                return self.op(input, self.weight, bias=None, stride=[1] * self.dim,
+                               padding=[0] * self.dim, output_padding=[0] * self.dim,
+                               dilation=[1] * self.dim, groups=1)
 
         for dimension in [1, 2, 3]:
             model = Mod(3, 16, 3, dimension)
