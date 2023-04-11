@@ -220,6 +220,15 @@ def _share_state_and_init_handle_attrs(
         attr_name_to_values[attr_name] = set()
     root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
+    # Update _has_optim_in_backward for each handle.
+    for handle in root_state._all_handles:
+        flat_param = handle.flat_param
+        if flat_param._params is not None:
+            handle._has_optim_in_backward = any(
+                hasattr(param, "_in_backward_optimizers")
+                for param in flat_param._params
+            )
+
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
@@ -416,6 +425,10 @@ def _pre_forward(
         # their gradients. They must be re-registered every forward pass in case
         # the `grad_fn` is mutated.
         _register_post_backward_hooks(state, handles)
+        # We may have to reallocate the _cpu_grad if optimizer overlap set the grad to None in the backward pass.
+        # flat_param._cpu_grad = torch.zeros_like(
+        #         flat_param._local_shard, device=cpu_device
+        #     ).pin_memory()
 
         # Recursively convert args and kwargs to specified precision.
         input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
@@ -815,13 +828,16 @@ def _post_backward_hook(
                     for orig_param in handle.flat_param._params:
                         # checking grad for None also filters out params
                         # that don't belong to this rank
-                        if orig_param.grad is not None and hasattr(orig_param, '_in_backward_optimizers'):
+                        if orig_param.grad is not None and hasattr(
+                            orig_param, "_in_backward_optimizers"
+                        ):
                             for optim in orig_param._in_backward_optimizers:
                                 optim.step()
                             # Not sure if we need to do this. Setting entire
                             # flat_param's grad to be None should be fine.
                             orig_param.grad = None
-                    handle.flat_param.grad = None
+
+                        handle.flat_param.grad = None
 
 
 @no_type_check
