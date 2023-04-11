@@ -3,7 +3,7 @@ import torch
 from collections import defaultdict
 from torch import nn
 import copy
-from ...sparsifier.utils import fqn_to_module, module_to_fqn
+from ...pruner.utils import fqn_to_module, module_to_fqn
 import warnings
 
 __all__ = ['ActivationSparsifier']

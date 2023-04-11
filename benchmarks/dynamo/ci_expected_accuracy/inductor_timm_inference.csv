@@ -1,6 +1,8 @@
 name,accuracy,graph_breaks
 adv_inception_v3,pass,0
 beit_base_patch16_224,pass,0
+botnet26t_256,pass,0
+cait_m36_384,fail_accuracy,0
 coat_lite_mini,pass,0
 convit_base,pass,15
 convmixer_768_32,pass,0
@@ -19,6 +21,7 @@ fbnetv3_b,pass,0
 gernet_l,pass,0
 ghostnet_100,pass,0
 gluon_inception_v3,pass,0
+gluon_xception65,pass,0
 gmixer_24_224,pass,0
 gmlp_s16_224,pass,0
 hrnet_w18,pass,0
@@ -57,3 +60,4 @@ twins_pcpvt_base,pass,0
 visformer_small,pass,0
 vit_base_patch16_224,pass,0
 volo_d1_224,pass,0
+xcit_large_24_p8_224,pass,0
