@@ -759,7 +759,13 @@ ProcessGroupGloo::ProcessGroupGloo(
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
     context->setTimeout(options->timeout);
-    context->connectFullMesh(store, options->devices[i]);
+    try {
+      context->connectFullMesh(store, options->devices[i]);
+    } catch (const std::runtime_error &e) {
+      auto err = e.what();
+      // TORCH_CHECK to print the cpp stacktrace.
+      TORCH_CHECK(false, c10::str("Gloo connectFullMesh failed with ", err));
+    }
     contexts_.push_back(std::move(context));
   }
 
