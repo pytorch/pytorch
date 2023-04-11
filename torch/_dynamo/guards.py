@@ -101,17 +101,17 @@ def strip_getattr_getitem(name):
 
 
 @dataclasses.dataclass
-class CodePart:
+class InstalledGuardSubexpression:
     """
-    A CodePart represents a code string and bookeeping information accumulated at guard creation time.
-    CodeParts are used to make up the check_fn we use for guards. A collection of CodeParts is kept on each
+    A InstalledGuardSubexpression represents a code string and bookeeping information accumulated at guard creation time.
+    InstalledGuardSubexpressions are used to make up the check_fn we use for guards. A collection of InstalledGuardSubexpressions is kept on each
     guard cache entry, and is passed into the subsequent eval_frame callback upon guard failure.
 
     Note: This object's uniqueness is dictated by the code str. For a given code str, all other parts
     must be identical.
     """
 
-    source: Optional[
+    sources: Optional[
         List[Source]
     ]  # Note: List of sources for tensor checks and shape_env
     code: str
@@ -161,12 +161,12 @@ class GuardBuilder(GuardBuilderBase):
 
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
-        self.code: List[CodePart] = []
+        self.code: List[InstalledGuardSubexpression] = []
         # shape_env_code is only used by local_builder and is used for
         # shape env code.  This exists only because we need to make sure
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
-        self.shape_env_code: List[CodePart] = []
+        self.shape_env_code: List[InstalledGuardSubexpression] = []
 
         # [Note - On Eager Tensor Guards]
         # Most of the time, we generate Python code in a guard to directly
@@ -617,16 +617,17 @@ class GuardBuilder(GuardBuilderBase):
             self.__class__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
-        caller_fn = getframeinfo(caller)[2]
         del caller
         for code in code_list:
             if sources is None:
                 sources = [guard.origin]
-            code_part = CodePart(sources, code, caller_fn)
+            installed_guard_subexpression = InstalledGuardSubexpression(
+                sources, code, func_name
+            )
             if shape_env:
-                self.shape_env_code.append(code_part)
+                self.shape_env_code.append(installed_guard_subexpression)
             else:
-                self.code.append(code_part)
+                self.code.append(installed_guard_subexpression)
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
@@ -739,11 +740,13 @@ class CheckFunctionManager:
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
 
-        validation_code_part = CodePart(None, "___guarded_code.valid", "")
-        code_parts = []
-        code_parts.append(validation_code_part)
-        code_parts += local_builder.code + global_builder.code
-        part_list: List[CodePart] = []
+        validation_installed_guard_subexpression = InstalledGuardSubexpression(
+            None, "___guarded_code.valid", ""
+        )
+        installed_guard_subexpressions = []
+        installed_guard_subexpressions.append(validation_installed_guard_subexpression)
+        installed_guard_subexpressions += local_builder.code + global_builder.code
+        part_list: List[InstalledGuardSubexpression] = []
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
@@ -769,12 +772,12 @@ class CheckFunctionManager:
             check_tensors_fn = tensor_guards.check
             check_tensor_names = ", ".join(tensor_check_names)
             check_tensor_slug = f"___check_tensors({check_tensor_names})"
-            code_part = CodePart(
+            installed_guard_subexpression = InstalledGuardSubexpression(
                 tensor_check_sources, check_tensor_slug, "TENSOR_MATCH"
             )
             check_tensor_verbose = tensor_guards.check_verbose
-            code_part.tensor_check_names = tensor_check_names
-            code_parts.append(code_part)
+            installed_guard_subexpression.tensor_check_names = tensor_check_names
+            installed_guard_subexpressions.append(installed_guard_subexpression)
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
@@ -785,16 +788,16 @@ class CheckFunctionManager:
             if isinstance(guard, DuplicateInputs):
                 source_a = guard.input_source_a
                 source_b = guard.input_source_b
-                code_part = CodePart(
+                installed_guard_subexpression = InstalledGuardSubexpression(
                     [source_a, source_b],
                     f"{source_a.name()} is {source_b.name()}",
                     "DuplicateInputs",
                 )
-                code_parts.append(code_part)
+                installed_guard_subexpressions.append(installed_guard_subexpression)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
-        code_parts.extend(local_builder.shape_env_code)
+        installed_guard_subexpressions.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
         closure_vars = collections.OrderedDict(
@@ -822,29 +825,28 @@ class CheckFunctionManager:
         # which becomes the check_fn.
         #
         # 4) Everything in `code` becomes the check_fn. We write it out by first defining a `__fail`, which
-        # given a code_part_id, the id() of a code_part, extract a code_part from the part_list and binds a scope
-        # to it. This is used later for evaluating the expression defined in code_part, if necessary. `__fail` is
+        # given a installed_guard_subexpression_idx, the index of a installed_guard_subexpression, extract a installed_guard_subexpression from the part_list and binds a scope
+        # to it. This is used later for evaluating the expression defined in installed_guard_subexpression, if necessary. `__fail` is
         # invoked if a specific sub expression of a guard is failed.
         #
-        # 5) The sub expressions of guards are defined 1 per code_part. We iterate over the code_parts and produce
-        # code that (a) assigns the result of the expression to a variable named `passing` (b) checks if not passing,
-        # (c) and if not passing, returns __fail(code_part_id) with the id of the code_part used to produce the code.
-        # or (d) if passing, proceeds until we've run all the sub expressions through.
+        # 5) The sub expressions of guards are defined 1 per installed_guard_subexpression. We iterate over the installed_guard_subexpressions and produce
+        # code that evaluates the code and if it is False, returns __fail(installed_guard_subexpression_idx), or if passing, proceeds until
+        # we've run all the sub expressions through.
         #
-        # 6) In the event that we re-enter frame evaluation having failed a guard, we return the code_part
+        # 6) In the event that we re-enter frame evaluation having failed a guard, we return the installed_guard_subexpression
         # and pass it through to the frame evaluation callback. This is where downstream systems that handle guard
         # failures hook in, like guard failure logging, or converting static shape failures to dynamic shapes (if
         # the config is set).
-        py_code = make_guard_fn(code_parts, closure_vars, part_list)
+        py_code = make_guard_fn(installed_guard_subexpressions, closure_vars, part_list)
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", py_code)
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
-        # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
+        # TODO(whc) maybe '.installed_guard_subexpressions' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
-        guard_fn.code_parts = code_parts
+        guard_fn.installed_guard_subexpressions = installed_guard_subexpressions
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {"G": global_builder.scope["G"]}
         guard_fn.guard_fail_fn = guard_fail_fn
@@ -869,17 +871,17 @@ class CheckFunctionManager:
 def record_guard_failure(
     guard_fail_fn,
     code,
-    code_part: CodePart,
+    installed_guard_subexpression: InstalledGuardSubexpression,
 ) -> str:
     """
     called whenever a guard fails.
     """
-    reason = code_part.code
+    reason = installed_guard_subexpression.code
     if "__check_tensors" in reason:
-        assert code_part.tensor_check_names is not None
+        assert installed_guard_subexpression.tensor_check_names is not None
         reason = eval(
-            f"___check_tensors_verbose({', '.join(code_part.tensor_check_names)}, tensor_check_names={code_part.tensor_check_names})",  # noqa: B950
-            code_part.scope,
+            f"___check_tensors_verbose({', '.join(installed_guard_subexpression.tensor_check_names)}, tensor_check_names={installed_guard_subexpression.tensor_check_names})",  # noqa: B950
+            installed_guard_subexpression.scope,
         )
     guard_failures[code].append(reason)
     if guard_fail_fn:
@@ -904,36 +906,40 @@ def guard_error_hook(
     # column number of which subexpression failed.  But that would also
     # require us to have the TRUE code that was eval'ed, not a shoddy
     # reconstruction (like is done here)
-    print(make_guard_fn(guard_fn.code_parts, {}, []))
+    print(make_guard_fn(guard_fn.installed_guard_subexpressions, {}, []))
 
 
 set_guard_error_hook(guard_error_hook)
 
 
-def make_guard_fn(code_parts, closure_vars, part_list):
+def make_guard_fn(installed_guard_subexpressions, closure_vars, part_list):
     # TODO(voz): Move this somewhere more general so we don't have to violate heirarchy?
     from torch._inductor.utils import IndentedBuffer
 
     make_fail_buf = IndentedBuffer()
-    make_fail_buf.writeline("def __fail(code_part_idx):")
+    make_fail_buf.writeline("def __fail(installed_guard_subexpression_idx):")
     with make_fail_buf.indent():
-        make_fail_buf.writeline("code_part = part_list[code_part_idx]")
-        make_fail_buf.writeline("code_part.scope = locals()")
-        make_fail_buf.writeline("code_part.scope['L'] = L")
+        make_fail_buf.writeline(
+            "installed_guard_subexpression = part_list[installed_guard_subexpression_idx]"
+        )
+        make_fail_buf.writeline("installed_guard_subexpression.scope = locals()")
+        make_fail_buf.writeline("installed_guard_subexpression.scope['L'] = L")
         for key, value in closure_vars.items():
             if callable(value):
-                make_fail_buf.writeline(f"code_part.scope['{key}'] = {key}")
-        make_fail_buf.writeline("return code_part")
+                make_fail_buf.writeline(
+                    f"installed_guard_subexpression.scope['{key}'] = {key}"
+                )
+        make_fail_buf.writeline("return installed_guard_subexpression")
 
     assert len(part_list) == 0
 
     code_buf = IndentedBuffer()
-    code_buf.writeline("passing = True")
-    unique_code_parts = unique(code_parts)
-    for i, code_part in enumerate(unique_code_parts):
-        part_list.append(code_part)
-        code_buf.writeline(f"passing = {code_part.code}")
-        code_buf.writeline("if not passing:")
+    unique_installed_guard_subexpressions = unique(installed_guard_subexpressions)
+    for i, installed_guard_subexpression in enumerate(
+        unique_installed_guard_subexpressions
+    ):
+        part_list.append(installed_guard_subexpression)
+        code_buf.writeline(f"if ({installed_guard_subexpression.code}) == False:")
         with code_buf.indent():
             code_buf.writeline(f"return (False, __fail({i}))")
 

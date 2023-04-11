@@ -359,64 +359,72 @@ def first_real_inst_idx(code):
     raise RuntimeError("RESUME instruction not found in code")
 
 
-# Converts a CodePart structure, which carries our
-# re-compilation code, source, and more, into a
-# plan for how to mark certain dims as dynamic.
-def dynamic_plan_from_code_part(code_part, dynamic_plan):
+# Given a installed_guard_subexpression, mutates frame_state with relevant changes.
+# Specifically, this impliments the automatic dynamic frame state changes by
+# reading out which guards failed, and if the right guard for triggering automatic dynamic
+# shape expansion failed, it takes all the installed_guard_subexpressions and mutates the frame_state with every dim that
+# would have failed a guard this frame.
+def frame_state_from_installed_guard_subexpression(
+    installed_guard_subexpression: "torch._dynamo.guards.InstalledGuardSubexpression",
+    frame_state: Dict[str, List[int]],
+):
     from torch._dynamo.source import TensorProperty, TensorPropertySource
 
-    if code_part is None or not config.automatic_dynamic_shapes:
+    if installed_guard_subexpression is None or not config.automatic_dynamic_shapes:
         return
 
     def is_dynamic_source_candidate(source):
         if isinstance(source, TensorPropertySource):
             prop = source.prop
             # TODO: Expand to stride?
-            if prop == TensorProperty.SIZE:
+            if prop == TensorProperty.SIZE or prop == TensorProperty.STRIDE:
                 return True
         return False
 
-    def is_dynamic_code_part_candidate(code_part):
-        if code_part.origin == "SHAPE_ENV":
-            sources = code_part.source
-            for source in sources:
+    def is_dynamic_installed_guard_subexpression_candidate(
+        installed_guard_subexpression,
+    ):
+        if installed_guard_subexpression.origin == "SHAPE_ENV":
+            for source in installed_guard_subexpression.sources:
                 if is_dynamic_source_candidate(source):
                     return True
         return False
 
-    def add_dynamic_dim(code_part):
-        if not code_part.source:
+    def add_dynamic_dim(installed_guard_subexpression):
+        if not installed_guard_subexpression.sources:
             # Not all code has sources! Ex: __guarded_code.valid
             return
-        for source in code_part.source:
+        for source in installed_guard_subexpression.sources:
             if is_dynamic_source_candidate(source):
                 inner_source = source.base
                 name = inner_source.local_name
-                if name not in dynamic_plan:
-                    dynamic_plan[name] = set()
-                dynamic_plan[name].add(source.idx)
+                if name not in frame_state:
+                    frame_state[name] = set()
+                frame_state[name].add(source.idx)
 
-    # Determine if this code_part is a candidate for automatic dynamic
+    # Determine if this installed_guard_subexpression is a candidate for automatic dynamic
     # marking. If the failed guard was not a shape_env size property guard,
     # we do not proceed.
-    if not is_dynamic_code_part_candidate(code_part):
+    if not is_dynamic_installed_guard_subexpression_candidate(
+        installed_guard_subexpression
+    ):
         # The guard was not a candidate for automatic dynamic marking.
         return
-    code_parts = code_part.scope["part_list"]
-    for code_part in code_parts:
+    installed_guard_subexpressions = installed_guard_subexpression.scope["part_list"]
+    for installed_guard_subexpression in installed_guard_subexpressions:
         # Take the failed code part, and add it as a dynamic dim
-        add_dynamic_dim(code_part)
+        add_dynamic_dim(installed_guard_subexpression)
 
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size, code_part, dynamic_plan):
-        assert dynamic_plan is not None
+    def catch_errors(frame, cache_size, installed_guard_subexpression, frame_state):
+        assert frame_state is not None
 
         msg = "Compiling %s %s with cache_size %s."
-        if code_part is not None:
+        if installed_guard_subexpression is not None:
             torch._dynamo.guards.record_guard_failure(
-                hooks.guard_fail_fn, frame.f_code, code_part
+                hooks.guard_fail_fn, frame.f_code, installed_guard_subexpression
             )
             msg += " Due to guard failure %s from guard %s and source %s"
             log.debug(
@@ -424,14 +432,16 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                 frame.f_code.co_name,
                 frame.f_code.co_filename,
                 cache_size,
-                code_part.code,
-                code_part.origin,
-                code_part.source,
+                installed_guard_subexpression.code,
+                installed_guard_subexpression.origin,
+                installed_guard_subexpression.sources,
             )
         else:
             log.debug(msg, frame.f_code.co_name, frame.f_code.co_filename, cache_size)
 
-        dynamic_plan_from_code_part(code_part, dynamic_plan)
+        frame_state_from_installed_guard_subexpression(
+            installed_guard_subexpression, frame_state
+        )
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
@@ -457,10 +467,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         ddp_optimizer.compile_fn,
                         hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size, hooks, dynamic_plan)
+                    return hijacked_callback(frame, cache_size, hooks, frame_state)
 
         with compile_lock:
-            return callback(frame, cache_size, hooks, dynamic_plan)
+            return callback(frame, cache_size, hooks, frame_state)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors

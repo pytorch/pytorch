@@ -1804,7 +1804,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         export_constraints,
         mutated_closure_cell_contents: Set[str],
-        dynamic_plan,
+        frame_state,
     ):
         super().__init__(
             output=OutputGraph(
@@ -1814,7 +1814,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self,
                 export,
                 export_constraints,
-                dynamic_plan,
+                frame_state,
             ),
             instructions=instructions,
             f_locals=f_locals,

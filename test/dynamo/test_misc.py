@@ -4005,7 +4005,7 @@ def fn():
             root_tx=None,
             export=False,
             export_constraints=None,
-            dynamic_plan=None,
+            frame_state=None,
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}

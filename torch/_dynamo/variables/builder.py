@@ -1168,10 +1168,10 @@ def wrap_to_fake_tensor_and_record(
             constraint_dims = []
             automatic_marked_dims = set()
             if isinstance(source, LocalSource):
-                dynamic_plan = tx.output.dynamic_plan
+                frame_state = tx.output.frame_state
                 local_name = source.local_name
-                if dynamic_plan and local_name in dynamic_plan:
-                    automatic_marked_dims = dynamic_plan[local_name]
+                if frame_state and local_name in frame_state:
+                    automatic_marked_dims = frame_state[local_name]
 
             for i in range(e.dim()):
                 # NB: mark dynamic has precedence over static
@@ -1187,7 +1187,7 @@ def wrap_to_fake_tensor_and_record(
                 if constraint is None:
                     if marked_dynamic and not config.allow_ignore_mark_dynamic:
                         constraint = RelaxedUnspecConstraint(warn_only=False)
-                    elif automatic_dynamic:
+                    elif not marked_static and automatic_dynamic:
                         constraint = RelaxedUnspecConstraint(warn_only=True)
                 constraint_dims.append(constraint)
 

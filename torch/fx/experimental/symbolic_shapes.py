@@ -12,7 +12,7 @@ import traceback
 from dataclasses import dataclass
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import cast, Dict, List, Optional, Set, Type, Union, Tuple
+from typing import cast, Dict, List, Optional, Set, Type, Union
 from enum import Enum
 
 import torch
@@ -1335,7 +1335,7 @@ class ShapeGuardExprSources:
     Represents a shape guard expression, with the related sources.
 
     Ex:
-        expr: s0 < s1 * 2
+        expr: x < y * 2
         sources: LocalInputSource(x), LocalInputSource(y)
     """
     expr: str
@@ -1677,7 +1677,7 @@ class ShapeEnv:
         # just means there are no constraints
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
         _simplified=False
-    ) -> Tuple[List[ShapeGuardExprSources]]:
+    ) -> List[ShapeGuardExprSources]:
 
         assert len(placeholders) == len(sources)
 
@@ -1926,10 +1926,9 @@ class ShapeEnv:
                         # originally.  Otherwise, should only assert that
                         # vr is superset of c_vr
                         if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
-                            constraint = c.render(sources[0])
                             record_constraint_violation(lambda: (
-                                constraint,
-                                f"Could not validate constraint {constraint} as "
+                                c,
+                                f"Could not validate constraint {c.render(sources[0])} as "
                                 f"we actually inferred the valid range to be [{vr.lower}, {vr.upper}]."
                                 "This is actually supposed to be impossible to "
                                 "trigger right now as we do not refine ranges; maybe you called "
@@ -1968,10 +1967,9 @@ class ShapeEnv:
                     msg = f"  {len(raise_msgs) + 1}. {msg}"
                     raise_msgs.append(msg)
 
+            log.warning(f"Warning only constraints violated \n {warn_msgs}")
             if len(raise_msgs) > 0:
-                raise ConstraintViolationError(f"Constraints violated!\n Erroring constraints: \n {raise_msgs} \n Warning only constraints: \n {warn_msgs}")
-            else:
-                log.debug(f"Warning only constraints violated \n {warn_msgs}")
+                raise ConstraintViolationError(f"Constraints violated!\n{raise_msgs}")
 
         return exprs
 
