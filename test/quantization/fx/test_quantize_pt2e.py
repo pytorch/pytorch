@@ -202,8 +202,8 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
         quantizer = QNNPackQuantizer()
-        operator_qspec = qq.get_default_per_channel_symmetric_qnnpack_operator_qspec()
-        quantizer.set_global(operator_qspec)
+        operator_spec = qq.get_default_per_channel_symmetric_qnnpack_operator_spec()
+        quantizer.set_global(operator_spec)
         m = M().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
@@ -251,8 +251,8 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
         quantizer = QNNPackQuantizer()
-        operator_qspec = qq.get_default_per_channel_symmetric_qnnpack_operator_qspec()
-        quantizer.set_global(operator_qspec)
+        operator_spec = qq.get_default_per_channel_symmetric_qnnpack_operator_spec()
+        quantizer.set_global(operator_spec)
         m = M().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
@@ -265,8 +265,10 @@ class TestQuantizePT2E(QuantizationTestCase):
         )
 
         m = prepare_pt2e_quantizer(m, quantizer)
+        print("after prepare:", m)
         m(*example_inputs)
         m = convert_pt2e(m)
+        print("m:", m)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 5,
@@ -552,8 +554,8 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             before_fusion_result = m(*example_inputs)
             import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
             quantizer = QNNPackQuantizer()
-            operator_qspec = qq.get_default_per_channel_symmetric_qnnpack_operator_qspec()
-            quantizer.set_global(operator_qspec)
+            operator_spec = qq.get_default_per_channel_symmetric_qnnpack_operator_spec()
+            quantizer.set_global(operator_spec)
             m = prepare_pt2e_quantizer(m, quantizer)
             # checking that we inserted observers correctly for maxpool operator (input and
             # output share observer instance)
