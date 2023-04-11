@@ -47,6 +47,15 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (2) manual_seed_all(seed: int) -> None
         Sets the seed for generating random numbers for your devices.
 
+    (3) device_count() -> int:
+        Returns the number of `foo`s available.
+
+    (4) get_rng_state(device: Union[int, str, torch.device] = 'foo') -> Tensor:
+        Returns a list of ByteTensor representing the random number states of all devices.
+
+    (5) set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'foo') -> None:
+        Sets the random number generator state of the specified `foo` device.
+
     For more details, see https://pytorch.org/tutorials/advanced/extend_dispatcher.html#get-a-dispatch-key-for-your-backend
     For an existing example, see https://github.com/bdhirsh/pytorch_open_registration_example
 
