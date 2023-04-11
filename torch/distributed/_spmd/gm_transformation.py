@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch import fx
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.decomposition import select_decomp_table
+from torch.distributed._spmd.graph_optimization import comm_fusion_with_concat
 from torch.distributed._spmd.graph_utils import dump_graphs_to_files, OP
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
 from torch.utils._pytree import tree_flatten
@@ -115,11 +116,13 @@ class GraphModuleTransformation:
         self,
         num_iters: int,
         *,
+        enable_graph_optimization: bool = False,
         enable_inductor: bool = False,
         enable_cudagraphs: bool = False,
         dump_graphs: bool = False,
     ) -> None:
         self.num_iters = num_iters
+        self.enable_graph_optimization = enable_graph_optimization
         self.enable_inductor = enable_inductor
         self.enable_cudagraphs = enable_cudagraphs
         self.dump_graphs = dump_graphs
@@ -131,6 +134,8 @@ class GraphModuleTransformation:
             )
 
         iter_gm = IterGraphModule(gm)
+        if self.enable_graph_optimization:
+            comm_fusion_with_concat(iter_gm, 100)
         iter_gm.freeze_cross_iter_movement()
         iter_gm.setup(self.num_iters)
 
