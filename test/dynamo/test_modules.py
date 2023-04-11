@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import traceback
 import types
 import unittest
@@ -790,6 +791,27 @@ class SequentialWithDuplicatedModule(torch.nn.Module):
         return self.layer(x)
 
 
+class SequentialWithDuplicatedModule2(torch.nn.Module):
+    def __init__(self):
+        super(SequentialWithDuplicatedModule2, self).__init__()
+        self.relu = torch.nn.ReLU()
+        self.layer = torch.nn.Sequential(
+            collections.OrderedDict(
+                [
+                    ("linear1", torch.nn.Linear(10, 20)),
+                    ("relu1", self.relu),
+                    ("linear2", torch.nn.Linear(20, 20)),
+                    ("relu2", self.relu),
+                    ("linear3", torch.nn.Linear(20, 10)),
+                    ("relu3", self.relu),
+                ]
+            )
+        )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -859,6 +881,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
     test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
     test_sequential_with_duplicated_module = make_test(SequentialWithDuplicatedModule())
+    test_sequential_with_duplicated_module2 = make_test(
+        SequentialWithDuplicatedModule2()
+    )
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
