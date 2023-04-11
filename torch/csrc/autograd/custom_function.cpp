@@ -29,7 +29,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
 }
 
 // This function has two main goals:
-//  1) Use the user-provided jvp function to populate the the outputs' forward
+//  1) Use the user-provided jvp function to populate the outputs' forward
 //  gradient 2) Perform error checking to ensure that view and inplace ops are
 //  properly handled
 //
@@ -474,7 +474,7 @@ void check_variable_result(
     throw std::runtime_error(ss.str());
   }
 
-  if (original.sizes().vec() != result.sizes().vec()) {
+  if (original.sym_sizes().vec() != result.sym_sizes().vec()) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the size of value";
     throw std::runtime_error(ss.str());

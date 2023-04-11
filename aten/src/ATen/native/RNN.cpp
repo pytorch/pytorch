@@ -5,6 +5,7 @@
 #include <ATen/core/List.h>
 #include <ATen/Context.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/mps/MPSDevice.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
@@ -723,6 +724,19 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       auto hy = params.matmul_hr(std::get<0>(result));
       // Slice off the workspace argument (it's needed only for AD).
       return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
+    } else if (input.is_mps()) {
+      // MPS has issues with inplace ops, workaround to prevent using inplace ops for mps.
+      const auto gates = params.linear_hh(hx).add_(
+        pre_compute_input ? input : params.linear_ih(input));
+      auto chunked_gates = gates.unsafe_chunk(4, 1);
+      auto ingate = chunked_gates[0].sigmoid();
+      auto forgetgate = chunked_gates[1].sigmoid();
+      auto cellgate = chunked_gates[2].tanh();
+      auto outgate = chunked_gates[3].sigmoid();
+      auto cy = (forgetgate * cx).add_(ingate * cellgate);
+      auto hy = outgate * cy.tanh();
+      hy = params.matmul_hr(hy);
+      return std::make_tuple(std::move(hy), std::move(cy));
     }
 
     const auto gates = params.linear_hh(hx).add_(
@@ -1422,11 +1436,15 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 #ifdef USE_MPS
-  if (_input.is_mps() && !bidirectional) {
-    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
+  if (_input.is_mps() && (mps::is_macos_13_or_newer() || num_layers == 1)) {
+    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
     return return_values;
+  } else if (_input.is_mps()) {
+    TORCH_WARN_ONCE("Native multi-layer LSTM support in MPS available only on MacOS 13 onwards.",
+                    " Falling back to LSTMCell iteration.",
+                    " This may have performance implications.");
   }
 #endif
   // if cells are of different size, that means projections are used

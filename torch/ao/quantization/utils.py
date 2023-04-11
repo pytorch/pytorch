@@ -152,12 +152,14 @@ def to_underlying_dtype(qdtype):
     return DTYPE_MAPPING[qdtype]
 
 def get_qparam_dict(observer_or_fake_quant):
+    from torch.ao.quantization.observer import PlaceholderObserver
+
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
     dtype = observer_or_fake_quant.dtype
     qparams = {"qscheme": qscheme, "dtype": dtype}
 
-    if not qscheme:
-        return qparams
+    if not qscheme or isinstance(observer_or_fake_quant, PlaceholderObserver):
+        return {"qscheme": None, "dtype": dtype}
 
     if is_per_tensor(qscheme):
         qscheme = torch.per_tensor_affine
@@ -176,6 +178,11 @@ def get_qparam_dict(observer_or_fake_quant):
     scale, zero_point = observer_or_fake_quant.calculate_qparams()
     qparams["scale"] = scale
     qparams["zero_point"] = zero_point
+
+    if hasattr(observer_or_fake_quant, "quant_min"):
+        qparams["quant_min"] = observer_or_fake_quant.quant_min
+    if hasattr(observer_or_fake_quant, "quant_max"):
+        qparams["quant_max"] = observer_or_fake_quant.quant_max
 
     return qparams
 
@@ -336,7 +343,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
         # The actual values of initial_qmin and initial_qmax will be reset below.
         if dtype == torch.qint32:
-            initial_quant_min, initial_quant_max = 0, 2**31 - 1
+            initial_quant_min, initial_quant_max = 0, 2**32 - 1
         else:
             initial_quant_min, initial_quant_max = 0, 255
         # The following assignment of self.qmin and self.qmax to the local variables and the if check refine the
@@ -355,7 +362,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             ), "quantization range should be positive and not exceed the maximum bit range (=256)."
         elif dtype == torch.qint32:
             assert (
-                0 < qrange_len <= 2**31
+                0 < qrange_len <= 2**32
             ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
         if reduce_range:
             quant_min, quant_max = quant_min // 2, quant_max // 2
@@ -596,7 +603,7 @@ def get_fqn_to_example_inputs(
     e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
           "sub.linear1": (tensor4,), ...}
 
-    Used to make quantizing submodules easier now that FX Graph Mode Quantization requries
+    Used to make quantizing submodules easier now that FX Graph Mode Quantization requires
     example inputs.
 
     Also works for keyword arguments with default values, we would flatten keyword
@@ -643,96 +650,6 @@ def get_fqn_to_example_inputs(
         # restore the module call even if there is an exception
         torch.nn.Module.__call__ = orig_module_call
     return fqn_to_example_inputs
-
-def _get_lstm_with_individually_observed_parts(
-    float_lstm: torch.nn.LSTM,
-    # Use Callable instead of _PartialWrapper here to avoid circular dependencies
-    linear_output_obs_ctr: Optional[Callable] = None,
-    sigmoid_obs_ctr: Optional[Callable] = None,
-    tanh_obs_ctr: Optional[Callable] = None,
-    cell_state_obs_ctr: Optional[Callable] = None,
-    hidden_state_obs_ctr: Optional[Callable] = None,
-) -> torch.ao.nn.quantizable.LSTM:
-    """
-    Return an observed `torch.ao.nn.quantizable.LSTM` created from a `torch.nn.LSTM`
-    with specific observers or fake quantizes assigned to the inner ops or submodules.
-
-    In both eager and FX graph mode quantization, `torch.ao.nn.quantizable.LSTM` is
-    used as an observed custom module, which is responsible for inserting its own
-    observers. By default, all inner ops inherit the parent custom module's QConfig.
-    Users who wish to override this behavior may extend `torch.ao.nn.quantizable.LSTM`
-    and use this helper function to customize the observer insertion logic.
-
-    Args:
-        `float_lstm`: The float LSTM module
-        `linear_output_obs_ctr`: observer or fake quantize for linear outputs Wx + b,
-            where W is the weight matrix, b is the bias, and x is either the inputs
-            or the hidden state from the previous layer (if any)
-        `sigmoid_obs_ctr`: observer or fake quantize for sigmoid activations
-        `tanh_obs_ctr`: observer or fake quantize for tanh activations
-        `cell_state_obs_ctr`: observer or fake quantize for the cell state
-        `hidden_state_obs_ctr`: observer or fake quantize for the hidden state and
-            the output
-
-    Return:
-        A `torch.ao.nn.quantizable.LSTM` with the specified observers or fake quantizes
-        attached to the inner submodules.
-    """
-    def make_qconfig(obs_ctr: Callable) -> torch.ao.quantization.QConfig:
-        """
-        Make a QConfig with fixed qparams observers or fake quantizes.
-        """
-        if isinstance(obs_ctr(), torch.ao.quantization.FakeQuantizeBase):
-            weight = torch.ao.quantization.default_weight_fake_quant
-        else:
-            weight = torch.ao.quantization.default_weight_observer
-        return torch.ao.quantization.QConfig(activation=obs_ctr, weight=weight)
-
-    observed_lstm = torch.ao.nn.quantizable.LSTM(
-        float_lstm.input_size, float_lstm.hidden_size, float_lstm.num_layers, float_lstm.bias,
-        float_lstm.batch_first, float_lstm.dropout, float_lstm.bidirectional)
-
-    # Assign QConfigs with fixed qparams to all inner submodules
-    # Module hierarchy: LSTM > _LSTMLayer > _LSTMSingleLayer (forward or backward) > LSTMCell
-    for layer in observed_lstm.layers:
-        inner_layers = [layer.layer_fw]
-        if float_lstm.bidirectional:
-            inner_layers.append(layer.layer_bw)
-        for inner_layer in inner_layers:
-            cell = inner_layer.cell
-            if linear_output_obs_ctr is not None:
-                qconfig = make_qconfig(linear_output_obs_ctr)
-                cell.igates.qconfig = qconfig
-                cell.hgates.qconfig = qconfig
-            if sigmoid_obs_ctr is not None:
-                qconfig = make_qconfig(sigmoid_obs_ctr)
-                cell.input_gate.qconfig = qconfig
-                cell.forget_gate.qconfig = qconfig
-                cell.output_gate.qconfig = qconfig
-            if tanh_obs_ctr is not None:
-                cell.cell_gate.qconfig = make_qconfig(tanh_obs_ctr)
-            if cell_state_obs_ctr is not None:
-                cell.fgate_cx_igate_cgate.qconfig = make_qconfig(cell_state_obs_ctr)
-                obs = cell_state_obs_ctr()
-                if hasattr(obs, "scale") and hasattr(obs, "zero_point"):
-                    cell.initial_cell_state_qparams = (obs.scale, obs.zero_point)
-                cell.cell_state_dtype = obs.dtype
-            if hidden_state_obs_ctr is not None:
-                cell.ogate_cy.qconfig = make_qconfig(hidden_state_obs_ctr)
-                obs = hidden_state_obs_ctr()
-                if hasattr(obs, "scale") and hasattr(obs, "zero_point"):
-                    cell.initial_hidden_state_qparams = (obs.scale, obs.zero_point)
-                cell.hidden_state_dtype = obs.dtype
-
-    # need to do this here to avoid circular dependency
-    from torch.ao.quantization.quantize import _add_observer_
-    # Insert the observers based on the previously attached QConfigs
-    # Pass in non_leaf_module_list to prevent the observers for sigmoid/tanh from being overridden
-    _add_observer_(  # type: ignore[attr-defined]
-        observed_lstm,
-        non_leaf_module_list=[torch.nn.Sigmoid, torch.nn.Tanh]
-    )
-    return observed_lstm
 
 __all__ = [
     "NodePattern",

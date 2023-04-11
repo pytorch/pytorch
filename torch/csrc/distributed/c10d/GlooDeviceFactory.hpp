@@ -21,7 +21,7 @@ class TORCH_API GlooDeviceFactory {
       const std::string& hostname);
 };
 
-C10_DECLARE_SHARED_REGISTRY(
+TORCH_DECLARE_SHARED_REGISTRY(
     GlooDeviceRegistry,
     ::gloo::transport::Device,
     const std::string&, /* interface */

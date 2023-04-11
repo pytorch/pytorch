@@ -46,12 +46,30 @@ def convert_instruction(i: dis.Instruction):
 
 
 class _NotProvided:
-    pass
+    def __repr__(self):
+        return "_NotProvided"
 
 
-def create_instruction(name, arg=None, argval=_NotProvided, target=None):
-    if argval is _NotProvided:
-        argval = arg
+def create_instruction(name, *, arg=None, argval=_NotProvided, target=None):
+    """
+    At most one of `arg`, `argval`, and `target` can be not None/_NotProvided.
+    This is to prevent ambiguity, e.g. does
+        create_instruction("LOAD_CONST", 5)
+    mean load the constant at co_consts[5], or load the constant 5?
+
+    If `arg` is not provided, it will be computed during assembly from
+    `argval` or `target`.
+
+    Do not use for LOAD_GLOBAL - use create_load_global instead.
+    """
+    assert name != "LOAD_GLOBAL"
+    cnt = (arg is not None) + (argval is not _NotProvided) + (target is not None)
+    if cnt > 1:
+        raise RuntimeError(
+            "only one of arg, argval, and target can be not None/_NotProvided"
+        )
+    if arg is not None and not isinstance(arg, int):
+        raise RuntimeError("instruction arg must be int or None")
     return Instruction(
         opcode=dis.opmap[name], opname=name, arg=arg, argval=argval, target=target
     )
@@ -63,9 +81,34 @@ def create_jump_absolute(target):
     return create_instruction(inst, target=target)
 
 
+def create_load_global(name, push_null):
+    """
+    `name` is the name of the global to be loaded.
+    `push_null` specifies whether or not a NULL should be pushed to the stack
+    before the global (Python 3.11+ only).
+
+    Python 3.11 changed the LOAD_GLOBAL instruction in that the first bit of
+    the instruction arg specifies whether a NULL should be pushed to the stack
+    before the global. The remaining bits of the instruction arg contain the
+    name index. See `create_call_function` for why this NULL is needed.
+
+    The instruction's `arg` is actually computed when assembling the bytecode.
+    For Python 3.11, push_null information is propagated through the arg.
+
+    NOTE: we don't use create_instruction since LOAD_GLOBAL is the only instruction
+    where both arg and argval need to be specified.
+    """
+    return Instruction(
+        opcode=dis.opmap["LOAD_GLOBAL"],
+        opname="LOAD_GLOBAL",
+        arg=push_null,
+        argval=name,
+    )
+
+
 def create_dup_top():
     if sys.version_info >= (3, 11):
-        return create_instruction("COPY", 1)
+        return create_instruction("COPY", arg=1)
     return create_instruction("DUP_TOP")
 
 
@@ -85,7 +128,7 @@ def create_rot_n(n):
     if sys.version_info >= (3, 11):
         # rotate can be expressed as a sequence of swap operations
         # e.g. rotate 3 is equivalent to swap 3, swap 2
-        return [create_instruction("SWAP", i) for i in range(n, 1, -1)]
+        return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
     # ensure desired rotate function exists
     if sys.version_info < (3, 8) and n >= 4:
@@ -95,7 +138,45 @@ def create_rot_n(n):
 
     if n <= 4:
         return [create_instruction("ROT_" + ["TWO", "THREE", "FOUR"][n - 2])]
-    return [create_instruction("ROT_N", n)]
+    return [create_instruction("ROT_N", arg=n)]
+
+
+def create_call_function(nargs, push_null):
+    """
+    Creates a sequence of instructions that makes a function call.
+
+    `push_null` is used in Python 3.11+ only. It is used in codegen when
+    a function call is intended to be made with the NULL + fn convention,
+    and we know that the NULL has not been pushed yet. We will push a
+    NULL and rotate it to the correct position immediately before making
+    the function call.
+    push_null should default to True unless you know you are calling a function
+    that you codegen'd with a null already pushed, for example
+    (assume `math` is available in the global scope),
+
+    create_load_global("math", True)  # pushes a null
+    create_instruction("LOAD_ATTR", argval="sqrt")
+    create_instruction("LOAD_CONST", argval=25)
+    create_call_function(1, False)
+    """
+    if sys.version_info >= (3, 11):
+        output = []
+        if push_null:
+            output.append(create_instruction("PUSH_NULL"))
+            output.extend(create_rot_n(nargs + 2))
+        output.append(create_instruction("PRECALL", arg=nargs))
+        output.append(create_instruction("CALL", arg=nargs))
+        return output
+    return [create_instruction("CALL_FUNCTION", arg=nargs)]
+
+
+def create_call_method(nargs):
+    if sys.version_info >= (3, 11):
+        return [
+            create_instruction("PRECALL", arg=nargs),
+            create_instruction("CALL", arg=nargs),
+        ]
+    return [create_instruction("CALL_METHOD", arg=nargs)]
 
 
 def lnotab_writer(lineno, byteno=0):
@@ -120,13 +201,13 @@ def lnotab_writer(lineno, byteno=0):
     return lnotab, update
 
 
-def linetable_writer(first_lineno):
+def linetable_310_writer(first_lineno):
     """
     Used to create typing.CodeType.co_linetable
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
-    This is the internal format of the line number table if Python >= 3.10
+    This is the internal format of the line number table for Python 3.10
     """
-    assert sys.version_info >= (3, 10)
+    assert sys.version_info >= (3, 10) and sys.version_info < (3, 11)
     linetable = []
     lineno = first_lineno
     lineno_delta = 0
@@ -155,25 +236,92 @@ def linetable_writer(first_lineno):
     return linetable, update, end
 
 
+def encode_varint(n):
+    """
+    6-bit chunk encoding of an unsigned integer
+    See https://github.com/python/cpython/blob/3.11/Objects/locations.md
+    """
+    assert n >= 0
+    b = [n & 63]
+    n >>= 6
+    while n > 0:
+        b[-1] |= 64
+        b.append(n & 63)
+        n >>= 6
+    return b
+
+
+def linetable_311_writer(first_lineno):
+    """
+    Used to create typing.CodeType.co_linetable
+    See https://github.com/python/cpython/blob/3.11/Objects/locations.md
+    This is the internal format of the line number table for Python 3.11
+    """
+    assert sys.version_info >= (3, 11)
+    linetable = []
+    lineno = first_lineno
+
+    def update(lineno_new, inst_size):
+        nonlocal lineno
+
+        def _update(delta, size):
+            assert 0 < size <= 8
+            # first byte - always use no column info code (13)
+            linetable.append(0b1_1101_000 + size - 1)
+            # encode signed int
+            if delta < 0:
+                delta = ((-delta) << 1) | 1
+            else:
+                delta <<= 1
+            # encode unsigned int
+            linetable.extend(encode_varint(delta))
+
+        if lineno_new is None:
+            lineno_delta = 0
+        else:
+            lineno_delta = lineno_new - lineno
+            lineno = lineno_new
+        while inst_size > 8:
+            _update(lineno_delta, 8)
+            inst_size -= 8
+        _update(lineno_delta, inst_size)
+
+    return linetable, update
+
+
 def assemble(instructions: List[Instruction], firstlineno):
     """Do the opposite of dis.get_instructions()"""
     code = []
-    if sys.version_info < (3, 10):
-        lnotab, update_lineno = lnotab_writer(firstlineno)
-    else:
-        lnotab, update_lineno, end = linetable_writer(firstlineno)
-
-    for inst in instructions:
-        if inst.starts_line is not None:
-            update_lineno(inst.starts_line, len(code))
-        arg = inst.arg or 0
-        code.extend((inst.opcode, arg & 0xFF))
-        if sys.version_info >= (3, 11):
+    if sys.version_info >= (3, 11):
+        lnotab, update_lineno = linetable_311_writer(firstlineno)
+        num_ext = 0
+        for inst in instructions:
+            if inst.opname == "EXTENDED_ARG":
+                inst_size = 1
+                num_ext += 1
+            else:
+                inst_size = instruction_size(inst) // 2 + num_ext
+                num_ext = 0
+            update_lineno(inst.starts_line, inst_size)
+            num_ext = 0
+            arg = inst.arg or 0
+            code.extend((inst.opcode, arg & 0xFF))
             for _ in range(instruction_size(inst) // 2 - 1):
                 code.extend((0, 0))
+    else:
+        if sys.version_info < (3, 10):
+            lnotab, update_lineno = lnotab_writer(firstlineno)
+        else:
+            lnotab, update_lineno, end = linetable_310_writer(firstlineno)
 
-    if sys.version_info >= (3, 10):
-        end(len(code))
+        for inst in instructions:
+            if inst.starts_line is not None:
+                update_lineno(inst.starts_line, len(code))
+            arg = inst.arg or 0
+            code.extend((inst.opcode, arg & 0xFF))
+
+        if sys.version_info >= (3, 10):
+            end(len(code))
 
     return bytes(code), bytes(lnotab)
 
@@ -268,32 +416,51 @@ def remove_load_call_method(instructions: List[Instruction]):
     return instructions
 
 
+def remove_jump_if_none(instructions: List[Instruction]):
+    new_insts = []
+    for inst in instructions:
+        new_insts.append(inst)
+        if "_NONE" in inst.opname:
+            is_op = create_instruction("IS_OP", arg=int("NOT" in inst.opname))
+            is_op.argval = is_op.arg
+            jump_op = create_instruction(
+                "POP_JUMP_FORWARD_IF_TRUE"
+                if "FORWARD" in inst.opname
+                else "POP_JUMP_BACKWARD_IF_TRUE",
+                target=inst.target,
+            )
+            # modify inst in-place to preserve jump target
+            inst.opcode = dis.opmap["LOAD_CONST"]
+            inst.opname = "LOAD_CONST"
+            inst.arg = None
+            inst.argval = None
+            new_insts.extend([is_op, jump_op])
+    instructions[:] = new_insts
+
+
 def explicit_super(code: types.CodeType, instructions: List[Instruction]):
-    """convert super() with no args into explict arg form"""
+    """convert super() with no args into explicit arg form"""
     cell_and_free = (code.co_cellvars or tuple()) + (code.co_freevars or tuple())
     output = []
     for idx, inst in enumerate(instructions):
         output.append(inst)
         if inst.opname == "LOAD_GLOBAL" and inst.argval == "super":
             nexti = instructions[idx + 1]
-            if nexti.opname == "CALL_FUNCTION" and nexti.arg == 0:
+            if nexti.opname in ("CALL_FUNCTION", "PRECALL") and nexti.arg == 0:
                 assert "__class__" in cell_and_free
-                output.append(
-                    create_instruction(
-                        "LOAD_DEREF", cell_and_free.index("__class__"), "__class__"
-                    )
-                )
+                output.append(create_instruction("LOAD_DEREF", argval="__class__"))
                 first_var = code.co_varnames[0]
                 if first_var in cell_and_free:
-                    output.append(
-                        create_instruction(
-                            "LOAD_DEREF", cell_and_free.index(first_var), first_var
-                        )
-                    )
+                    output.append(create_instruction("LOAD_DEREF", argval=first_var))
                 else:
-                    output.append(create_instruction("LOAD_FAST", 0, first_var))
+                    output.append(create_instruction("LOAD_FAST", argval=first_var))
                 nexti.arg = 2
                 nexti.argval = 2
+                if nexti.opname == "PRECALL":
+                    # also update the following CALL instruction
+                    call_inst = instructions[idx + 2]
+                    call_inst.arg = 2
+                    call_inst.argval = 2
 
     instructions[:] = output
 
@@ -313,16 +480,16 @@ def fix_extended_args(instructions: List[Instruction]):
             inst.arg = 0
         elif inst.arg and inst.arg > 0xFFFFFF:
             maybe_pop_n(3)
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 24))
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 16))
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 24))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 16))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 8))
         elif inst.arg and inst.arg > 0xFFFF:
             maybe_pop_n(2)
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 16))
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 16))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 8))
         elif inst.arg and inst.arg > 0xFF:
             maybe_pop_n(1)
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+            output.append(create_instruction("EXTENDED_ARG", arg=inst.arg >> 8))
         output.append(inst)
 
     added = len(output) - len(instructions)
@@ -388,19 +555,85 @@ def debug_checks(code):
 
 HAS_LOCAL = set(dis.haslocal)
 HAS_NAME = set(dis.hasname)
+HAS_FREE = set(dis.hasfree)
+HAS_CONST = set(dis.hasconst)
 
 
-def fix_vars(instructions: List[Instruction], code_options):
-    varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
+def get_const_index(code_options, val):
+    for i, v in enumerate(code_options["co_consts"]):
+        # NOTE: stronger comparison is required, since we have
+        # examples where two values compare equal but have
+        # different semantic meaning in some cases, e.g.
+        # 0.0 == -0.0 but have different effects in torch.copysign.
+        if val is v:
+            return i
+    code_options["co_consts"] += (val,)
+    return len(code_options["co_consts"]) - 1
+
+
+def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=None):
+    # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
+    if sys.version_info < (3, 11):
+        assert varname_from_oparg is None
+        varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
+        freenames = {
+            name: idx
+            for idx, name in enumerate(
+                code_options["co_cellvars"] + code_options["co_freevars"]
+            )
+        }
+    else:
+        assert callable(varname_from_oparg)
+        allnames = {}
+        for idx in itertools.count():
+            try:
+                name = varname_from_oparg(idx)
+                allnames[name] = idx
+            except IndexError:
+                break
+        varnames = {name: allnames[name] for name in code_options["co_varnames"]}
+        freenames = {
+            name: allnames[name]
+            for name in code_options["co_cellvars"] + code_options["co_freevars"]
+        }
     for i in range(len(instructions)):
-        if instructions[i].opcode in HAS_LOCAL:
-            instructions[i].arg = varnames[instructions[i].argval]
+
+        def should_compute_arg():
+            # argval is prioritized over arg
+            return instructions[i].argval is not _NotProvided
+
+        if instructions[i].opname == "LOAD_GLOBAL":
+            # 3.11 LOAD_GLOBAL requires both arg and argval - see create_load_global
+            assert instructions[i].arg is not None
+            assert instructions[i].argval is not _NotProvided
+            if sys.version_info >= (3, 11):
+                instructions[i].arg = (names[instructions[i].argval] << 1) + (
+                    instructions[i].arg % 2
+                )
+            else:
+                instructions[i].arg = names[instructions[i].argval]
+        elif instructions[i].opcode in HAS_LOCAL:
+            if should_compute_arg():
+                instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
-            instructions[i].arg = names[instructions[i].argval]
+            if should_compute_arg():
+                instructions[i].arg = names[instructions[i].argval]
+        elif instructions[i].opcode in HAS_FREE:
+            if should_compute_arg():
+                instructions[i].arg = freenames[instructions[i].argval]
+        elif instructions[i].opcode in HAS_CONST:
+            # NOTE: only update argval if arg is not provided. This assumes
+            # that any additions to co_consts are appended.
+            if instructions[i].arg is None:
+                # cannot use a dictionary since consts may not be hashable
+                instructions[i].arg = get_const_index(
+                    code_options, instructions[i].argval
+                )
+                assert instructions[i].arg >= 0
 
 
-def transform_code_object(code, transformations, safe=False):
+def get_code_keys():
     # Python 3.11 changes to code keys are not fully documented.
     # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
     # for new format.
@@ -436,6 +669,11 @@ def transform_code_object(code, transformations, safe=False):
             "co_cellvars",
         ]
     )
+    return keys
+
+
+def transform_code_object(code, transformations, safe=False):
+    keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
@@ -449,7 +687,13 @@ def transform_code_object(code, transformations, safe=False):
 def clean_and_assemble_instructions(
     instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
 ) -> Tuple[List[Instruction], types.CodeType]:
-    fix_vars(instructions, code_options)
+    code_options["co_nlocals"] = len(code_options["co_varnames"])
+    varname_from_oparg = None
+    if sys.version_info >= (3, 11):
+        # temporary code object with updated names
+        tmp_code = types.CodeType(*[code_options[k] for k in keys])
+        varname_from_oparg = tmp_code._varname_from_oparg
+    fix_vars(instructions, code_options, varname_from_oparg=varname_from_oparg)
 
     dirty = True
     while dirty:
@@ -466,7 +710,6 @@ def clean_and_assemble_instructions(
         code_options["co_linetable"] = lnotab
 
     code_options["co_code"] = bytecode
-    code_options["co_nlocals"] = len(code_options["co_varnames"])
     code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
         "co_posonlyargcount"
@@ -477,13 +720,26 @@ def clean_and_assemble_instructions(
     return instructions, types.CodeType(*[code_options[k] for k in keys])
 
 
+def populate_kw_names_argval(instructions, consts):
+    for inst in instructions:
+        if inst.opname == "KW_NAMES":
+            inst.argval = consts[inst.arg]
+
+
 def cleaned_instructions(code, safe=False):
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
+    if sys.version_info >= (3, 11):
+        populate_kw_names_argval(instructions, code.co_consts)
     check_offsets(instructions)
     virtualize_jumps(instructions)
     strip_extended_args(instructions)
     if not safe:
-        remove_load_call_method(instructions)
+        if sys.version_info < (3, 11):
+            remove_load_call_method(instructions)
+        else:
+            remove_jump_if_none(instructions)
+            update_offsets(instructions)
+            devirtualize_jumps(instructions)
         explicit_super(code, instructions)
     return instructions
 

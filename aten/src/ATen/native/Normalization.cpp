@@ -137,8 +137,10 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 
   // inference contiguous path
   if (all_contiguous) {
-    batch_norm_cpu_stub(kCPU, output, input, weight, bias,
-        save_mean, save_invstd, running_mean, running_var, train, eps);
+    if (input.numel() != 0) {
+      batch_norm_cpu_stub(kCPU, output, input, weight, bias,
+          save_mean, save_invstd, running_mean, running_var, train, eps);
+    }
     return std::make_tuple(output, save_mean, save_invstd);
   }
 

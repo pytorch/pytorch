@@ -38,7 +38,7 @@ def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
           (Shard(0), Shard(0)) -> (Replicate(), Shard(0))
           Here the Shard(0) -> Shard(0) for mesh dimension 2 is actually
           a reshard, because in the first case it's a sub-sharding of an already tensor dimension 0,
-          and in the second case, it's the first sharding on tensor dimesnion 0.
+          and in the second case, it's the first sharding on tensor dimension 0.
     """
     # detect mis-aligned repeated shardings
     from collections import defaultdict
@@ -86,7 +86,7 @@ def _redistribute_with_local_tensor(
     sorted_placements.sort(key=_replicate_then_shard)
 
     for i, (current, target) in sorted_placements:
-        my_coordinate = device_mesh.get_coordinate_on_dim(i)
+        my_coordinate = device_mesh.get_coordinate()
         num_chunks = device_mesh.size(dim=i)
         # TODO: what should happen if rank is not in the mesh?
         # see issue https://github.com/pytorch/tau/pull/492
@@ -131,7 +131,7 @@ def _redistribute_with_local_tensor(
                     with_padding=False,
                     contiguous=False,
                 )
-                new_local_tensor = shards[my_coordinate].clone()
+                new_local_tensor = shards[my_coordinate[i]].clone()
             else:
                 # NOTE: this case shouldn't hit _decompose_sharding, decompose sharding should
                 # decompose Shard(0) -> Shard(1) into Shard(0) -> Replicate -> Shard(1)
@@ -149,7 +149,7 @@ def _redistribute_with_local_tensor(
             if current.is_replicate():
                 # For replicate -> partial, we zero out all other ranks of the current mesh dim
                 # and leave only 1 rank have the data, to perform a "zero cost" reshard.
-                if my_coordinate is not None and my_coordinate != 0:
+                if my_coordinate[i] != 0:
                     new_local_tensor = local_tensor.zero_()
                 else:
                     new_local_tensor = local_tensor
@@ -188,8 +188,10 @@ def redistribute_dtensor(
         new_local_tensor,
         device_mesh,
         placements,
-        size=input.size(),
+        shape=input.size(),
+        dtype=input.dtype,
         requires_grad=local_tensor.requires_grad,
+        stride=input.stride(),
     )
 
 
@@ -217,7 +219,7 @@ class Redistribute(torch.autograd.Function):
         # In this case we keep the grad as replicate, this is because we don't
         # want to convert the replicated gradients back to partial, although
         # that's logically conform with the same layout, converting the gradients
-        # back to partial is acutally useless as you would have to do reduce later
+        # back to partial is actually useless as you would have to do reduce later
         # which would be more expensive than keeping it replicate! For this reason,
         # we keep the replicate grad here.
         # TODO: see if this make sense for all cases.
