@@ -135,7 +135,7 @@ class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
         id_ref: Callable[[Type[object]], str],
-        source_ref: Callable[[Source], str],
+        source_ref: Callable[[Source, List[Source]], str],
         user_scope: Optional[Dict[str, object]],
         check_fn_manager: "CheckFunctionManager",
         *,
@@ -837,7 +837,7 @@ class CheckFunctionManager:
         # the config is set).
         py_code = make_guard_fn(code_parts, closure_vars, part_list)
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
-            print("GUARDS", code)
+            print("GUARDS", py_code)
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
