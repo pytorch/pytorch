@@ -958,7 +958,7 @@ def propagate_dtypes_for_known_nodes(
                     arg_list = [arg]
 
                 for cur_arg in arg_list:
-                    # hard coded arguments show up but aren't `Node` typed and do not need dtype propgated
+                    # hard coded arguments show up but aren't `Node` typed and do not need dtype propagated
                     if isinstance(cur_arg, torch.fx.node.Node):
                         _maybe_propagate_dtype_for_node(
                             cur_arg, arg_type, node_name_to_match_result_with_qconfig)
@@ -1151,7 +1151,7 @@ def insert_observers_for_model(
     input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
     processed_nodes: Set[Node] = set()
-    # initalize target_dtype_info
+    # initialize target_dtype_info
     for node in model.graph.nodes:
         node.meta["target_dtype_info"] = copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
