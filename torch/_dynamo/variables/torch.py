@@ -13,8 +13,9 @@ from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
 
-from .. import config, variables
+from .. import variables
 from ..allowed_functions import torch_get_name
+from ..config_utils import config
 from ..exc import unimplemented
 from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
