@@ -510,7 +510,7 @@ def _store_based_barrier(rank, store, timeout):
             )
 
     logger.info(
-        f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes."
+        "Rank %s: Completed store-based barrier for key:%s with %s nodes.", rank, store_key, world_size
     )
 
 
@@ -1042,6 +1042,9 @@ def _new_process_group_helper(
             backend_type = ProcessGroup.BackendType.MPI
             if not backend_class:
                 return GroupMember.NON_GROUP_MEMBER
+            # create new process group with accurate rank and size
+            if pg.rank() == -1 and pg.size() == -1:
+                pg = ProcessGroup(backend_prefix_store, backend_class.rank(), backend_class.size(), base_pg_options)
         elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:

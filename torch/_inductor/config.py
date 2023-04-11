@@ -61,7 +61,7 @@ search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") ==
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 # control store vs recompute heuristic
-# For fanouts, rematearialization can lead to exponential blowup. So, have
+# For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
@@ -95,7 +95,7 @@ conv_1x1_as_mm = False
 split_reductions = True
 
 # Only save random seed for backwards rather than full mask
-lowmem_dropout = False
+lowmem_dropout = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -203,10 +203,10 @@ class triton:
     cudagraph_trees = False
 
     # assertions not on the fast path, steady state
-    fast_cudagraph_asserts = True
+    slow_path_cudagraph_asserts = False
 
     # assertions on the fast path
-    slow_cudagraph_asserts = False
+    fast_path_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
@@ -264,7 +264,7 @@ class trace:
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
-    debug_log = True
+    debug_log = False
 
     # Save python logger call >=logging.INFO
     info_log = False
