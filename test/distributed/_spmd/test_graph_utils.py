@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 import os
-import unittest
 
 from torch.distributed._spmd.graph_utils import dump_graphs_to_files
 from torch.testing._internal.common_utils import run_tests
