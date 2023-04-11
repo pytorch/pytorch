@@ -217,7 +217,14 @@ class Shard(Placement):
         return hash(self.dim)
 
     def __repr__(self) -> str:
+        """
+        machine readable representation of the Shard placement
+        """
         return f"Shard(dim={self.dim})"
+
+    def __str__(self) -> str:
+        """human readable representation of the Shard placement"""
+        return f"S({self.dim})"
 
 
 class Replicate(Placement):
@@ -232,7 +239,16 @@ class Replicate(Placement):
         return -1
 
     def __repr__(self) -> str:
+        """
+        machine readable representation of the Replicate placement
+        """
         return "Replicate()"
+
+    def __str__(self) -> str:
+        """
+        human readable representation of the Replicate placement
+        """
+        return "R"
 
     def _replicate_tensor(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -292,7 +308,16 @@ class _Partial(Placement):
         return hash(self.reduce_op)
 
     def __repr__(self) -> str:
+        """
+        machine readable representation of the Partial placement
+        """
         return f"_Partial(reduce_op={self.reduce_op})"
+
+    def __str__(self) -> str:
+        """
+        human readable representation of the Partial placement
+        """
+        return "P"
 
 
 # used internally to propagate the placements

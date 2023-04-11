@@ -136,7 +136,9 @@ REQUIRE_COSINE_TOLERACE = {
 
 # non-deterministic output / cant check correctness
 NONDETERMINISTIC = {
+    # https://github.com/pytorch/pytorch/issues/98355
     "mobilenet_v3_large",
+    "vision_maskrcnn",  # eager variant
 }
 
 # These benchmarks took >600s on an i9-11900K CPU
