@@ -36,6 +36,7 @@ from torch.ao.ns.fx.utils import (
 import copy
 import itertools
 from torch._inductor.compile_fx import compile_fx
+from enum import Enum
 
 
 @skipIfNoQNNPACK
@@ -604,12 +605,371 @@ class TestX86InductorQuantizePT2EModels(QuantizationTestCase):
     @xfailIfPython311
     def test_conv2d_with_quantizer_api(self):
         class Mod(torch.nn.Module):
-            def __init__(self, ) -> None:
+            def __init__(self, use_bias: bool = False) -> None:
                 super().__init__()
-                self.conv = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1))
+                self.conv = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1), bias=use_bias)
 
             def forward(self, x):
                 return self.conv(x)
+
+        with override_quantized_engine("x86"):
+            with torch.no_grad():
+                for use_bias in [True, False]:
+                    m = Mod(use_bias=use_bias).eval()
+                    m_copy = copy.deepcopy(m)
+                    example_inputs = (torch.randn(2, 3, 16, 16),)
+                    # program capture
+                    m, guards = torchdynamo.export(
+                        m,
+                        *copy.deepcopy(example_inputs),
+                        aten_graph=True,
+                        tracing_mode="real",
+                    )
+
+                    before_fusion_result = m(*example_inputs)
+                    import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+                    quantizer = X86InductorQuantizer()
+                    operator_spec = xiq.get_default_x86_inductor_operator_spec()
+                    quantizer.set_global(operator_spec)
+                    # Insert Observer
+                    m = prepare_pt2e_quantizer(m, quantizer)
+                    after_prepare_result = m(*example_inputs)
+                    m = convert_pt2e(m)
+                    node_occurrence = {
+                        # one for input and weight of the conv, one for output for the conv
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
+                    }
+                    node_list = [
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                        ns.call_function(torch.ops.aten.convolution.default),
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                    ]
+                    self.checkGraphModuleNodes(m,
+                                               expected_node_occurrence=node_occurrence,
+                                               expected_node_list=node_list)
+
+    @skipIfNoX86
+    @xfailIfPython311
+    def test_conv2d_unary_with_quantizer_api(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, inplace_relu: bool = False, use_bias: bool = False) -> None:
+                super().__init__()
+                self.conv = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1), bias=use_bias)
+                self.relu = nn.ReLU(inplace=inplace_relu)
+
+            def forward(self, x):
+                return self.relu(self.conv(x))
+
+        inplace_relu_list = [True, False]
+        use_bias_list = [True, False]
+        with override_quantized_engine("x86"):
+            with torch.no_grad():
+                for inplace_relu, use_bias in itertools.product(inplace_relu_list, use_bias_list):
+                    m = Mod(inplace_relu=inplace_relu, use_bias=use_bias).eval()
+                    m_copy = copy.deepcopy(m)
+                    example_inputs = (torch.randn(2, 3, 16, 16),)
+                    # program capture
+                    m, guards = torchdynamo.export(
+                        m,
+                        *copy.deepcopy(example_inputs),
+                        aten_graph=True,
+                        tracing_mode="real",
+                    )
+
+                    before_fusion_result = m(*example_inputs)
+                    import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+                    quantizer = X86InductorQuantizer()
+                    operator_spec = xiq.get_default_x86_inductor_operator_spec()
+                    quantizer.set_global(operator_spec)
+                    # Insert Observer
+                    m = prepare_pt2e_quantizer(m, quantizer)
+                    after_prepare_result = m(*example_inputs)
+                    m = convert_pt2e(m)
+                    node_occurrence = {
+                        # one for input and weight of the conv, one for output for the conv
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
+                    }
+                    node_list = [
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                        ns.call_function(torch.ops.aten.convolution.default),
+                        ns.call_function(torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default),
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                    ]
+                    self.checkGraphModuleNodes(m,
+                                               expected_node_occurrence=node_occurrence,
+                                               expected_node_list=node_list)
+
+    @skipIfNoX86
+    @xfailIfPython311
+    def test_conv2d_binary_with_quantizer_api(self):
+        class Conv2DType(Enum):
+            left = 1
+            right = 2
+            both = 3
+
+        class Mod(torch.nn.Module):
+            def __init__(self,
+                         inplace_add: bool = False,
+                         conv2d_type: Conv2DType = Conv2DType.left,
+                         use_bias: bool = False,
+                         ) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=use_bias
+                )
+                self.conv2 = torch.nn.Conv2d(
+                    in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=use_bias
+                )
+                self.relu = nn.ReLU()
+                self.inplace_add = inplace_add
+                self.conv2d_type = conv2d_type
+
+            def forward(self, x):
+                if self.conv2d_type == Conv2DType.left:
+                    if self.inplace_add:
+                        tmp = self.conv(x)
+                        tmp += self.relu(x)
+                        return tmp
+                    else:
+                        return self.conv(x) + self.relu(x)
+                elif self.conv2d_type == Conv2DType.right:
+                    if self.inplace_add:
+                        tmp = self.relu(x)
+                        tmp += self.conv(x)
+                        return tmp
+                    else:
+                        return self.relu(x) + self.conv(x)
+                elif self.conv2d_type == Conv2DType.both:
+                    if self.inplace_add:
+                        tmp = self.conv(x)
+                        tmp += self.conv2(x)
+                        return tmp
+                    else:
+                        return self.conv(x) + self.conv2(x)
+
+
+        inplace_add_list = [True, False]
+        conv2d_type_list = [Conv2DType.left, Conv2DType.right, Conv2DType.both]
+        use_bias_list = [True, False]
+        with override_quantized_engine("x86"):
+            with torch.no_grad():
+                for inplace_add, conv2d_type, use_bias in itertools.product(inplace_add_list, conv2d_type_list, use_bias_list):
+                    print("conv2d_type is: {}".format(conv2d_type), flush=True)
+                    m = Mod(inplace_add=inplace_add, conv2d_type=conv2d_type, use_bias=use_bias).eval()
+                    m_copy = copy.deepcopy(m)
+                    example_inputs = (torch.randn(2, 3, 16, 16),)
+                    # program capture
+                    m, guards = torchdynamo.export(
+                        m,
+                        *copy.deepcopy(example_inputs),
+                        aten_graph=True,
+                        tracing_mode="real",
+                    )
+
+                    before_fusion_result = m(*example_inputs)
+                    import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+                    quantizer = X86InductorQuantizer()
+                    operator_spec = xiq.get_default_x86_inductor_operator_spec()
+                    quantizer.set_global(operator_spec)
+                    # Insert Observer
+                    m = prepare_pt2e_quantizer(m, quantizer)
+                    print("m after prepare_pt2e_quantizer is: {}".format(m), flush=True)
+                    after_prepare_result = m(*example_inputs)
+                    m = convert_pt2e(m)
+                    print("m after convert_pt2e is: {}".format(m), flush=True)
+                    # from torch.fx.passes.graph_drawer import FxGraphDrawer
+                    # g = FxGraphDrawer(m, "resnet50")
+                    # g.get_dot_graph().write_svg("/root/test_x86_inductor_quantizer.svg")
+                    if conv2d_type != Conv2DType.both:
+                        node_occurrence = {
+                            # one for input and weight of the conv
+                            # one for output for the conv
+                            # one for extra input node of add
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
+                        }
+                    else:
+                        node_occurrence = {
+                            # one for input and weight of the conv
+                            # one for output for the conv
+                            # 2 conv will share same input quant/dequant
+                            # one for extra input node of add
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 2,
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 2,
+                        }
+                    node_list = [
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                        ns.call_function(torch.ops.aten.convolution.default),
+                        ns.call_function(torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor),
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                    ]
+                    self.checkGraphModuleNodes(m,
+                                               expected_node_occurrence=node_occurrence,
+                                               expected_node_list=node_list)
+
+    @skipIfNoX86
+    @xfailIfPython311
+    def test_conv2d_binary_unary_with_quantizer_api(self):
+        class Conv2DType(Enum):
+            left = 1
+            right = 2
+            both = 3
+
+        class Mod(torch.nn.Module):
+            def __init__(self,
+                         inplace_add: bool = False,
+                         conv2d_type: Conv2DType = Conv2DType.left,
+                         inplace_relu: bool = False,
+                         use_bias: bool = False,
+                         ) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=use_bias
+                )
+                self.conv2 = torch.nn.Conv2d(
+                    in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=use_bias
+                )
+                self.relu = nn.ReLU()
+                self.inplace_add = inplace_add
+                self.conv2d_type = conv2d_type
+                self.relu2 = nn.ReLU(inplace=inplace_relu)
+
+            def forward(self, x):
+                if self.conv2d_type == Conv2DType.left:
+                    if self.inplace_add:
+                        tmp = self.conv(x)
+                        tmp += self.relu(x)
+                        return self.relu2(tmp)
+                    else:
+                        return self.relu2(self.conv(x) + self.relu(x))
+                elif self.conv2d_type == Conv2DType.right:
+                    if self.inplace_add:
+                        tmp = self.relu(x)
+                        tmp += self.conv(x)
+                        return self.relu2(tmp)
+                    else:
+                        return self.relu2(self.relu(x) + self.conv(x))
+                elif self.conv2d_type == Conv2DType.both:
+                    if self.inplace_add:
+                        tmp = self.conv(x)
+                        tmp += self.conv2(x)
+                        return self.relu2(tmp)
+                    else:
+                        return self.relu2(self.conv(x) + self.conv2(x))
+
+        inplace_add_list = [True, False]
+        conv2d_type_list = [Conv2DType.left, Conv2DType.right, Conv2DType.both]
+        inplace_relu_list = [True, False]
+        use_bias_list = [True, False]
+        with override_quantized_engine("x86"):
+            with torch.no_grad():
+                for inplace_add, conv2d_type, inplace_relu, use_bias in itertools.product(
+                        inplace_add_list,
+                        conv2d_type_list,
+                        inplace_relu_list,
+                        use_bias_list,
+                ):
+                    print("conv2d_type is: {}".format(conv2d_type), flush=True)
+                    m = Mod(inplace_add=inplace_add, conv2d_type=conv2d_type, inplace_relu=inplace_relu, use_bias=use_bias).eval()
+                    m_copy = copy.deepcopy(m)
+                    example_inputs = (torch.randn(2, 3, 16, 16),)
+                    # program capture
+                    m, guards = torchdynamo.export(
+                        m,
+                        *copy.deepcopy(example_inputs),
+                        aten_graph=True,
+                        tracing_mode="real",
+                    )
+
+                    before_fusion_result = m(*example_inputs)
+                    import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+                    quantizer = X86InductorQuantizer()
+                    operator_spec = xiq.get_default_x86_inductor_operator_spec()
+                    quantizer.set_global(operator_spec)
+                    # Insert Observer
+                    m = prepare_pt2e_quantizer(m, quantizer)
+                    print("m after prepare_pt2e_quantizer is: {}".format(m), flush=True)
+                    after_prepare_result = m(*example_inputs)
+                    m = convert_pt2e(m)
+                    print("m after convert_pt2e is: {}".format(m), flush=True)
+                    # from torch.fx.passes.graph_drawer import FxGraphDrawer
+                    # g = FxGraphDrawer(m, "resnet50")
+                    # g.get_dot_graph().write_svg("/root/test_x86_inductor_quantizer.svg")
+                    if conv2d_type != Conv2DType.both:
+                        node_occurrence = {
+                            # one for input and weight of the conv
+                            # one for output for the conv
+                            # one for extra input node of add
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
+                        }
+                    else:
+                        node_occurrence = {
+                            # one for input and weight of the conv
+                            # one for output for the conv
+                            # 2 conv will share same input quant/dequant
+                            # one for extra input node of add
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 2,
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 2,
+                        }
+                    node_list = [
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                        ns.call_function(torch.ops.aten.convolution.default),
+                        ns.call_function(torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor),
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                    ]
+                    self.checkGraphModuleNodes(m,
+                                               expected_node_occurrence=node_occurrence,
+                                               expected_node_list=node_list)
+
+    @skipIfNoX86
+    @xfailIfPython311
+    def test_conv2d_serials_binary_unary_with_quantizer_api(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, ) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=True
+                )
+                self.conv2 = torch.nn.Conv2d(
+                    in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=True
+                )
+                self.conv3 = torch.nn.Conv2d(
+                    in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=True
+                )
+                self.conv4 = torch.nn.Conv2d(
+                    in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=True
+                )
+                self.relu = nn.ReLU()
+                self.relu2 = nn.ReLU()
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                res1 = self.relu(self.conv2(x1) + self.conv3(x1))
+                res2 = self.relu2(self.conv4(res1) + res1)
+                return res2
 
         with override_quantized_engine("x86"):
             with torch.no_grad():
@@ -631,19 +991,29 @@ class TestX86InductorQuantizePT2EModels(QuantizationTestCase):
                 quantizer.set_global(operator_spec)
                 # Insert Observer
                 m = prepare_pt2e_quantizer(m, quantizer)
+                print("m after prepare_pt2e_quantizer is: {}".format(m), flush=True)
                 after_prepare_result = m(*example_inputs)
                 m = convert_pt2e(m)
+                print("m after convert_pt2e is: {}".format(m), flush=True)
+                # from torch.fx.passes.graph_drawer import FxGraphDrawer
+                # g = FxGraphDrawer(m, "resnet50")
+                # g.get_dot_graph().write_svg("/root/test_x86_inductor_quantizer.svg")
                 node_occurrence = {
-                    # one for input and weight of the conv, one for output for the conv
-                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
-                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
-                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
-                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 5,
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 5,
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 4,
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 4,
                 }
                 node_list = [
                     ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
                     ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
                     ns.call_function(torch.ops.aten.convolution.default),
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                    ns.call_function(torch.ops.aten.convolution.default),
+                    ns.call_function(torch.ops.aten.convolution.default),
+                    ns.call_function(torch.ops.aten.add.Tensor),
+                    ns.call_function(torch.ops.aten.relu.default),
                     ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
                     ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
                 ]

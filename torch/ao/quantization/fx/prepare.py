@@ -719,13 +719,22 @@ def _maybe_insert_input_observers_for_node(
     # Look through every input arg.  If that arg's target dtype does not
     # match the current node's target dtype, insert an observer.
     new_args = []
+    arg_idx = 0
     for arg in node.args:
+        if node.meta["target_dtype_info"].get("args_act_index", None):
+            if arg_idx not in node.meta["target_dtype_info"]["args_act_index"]:
+                # if node.meta["target_dtype_info"]["args_act_index"] defined,
+                # Only insert observer to corresponding idx
+                new_args.append(arg)
+                arg_idx += 1
+                continue
         new_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
             node, arg, qconfig, model, named_modules, graph,
             qhandler,
             prepare_custom_config,
             backend_config)
         new_args.append(new_arg)
+        arg_idx += 1
 
     new_kwargs = {}
     for k, kwarg in node.kwargs.items():
