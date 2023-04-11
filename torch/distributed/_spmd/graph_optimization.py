@@ -439,3 +439,41 @@ def comm_fusion_with_concat(
     else:
         if begin < len(comm_blocks):
             _fuse_with_cat(gm, comm_blocks[begin:end], node_indices)
+
+
+@graph_optimization_pass(run_after=("comm_fusion_with_concat",))
+def schedule_comm_wait(gm: IterGraphModule) -> None:
+    """
+    Delay the execution of wait tensors of allreduce until its first user.
+    """
+    comm_blocks = get_all_comm_blocks(gm, (CommType.ALLREDUCE, "all_reduce"))
+
+    # Find all the end users.
+    allreduce_users: Set[fx.Node] = set()
+    for allreduce in comm_blocks:
+        for output in allreduce.outputs:
+            allreduce_users.update(output.users)
+
+    node_indices = {node: i for i, node in enumerate(gm.graph.nodes)}
+    for allreduce in comm_blocks:
+        # Find the earliest users.
+        assert (
+            len(allreduce.outputs) >= 1
+        ), f"Found a allreduce that has zero outputs/users -- {allreduce}."
+        # Initialize the target_node to be the first user of the first output.
+        target_node = next(iter(next(iter(allreduce.outputs)).users))
+        target_node_index = 2**31
+        for user in (user for output in allreduce.outputs for user in output.users):
+            index = node_indices[user]
+            if index < target_node_index:
+                target_node = user
+                target_node_index = index
+
+        # Move wait nodes and all the subsequent output nodes before the
+        # earliest user.
+        wait_idx = -1
+        for wait_idx, node in enumerate(allreduce.node_list):
+            if node == allreduce.wait_nodes[0]:
+                break
+        assert wait_idx >= 0
+        gm.graph.move_before(allreduce.node_list[wait_idx:], target_node)
