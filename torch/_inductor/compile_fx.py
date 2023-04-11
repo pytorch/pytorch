@@ -31,7 +31,12 @@ from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes
 from .graph import GraphLowering
-from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
+from .utils import (
+    developer_warning,
+    get_dtype_size,
+    has_incompatible_cudagraph_ops,
+    is_cpu_device,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)

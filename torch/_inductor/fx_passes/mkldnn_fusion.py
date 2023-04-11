@@ -411,7 +411,7 @@ def _register_unary_fusion():
         _register_hardtanh_fusion_lowering(pattern, computation_op)
 
 
-def _register_inplace_fusion_lowering():
+def _register_inplace_fusion():
     binary_ops = [aten.add, ops.add]
     fusion_ops = [mkldnn._convolution_pointwise_.binary]
     for computation_call, computation_op in zip(
@@ -509,6 +509,6 @@ def _register_binary_unary_fusion():
 
 def _mkldnn_fusion_init():
     _register_unary_fusion()
-    _register_inplace_fusion_lowering()
+    _register_inplace_fusion()
     _register_binary_unary_fusion()
     _register_binary_fusion()

@@ -24,6 +24,7 @@ from ..pattern_matcher import (
 )
 from ..virtualized import V
 
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
@@ -44,6 +45,7 @@ def post_grad_passes(gm: torch.fx.GraphModule):
             _mkldnn_fusion_init()
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
+
     gm.graph.lint()
 
 
