@@ -1,3 +1,5 @@
+import functools
+
 import torch
 
 from .. import ir
@@ -255,6 +257,7 @@ if torch._C.has_mkldnn:
         for pattern, computation_op in zip(_hardtanh_patterns, computation_ops):
             _register_hardtanh_fusion_lowering(pattern, computation_op)
 
+    @functools.lru_cache(None)
     def _mkldnn_fusion_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_unary_fusion()
