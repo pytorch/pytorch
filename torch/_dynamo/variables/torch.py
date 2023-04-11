@@ -840,7 +840,6 @@ class TorchHigherOrderOperator(VariableTracker):
 
             args = []
             # One argument to graph per sub_args
-            # TODO (awgu): Do we need to de-dup here?
             for a in sub_args:
                 if isinstance(a, TensorVariable):
                     tx.output.create_graph_input(a.as_proxy().node.name)
