@@ -193,7 +193,11 @@ __global__ void amp_update_scale_cuda_kernel(float* current_scale,
     // so growth_tracker is incremented before comparing to growth_interval.
     auto successful = (*growth_tracker) + 1;
     if (successful == growth_interval) {
-      *current_scale = (*current_scale)*growth_factor;
+      auto new_scale = static_cast<float>((*current_scale)*growth_factor);
+      // Do not grow the scale past fp32 bounds to inf.
+      if (isfinite_ensure_cuda_math(new_scale)) {
+          *current_scale = new_scale;
+      }
       *growth_tracker = 0;
     } else {
       *growth_tracker = successful;

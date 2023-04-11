@@ -2521,6 +2521,20 @@ torch.cuda.synchronize()
                         actual = actual.squeeze()
                     self.assertEqual(state_control[k], actual)
 
+    def test_grad_scale_will_not_overflow(self):
+        net = torch.nn.Linear(5,1).cuda()
+        optimizer = torch.optim.Adam(net.parameters())
+        scaler = torch.cuda.amp.GradScaler(growth_interval=1)
+        for _ in range(150):
+            optimizer.zero_grad()
+            x = torch.randn(1,5).cuda()
+            y = 1e-30 * torch.randn(1,1).cuda()
+            l = ((net(x)-y)**2).mean()
+            scaler.scale(l).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        assert(scaler._scale is not float('inf') and scaler._scale is not float('nan'))
+
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
