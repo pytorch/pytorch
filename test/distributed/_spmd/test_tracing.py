@@ -684,6 +684,47 @@ class TraceTrainStepTest(DTensorTestBase):
         self.assertEqual(id(gm), id(train_step.__dict__[COMPILED_OBJECT_KEY].gm))
         self.assertEqual(graph_optimization.call_count, 1)
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_buffer(self):
+        class BufferModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+                self.register_buffer("dummy_buffer", torch.ones(10, 10))
+
+            def forward(self, x):
+                # N.B.: setting requires_grad in forward, as deepcopy does not
+                # work for requires_grad=True buffers.
+                self.dummy_buffer.requires_grad = True
+                return torch.matmul(self.fc(x), self.dummy_buffer)
+
+        class AssertOptimizer(torch.optim.Optimizer):
+            def __init__(self, params, lr):
+                super().__init__(params, dict(lr=lr))
+
+            def step(self):
+                assert len(self.param_groups[0]["params"]) == 2
+                with torch.no_grad():
+                    for p in self.param_groups[0]["params"]:
+                        p += p.grad
+
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        torch.manual_seed(0)
+        mod = BufferModule().cuda(self.rank)
+        inp = torch.randn(2, 10).cuda(self.rank)
+        opt = AssertOptimizer(mod.parameters(), lr=0.01)
+
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+        ddp_opt = AssertOptimizer(ddp_mod.parameters(), lr=0.01)
+
+        self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
+        self.assertEqual(mod.dummy_buffer, ddp_mod.module.dummy_buffer)
+
 
 class CoverageTest(DTensorTestBase):
     @property
@@ -765,6 +806,36 @@ class CoverageTest(DTensorTestBase):
         tgt = torch.empty(2, dtype=torch.long).random_(0, 10).to(self.rank)
 
         self._test_train_step(train_step, mod, inp, tgt)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_replicated_embedding(self):
+        N, D, B = 10, 8, 2
+
+        class EmbeddingModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = nn.Embedding(N, D)
+                self.norm = nn.LayerNorm(D, elementwise_affine=False)
+                self.fc = nn.Linear(D, D)
+                self.softmax = nn.Softmax(dim=1)
+                self.lss = nn.NLLLoss()
+
+            def forward(self, ids, tgt):
+                return self.lss(self.softmax(self.fc(self.norm(self.emb(ids)))), tgt)
+
+        torch.manual_seed(0)
+        mod = EmbeddingModule().cuda(self.rank)
+
+        @compile()
+        def train_step(mod, opt, ids, tgt):
+            mod(ids, tgt).sum().backward()
+            opt.step()
+
+        ids = torch.randint(0, N, (B,)).cuda(self.rank)
+        tgt = torch.empty(B, dtype=torch.long).random_(0, D).to(self.rank)
+
+        self._test_train_step(train_step, mod, ids, tgt)
 
 
 if __name__ == "__main__":
