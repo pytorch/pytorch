@@ -76,7 +76,10 @@ def supported_symmetric_quantized_operators() -> List[str]:
 
 def get_supported_symmetric_quantized_operator_qspec_and_operators() -> List[OperatorQSpecAndOperators]:
     supported_operator_qspec_and_operators: List[OperatorQSpecAndOperators] = []
-    for operator_qspec in [get_default_symmetric_qnnpack_operator_qspec(), get_default_per_channel_symmetric_qnnpack_operator_qspec()]:
+    for operator_qspec in [
+            get_default_symmetric_qnnpack_operator_qspec(),
+            get_default_per_channel_symmetric_qnnpack_operator_qspec()
+    ]:
         ops = supported_symmetric_quantized_operators()
         supported_operator_qspec_and_operators.append(OperatorQSpecAndOperators(operator_qspec, ops))
     return copy.deepcopy(supported_operator_qspec_and_operators)
@@ -121,8 +124,8 @@ def get_default_per_channel_symmetric_qnnpack_operator_qspec():
     operator_qspec = OperatorQuantizationSpec(act_qspec, weight_qspec, bias_qspec)
     return operator_qspec
 
-def get_supported_spec_and_operators() -> List[OperatorQSpecAndOperators]:
-    return get_supported_symmetric_quantized_spec_and_operators()
+def get_supported_operator_qspec_and_operators() -> List[OperatorQSpecAndOperators]:
+    return get_supported_symmetric_quantized_operator_qspec_and_operators()
 
 class OperatorQuantizationSpecConfig:
 
@@ -135,7 +138,11 @@ class OperatorQuantizationSpecConfig:
         self.global_spec = operator_qspec
         return self
 
-    def set_operator_type(self, operator_type: str, operator_qspec: Optional[OperatorQuantizationSpec]) -> OperatorQuantizationSpecConfig:
+    def set_operator_type(
+            self,
+            operator_type: str,
+            operator_qspec: Optional[OperatorQuantizationSpec]
+    ) -> OperatorQuantizationSpecConfig:
         self.operator_type_specs[operator_type] = operator_qspec
         return self
 
@@ -399,7 +406,12 @@ class QNNPackQuantizer(Quantizer):
             "_annotated": True,
         }
 
-    def _annotate_input_out_obs_sharing_op(self, op: Callable, node: Node, operator_qspec: Optional[OperatorQuantizationSpec]) -> None:
+    def _annotate_input_out_obs_sharing_op(
+            self,
+            op: Callable,
+            node: Node,
+            operator_qspec: Optional[OperatorQuantizationSpec]
+    ) -> None:
         io_obs_sharing_node = node
         if io_obs_sharing_node.op != "call_function" or io_obs_sharing_node.target != op:
             return
