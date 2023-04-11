@@ -29,11 +29,11 @@ RUN_CPU = HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS
 RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN
 
 
-class CppWrapperTemplate:
+class CppWrapperTemplate(TorchTestCase):
     pass
 
 
-class CudaWrapperTemplate:
+class CudaWrapperTemplate(TorchTestCase):
     pass
 
 

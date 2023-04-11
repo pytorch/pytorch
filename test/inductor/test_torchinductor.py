@@ -519,7 +519,7 @@ class SweepInputs2:
                 cls.gen_template(name1, name2)
 
 
-class CommonTemplate:
+class CommonTemplate(TorchTestCase):
     def test_bool(self):
         def fn(a, b):
             return (

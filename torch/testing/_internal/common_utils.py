@@ -2271,7 +2271,6 @@ class TestCase(expecttest.TestCase):
             self._run_with_retry(result=result, num_runs_left=0, report_only=report_only,
                                  num_red=num_red, num_green=num_green + 1)
 
-
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:
