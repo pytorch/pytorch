@@ -1528,7 +1528,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(
         data_type_.Match<T>(),
         "Tensor type mismatch, caller expects elements to be ",
-        caffe2::TypeMeta::TypeName<T>(),
+        caffe2::TypeMeta::TypeName<std::remove_const_t<T>>(),
         ", while tensor contains ",
         data_type_.name(),
         ". ");
