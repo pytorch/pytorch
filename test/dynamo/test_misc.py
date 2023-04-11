@@ -23,7 +23,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
-from torch._dynamo import bytecode_transformation, config, graph_break
+from torch._dynamo import bytecode_transformation, graph_break
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
@@ -3839,10 +3839,7 @@ def fn():
         else:
             self.assertTrue(guard_failure is not None)
             if not torch._dynamo.config.dynamic_shapes:
-                self.assertExpectedInline(
-                    guard_failure[0],
-                    """L['k'] == 3""",
-                )
+                self.assertExpectedInline(guard_failure[0], """L['k'] == 3""")
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_guard_failure_fn_shape_control(self):
@@ -3948,10 +3945,7 @@ def fn():
 
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
-        self.assertExpectedInline(
-            guard_failure[0],
-            """len(L['x']) == 10""",
-        )
+        self.assertExpectedInline(guard_failure[0], """len(L['x']) == 10""")
 
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
@@ -4442,10 +4436,7 @@ def fn():
         dis.dis(fn)
         self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
 
-    @config.patch(
-        dynamic_shapes=True,
-        automatic_dynamic_shapes=False,
-    )
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -4528,10 +4519,7 @@ def fn():
         ):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
 
-    @config.patch(
-        dynamic_shapes=True,
-        automatic_dynamic_shapes=False,
-    )
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_raise_guard_partial_constraint_no_graph_break(self):
         y = torch.randn([3, 3, 3])
 

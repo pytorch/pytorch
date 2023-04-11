@@ -40,11 +40,7 @@ ALL_DYNAMIC_XFAILS = {
 XFAIL_HITS = 0
 
 
-def make_dynamic_cls(
-    cls,
-    *,
-    static_default=False,
-):
+def make_dynamic_cls(cls, *, static_default=False):
     suffix = "_dynamic_shapes"
     if static_default:
         suffix += "_static_default"
