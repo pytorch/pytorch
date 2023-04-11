@@ -628,7 +628,7 @@ def parse_min_max_nnodes(nnodes: str):
 
 def determine_local_world_size(nproc_per_node: str):
     try:
-        logging.info("Using nproc_per_node=%s.", nproc_per_node)
+        logging.info(f"Using nproc_per_node={nproc_per_node}.")
         return int(nproc_per_node)
     except ValueError as e:
         if nproc_per_node == "cpu":

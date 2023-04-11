@@ -94,8 +94,6 @@ conv_1x1_as_mm = False
 # being reduced over is large (by splitting it)
 split_reductions = True
 
-# Only save random seed for backwards rather than full mask
-lowmem_dropout = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -203,10 +201,10 @@ class triton:
     cudagraph_trees = False
 
     # assertions not on the fast path, steady state
-    slow_path_cudagraph_asserts = False
+    fast_cudagraph_asserts = True
 
     # assertions on the fast path
-    fast_path_cudagraph_asserts = False
+    slow_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
@@ -264,7 +262,7 @@ class trace:
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
-    debug_log = False
+    debug_log = True
 
     # Save python logger call >=logging.INFO
     info_log = False

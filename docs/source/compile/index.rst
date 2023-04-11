@@ -78,4 +78,3 @@ please check out the references below.
 
    get-started
    technical-overview
-   nn-module

@@ -188,7 +188,7 @@ class FileTimerServer:
         self._log_event("watchdog started", None)
 
     def stop(self) -> None:
-        log.info("Stopping %s", type(self).__name__)
+        log.info(f"Stopping {type(self).__name__}")
         self._stop_signaled = True
         if self._watchdog_thread:
             log.info("Stopping watchdog thread...")
@@ -247,13 +247,13 @@ class FileTimerServer:
                     expired_timer = timer
                     break
             if signal <= 0:
-                log.info("No signal specified with worker=[%s]. Do not reap it.", worker_pid)
+                log.info(f"No signal specified with worker=[{worker_pid}]. Do not reap it.")
                 continue
             if self._reap_worker(worker_pid, signal):
-                log.info("Successfully reaped worker=[%s] with signal=%s", worker_pid, signal)
+                log.info(f"Successfully reaped worker=[{worker_pid}] with signal={signal}")
                 self._log_event("kill worker process", expired_timer)
             else:
-                log.error("Error reaping worker=[%s]. Will retry on next watchdog.", worker_pid)
+                log.error(f"Error reaping worker=[{worker_pid}]. Will retry on next watchdog.")
         self.clear_timers(reaped_worker_pids)
 
     def _get_scopes(self, timer_requests: List[FileTimerRequest]) -> List[str]:
@@ -325,7 +325,7 @@ class FileTimerServer:
             os.kill(worker_pid, signal)
             return True
         except ProcessLookupError:
-            log.info("Process with pid=%s does not exist. Skipping", worker_pid)
+            log.info(f"Process with pid={worker_pid} does not exist. Skipping")
             return True
         except Exception as e:
             log.error(f"Error terminating pid={worker_pid}", exc_info=e)

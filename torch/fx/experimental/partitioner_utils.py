@@ -128,7 +128,7 @@ def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:
 def get_latency_of_one_partition(
     partition: Partition, node_to_latency_mapping: Dict[Node, NodeLatency]
 ) -> PartitionLatency:
-    """Given a partition and its nodes' latency, return a PartitionLatency for this partition"""
+    """Given a partiton and its nodes' latency, return a PartitionLatency for this partition"""
 
     def get_top_nodes(partition: Partition) -> List[Node]:
         """Given a partition, return a list of nodes on the top bfs level"""
@@ -273,7 +273,7 @@ def get_latency_of_partitioned_graph(
     partition_to_latency_mapping: Dict[Partition, PartitionLatency],
     transfer_rate_bytes_per_sec: float,
 ):
-    """Given all partitions in a graph, find the critical path among all partitions
+    """Given all paritions in a graph, find the critical path among all partitions
     and return its latency as the latency of the whole graph
     """
 

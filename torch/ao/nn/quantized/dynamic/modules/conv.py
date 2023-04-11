@@ -267,7 +267,7 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'DynamicQuantizedConvTranspose1d'
+        return 'DynamicQuantizedConvTranpose1d'
 
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -328,7 +328,7 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'DynamicQuantizedConvTranspose2d'
+        return 'DynamicQuantizedConvTranpose2d'
 
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -389,7 +389,7 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'DynamicQuantizedConvTranspose3d'
+        return 'DynamicQuantizedConvTranpose3d'
 
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue

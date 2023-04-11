@@ -60,7 +60,7 @@ def is_input_source(source):
     ]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class LocalSource(Source):
     local_name: str
 
@@ -74,7 +74,7 @@ class LocalSource(Source):
         return f"L[{repr(self.local_name)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class RandomValueSource(Source):
     random_call_index: int
 
@@ -92,7 +92,7 @@ class RandomValueSource(Source):
         return f"random_value_{self.random_call_index}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class GeneratorStateSource(Source):
     device: str
     initial_seed: int
@@ -109,7 +109,7 @@ class GeneratorStateSource(Source):
         return f"L[{name}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class GlobalSource(Source):
     global_name: str
 
@@ -123,7 +123,7 @@ class GlobalSource(Source):
         return f"G[{repr(self.global_name)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class GlobalWeakRefSource(Source):
     global_name: str
 
@@ -140,19 +140,22 @@ class GlobalWeakRefSource(Source):
         return f"G[{repr(self.global_name)}]()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class AttrSource(Source):
     base: Source
     member: str
 
-    def __post_init__(self):
-        assert self.base, "Can't construct an AttrSource without a valid base source"
-        if "." in self.member:
-            member_parts = self.member.split(".")
-            object.__setattr__(
-                self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
-            )
-            object.__setattr__(self, "member", member_parts[-1])
+    def __init__(self, base, member):
+        super().__init__()
+        assert base, "Can't construct an AttrSource without a valid base source"
+        if "." in member:
+            member_parts = member.split(".")
+            self.base = AttrSource(base, ".".join(member_parts[:-1]))
+            self.member = member_parts[-1]
+        else:
+            self.base = base
+            self.member = member
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return self.base.reconstruct(codegen) + codegen.create_load_attrs(self.member)
@@ -166,7 +169,7 @@ class AttrSource(Source):
         return f"{self.base.name()}.{self.member}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class ParamBufferSource(AttrSource):
     def guard_source(self):
         return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
@@ -178,7 +181,7 @@ class TensorProperty(enum.Enum):
     STORAGE_OFFSET = 2
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class TensorPropertySource(Source):
     base: Source
     prop: TensorProperty
@@ -209,7 +212,7 @@ class TensorPropertySource(Source):
             raise AssertionError(f"unhandled {self.prop}")
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class NegateSource(Source):
     base: Source
 
@@ -227,30 +230,29 @@ class NegateSource(Source):
         return f"{self.base.name()}.__neg__()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class DefaultsSource(Source):
     base: Source
     idx_key: Union[int, str]
-    is_kw: bool = False
-    field: str = dataclasses.field(init=False, repr=False, compare=False)
-    _name: str = dataclasses.field(init=False, repr=False, compare=False)
+    is_kw: bool
+    field: str
 
-    def __post_init__(self):
+    def __init__(self, base, idx_key, is_kw=False):
+        super().__init__()
         assert (
-            self.base
+            base
         ), "Base must be a valid source in order to properly track and guard this Defaults to its origin."
+        self.base = base
+        self.idx_key = idx_key
+        self.is_kw = is_kw
         if self.is_kw:
-            assert isinstance(self.idx_key, str)
-            object.__setattr__(self, "field", "__kwdefaults__")
-            object.__setattr__(
-                self, "_name", f"{self.base.name()}.{self.field}['{self.idx_key}']"
-            )
+            assert isinstance(idx_key, str)
+            self.field = "__kwdefaults__"
+            self._name = f"{self.base.name()}.{self.field}['{self.idx_key}']"
         else:
-            assert isinstance(self.idx_key, int)
-            object.__setattr__(self, "field", "__defaults__")
-            object.__setattr__(
-                self, "_name", f"{self.base.name()}.{self.field}[{self.idx_key}]"
-            )
+            assert isinstance(idx_key, int)
+            self.field = "__defaults__"
+            self._name = f"{self.base.name()}.{self.field}[{self.idx_key}]"
 
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
@@ -270,7 +272,7 @@ class DefaultsSource(Source):
         return self._name
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class GetItemSource(Source):
     base: Source
     index: Any
@@ -302,7 +304,7 @@ class GetItemSource(Source):
                 return f"{self.base.name()}[{self.index!r}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
         codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
@@ -316,7 +318,7 @@ class TupleIteratorGetItemSource(GetItemSource):
         return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class TypeSource(Source):
     base: Source
 
@@ -334,7 +336,7 @@ class TypeSource(Source):
         return f"type({self.base.name()})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class SuperSource(Source):
     type: Source
     obj: Source
@@ -358,7 +360,7 @@ class SuperSource(Source):
         return f"super({self.type.name()}, {self.obj.name()})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class ODictGetItemSource(Source):
     base: Source
     index: Any
@@ -385,7 +387,7 @@ class ODictGetItemSource(Source):
             return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class NNModuleSource(Source):
     inner: Source
 
@@ -399,19 +401,18 @@ class NNModuleSource(Source):
         return self.inner.name()
 
 
-@dataclasses.dataclass(frozen=True)
 class NotNNModuleSource(NNModuleSource):
     def guard_source(self):
         return _GUARD_SOURCE_NOT_NN_MODULE[self.inner.guard_source()]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class FSDPNNModuleSource(NNModuleSource):
     def guard_source(self):
         return _GUARD_SOURCE_FSDP_MODULE[self.inner.guard_source()]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class DeterministicAlgorithmsSource(Source):
     def name(self):
         return ""
@@ -420,7 +421,7 @@ class DeterministicAlgorithmsSource(Source):
         return GuardSource.GLOBAL
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class ConstantSource(Source):
     source_name: str
 
@@ -440,7 +441,7 @@ class ConstantSource(Source):
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class ShapeEnvSource(Source):
     def name(self):
         return ""

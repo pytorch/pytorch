@@ -66,6 +66,14 @@ class C10_API Scalar {
     v.i = convert<int64_t, bool>(vv);
   }
 
+  template <
+      typename T,
+      typename std::enable_if<std::is_same<T, c10::SymBool>::value, bool>::type* =
+          nullptr>
+  Scalar(T vv) : tag(Tag::HAS_sb) {
+    v.i = convert<int64_t, c10::SymBool>(vv);
+  }
+
 #define DEFINE_ACCESSOR(type, name)                                   \
   type to##name() const {                                             \
     if (Tag::HAS_d == tag) {                                          \

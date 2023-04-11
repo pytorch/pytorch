@@ -1,6 +1,5 @@
 import builtins
 import collections
-import enum
 import importlib
 import itertools
 import logging
@@ -179,7 +178,7 @@ class GuardBuilder(GuardBuilderBase):
         if base not in self.argnames:
             if re.match(r"[a-zA-Z0-9_]+", base):
                 if re.match(r"^\d+$", base):
-                    log.warning("invalid var name: %s", guard)
+                    log.warning(f"invalid var name: {guard}")
                 self.argnames.append(base)
 
         return name
@@ -598,11 +597,7 @@ class GuardBuilder(GuardBuilderBase):
             weakref.ref(type(guarded_object)) if guarded_object is not None else None
         )
         obj_ref = None
-        # Not necessary to have weakref for Enum type, but there is a bug that
-        # makes hasattr(guarded_object.__class__, "__weakref__") return True.
-        if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
-            guarded_object, enum.Enum
-        ):
+        if hasattr(guarded_object.__class__, "__weakref__"):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(

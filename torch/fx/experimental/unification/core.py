@@ -8,9 +8,9 @@ from .dispatch import dispatch
 
 __all__ = ["reify", "unify"]
 
-###############
-# Reification #
-###############
+################
+# Reificiation #
+################
 
 @dispatch(Iterator, dict)
 def _reify(t, s):

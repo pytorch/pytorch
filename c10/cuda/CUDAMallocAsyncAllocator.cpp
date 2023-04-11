@@ -411,7 +411,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
       mallocAsync(&r, device, size, cuda::getCurrentCUDAStream(device));
@@ -818,7 +818,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       return nullptr;
     }
     int device;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
     return r;
@@ -829,7 +829,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       return nullptr;
     }
     int device;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, stream);
     return r;

@@ -369,7 +369,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):
-            log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
+            log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
@@ -431,13 +431,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 def check_if_dynamo_supported():
     if sys.platform == "win32":
         raise RuntimeError("Windows not yet supported for torch.compile")
-    if sys.version_info >= (3, 12):
-        raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
-    elif sys.version_info >= (3, 11):
-        warnings.warn(
-            "torch.compile support of Python 3.11 is experimental. "
-            "Program may generate incorrect results or segfault."
-        )
+    if sys.version_info >= (3, 11):
+        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
 
 
 def is_dynamo_supported():
@@ -538,7 +533,7 @@ def explain(f, *args, **kwargs):
 
         op_count += len(ops)
         ops_per_graph.append(ops)
-        if gm.compile_subgraph_reason.graph_break:
+        if gm.compile_subgraph_reason is not None:
             break_reasons.append(gm.compile_subgraph_reason)
         return gm.forward
 

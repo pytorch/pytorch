@@ -270,7 +270,7 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   m_current_allocated_memory -= buffer_block->size;
 }
 
-BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(const void* ptr) {
+BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(void* ptr) {
   auto it = m_allocated_buffers.find(ptr);
   if (it == m_allocated_buffers.end()) {
     return nullptr;
@@ -461,7 +461,7 @@ id<MTLBuffer> MPSHeapAllocatorImpl::malloc(size_t size, uint32_t usage) {
   return buffer_block ? buffer_block->buffer : nullptr;
 }
 
-bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
+bool MPSHeapAllocatorImpl::isSharedBuffer(void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
@@ -484,7 +484,7 @@ id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size
   return buffer_block->buffer;
 }
 
-ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(const void* ptr) {
+ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
@@ -495,7 +495,7 @@ ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(const void* ptr) {
   return -1;
 }
 
-void MPSHeapAllocatorImpl::setBufferShape(const void* ptr, const IntArrayRef& shape) {
+void MPSHeapAllocatorImpl::setBufferShape(void* ptr, const IntArrayRef& shape) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
@@ -506,7 +506,7 @@ void MPSHeapAllocatorImpl::setBufferShape(const void* ptr, const IntArrayRef& sh
   buffer_block->shape = shape.vec();
 }
 
-IntArrayRef MPSHeapAllocatorImpl::getBufferShape(const void* ptr) {
+IntArrayRef MPSHeapAllocatorImpl::getBufferShape(void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
@@ -609,7 +609,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     id<MTLBuffer> buf = _getAllocImpl().allocScalarBufferWithValue(value, size);
     return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
-  bool isSharedBuffer(const void* ptr) const override {
+  bool isSharedBuffer(void* ptr) const override {
     return _getAllocImpl().isSharedBuffer(ptr);
   }
   bool isSharedStorageSupported() const override {
@@ -618,13 +618,13 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   void emptyCache() const override {
     _getAllocImpl().emptyCache();
   }
-  ssize_t getUnalignedBufferSize(const void* ptr) const override {
+  ssize_t getUnalignedBufferSize(void* ptr) const override {
     return _getAllocImpl().getUnalignedBufferSize(ptr);
   }
-  IntArrayRef getBufferShape(const void* ptr) const override {
+  IntArrayRef getBufferShape(void* ptr) const override {
     return _getAllocImpl().getBufferShape(ptr);
   }
-  void setBufferShape(const void* ptr, const IntArrayRef& shape) const override {
+  void setBufferShape(void* ptr, const IntArrayRef& shape) const override {
     _getAllocImpl().setBufferShape(ptr, shape);
   }
   size_t getTotalAllocatedMemory() const override {

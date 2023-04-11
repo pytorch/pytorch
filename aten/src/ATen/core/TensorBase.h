@@ -561,7 +561,7 @@ class TORCH_API TensorBase {
   }
 
   void* data_ptr() const {
-    return this->unsafeGetTensorImpl()->mutable_data();
+    return this->unsafeGetTensorImpl()->data();
   }
 
   template <typename T>

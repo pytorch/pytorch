@@ -558,9 +558,7 @@ class BuiltinVariable(VariableTracker):
             except TypeError as exc:
                 if not has_constant_handler:
                     log.warning(
-                        "incorrect arg count %s %s and no constant handler",
-                        handler,
-                        exc,
+                        f"incorrect arg count {handler} {exc} and no constant handler"
                     )
                 handler = None
 
@@ -1054,7 +1052,7 @@ class BuiltinVariable(VariableTracker):
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
-        if isinstance(obj, variables.DataClassVariable):
+        if isinstance(obj, (variables.BlackHoleVariable, variables.DataClassVariable)):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)

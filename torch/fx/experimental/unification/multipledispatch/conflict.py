@@ -107,7 +107,7 @@ def edge(a, b, tie_breaker=hash):
 
 def ordering(signatures):
     """ A sane ordering of signatures to check, first to last
-    Topological sort of edges as given by ``edge`` and ``supercedes``
+    Topoological sort of edges as given by ``edge`` and ``supercedes``
     """
     signatures = list(map(tuple, signatures))
     edges = [(a, b) for a in signatures for b in signatures if edge(a, b)]

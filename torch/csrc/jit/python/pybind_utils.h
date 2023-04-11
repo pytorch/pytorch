@@ -33,7 +33,6 @@
 #include <ATen/core/function_schema.h>
 #include <c10/core/Stream.h>
 #ifdef USE_C10D_NCCL
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 #endif
 #include <c10/util/Exception.h>
