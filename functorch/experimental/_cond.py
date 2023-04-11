@@ -148,12 +148,6 @@ def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
     return true_outs
 
 
-# We cannot directly call fallthrough here due to issue #89037.
-@cond.py_impl(DispatchKey.PythonDispatcher)
-def cond_python_dispatcher(*args):
-    _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.PythonDispatcher))
-    return cond(*args)
-
 
 def _has_potential_branch_input_mutation(branch, inputs):
     """
@@ -191,6 +185,7 @@ def _has_potential_branch_input_alias(branch, inputs):
     """
     try:
         gm = make_fx(branch)(*inputs)
+
     except UnsupportedAliasMutationException:
         # this can happen when nested cond is
         # functionalized
@@ -242,6 +237,7 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
         return _wrap_all_tensors_to_functional(cond_return, level=interpreter.level())
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
+cond.fallthrough(DispatchKey.PythonDispatcher)
 cond.fallthrough(DispatchKey.PythonTLSSnapshot)
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)

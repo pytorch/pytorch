@@ -4,6 +4,7 @@ import copy
 import itertools
 import functools
 import unittest
+from contextlib import nullcontext
 
 try:
     import torchvision
@@ -1391,7 +1392,7 @@ class TestMkldnn(TestCase):
 
                 model1 = copy.deepcopy(model)
                 model2 = copy.deepcopy(model)
-                with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16):
+                with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16), torch.no_grad() if not training else nullcontext():
                     with torch.backends.mkldnn.flags(enabled=False):
                         torch.manual_seed(seed)
                         output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
