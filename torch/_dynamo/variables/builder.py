@@ -1167,11 +1167,10 @@ def wrap_to_fake_tensor_and_record(
             dynamic_dims = []
             constraint_dims = []
             automatic_marked_dims = set()
-            if isinstance(source, LocalSource):
-                frame_state = tx.output.frame_state
-                local_name = source.local_name
-                if frame_state and local_name in frame_state:
-                    automatic_marked_dims = frame_state[local_name]
+            frame_state = tx.output.frame_state
+            name = source.name()
+            if frame_state and name in frame_state:
+                automatic_marked_dims = frame_state[name]
 
             for i in range(e.dim()):
                 # NB: mark dynamic has precedence over static

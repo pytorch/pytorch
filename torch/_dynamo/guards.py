@@ -116,9 +116,10 @@ class InstalledGuardSubexpression:
     ]  # Note: List of sources for tensor checks and shape_env
     code: str
     origin: str
+    static_boundary: bool 
+    static_value: Optional[int]
 
-    # bound at guard failure time
-    scope = None
+    part_list: List["InstalledGuardSubexpression"] = None
 
     # tensor check only
     check_tensor_verbose = None
@@ -496,7 +497,7 @@ class GuardBuilder(GuardBuilderBase):
         origin = guard.origin
         for shape_guard in guards:
             self._produce_guard_code(
-                guard, [shape_guard.expr], shape_env=True, sources=shape_guard.sources
+                guard, [shape_guard.expr], shape_env=True, sources=shape_guard.sources, static_boundary=shape_guard.static_boundary, static_value=shape_guard.static_value
             )
 
     def TENSOR_MATCH(self, guard: Guard):
@@ -602,6 +603,8 @@ class GuardBuilder(GuardBuilderBase):
         provided_guarded_object=None,
         shape_env=False,
         sources=None,
+        static_boundary=False,
+        static_value=None,
     ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
@@ -622,7 +625,7 @@ class GuardBuilder(GuardBuilderBase):
             if sources is None:
                 sources = [guard.origin]
             installed_guard_subexpression = InstalledGuardSubexpression(
-                sources, code, func_name
+                sources, code, func_name, static_boundary, static_value
             )
             if shape_env:
                 self.shape_env_code.append(installed_guard_subexpression)
@@ -741,7 +744,7 @@ class CheckFunctionManager:
         args = ",".join(largs)
 
         validation_installed_guard_subexpression = InstalledGuardSubexpression(
-            None, "___guarded_code.valid", ""
+            None, "___guarded_code.valid", "", static_boundary=False, static_value=None,
         )
         installed_guard_subexpressions = []
         installed_guard_subexpressions.append(validation_installed_guard_subexpression)
@@ -771,9 +774,9 @@ class CheckFunctionManager:
             )
             check_tensors_fn = tensor_guards.check
             check_tensor_names = ", ".join(tensor_check_names)
-            check_tensor_slug = f"___check_tensors({check_tensor_names})"
+            check_tensor_func_str = f"___check_tensors({check_tensor_names})"
             installed_guard_subexpression = InstalledGuardSubexpression(
-                tensor_check_sources, check_tensor_slug, "TENSOR_MATCH"
+                tensor_check_sources, check_tensor_func_str, "TENSOR_MATCH", static_boundary=False, static_value=None
             )
             check_tensor_verbose = tensor_guards.check_verbose
             installed_guard_subexpression.tensor_check_names = tensor_check_names
@@ -792,6 +795,7 @@ class CheckFunctionManager:
                     [source_a, source_b],
                     f"{source_a.name()} is {source_b.name()}",
                     "DuplicateInputs",
+                    static_boundary=False,
                 )
                 installed_guard_subexpressions.append(installed_guard_subexpression)
             else:
@@ -814,37 +818,43 @@ class CheckFunctionManager:
 
         # Let's go over how this code works.
         #
-        # 1) The cache entry structure in eval_frame.c is stored in the frame's extra field. Each cache_entry is a node
-        # in a linked list. Each cache entry represents a compiled frame with specializations. In order to know if
-        # a cache entry's compiled frame is valid for reuse, we need to invoke a function, check_fn,
-        # to compare current state against the specializations captured at compile time.
+        # 1) The cache entry structure in eval_frame.c is stored in the frame's extra
+        # field. Each cache_entry is a node in a linked list. Each cache entry represents
+        # a compiled frame with specializations. In order to know if a cache entry's
+        # compiled frame is valid for reuse, we need to invoke a function, check_fn, to
+        # compare current state against the specializations captured at compile time.
         #
-        # 2) The function, check_fn, mentioned above, is defined by executing the function below, ___make_guard_fn
+        # 2) The function, check_fn, mentioned above, is defined by executing the
+        # function below, ___make_guard_fn
         #
-        # 3) In this, this code is rather confusing, because it defines both ___make_guard_fn and the lambda it produces
-        # which becomes the check_fn.
+        # 3) In this, this code is rather confusing, because it defines both
+        # ___make_guard_fn and the lambda it produces which becomes the check_fn.
         #
-        # 4) Everything in `code` becomes the check_fn. We write it out by first defining a `__fail`, which
-        # given a installed_guard_subexpression_idx, the index of a installed_guard_subexpression, extract a installed_guard_subexpression from the part_list and binds a scope
-        # to it. This is used later for evaluating the expression defined in installed_guard_subexpression, if necessary. `__fail` is
-        # invoked if a specific sub expression of a guard is failed.
+        # 4) Everything in code becomes the check_fn. We write it out by first
+        # defining a __fail, which given a installed_guard_subexpression_idx, the index
+        # of a installed_guard_subexpression, extract a installed_guard_subexpression
+        # from the part_list and binds a scope to it. This is used later for evaluating
+        # the expression defined in installed_guard_subexpression, if necessary.
+        # __fail is invoked if a specific sub expression of a guard is failed.
         #
-        # 5) The sub expressions of guards are defined 1 per installed_guard_subexpression. We iterate over the installed_guard_subexpressions and produce
-        # code that evaluates the code and if it is False, returns __fail(installed_guard_subexpression_idx), or if passing, proceeds until
-        # we've run all the sub expressions through.
-        #
-        # 6) In the event that we re-enter frame evaluation having failed a guard, we return the installed_guard_subexpression
-        # and pass it through to the frame evaluation callback. This is where downstream systems that handle guard
-        # failures hook in, like guard failure logging, or converting static shape failures to dynamic shapes (if
-        # the config is set).
-        py_code = make_guard_fn(installed_guard_subexpressions, closure_vars, part_list)
+        # 5) The sub expressions of guards are defined 1 per installed_guard_subexpression.
+        # We iterate over the installed_guard_subexpressions and produce a function that
+        # evaluates the code and if it is False, returns __fail(installed_guard_subexpression_idx),
+        # or if passing, proceeds until we've run all the sub expressions through.
+        # 6) In the event that we re-enter frame evaluation having failed a guard, we
+        # return the installed_guard_subexpression and pass it through to the frame
+        # evaluation callback. This is where downstream systems that handle guard
+        # failures hook in, like guard failure logging, or converting static shape
+        # failures to dynamic shapes (if the config is set).
+        py_code = make_guard_fn(installed_guard_subexpressions, closure_vars, part_list, self.output_graph.frame_state)
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", py_code)
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
-        # TODO(whc) maybe '.installed_guard_subexpressions' was only kept around for the guard callback? so we don't need both
+        # TODO(whc) maybe '.installed_guard_subexpressions' was only kept around for the guard callback? so we don't
+        # need both
         guard_fn.args = largs
         guard_fn.installed_guard_subexpressions = installed_guard_subexpressions
         # Grab only G, but preserve "G" because guards access it as "G"
@@ -870,6 +880,7 @@ class CheckFunctionManager:
 
 def record_guard_failure(
     guard_fail_fn,
+    f_locals,
     code,
     installed_guard_subexpression: InstalledGuardSubexpression,
 ) -> str:
@@ -881,7 +892,7 @@ def record_guard_failure(
         assert installed_guard_subexpression.tensor_check_names is not None
         reason = eval(
             f"___check_tensors_verbose({', '.join(installed_guard_subexpression.tensor_check_names)}, tensor_check_names={installed_guard_subexpression.tensor_check_names})",  # noqa: B950
-            installed_guard_subexpression.scope,
+            f_locals,
         )
     guard_failures[code].append(reason)
     if guard_fail_fn:
@@ -912,7 +923,7 @@ def guard_error_hook(
 set_guard_error_hook(guard_error_hook)
 
 
-def make_guard_fn(installed_guard_subexpressions, closure_vars, part_list):
+def make_guard_fn(installed_guard_subexpressions, closure_vars, part_list, frame_state):
     # TODO(voz): Move this somewhere more general so we don't have to violate heirarchy?
     from torch._inductor.utils import IndentedBuffer
 
@@ -922,13 +933,15 @@ def make_guard_fn(installed_guard_subexpressions, closure_vars, part_list):
         make_fail_buf.writeline(
             "installed_guard_subexpression = part_list[installed_guard_subexpression_idx]"
         )
-        make_fail_buf.writeline("installed_guard_subexpression.scope = locals()")
-        make_fail_buf.writeline("installed_guard_subexpression.scope['L'] = L")
-        for key, value in closure_vars.items():
-            if callable(value):
-                make_fail_buf.writeline(
-                    f"installed_guard_subexpression.scope['{key}'] = {key}"
-                )
+        # This line is awful. It does some really gross scope binding so that eval into `L` dict
+        # can work on the given source.name()
+        #
+        # Alternative impls:
+        #  1) regex to strip L out of name (brittle)
+        #  2) give every source a .local_name matching the heirarchy of .name, but without the L/G access.
+        make_fail_buf.writeline(
+            "installed_guard_subexpression.guard_scope = {'L': L} "
+        )
         make_fail_buf.writeline("return installed_guard_subexpression")
 
     assert len(part_list) == 0
@@ -938,6 +951,10 @@ def make_guard_fn(installed_guard_subexpressions, closure_vars, part_list):
     for i, installed_guard_subexpression in enumerate(
         unique_installed_guard_subexpressions
     ):
+        installed_guard_subexpression.part_list = part_list
+        if installed_guard_subexpression.static_boundary:
+            for source in installed_guard_subexpression.sources:
+                frame_state[source.name()] = installed_guard_subexpression.static_value
         part_list.append(installed_guard_subexpression)
         code_buf.writeline(f"if ({installed_guard_subexpression.code}) == False:")
         with code_buf.indent():

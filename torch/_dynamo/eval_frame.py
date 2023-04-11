@@ -364,15 +364,17 @@ def first_real_inst_idx(code):
 # reading out which guards failed, and if the right guard for triggering automatic dynamic
 # shape expansion failed, it takes all the installed_guard_subexpressions and mutates the frame_state with every dim that
 # would have failed a guard this frame.
-def frame_state_from_installed_guard_subexpression(
+def compute_dynamic_expansions(
     installed_guard_subexpression: "torch._dynamo.guards.InstalledGuardSubexpression",
-    frame_state: Dict[str, List[int]],
+    frame_state: Dict[str, Set[int]],
+    frame,
 ):
     from torch._dynamo.source import TensorProperty, TensorPropertySource
 
     if installed_guard_subexpression is None or not config.automatic_dynamic_shapes:
         return
 
+    guard_scope = installed_guard_subexpression.guard_scope
     def is_dynamic_source_candidate(source):
         if isinstance(source, TensorPropertySource):
             prop = source.prop
@@ -390,17 +392,30 @@ def frame_state_from_installed_guard_subexpression(
                     return True
         return False
 
-    def add_dynamic_dim(installed_guard_subexpression):
+    def expand_dynamic_frame_state(installed_guard_subexpression):
         if not installed_guard_subexpression.sources:
             # Not all code has sources! Ex: __guarded_code.valid
             return
+        if not installed_guard_subexpression.static_boundary:
+            return
         for source in installed_guard_subexpression.sources:
             if is_dynamic_source_candidate(source):
-                inner_source = source.base
-                name = inner_source.local_name
-                if name not in frame_state:
-                    frame_state[name] = set()
-                frame_state[name].add(source.idx)
+                name = source.name()
+                if name in frame_state:
+                    curr_value = frame_state[name]
+                    if curr_value is None: 
+                        # Already dynamic
+                        continue
+                    new_value = eval(name, guard_scope)
+                    if curr_value != new_value:
+                        # Mark it dynamic
+                        frame_state[name] = None
+                        # record the base name for this dim
+                        base_name = source.base.name()
+                        if base_name not in frame_state:
+                            frame_state[base_name] = set()
+                        frame_state[base_name].add(source.idx)
+                    
 
     # Determine if this installed_guard_subexpression is a candidate for automatic dynamic
     # marking. If the failed guard was not a shape_env size property guard,
@@ -410,10 +425,10 @@ def frame_state_from_installed_guard_subexpression(
     ):
         # The guard was not a candidate for automatic dynamic marking.
         return
-    installed_guard_subexpressions = installed_guard_subexpression.scope["part_list"]
+    installed_guard_subexpressions = installed_guard_subexpression.part_list
     for installed_guard_subexpression in installed_guard_subexpressions:
         # Take the failed code part, and add it as a dynamic dim
-        add_dynamic_dim(installed_guard_subexpression)
+        expand_dynamic_frame_state(installed_guard_subexpression)
 
 
 def catch_errors_wrapper(callback, hooks: Hooks):
@@ -424,7 +439,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         msg = "Compiling %s %s with cache_size %s."
         if installed_guard_subexpression is not None:
             torch._dynamo.guards.record_guard_failure(
-                hooks.guard_fail_fn, frame.f_code, installed_guard_subexpression
+                hooks.guard_fail_fn, frame.f_locals, frame.f_code, installed_guard_subexpression
             )
             msg += " Due to guard failure %s from guard %s and source %s"
             log.debug(
@@ -439,8 +454,8 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         else:
             log.debug(msg, frame.f_code.co_name, frame.f_code.co_filename, cache_size)
 
-        frame_state_from_installed_guard_subexpression(
-            installed_guard_subexpression, frame_state
+        compute_dynamic_expansions(
+            installed_guard_subexpression, frame_state, frame
         )
         if (
             # TODO: the first condition is not covered by any test

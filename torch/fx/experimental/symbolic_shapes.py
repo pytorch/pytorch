@@ -1333,13 +1333,26 @@ def _lru_cache(fn, maxsize=None):
 class ShapeGuardExprSources:
     """
     Represents a shape guard expression, with the related sources.
+    
+    The static boundary indicates if this guard expression is a candidate for automatic dynamic shapes,
+    generally meaning it came from allocating a single value for it through static allocation.
 
     Ex:
         expr: x < y * 2
         sources: LocalInputSource(x), LocalInputSource(y)
+        static_boundary: False
+        static_value: None
+
+    Ex:
+        x == 2
+        sources: LocalSource('x')
+        static_boundary: True
+        static_value: 2
     """
     expr: str
     sources: List[Source]
+    static_boundary: bool = False
+    static_value: Optional[int] = None 
 
 class ShapeGuardPrinter(StrPrinter):
     def __init__(
@@ -1816,10 +1829,10 @@ class ShapeEnv:
                             f"{s}.  {hint()}"
                         ))
 
-                input_guards.append((source, s))
+                input_guards.append((source, s, False))
             else:
                 s = sympy.Integer(val)
-                input_guards.append((source, s))
+                input_guards.append((source, s, True))
                 if constraint is not None:
                     record_constraint_violation(lambda: (
                         constraint,
@@ -1853,7 +1866,7 @@ class ShapeEnv:
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
         if not _simplified:
-            for source, expr in input_guards:
+            for source, expr, static_boundary in input_guards:
                 # Small optimization
                 if (
                     isinstance(expr, sympy.Symbol) and
@@ -1863,7 +1876,7 @@ class ShapeEnv:
                     continue
                 guard_sources = []
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources, guard_sources).doprint(expr)
-                exprs.append(ShapeGuardExprSources(f"{source_ref(source, guard_sources)} == {sexpr}", guard_sources))
+                exprs.append(ShapeGuardExprSources(f"{source_ref(source, guard_sources)} == {sexpr}", guard_sources, static_boundary, int(expr) if static_boundary else None))
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only
