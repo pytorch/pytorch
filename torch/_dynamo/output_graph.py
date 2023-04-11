@@ -25,7 +25,7 @@ from torch._guards import (
 )
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-from . import config, logging as torchdynamo_logging, variables
+from . import logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
@@ -34,6 +34,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
+from .config_utils import config
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
