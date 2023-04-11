@@ -764,7 +764,8 @@ ProcessGroupGloo::ProcessGroupGloo(
     } catch (const std::runtime_error &e) {
       auto err = e.what();
       // TORCH_CHECK to print the cpp stacktrace.
-      TORCH_CHECK(false, c10::str("Gloo connectFullMesh failed with ", err));
+      auto msg = c10::str("Gloo connectFullMesh failed with ", err);
+      logAndThrow(msg, msg);
     }
     contexts_.push_back(std::move(context));
   }
