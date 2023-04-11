@@ -70,21 +70,6 @@ BATCH_SIZE_DIVISORS = {
 
 REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256")
 
-SKIP = {
-    # Unusual training setup
-    "levit_128",
-}
-
-SKIP_TRAIN = {
-    # segfault: Internal Triton PTX codegen error
-    "eca_halonext26ts",
-}
-
-NONDETERMINISTIC = {
-    # https://github.com/pytorch/pytorch/issues/94066
-    "sebotnet33ts_256",
-}
-
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "cait_m36_384": 4,
 }
