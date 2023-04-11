@@ -1075,6 +1075,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertTrue(same(opt_fn(mod, x), fn(mod, x)))
 
+    def test_constant_getattr(self):
+        # https://github.com/pytorch/pytorch/issues/97480
+        def fn():
+            return getattr(None, "arg", 3)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        optimized_fn = torch._dynamo.optimize(cnt)(fn)
+        res = optimized_fn()
+        self.assertTrue(same(res, 3))
+
     def test_user_property(self):
         class MyConfig:
             @property
@@ -1574,6 +1584,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_typing_union_and_optional(self):
+        def fn(x):
+            a = torch.jit.annotate(typing.Dict[str, typing.Optional[torch.Tensor]], {})
+            b = torch.jit.annotate(
+                typing.Dict[str, typing.Union[torch.Tensor, None]], {}
+            )
+            return a, b, x + 1
+
+        x = torch.randn(3)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
@@ -2956,6 +2980,154 @@ def fn():
         b = opt_fn(torch.tensor(True), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), b))
 
+    def test_nonzero_static(self):
+        # invalid size
+        with self.assertRaisesRegex(
+            RuntimeError, "nonzero_static: 'size' must be an non-negative integer"
+        ):
+            torch.nonzero_static(torch.tensor([8]), size=-2)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "nonzero_static: 'size' must be an non-negative integer"
+        ):
+            torch.nonzero_static(torch.tensor([8]), size=-2, out=torch.tensor(0))
+
+        # nonzero_static.out: out dtype mismatch
+        input_tensor = torch.tensor([8])
+        static_size = 1
+        out_tensor = torch.empty((static_size, input_tensor.dim()), dtype=torch.float)
+        with self.assertRaisesRegex(
+            RuntimeError, "nonzero_static: Expected out tensor to have scalar type Long"
+        ):
+            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor)
+
+        # nonzero_static.out: out resize (shrink)
+        input_tensor = torch.tensor([8])
+        static_size = 1
+        out_tensor = torch.empty((10, 10, 10, 10), dtype=torch.long)
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
+                torch.tensor([0]),
+            )
+        )
+        self.assertTrue(
+            same(
+                out_tensor,
+                torch.tensor([0]),
+            )
+        )
+
+        # nonzero_static.out: out resize (enlarge)
+        input_tensor = torch.tensor([8])
+        static_size = 1
+        out_tensor = torch.empty((0), dtype=torch.long)
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
+                torch.tensor([0]),
+            )
+        )
+        self.assertTrue(
+            same(
+                out_tensor,
+                torch.tensor([0]),
+            )
+        )
+
+        # 0 rank
+        input_tensor = torch.tensor(6)
+        static_size = 2
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size),
+                torch.empty((static_size, input_tensor.dim()), dtype=torch.long),
+            )
+        )
+
+        # 0 size
+        input_tensor = torch.tensor([[[1]]])
+        static_size = 0
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size),
+                torch.empty((static_size, input_tensor.dim()), dtype=torch.long),
+            )
+        )
+
+        # 1D input
+        input_tensor = torch.tensor([0, 8])
+        static_size = 1
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size),
+                torch.tensor([1]),
+            )
+        )
+
+        input_tensor = torch.tensor([8, 0])
+        static_size = 2
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size),
+                torch.tensor([[0], [-1]]),  # padded with default fill_value "-1"
+            )
+        )
+
+        # 2D input
+        input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]])
+        static_size = 5
+        fill_value = -100
+        self.assertTrue(
+            torch._dynamo.utils.same(
+                torch.nonzero_static(
+                    input_tensor, size=static_size, fill_value=fill_value
+                ),
+                torch.tensor(
+                    [
+                        [0, 0],
+                        [1, 0],
+                        [1, 1],
+                        [fill_value, fill_value],
+                        [fill_value, fill_value],
+                    ]
+                ),
+            )
+        )
+        input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]])
+        static_size = 2
+        fill_value = -100
+        self.assertTrue(
+            torch._dynamo.utils.same(
+                torch.nonzero_static(
+                    input_tensor, size=static_size, fill_value=fill_value
+                ),
+                torch.tensor([[0, 0], [1, 0]]),
+            )
+        )
+
+        # 3D input
+        input_tensor = torch.tensor([[[0, 0], [0, -3]], [[0, 0], [5, 0]]])
+        static_size = 4
+        fill_value = -999
+        self.assertTrue(
+            torch._dynamo.utils.same(
+                torch.nonzero_static(
+                    input_tensor,
+                    size=static_size,
+                    fill_value=fill_value,
+                ),
+                torch.tensor(
+                    [
+                        [0, 1, 1],
+                        [1, 1, 0],
+                        [fill_value, fill_value, fill_value],
+                        [fill_value, fill_value, fill_value],
+                    ]
+                ),
+            )
+        )
+
     def test_cond_with_quantization(self):
         from functorch.experimental.control_flow import cond
 
@@ -3163,6 +3335,24 @@ def fn():
 
         false_sin = graph(torch.tensor(False), torch.tensor([0.5, 0.5]))
         self.assertTrue(same(torch.sin(torch.tensor([0.5, 0.5])), false_sin))
+
+    def test_enum_guards(self):
+        class MyEnum(enum.Enum):
+            FOO = 10
+            BAR = 20
+
+        def fn(x, y):
+            if y == MyEnum.FOO:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(3)
+        y = MyEnum.BAR
+        ref = fn(x, y)
+        opt_fn = torch.compile(backend="eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
 
     def test_disable_optimize(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -4284,10 +4474,8 @@ def fn():
                 z *= 3
             return z
 
-        # TODO remove condition once 3.11 is fully supported
-        if sys.version_info < (3, 11):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
-            self.assertEqual(opt_f(None, torch.ones(2)), 6)
+        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+        self.assertEqual(opt_f(None, torch.ones(2)), 6)
 
         if sys.version_info >= (3, 11):
             insts = bytecode_transformation.cleaned_instructions(f.__code__)
@@ -4424,6 +4612,21 @@ def fn():
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
+    def test_mark_static(self):
+        counter = CompileCounter()
+
+        def my_dyn_fn(x):
+            return x.cos()
+
+        y = torch.randn([3])
+        torch._dynamo.mark_static(y, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(y)
+
+        z = torch.randn([4])
+        torch._dynamo.optimize(counter)(my_dyn_fn)(z)
+
+        self.assertEqual(counter.frame_count, 2)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -4517,24 +4720,6 @@ def fn():
             return x * x
 
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-
-    @torch._dynamo.config.patch(dynamic_shapes=False)
-    def test_no_dynamic_shapes_mark_dynamic_illegal(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-        torch._dynamo.mark_dynamic(y, 0)
-        torch._dynamo.reset()
-        with self.assertRaisesRegex(
-            AssertionError,
-            "mark_dynamic usage with dynamic_shapes=False is not yet supported",
-        ):
-            torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_py_guards_mark_dynamic(self):
@@ -4816,6 +5001,14 @@ def fn():
         # strip_function_call should extract the object from the string.
         for name, expect_obj in test_case:
             self.assertEqual(strip_function_call(name), expect_obj)
+
+    def test_int_neg(self):
+        def int_neg(a, b):
+            x = a.shape[0]
+            y = b.shape[0]
+            return -x * -y * a * b
+
+        torch._dynamo.testing.standard_test(self, int_neg, 2)
 
 
 class CustomFunc1(torch.autograd.Function):
