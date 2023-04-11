@@ -263,7 +263,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
-        self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -592,14 +591,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             rand_fn = disable(_get_gen_rand_values_fn(tx.random_calls))
             self.install_global(rand_fn_name, rand_fn)
             codegen = PyCodegen(tx, root)
-            random_calls_instructions.extend(
-                [
-                    codegen.create_load_global("random", True, add=True),
-                    codegen.create_load_attr("setstate"),
-                    codegen.create_load_const(tx.output.initial_random_state),
-                ]
-                + create_call_function(1, False),
-            )
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
             )
