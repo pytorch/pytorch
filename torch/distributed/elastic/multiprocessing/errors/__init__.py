@@ -112,7 +112,7 @@ class ProcessFailure:
                 with open(self.error_file, "r") as fp:
                     self.error_file_data = json.load(fp)
                     log.debug(
-                        f"User process failed with error data: {json.dumps(self.error_file_data, indent=2)}"
+                        "User process failed with error data: %s", json.dumps(self.error_file_data, indent=2)
                     )
                     self.message, self.timestamp = self._get_error_data(
                         self.error_file_data

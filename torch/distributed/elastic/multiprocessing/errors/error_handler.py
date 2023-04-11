@@ -110,7 +110,7 @@ class ErrorHandler:
         with open(rootcause_error_file, "r") as fp:
             rootcause_error = json.load(fp)
             # Override error code since the child process cannot capture the error code if it
-            # is terminated by singals like SIGSEGV.
+            # is terminated by signals like SIGSEGV.
             if error_code:
                 self.override_error_code_in_rootcause_data(rootcause_error_file, rootcause_error, error_code)
             log.debug(
@@ -132,10 +132,10 @@ class ErrorHandler:
             # original error file contents and overwrite the error file.
             self._rm(my_error_file)
             self._write_error_file(my_error_file, json.dumps(rootcause_error))
-            log.info(f"dumped error file to parent's {my_error_file}")
+            log.info("dumped error file to parent's %s", my_error_file)
         else:
             log.error(
-                f"no error file defined for parent, to copy child error file ({rootcause_error_file})"
+                "no error file defined for parent, to copy child error file (%s)", rootcause_error_file
             )
 
     def _rm(self, my_error_file):
