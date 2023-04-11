@@ -3039,6 +3039,25 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    def test_complex_fallback(self):
+        def fn(x):
+            return x * x + 10
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]).to(dtype=torch.complex64),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+        class ToComplex(nn.Module):
+            def forward(self, x):
+                return (x + x + 12).to(torch.complex64)
+
+        self.common(ToComplex(), (torch.rand([1, 2, 4, 8]),), check_lowp=False)
+
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
     def test_cauchy(self):
         def fn(x, y):
             return torch.sum(1 / (torch.unsqueeze(x, -1) - y))

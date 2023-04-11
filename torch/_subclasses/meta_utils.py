@@ -492,10 +492,6 @@ class MetaConverter:
                     t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
-                    # these are supported in meta conversion but the fallbacks
-                    # don't work
-                    t.is_neg(),
-                    t.is_conj(),
                     t.device.type in ("lazy"),
                     # We need a way to test if a tensor is batched but there
                     # is no official APi to do it
