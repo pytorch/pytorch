@@ -610,7 +610,7 @@ def convert_to_reference_fx(
 ) -> torch.nn.Module:
     r""" Convert a calibrated or trained model to a reference quantized model,
     see https://github.com/pytorch/rfcs/blob/master/RFC-0019-Extending-PyTorch-Quantization-to-Custom-Backends.md for more details,
-    reference quantzied model is a standard representation of a quantized model provided
+    reference quantized model is a standard representation of a quantized model provided
     by FX Graph Mode Quantization, it can be further lowered to run on the target
     hardware, like accelerators
 
@@ -660,7 +660,7 @@ def _convert_to_reference_decomposed_fx(
     r""" Convert a calibrated or trained model to a reference quantized model, with
     decomposed representation for quantized Tensor
     see https://github.com/pytorch/rfcs/blob/master/RFC-0019-Extending-PyTorch-Quantization-to-Custom-Backends.md for more details,
-    reference quantzied model is a standard representation of a quantized model provided
+    reference quantized model is a standard representation of a quantized model provided
     by FX Graph Mode Quantization, it can be further lowered to run on the target
     hardware, like accelerators
 
