@@ -1651,7 +1651,10 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   }
 
   if (torch::is_symbool(arg)) {
-    return at::Scalar(py::cast<c10::SymBool>(arg));
+    // Windows build fails with C2440: '<function-style-cast>'
+    // when at:Scalar(py::cast<c10::SymBool>(arg))
+    auto sym_bool = py::handle(arg).cast<c10::SymBool>();
+    return at::Scalar(sym_bool);
   }
 
   return at::Scalar(THPUtils_unpackDouble(arg));
