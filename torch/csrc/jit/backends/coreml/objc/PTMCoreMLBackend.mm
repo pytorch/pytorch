@@ -132,7 +132,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     const c10::Dict<IValue, IValue> model_dict = processed.toGenericDict();
     const std::string& extra = model_dict.at("extra").toStringRef();
     const std::string& model = model_dict.at("model").toStringRef();
-    const std::string& modelID = model_dict.at("hash").toStringRef();
+    const std::string modelID = std::string(model_dict.at("hash").toStringRef());
 
     CoreMLConfig config;
     std::vector<TensorSpec> input_specs;
