@@ -2013,15 +2013,31 @@ class TestSparse(TestSparseBase):
         sparse_dims = len(shape)
         nnzs = (0, 5, 25)
 
+        def remove_zeros(t):
+            res = t.to_dense().to_sparse(t.sparse_dim())
+            with torch.no_grad():
+                res._coalesced_(t.is_coalesced())
+            return res
+
+        def f(x, y):
+            # x and y might contain materialized zeroes
+            # which might get matched in `sparse_mask`.
+            # The problem is that `to_dense` kills all zero values,
+            # even if there explicit indices for them.
+            # This disrupts parametrizations induces by the indices.
+            # Hence, we have to remove zero values to comply with this
+            # semantics.
+            x = remove_zeros(x)
+            y = remove_zeros(y)
+            return x.sparse_mask(y).to_dense(masked_grad=False)
+
         for nnz in nnzs:
             for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
                 lhs, _, _ = self._gen_sparse(sparse_dims, nnz, shape, dtype, device, lhs_is_coalesced)
                 lhs.requires_grad_(True)
                 rhs, _, _ = self._gen_sparse(sparse_dims, nnz, shape, dtype, device, rhs_is_coalesced)
-                # setting masked = True is required because of the broken backward of to_dense().
-                # See https://github.com/pytorch/pytorch/issues/95550.
-                gradcheck(lambda x, y: x.sparse_mask(y).to_dense(), (lhs, rhs), masked=True, check_sparse_nnz=True)
-                gradcheck(lambda x, y: x.sparse_mask(y).to_dense(), (lhs, lhs.detach()), masked=True, check_sparse_nnz=True)
+                gradcheck(f, (lhs, rhs))
+                gradcheck(f, (lhs, lhs.detach()))
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
