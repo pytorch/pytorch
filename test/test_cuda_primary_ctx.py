@@ -111,5 +111,54 @@ class TestCudaPrimaryCtx(TestCase):
         self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
         self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_backward(self):
+        x = torch.ones(3, device='cuda:1', requires_grad=True)
+        y = torch.sum(x * x)
+        y.backward()
+
+        for d in range(torch.cuda.device_count()):
+            if d == 1:
+                self.assertTrue(torch._C._cuda_hasPrimaryContext(d))
+                continue
+            self.assertFalse(torch._C._cuda_hasPrimaryContext(d))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_device_context_manager(self):
+        with torch.cuda.device('cuda:1'):
+            x = torch.randn(1, device='cuda')
+
+        # Current device must remain 0
+        self.assertTrue(torch.cuda.current_device() == 0)
+
+        # We should still have only created context on 'cuda:1'
+        self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
+
+        y = torch.randn(1, device='cuda')
+
+        # Now the device 0 should have context
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
+        self.assertTrue(y.device == torch.device('cuda', 0))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_tensor_creation(self):
+        x = torch.randn(1, device='cuda:1')
+
+        # Current device must remain 0
+        self.assertTrue(torch.cuda.current_device() == 0)
+
+        # We should still have only created context on 'cuda:1'
+        self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
+
+        y = torch.randn(1, device='cuda')
+
+        # Now the device 0 should have context
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
+        self.assertTrue(y.device == torch.device('cuda', 0))
+
 if __name__ == '__main__':
     run_tests()
