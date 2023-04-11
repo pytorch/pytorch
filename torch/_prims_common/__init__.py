@@ -154,16 +154,15 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             )
             raise RuntimeError(msg)
 
-        if a.is_conj() != b.is_conj():
-            raise RuntimeError(
-                f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
-            )
+    if a.is_conj() != b.is_conj():
+        raise RuntimeError(
+            f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
+        )
 
-        if a.is_neg() != b.is_neg():
-            raise RuntimeError(
-                f"Neg mismatch! is_neg is set to {a.is_neg()} and {b.is_neg()}"
-            )
-
+    if a.is_neg() != b.is_neg():
+        raise RuntimeError(
+            f"Neg mismatch! is_neg is set to {a.is_neg()} and {b.is_neg()}"
+        )
 
 
 def _check_strides_helper(
